@@ -11,5 +11,14 @@ export const LoginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const CreateAlbumSchema = z.object({
+  title: z
+    .string()
+    .min(1, 'Album title is required')
+    .max(100, 'Title must be 100 characters or less'),
+  productId: z.string().uuid('Please select an album size'),
+});
+
 export type SignupInput = z.infer<typeof SignupSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
+export type CreateAlbumInput = z.infer<typeof CreateAlbumSchema>;

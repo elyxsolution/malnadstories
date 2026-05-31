@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { db } from '@/db';
 import { profiles } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import AppHeader from '@/components/app-header';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -20,5 +21,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (!profile || profile.role !== 'admin') redirect('/dashboard');
 
-  return <>{children}</>;
+  return (
+    <div className="flex flex-col min-h-screen">
+      <AppHeader email={user.email!} />
+      <main className="flex-1">{children}</main>
+    </div>
+  );
 }
