@@ -59,26 +59,47 @@ drizzle/
 
 ## Non-negotiable security rules
 
-1. **All DB queries via Drizzle ORM** — never string-concatenated SQL, ever.
-2. **RLS on every table** — see `drizzle/0001_init.sql`. Defense-in-depth.
-3. **Zod validation before any DB access** in every API route.
-4. **`getUser()` not `getSession()`** — session token can be stale; `getUser()` validates against Supabase.
-5. **No secrets in committed code** — `.env.local` is gitignored. `.env.example` has placeholders.
-6. **CSP headers** in `next.config.mjs`. Tighten `unsafe-eval` / `unsafe-inline` with nonces before prod.
-7. **httpOnly/Secure/SameSite cookies** — handled automatically by `@supabase/ssr`.
+1. **User data via Supabase server client** — `createClient()` carries the user's JWT; `auth.uid()` resolves in Postgres and RLS is enforced as a real DB boundary.
+2. **Admin / privileged data via Drizzle** — service role (`DATABASE_URL`) bypasses RLS intentionally for the admin portal and schema operations.
+3. **Never mix them up** — don't use Drizzle for user-scoped reads/writes; don't expose service role to client code.
+4. **RLS on every table** — see `drizzle/0001_init.sql`. Not defense-in-depth: it's the second enforcement layer for user data.
+5. **Zod validation before any DB access** in every API route / server action.
+6. **`getUser()` not `getSession()`** — session token can be stale; `getUser()` validates against Supabase.
+7. **No secrets in committed code** — `.env.local` is gitignored. `.env.example` has placeholders.
+8. **CSP headers** in `next.config.mjs`. Tighten `unsafe-eval` / `unsafe-inline` with nonces before prod.
+9. **httpOnly/Secure/SameSite cookies** — handled automatically by `@supabase/ssr`.
 
 ---
 
-## Drizzle + Supabase access model
+## Data access pattern (IMPORTANT — follow this in every session)
 
-Drizzle uses the **service role** key via `DATABASE_URL` (transaction pooler, port 6543).
-The service role bypasses RLS — so API route code is the **primary access gate**.
-RLS in SQL is defense-in-depth for direct DB access.
+### User-scoped reads and writes → Supabase server client
 
-When writing API routes:
-- Always check `supabase.auth.getUser()` first
-- Only query rows where `userId = user.id`
-- Never expose the service role key to the client
+```ts
+const supabase = createClient(); // from @/lib/supabase/server
+// No WHERE user_id = ? needed — RLS policy "user_id = auth.uid()" filters automatically
+const { data } = await supabase.from('albums').select('id, title, size, status');
+```
+
+The anon key + user JWT in the cookie means `auth.uid()` resolves in every query.
+If a bug omits a filter, RLS still prevents data leaking to the wrong user.
+
+### Admin / privileged operations → Drizzle (service role, bypasses RLS)
+
+```ts
+import { db } from '@/db';
+// Used in admin/layout.tsx to check role, future admin portal queries, etc.
+const [profile] = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.id, userId)).limit(1);
+```
+
+`DATABASE_URL` uses the `postgres.PROJECT_REF` user (superuser, `bypassrls`).
+Never use `db` for ordinary user CRUD — the explicit filter is the only gate.
+
+### Why this split
+Drizzle was originally used for everything, but the connection bypasses RLS.
+A missing `WHERE user_id = ?` would silently return all rows.
+Switched in session 3 after confirming code `23503` (FK violation) revealed
+the pattern, with the Supabase client as the enforcement layer for user data.
 
 ---
 
@@ -97,8 +118,13 @@ When writing API routes:
 - `products`: public SELECT for active rows; admin writes
 - Admin: `public.is_admin()` SQL function checks `profiles.role = 'admin'`
 
-**Auto-create profile**: `on_auth_user_created` trigger inserts a row into
-`profiles` on every `auth.users` insert. No client-side call needed.
+**Profile guarantee (three layers)**:
+1. `on_auth_user_created` trigger (idempotent — `ON CONFLICT DO NOTHING` since `0002`)
+2. `auth/callback/route.ts` upserts the profile after every email-link login
+3. `0002_backfill_profiles.sql` one-time fix for users who signed up before the trigger
+
+All user tables FK to `profiles(id)`, not `auth.users(id)`. A profile row must
+exist before any album/photo/order insert can succeed.
 
 **Migrations**: Write SQL to `drizzle/NNNN_description.sql`, paste into
 Supabase Dashboard → SQL Editor → New query to run.
@@ -134,8 +160,9 @@ pnpm dev          # http://localhost:3000
 
 Before first run:
 1. Paste `drizzle/0001_init.sql` into Supabase SQL Editor and run it.
-2. Set `Site URL = http://localhost:3000` in Supabase → Authentication → URL Configuration.
-3. Ensure `.env.local` has all five variables filled in.
+2. Paste `drizzle/0002_backfill_profiles.sql` and run it (backfills profiles for pre-existing users).
+3. Set `Site URL = http://localhost:3000` in Supabase → Authentication → URL Configuration.
+4. Ensure `.env.local` has all five variables filled in.
 
 ---
 

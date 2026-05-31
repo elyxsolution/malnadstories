@@ -1,26 +1,27 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { db } from '@/db';
-import { albums } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
+
+type AlbumRow = {
+  id: string;
+  title: string;
+  size: number;
+  status: string;
+};
 
 export default async function BuildPage({ params }: { params: { id: string } }) {
+  // Supabase server client: RLS policy "user_id = auth.uid()" scopes the SELECT.
+  // If the album belongs to someone else, or doesn't exist, data is null → 404.
+  // No explicit AND(id, userId) needed — RLS is the gate.
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
-  // Layout guarantees auth, but also needed to scope the ownership check below
-  if (!user) notFound();
+  const { data } = await supabase
+    .from('albums')
+    .select('id, title, size, status')
+    .eq('id', params.id)
+    .maybeSingle();
 
-  // Ownership check: album must exist AND belong to this user
-  const [album] = await db
-    .select()
-    .from(albums)
-    .where(and(eq(albums.id, params.id), eq(albums.userId, user.id)))
-    .limit(1);
-
+  const album = data as AlbumRow | null;
   if (!album) notFound();
 
   return (
@@ -33,13 +34,11 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         {album.title}
       </p>
 
-      <div className="mt-2 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">{album.title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground capitalize">
-            {album.size} pages · {album.status}
-          </p>
-        </div>
+      <div className="mt-2">
+        <h1 className="text-2xl font-bold">{album.title}</h1>
+        <p className="mt-1 text-sm text-muted-foreground capitalize">
+          {album.size} pages · {album.status}
+        </p>
       </div>
 
       <div className="mt-8 rounded-lg border border-dashed p-16 text-center text-muted-foreground">

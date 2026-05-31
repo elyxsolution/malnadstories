@@ -28,6 +28,22 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // Belt-and-suspenders: ensure a profiles row exists even if the
+      // on_auth_user_created trigger misfired (e.g. signup before migration).
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('profiles').upsert(
+          {
+            id: user.id,
+            name:
+              (user.user_metadata?.name as string | undefined) ??
+              user.email?.split('@')[0] ??
+              'User',
+          },
+          { onConflict: 'id', ignoreDuplicates: true },
+        );
+      }
+
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

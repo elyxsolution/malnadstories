@@ -1,28 +1,32 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { db } from '@/db';
-import { albums } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+type AlbumRow = {
+  id: string;
+  title: string;
+  size: number;
+  status: string;
+  updated_at: string;
+};
+
 export default async function DashboardPage() {
+  // Using the Supabase server client (anon key + user JWT) so RLS applies:
+  // the albums policy "user_id = auth.uid()" filters automatically —
+  // no explicit WHERE user_id = ? needed, and a bug can't leak other users' data.
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const userAlbums = await db
-    .select({
-      id: albums.id,
-      title: albums.title,
-      size: albums.size,
-      status: albums.status,
-      updatedAt: albums.updatedAt,
-    })
-    .from(albums)
-    .where(eq(albums.userId, user!.id))
-    .orderBy(desc(albums.updatedAt));
+  const { data, error } = await supabase
+    .from('albums')
+    .select('id, title, size, status, updated_at')
+    .order('updated_at', { ascending: false });
+
+  if (error) throw error;
+  const userAlbums = (data ?? []) as AlbumRow[];
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -42,11 +46,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {userAlbums.map((album) => (
-              <Link
-                key={album.id}
-                href={`/albums/${album.id}/build`}
-                className="block"
-              >
+              <Link key={album.id} href={`/albums/${album.id}/build`} className="block">
                 <Card className="h-full hover:ring-2 hover:ring-foreground/20 transition-shadow">
                   <CardHeader>
                     <CardTitle className="text-base">{album.title}</CardTitle>
