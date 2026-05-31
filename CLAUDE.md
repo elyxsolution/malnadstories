@@ -21,7 +21,7 @@ printed photo albums (50/100/200 pages), and order for printing.
 | Styling | Tailwind CSS v3 + shadcn@4 (`@base-ui/react`) + lucide-react |
 | Database + Auth | Supabase (Postgres + Supabase Auth) |
 | Auth in Next.js | `@supabase/ssr` — cookie-based, works in Server Components |
-| ORM | Drizzle ORM (`drizzle-orm/postgres-js`) |
+| ORM | Drizzle ORM (`drizzle-orm/postgres-js`) — admin and schema only |
 | Validation | Zod on every API route input |
 | Payments | Razorpay — **not added yet** |
 | Storage | Cloudflare R2 — **not added yet** |
@@ -37,69 +37,113 @@ src/
   middleware.ts               Session refresh + route guards (getUser, NOT getSession)
   app/
     page.tsx                  Landing page
-    auth/callback/route.ts    Supabase PKCE code → session exchange
+    auth/callback/route.ts    Supabase PKCE code → session exchange + profile upsert
     (auth)/                   Route group — public (login, signup)
     (app)/                    Route group — protected; layout redirects if no session
-      dashboard/page.tsx
+      dashboard/page.tsx      Albums grid — queries via Supabase server client (RLS)
+      albums/
+        new/page.tsx          Create album — server component fetches products
+        new/_form.tsx         Client component with useFormState
+        [id]/build/page.tsx   Builder placeholder — ownership via RLS SELECT
     admin/                    Admin section; layout checks role='admin' via Drizzle
-  components/ui/              shadcn/ui generated components
+  components/
+    app-header.tsx            Shared header with logout form (server action)
+    ui/                       shadcn/ui generated components
   db/
-    index.ts                  Drizzle client (service-role Postgres, server-only)
-    schema.ts                 Drizzle table definitions (mirrors drizzle/0001_init.sql)
+    index.ts                  Drizzle client (postgres superuser, bypassrls — admin only)
+    schema.ts                 Drizzle table definitions
   lib/
+    actions/
+      auth.ts                 signOut server action
+      albums.ts               createAlbum server action
     supabase/
-      client.ts               createBrowserClient() — for 'use client' components
-      server.ts               createServerClient() — for Server Components & Route Handlers
-    validations.ts            Zod schemas (SignupSchema, LoginSchema, …)
+      client.ts               createBrowserClient() — 'use client' components
+      server.ts               createServerClient() — Server Components, Server Actions
+      service.ts              createServiceClient() — service role, bypasses RLS
+    validations.ts            Zod schemas
 drizzle/
-  0001_init.sql               All tables, RLS policies, triggers, product seed
+  0001_init.sql               Tables, RLS policies, trigger, product seed
+  0002_backfill_profiles.sql  Backfill + idempotent trigger fix
+  0003_grants.sql             Table-level GRANTs for anon and authenticated roles
 ```
 
 ---
 
 ## Non-negotiable security rules
 
-1. **User data via Supabase server client** — `createClient()` carries the user's JWT; `auth.uid()` resolves in Postgres and RLS is enforced as a real DB boundary.
-2. **Admin / privileged data via Drizzle** — service role (`DATABASE_URL`) bypasses RLS intentionally for the admin portal and schema operations.
-3. **Never mix them up** — don't use Drizzle for user-scoped reads/writes; don't expose service role to client code.
-4. **RLS on every table** — see `drizzle/0001_init.sql`. Not defense-in-depth: it's the second enforcement layer for user data.
-5. **Zod validation before any DB access** in every API route / server action.
-6. **`getUser()` not `getSession()`** — session token can be stale; `getUser()` validates against Supabase.
-7. **No secrets in committed code** — `.env.local` is gitignored. `.env.example` has placeholders.
-8. **CSP headers** in `next.config.mjs`. Tighten `unsafe-eval` / `unsafe-inline` with nonces before prod.
-9. **httpOnly/Secure/SameSite cookies** — handled automatically by `@supabase/ssr`.
+1. **GRANTs allow table access; RLS policies filter rows — both are always required.**
+2. **User data via Supabase server client** (`createClient()` from `server.ts`): carries the user's JWT, `auth.uid()` resolves, RLS is enforced as a real DB boundary.
+3. **Privileged writes via service-role client** (`createServiceClient()` from `service.ts`): bypasses RLS — only for order creation, webhook processing, and admin writes. **Never use in Client Components. Never expose `SUPABASE_SERVICE_ROLE_KEY` to the browser.**
+4. **Admin portal queries via Drizzle** (`db` from `@/db`): postgres superuser, also bypasses RLS — use for role checks and future admin panel.
+5. **RLS on every table** — `0001_init.sql`. Second enforcement layer for user data, not just defense-in-depth.
+6. **Zod validation before any DB access** in every API route / server action.
+7. **`getUser()` not `getSession()`** — JWT can be stale; `getUser()` validates against Supabase.
+8. **No secrets in committed code** — `.env.local` is gitignored.
+9. **CSP headers** in `next.config.mjs`. Tighten before prod.
 
 ---
 
-## Data access pattern (IMPORTANT — follow this in every session)
+## Data access pattern — THREE clients, distinct purposes
 
-### User-scoped reads and writes → Supabase server client
+### 1 — User actions → `createClient()` from `@/lib/supabase/server`
 
 ```ts
-const supabase = createClient(); // from @/lib/supabase/server
-// No WHERE user_id = ? needed — RLS policy "user_id = auth.uid()" filters automatically
+import { createClient } from '@/lib/supabase/server';
+const supabase = createClient(); // anon key + user JWT from cookie
+// RLS policy "user_id = auth.uid()" filters rows automatically
 const { data } = await supabase.from('albums').select('id, title, size, status');
 ```
 
-The anon key + user JWT in the cookie means `auth.uid()` resolves in every query.
-If a bug omits a filter, RLS still prevents data leaking to the wrong user.
+Use for: all reads and writes that belong to the logged-in user.
+RLS is the DB-level gate; a missing app-layer filter cannot leak other users' data.
 
-### Admin / privileged operations → Drizzle (service role, bypasses RLS)
+Tables with full CRUD for `authenticated`: `profiles`, `addresses`, `albums`,
+`album_pages`, `photos`.
+
+Tables with SELECT only for `authenticated`: `orders`, `payments` (writes are
+server-controlled — see client 2 below).
+
+### 2 — Server-controlled writes → `createServiceClient()` from `@/lib/supabase/service`
+
+```ts
+import { createServiceClient } from '@/lib/supabase/service';
+const adminSupabase = createServiceClient(); // service role, bypasses RLS
+// Use when the authenticated role intentionally has no write GRANT
+await adminSupabase.from('orders').insert({ user_id, album_id, total_amount, ... });
+```
+
+Use for:
+- **Order creation** — `total_amount` must be computed server-side (never from user input)
+- **Razorpay webhook** — writes `payments` row after validating the signature
+- **Admin operations** that touch any user's data across the board
+
+`authenticated` role has no INSERT/UPDATE/DELETE on `orders` or `payments`.
+If client 1 accidentally tries a write there, Postgres returns `42501` — correct behaviour.
+
+### 3 — Admin role check → `db` from `@/db` (Drizzle, postgres superuser)
 
 ```ts
 import { db } from '@/db';
-// Used in admin/layout.tsx to check role, future admin portal queries, etc.
 const [profile] = await db.select({ role: profiles.role }).from(profiles).where(eq(profiles.id, userId)).limit(1);
 ```
 
-`DATABASE_URL` uses the `postgres.PROJECT_REF` user (superuser, `bypassrls`).
-Never use `db` for ordinary user CRUD — the explicit filter is the only gate.
+Use for: `admin/layout.tsx` role check, future admin portal complex queries.
+The postgres superuser (`BYPASSRLS`) is intentional — admin verification must not be
+gameable by RLS policy logic.
 
-### Why this split
-Drizzle was originally used for everything, but the connection bypasses RLS.
-A missing `WHERE user_id = ?` would silently return all rows.
-Switched in session 3 after confirming code `23503` (FK violation) revealed
-the pattern, with the Supabase client as the enforcement layer for user data.
+### Why orders/payments writes go through service role, not authenticated
+
+```
+User submits order → Server Action:
+  1. Validates album belongs to user (via client 1 + RLS)
+  2. Fetches product price from DB
+  3. Computes total_amount server-side
+  4. Inserts order via createServiceClient() (authenticated has no INSERT GRANT)
+
+Razorpay POST /api/webhooks/razorpay:
+  1. Verify HMAC signature with RAZORPAY_WEBHOOK_SECRET
+  2. Write payment row via createServiceClient()
+```
 
 ---
 
@@ -112,6 +156,19 @@ the pattern, with the Supabase client as the enforcement layer for user data.
 **Tables**: `profiles`, `addresses`, `products`, `albums`, `album_pages`,
 `photos`, `orders`, `payments`
 
+**GRANT summary** (see `0003_grants.sql`):
+
+| Table | anon | authenticated | service_role |
+|---|---|---|---|
+| products | SELECT | SELECT | ALL |
+| profiles | — | ALL | ALL |
+| addresses | — | ALL | ALL |
+| albums | — | ALL | ALL |
+| album_pages | — | ALL | ALL |
+| photos | — | ALL | ALL |
+| orders | — | SELECT | ALL |
+| payments | — | SELECT | ALL |
+
 **RLS model**:
 - User tables: `user_id = auth.uid()`
 - Child tables (album_pages, payments): access via parent ownership subquery
@@ -119,12 +176,12 @@ the pattern, with the Supabase client as the enforcement layer for user data.
 - Admin: `public.is_admin()` SQL function checks `profiles.role = 'admin'`
 
 **Profile guarantee (three layers)**:
-1. `on_auth_user_created` trigger (idempotent — `ON CONFLICT DO NOTHING` since `0002`)
-2. `auth/callback/route.ts` upserts the profile after every email-link login
-3. `0002_backfill_profiles.sql` one-time fix for users who signed up before the trigger
+1. `on_auth_user_created` trigger — idempotent (`ON CONFLICT DO NOTHING`) since `0002`
+2. `auth/callback/route.ts` — upserts profile after every email-link login
+3. `0002_backfill_profiles.sql` — one-time fix for users who signed up before the trigger
 
-All user tables FK to `profiles(id)`, not `auth.users(id)`. A profile row must
-exist before any album/photo/order insert can succeed.
+All user tables FK to `profiles(id)`. A profile row must exist before any
+album/photo/order insert can succeed.
 
 **Migrations**: Write SQL to `drizzle/NNNN_description.sql`, paste into
 Supabase Dashboard → SQL Editor → New query to run.
@@ -135,7 +192,7 @@ Supabase Dashboard → SQL Editor → New query to run.
 
 1. User signs up → Supabase sends verification email
 2. User clicks link → browser hits `/auth/callback?code=...`
-3. Route handler exchanges code → sets session cookie → redirects to `/dashboard`
+3. Route handler exchanges code, upserts profile, sets session cookie → redirects to `/dashboard`
 4. Middleware refreshes session on every request (reads + re-sets cookies)
 
 ---
@@ -145,8 +202,8 @@ Supabase Dashboard → SQL Editor → New query to run.
 | Variable | Purpose |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | JWT anon key (safe for client) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role JWT — **server-only, never expose** |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | JWT anon key — safe for client, used in `server.ts` and `client.ts` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role JWT — **server-only, never expose**; used in `service.ts` and `db/index.ts` |
 | `DATABASE_URL` | Transaction pooler (port 6543) — Drizzle runtime |
 | `DIRECT_URL` | Session pooler (port 5432) — drizzle-kit migrations |
 
@@ -158,22 +215,25 @@ Supabase Dashboard → SQL Editor → New query to run.
 pnpm dev          # http://localhost:3000
 ```
 
-Before first run:
-1. Paste `drizzle/0001_init.sql` into Supabase SQL Editor and run it.
-2. Paste `drizzle/0002_backfill_profiles.sql` and run it (backfills profiles for pre-existing users).
-3. Set `Site URL = http://localhost:3000` in Supabase → Authentication → URL Configuration.
-4. Ensure `.env.local` has all five variables filled in.
+**First-run SQL migrations (run in order in Supabase SQL Editor):**
+1. `drizzle/0001_init.sql` — tables, RLS, trigger, seed
+2. `drizzle/0002_backfill_profiles.sql` — backfill + idempotent trigger
+3. `drizzle/0003_grants.sql` — table-level GRANTs
+
+**Supabase dashboard config:**
+- Authentication → URL Configuration → Site URL: `http://localhost:3000`
 
 ---
 
 ## Code conventions
 
-- Server Components → `@/lib/supabase/server`
+- User data reads/writes → `@/lib/supabase/server` (`createClient`)
+- Privileged writes (orders, payments, admin) → `@/lib/supabase/service` (`createServiceClient`)
+- Admin role checks → `@/db` (Drizzle)
 - Client Components → `@/lib/supabase/client`
-- New tables: add to `src/db/schema.ts` AND write a new numbered SQL migration
-- API route pattern: `Zod.parse(input)` → `supabase.auth.getUser()` → Drizzle query
-- No React Hook Form yet — plain controlled forms for now
-- shadcn@4 uses `@base-ui/react` primitives (same team as Radix, next-gen API)
+- New tables: add to `src/db/schema.ts` AND write a new numbered SQL migration AND add GRANTs to `0003_grants.sql` or a new migration
+- API route / server action pattern: `Zod.parse(input)` → `supabase.auth.getUser()` → DB query
+- shadcn@4 uses `@base-ui/react` (same team as Radix, next-gen API); `asChild` → `render` prop
 
 ---
 
