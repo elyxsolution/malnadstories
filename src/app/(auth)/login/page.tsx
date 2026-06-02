@@ -1,52 +1,24 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useFormState, useFormStatus } from 'react-dom';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
-import { LoginSchema } from '@/lib/validations';
+import { signIn, type SignInState } from '@/lib/actions/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" className="w-full" disabled={pending}>
+      {pending ? 'Signing in…' : 'Log in'}
+    </Button>
+  );
+}
+
 export default function LoginPage() {
-  const router = useRouter();
-  const [fields, setFields] = useState({ email: '', password: '' });
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  function update(field: keyof typeof fields) {
-    return (e: React.ChangeEvent<HTMLInputElement>) =>
-      setFields((prev) => ({ ...prev, [field]: e.target.value }));
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    const result = LoginSchema.safeParse(fields);
-    if (!result.success) {
-      setError(result.error.issues[0].message);
-      return;
-    }
-
-    setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email: fields.email,
-      password: fields.password,
-    });
-    setLoading(false);
-
-    if (error) {
-      setError('Invalid email or password');
-      return;
-    }
-
-    router.push('/dashboard');
-    router.refresh();
-  }
+  const [state, formAction] = useFormState<SignInState, FormData>(signIn, null);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -55,33 +27,37 @@ export default function LoginPage() {
           <CardTitle>Welcome back</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form action={formAction} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={fields.email}
-                onChange={update('email')}
-                required
-              />
+              <Input id="email" name="email" type="email" autoComplete="email" required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
+                name="password"
                 type="password"
                 autoComplete="current-password"
-                value={fields.password}
-                onChange={update('password')}
                 required
               />
             </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Signing in…' : 'Log in'}
-            </Button>
+
+            <label htmlFor="remember" className="flex items-center gap-2 text-sm">
+              <input
+                id="remember"
+                name="remember"
+                type="checkbox"
+                defaultChecked
+                className="h-4 w-4"
+              />
+              Stay logged in
+            </label>
+
+            {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+
+            <SubmitButton />
+
             <p className="text-sm text-center text-muted-foreground">
               Don&apos;t have an account?{' '}
               <Link href="/signup" className="underline text-foreground">

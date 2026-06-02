@@ -3,7 +3,7 @@
 ## What this project is
 
 A web platform for travelers to upload photos, edit them, arrange them into
-printed photo albums (50/100/200 pages), and order for printing.
+printed photo albums (24/36/48 pages), and order for printing.
 
 - **Market**: India — INR pricing, Razorpay payments
 - **Team**: 3 developers
@@ -44,7 +44,14 @@ src/
       albums/
         new/page.tsx          Create album — server component fetches products
         new/_form.tsx         Client component with useFormState
-        [id]/build/page.tsx   Builder placeholder — ownership via RLS SELECT
+        [id]/build/page.tsx   Builder — fetches album + photos + saved layout (RLS)
+        [id]/build/_builder.tsx   Client orchestrator: photos/blocks state, save/submit
+        [id]/build/_uploader.tsx  Upload-only dropzone (presign→PUT→confirm), controlled
+        [id]/build/_tray.tsx      Photo tray — draggable thumbnails, edit/delete, placed badge
+        [id]/build/_block.tsx     One layout block: base slot, picker, unlimited overlays (drag/resize)
+        [id]/build/_photo-editor.tsx  Free crop + rotate 90° + straighten + flip + brightness + sharpness
+        [id]/build/_photo-frame.tsx   THE renderer: applies edit_config (crop/rotate/tilt/flip/brightness/sharpen)
+        [id]/build/_preview.tsx   In-app paged full-album preview
     admin/                    Admin section; layout checks role='admin' via Drizzle
   components/
     app-header.tsx            Shared header with logout form (server action)
@@ -56,6 +63,9 @@ src/
     actions/
       auth.ts                 signOut server action
       albums.ts               createAlbum server action
+      builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
+    builder/
+      model.ts                Shared builder types + accounting + render transform (no I/O)
     supabase/
       client.ts               createBrowserClient() — 'use client' components
       server.ts               createServerClient() — Server Components, Server Actions
@@ -65,6 +75,9 @@ drizzle/
   0001_init.sql               Tables, RLS policies, trigger, product seed
   0002_backfill_profiles.sql  Backfill + idempotent trigger fix
   0003_grants.sql             Table-level GRANTs for anon and authenticated roles
+  0004_album_sizes.sql        Album sizes 50/100/200 → 24/36/48 (CHECK + product rows)
+  0005_album_pages_layout.sql album_pages.layout_config jsonb + template/photo_ids guards
+  0006_generic_overlays.sql   Generic unlimited overlays; retire pip; relax photo_ids CHECK
 ```
 
 ---
@@ -195,6 +208,20 @@ Supabase Dashboard → SQL Editor → New query to run.
 3. Route handler exchanges code, upserts profile, sets session cookie → redirects to `/dashboard`
 4. Middleware refreshes session on every request (reads + re-sets cookies)
 
+**Password login + "Stay logged in"**: login signs in via the `signIn` **server
+action** (not the browser client) so the server controls auth-cookie persistence.
+A non-sensitive `remember_me` cookie (`1`/`0`) is set before sign-in:
+- `1` (checkbox checked, the default) → persistent auth cookies (survive browser close).
+- `0` → `setAll` in `server.ts` + `middleware.ts` omits `maxAge`/`expires`, making
+  the `sb-*` auth cookies **session cookies** (applied on refresh too, not just login).
+  An `rm_login_at` cookie + an **8-hour absolute backstop** in middleware clears the
+  cookies and forces re-login (handles browsers that restore session cookies on
+  restart). The backstop clears cookies only — it does not revoke the refresh token.
+
+Album `size` is data-driven: the create-album form renders `products.pages`, and
+`albums.size`/the photo cap follow it. The allowed values live in the DB CHECK
+(`0004`), not in TS — there is no size literal or Zod size enum to keep in sync.
+
 ---
 
 ## Environment variables
@@ -206,6 +233,16 @@ Supabase Dashboard → SQL Editor → New query to run.
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role JWT — **server-only, never expose**; used in `service.ts` and `db/index.ts` |
 | `DATABASE_URL` | Transaction pooler (port 6543) — Drizzle runtime |
 | `DIRECT_URL` | Session pooler (port 5432) — drizzle-kit migrations |
+| `R2_ACCESS_KEY_ID` | Cloudflare R2 access key — **server-only** |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret — **server-only, never expose** |
+| `R2_ENDPOINT` | Account-level S3 endpoint `https://<account_id>.r2.cloudflarestorage.com` |
+| `R2_BUCKET_NAME` | Private R2 bucket name |
+| `R2_REGION` | `auto` (R2 ignores region; SDK needs a value) |
+| `R2_ACCOUNT_ID` | Cloudflare account id |
+
+**R2 bucket CORS** (Cloudflare dashboard → bucket → Settings) must allow `PUT` and
+`GET` from the app origin, with `content-type`/`content-length` headers and `ETag`
+exposed — direct browser uploads/displays fail without it.
 
 ---
 
@@ -219,6 +256,9 @@ pnpm dev          # http://localhost:3000
 1. `drizzle/0001_init.sql` — tables, RLS, trigger, seed
 2. `drizzle/0002_backfill_profiles.sql` — backfill + idempotent trigger
 3. `drizzle/0003_grants.sql` — table-level GRANTs
+4. `drizzle/0004_album_sizes.sql` — album sizes 50/100/200 → 24/36/48
+5. `drizzle/0005_album_pages_layout.sql` — album_pages.layout_config + layout guards
+6. `drizzle/0006_generic_overlays.sql` — generic overlays; retire pip; relax CHECKs
 
 **Supabase dashboard config:**
 - Authentication → URL Configuration → Site URL: `http://localhost:3000`
@@ -237,11 +277,100 @@ pnpm dev          # http://localhost:3000
 
 ---
 
+## Photo upload (Cloudflare R2) — built
+
+Direct browser → R2 upload via short-lived presigned URLs. File bytes never pass
+through our server. Bucket is **private**; all reads are presigned GETs.
+
+- **Flow**: client `POST /api/photos/presign` (server verifies album ownership via
+  RLS, checks type/size, enforces per-album cap = page size, returns a presigned
+  PUT URL whose signature pins content-type + exact content-length) → client `PUT`s
+  the file straight to R2 with a progress bar → client `POST /api/photos/confirm`
+  → server inserts the `photos` row via the **authenticated** Supabase client (RLS
+  applies). Display + delete use presigned GET / server-side `DeleteObject`.
+- **Object key**: `{user_id}/albums/{album_id}/{uuid}.{ext}`
+- **R2 access lives only in `src/lib/r2.ts`** (`import 'server-only'`): `presignPut`,
+  `presignGet`, `deleteObject`. Credentials read from env, never sent to the browser.
+- **Routes**: `app/api/photos/presign`, `app/api/photos/confirm`, `app/api/photos/[id]`
+  (DELETE — removes both the R2 object and the row, ownership-checked via RLS).
+- **UI**: `app/(app)/albums/[id]/build/_uploader.tsx` — drag-drop bulk upload with
+  per-file progress. Now **upload-only and controlled**: it reports each finished
+  photo to the Builder via `onUploaded`; the tray (not the uploader) shows/deletes.
+
+> ⚠️ **Uploaded images are NOT yet re-validated or re-encoded server-side.** We
+> store originals as-is and serve them defensively (private bucket, presigned URLs,
+> CSP). Server-side hardening — re-encoding to strip malicious payloads, thumbnail
+> generation, HEIC→JPEG conversion, and EXIF date auto-ordering — is the **next
+> background worker job**, not done in this slice.
+
+## Album builder (layout + editing + preview + submit) — built
+
+In-app builder at `/albums/[id]/build`. All reads/writes go through the
+**authenticated** Supabase client (RLS scopes to the owner); Zod validates every
+action input; ownership is re-verified on every server action.
+
+- **Placement model**: each uploaded photo is placed **at most once** — as a base
+  OR as an overlay — so per-photo edits live on `photos.edit_config` (not per-slot).
+  The tray badges placed photos (base + overlay ids); assigning a placed photo moves it.
+- **Two templates** (`src/lib/builder/model.ts`):
+  `single-full` (1 base photo, 1 page) and `spread-full` (1 base photo, **2 pages**).
+  Both accept **any number of overlays**. (`pip` was retired in `0006` — it is just
+  `single-full` + one overlay; existing pip rows were migrated.)
+- **Overlays** are generic + unlimited on either template: each has a photo and a
+  normalized rect, is draggable + resizable, and has delete + replace controls.
+  Overlays are **optional and never gate submit**.
+- **Page accounting**: each `album_pages` row is one layout BLOCK.
+  `page_number` = the block's **sequence position** (0-based), NOT a physical
+  leaf. Leaves consumed = Σ cost (`single`=1, `spread`=2). `remaining =
+  size − consumed`; adding a block that would overflow is blocked. Physical leaf
+  numbers are derived at render by walking templates in order.
+- **`album_pages` shape**: `layout_template`, `photo_ids` = **base slot only**
+  (`[]` or `[baseId]`), `caption`, and `layout_config` jsonb =
+  `{ overlays: [ { photoId, x, y, w, h } ] }` (0..1 fractions). CHECKs: template ∈
+  {single-full, spread-full} or null; `array_length(photo_ids) ≤ 1`; `layout_config`
+  null or has an `overlays` array.
+- **Non-destructive edits** (`photos.edit_config` jsonb): `crop` (free rect
+  `{x,y,w,h}`, normalized to the oriented image), `rotate` (0/90/180/270), `tilt`
+  (fine straighten °), `flipH`/`flipV`, `brightness` (1 = no change), `sharpness`
+  (0 = no change). No color filters. R2 originals are never modified.
+- **Rendering — single source of truth** (`model.ts`, all pure so the future PDF
+  worker reuses them): `computeFrameLayout()` returns the crop/rotate/tilt/flip
+  geometry; `cssFilter()` returns the `filter` string; `sharpenKernel()` builds the
+  convolution kernel. `_photo-frame.tsx` is the ONLY renderer — tray, slots,
+  overlays, preview, and the editor's result preview all go through it, so a photo
+  looks identical everywhere. Crop is taken on the oriented (rotate+flip) image;
+  tilt straightens the framed crop afterwards; flip is composed into the `<img>`
+  transform so it interacts with crop identically in editor and renderer.
+  - **brightness** = cheap CSS `filter: brightness()`.
+  - **sharpness** has no CSS equivalent → an inline SVG `feConvolveMatrix` (3×3
+    sharpen kernel, `useId()`-unique filter id per frame). It is attached **only
+    when sharpness > 0** so default frames pay nothing — important in the preview
+    where many frames render at once (watch convolution cost / edge artifacts there).
+- **Editor** (`_photo-editor.tsx`): left canvas shows the full oriented image
+  (sized to its aspect, no letterbox) with an interactive rule-of-thirds crop rect;
+  right side shows a live **result** `PhotoFrame` fed the real `edit_config`, so it
+  is pixel-identical to the slot/preview. Rotating resets the crop to full (the
+  oriented frame swapped).
+- **Server actions** (`src/lib/actions/builder.ts`):
+  - `saveLayout` — replaces the album's blocks (delete-all + insert). Validates
+    that every referenced photo (**base AND overlays**) belongs to the album,
+    rejects overflow, and enforces placed-once across base + overlay ids. Overlays
+    capped at 50/block in Zod. Drafts may be incomplete.
+  - `savePhotoEdit` — persists one photo's `edit_config`.
+  - `submitAlbum` — **re-reads the saved layout from the DB** (never trusts the
+    client), requires leaves == `size` with every **base** slot filled (overlays
+    optional), then sets `status='submitted'`. Handoff to the future checkout slice.
+- **Always editable**: drafts AND submitted albums re-load their saved layout +
+  edits on re-entry (until an order is placed — a later slice).
+
+> Out of scope this slice (both in the next **worker** slice): the downloadable
+> preview/print **PDF**, and server-side image **re-validation / thumbnails**. The
+> worker will reuse `model.ts`'s `computeFrameLayout` / `cssFilter` / `sharpenKernel`
+> to render the exact same edits server-side.
+
 ## What's NOT built yet (do not add until asked)
 
-- Photo upload (needs Cloudflare R2)
-- Album editor / page arranger
 - Order + payment flow (needs Razorpay)
 - Email notifications (needs Resend)
-- Worker service
+- Worker service (print/preview PDF render + server-side image hardening/thumbnails)
 - Travel agency portal (`/agency`)

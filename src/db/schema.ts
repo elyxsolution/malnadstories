@@ -63,6 +63,7 @@ export const albumPages = pgTable('album_pages', {
   layoutTemplate: text('layout_template'),
   caption: text('caption'),
   photoIds: uuid('photo_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  layoutConfig: jsonb('layout_config'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

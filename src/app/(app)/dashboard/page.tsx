@@ -16,9 +16,8 @@ export default async function DashboardPage() {
   // the albums policy "user_id = auth.uid()" filters automatically —
   // no explicit WHERE user_id = ? needed, and a bug can't leak other users' data.
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Validate the JWT against Supabase (getUser, not getSession) before querying.
+  await supabase.auth.getUser();
 
   const { data, error } = await supabase
     .from('albums')

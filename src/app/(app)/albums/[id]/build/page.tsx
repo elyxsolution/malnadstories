@@ -1,18 +1,28 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { presignGet } from '@/lib/r2';
+import Builder from './_builder';
+import { type Photo } from './_uploader';
+import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
 
-type AlbumRow = {
+type AlbumRow = { id: string; title: string; size: number; status: string };
+type PhotoRow = {
   id: string;
-  title: string;
-  size: number;
-  status: string;
+  r2_key: string | null;
+  original_filename: string;
+  edit_config: EditConfig | null;
+};
+type PageRow = {
+  page_number: number;
+  layout_template: string | null;
+  caption: string | null;
+  photo_ids: string[] | null;
+  layout_config: { overlays?: Overlay[] } | null;
 };
 
 export default async function BuildPage({ params }: { params: { id: string } }) {
-  // Supabase server client: RLS policy "user_id = auth.uid()" scopes the SELECT.
-  // If the album belongs to someone else, or doesn't exist, data is null → 404.
-  // No explicit AND(id, userId) needed — RLS is the gate.
+  // Supabase server client: RLS "user_id = auth.uid()" scopes the SELECT. A foreign
+  // or missing album → null → 404. No explicit AND(id, userId) needed.
   const supabase = createClient();
 
   const { data } = await supabase
@@ -24,29 +34,58 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   const album = data as AlbumRow | null;
   if (!album) notFound();
 
+  // Photos (RLS-scoped). Presign a short-lived GET per object so private R2 images render.
+  const { data: photoData } = await supabase
+    .from('photos')
+    .select('id, r2_key, original_filename, edit_config')
+    .eq('album_id', album.id)
+    .order('uploaded_at', { ascending: true });
+
+  const photoRows = (photoData ?? []) as PhotoRow[];
+  const photos: Photo[] = await Promise.all(
+    photoRows
+      .filter((r) => r.r2_key)
+      .map(async (r) => ({
+        id: r.id,
+        url: await presignGet(r.r2_key as string),
+        filename: r.original_filename,
+        edit: r.edit_config,
+      })),
+  );
+  const photoIdSet = new Set(photos.map((p) => p.id));
+
+  // Saved layout → blocks (RLS-scoped via parent album). photo_ids holds the base
+  // slot; overlays live in layout_config.overlays. Drop any id whose photo was
+  // since deleted so stale references don't render as broken slots.
+  const { data: pageData } = await supabase
+    .from('album_pages')
+    .select('page_number, layout_template, caption, photo_ids, layout_config')
+    .eq('album_id', album.id)
+    .order('page_number', { ascending: true });
+
+  const isTemplate = (t: string | null): t is LayoutTemplate =>
+    !!t && (LAYOUT_TEMPLATES as readonly string[]).includes(t);
+
+  const initialBlocks: Block[] = ((pageData ?? []) as PageRow[])
+    .filter((r) => isTemplate(r.layout_template))
+    .map((r) => ({
+      key: crypto.randomUUID(),
+      template: r.layout_template as LayoutTemplate,
+      photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
+      caption: r.caption ?? '',
+      overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+    }));
+
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <p className="text-sm text-muted-foreground">
-        <Link href="/dashboard" className="hover:underline">
-          Dashboard
-        </Link>
-        {' / '}
-        {album.title}
-      </p>
-
-      <div className="mt-2">
-        <h1 className="text-2xl font-bold">{album.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground capitalize">
-          {album.size} pages · {album.status}
-        </p>
-      </div>
-
-      <div className="mt-8 rounded-lg border border-dashed p-16 text-center text-muted-foreground">
-        <p className="font-medium">Builder coming soon</p>
-        <p className="mt-1 text-sm">
-          Photo upload and page arrangement will be here in the next session.
-        </p>
-      </div>
+    <div className="p-6 max-w-6xl mx-auto">
+      <Builder
+        albumId={album.id}
+        title={album.title}
+        size={album.size}
+        initialStatus={album.status}
+        initialPhotos={photos}
+        initialBlocks={initialBlocks}
+      />
     </div>
   );
 }

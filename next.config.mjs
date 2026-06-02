@@ -16,9 +16,9 @@ const nextConfig = {
               // unsafe-eval required by Next.js dev server; tighten with nonces before prod
               "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https://*.supabase.co",
+              "img-src 'self' data: blob: https://*.supabase.co https://*.r2.cloudflarestorage.com",
               "font-src 'self'",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.r2.cloudflarestorage.com",
               "frame-ancestors 'none'",
               "object-src 'none'",
               "base-uri 'self'",
