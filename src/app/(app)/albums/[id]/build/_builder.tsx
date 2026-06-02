@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
@@ -55,7 +55,42 @@ export default function Builder({
 
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const placed = useMemo(() => placedPhotoIds(blocks), [blocks]);
-  const availablePhotos = useMemo(() => photos.filter((p) => !placed.has(p.id)), [photos, placed]);
+  // Only 'ready' (sanitized) photos can be placed.
+  const availablePhotos = useMemo(
+    () => photos.filter((p) => p.status === 'ready' && !placed.has(p.id)),
+    [photos, placed],
+  );
+
+  // Poll for processing photos: while any are 'pending', refresh status + signed
+  // URLs every few seconds, then stop. New uploads flip to 'ready' here.
+  const hasPending = photos.some((p) => p.status === 'pending');
+  useEffect(() => {
+    if (!hasPending) return;
+    let active = true;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/photos?albumId=${albumId}`);
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          photos: { id: string; status: Photo['status']; url: string; thumbUrl: string; takenAt: string | null }[];
+        };
+        if (!active) return;
+        setPhotos((prev) =>
+          prev.map((p) => {
+            const u = body.photos.find((x) => x.id === p.id);
+            return u ? { ...p, status: u.status, url: u.url, thumbUrl: u.thumbUrl, takenAt: u.takenAt } : p;
+          }),
+        );
+      } catch {
+        // transient — try again next tick
+      }
+    };
+    const id = setInterval(tick, 3000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [hasPending, albumId]);
 
   const consumed = pagesConsumed(blocks);
   const remaining = size - consumed;

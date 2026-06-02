@@ -31,7 +31,7 @@ export async function DELETE(
   // RLS scopes this to the user's own photos — null means "not yours / not found".
   const { data: photo } = await supabase
     .from('photos')
-    .select('id, r2_key')
+    .select('id, r2_key, sanitized_key, thumb_key')
     .eq('id', params.id)
     .maybeSingle();
 
@@ -39,12 +39,19 @@ export async function DELETE(
     return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
   }
 
-  const { r2_key } = photo as { id: string; r2_key: string | null };
+  const { r2_key, sanitized_key, thumb_key } = photo as {
+    id: string;
+    r2_key: string | null;
+    sanitized_key: string | null;
+    thumb_key: string | null;
+  };
 
-  // Delete the object first; if it errors we keep the row so the user can retry.
-  if (r2_key) {
+  // Delete every R2 object for this photo (raw if retained, sanitized master,
+  // thumbnail) before the row, so a failure leaves the row for a retry.
+  const keys = [r2_key, sanitized_key, thumb_key].filter((k): k is string => !!k);
+  for (const key of keys) {
     try {
-      await deleteObject(r2_key);
+      await deleteObject(key);
     } catch (err) {
       console.error('R2 delete error:', err);
       return NextResponse.json({ error: 'Could not delete file' }, { status: 502 });

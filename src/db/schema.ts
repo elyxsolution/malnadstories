@@ -76,6 +76,12 @@ export const photos = pgTable('photos', {
   r2Key: text('r2_key'),
   originalFilename: text('original_filename').notNull(),
   editConfig: jsonb('edit_config'),
+  status: text('status').notNull().default('pending'),
+  sanitizedKey: text('sanitized_key'),
+  thumbKey: text('thumb_key'),
+  width: integer('width'),
+  height: integer('height'),
+  takenAt: timestamp('taken_at', { withTimezone: true }),
   uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

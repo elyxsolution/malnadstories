@@ -8,9 +8,12 @@ import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, typ
 type AlbumRow = { id: string; title: string; size: number; status: string };
 type PhotoRow = {
   id: string;
-  r2_key: string | null;
   original_filename: string;
   edit_config: EditConfig | null;
+  status: 'pending' | 'ready' | 'rejected';
+  sanitized_key: string | null;
+  thumb_key: string | null;
+  taken_at: string | null;
 };
 type PageRow = {
   page_number: number;
@@ -34,23 +37,27 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   const album = data as AlbumRow | null;
   if (!album) notFound();
 
-  // Photos (RLS-scoped). Presign a short-lived GET per object so private R2 images render.
+  // Photos (RLS-scoped), auto-ordered by EXIF capture date (PRD auto-organise),
+  // nulls last. We presign only the SANITIZED derivatives — never the raw original.
+  // 'pending'/'rejected' photos have no usable URL yet.
   const { data: photoData } = await supabase
     .from('photos')
-    .select('id, r2_key, original_filename, edit_config')
+    .select('id, original_filename, edit_config, status, sanitized_key, thumb_key, taken_at')
     .eq('album_id', album.id)
+    .order('taken_at', { ascending: true, nullsFirst: false })
     .order('uploaded_at', { ascending: true });
 
   const photoRows = (photoData ?? []) as PhotoRow[];
   const photos: Photo[] = await Promise.all(
-    photoRows
-      .filter((r) => r.r2_key)
-      .map(async (r) => ({
-        id: r.id,
-        url: await presignGet(r.r2_key as string),
-        filename: r.original_filename,
-        edit: r.edit_config,
-      })),
+    photoRows.map(async (r) => ({
+      id: r.id,
+      url: r.status === 'ready' && r.sanitized_key ? await presignGet(r.sanitized_key) : '',
+      thumbUrl: r.status === 'ready' && r.thumb_key ? await presignGet(r.thumb_key) : '',
+      filename: r.original_filename,
+      edit: r.edit_config,
+      status: r.status,
+      takenAt: r.taken_at,
+    })),
   );
   const photoIdSet = new Set(photos.map((p) => p.id));
 

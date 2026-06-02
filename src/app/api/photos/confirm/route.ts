@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { ConfirmUploadSchema } from '@/lib/validations';
-import { presignGet } from '@/lib/r2';
+import { enqueueImageHardening } from '@/lib/queue';
 
 /**
  * POST /api/photos/confirm
  *
  * Called by the client after a successful direct-to-R2 upload. Inserts the photos
- * row via the AUTHENTICATED Supabase client so the RLS check (user_id = auth.uid())
- * is the real DB-level gate. Returns a short-lived presigned GET URL so the new
- * thumbnail can render immediately.
+ * row (status defaults to 'pending') via the AUTHENTICATED Supabase client so the
+ * RLS check (user_id = auth.uid()) is the real DB-level gate, then enqueues the
+ * image-hardening job. The raw upload is NEVER served — the worker produces
+ * sanitized derivatives and the client polls until status='ready'.
  */
 export async function POST(request: Request) {
   const supabase = createClient();
@@ -70,6 +71,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Could not save photo' }, { status: 500 });
   }
 
-  const url = await presignGet(key);
-  return NextResponse.json({ id: (photo as { id: string }).id, url });
+  const id = (photo as { id: string }).id;
+
+  // Best-effort enqueue. If it fails the row stays 'pending' and the worker's
+  // periodic sweep will pick it up, so an upload is never silently lost.
+  try {
+    await enqueueImageHardening(id);
+  } catch (e) {
+    console.error('enqueue image-hardening failed (worker sweep will retry):', e);
+  }
+
+  return NextResponse.json({ id, status: 'pending' });
 }

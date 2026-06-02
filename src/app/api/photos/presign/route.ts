@@ -49,11 +49,14 @@ export async function POST(request: Request) {
   }
 
   // Per-album upload cap (see photoCap: 24→50, 36→75, 48→100). RLS scopes the count.
+  // Rejected uploads don't count — they never become usable, so they shouldn't
+  // consume a slot.
   const cap = photoCap((album as { size: number }).size);
   const { count } = await supabase
     .from('photos')
     .select('id', { count: 'exact', head: true })
-    .eq('album_id', albumId);
+    .eq('album_id', albumId)
+    .neq('status', 'rejected');
 
   if ((count ?? 0) >= cap) {
     return NextResponse.json(

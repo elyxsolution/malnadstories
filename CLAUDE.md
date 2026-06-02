@@ -24,9 +24,9 @@ printed photo albums (24/36/48 pages), and order for printing.
 | ORM | Drizzle ORM (`drizzle-orm/postgres-js`) — admin and schema only |
 | Validation | Zod on every API route input |
 | Payments | Razorpay — **not added yet** |
-| Storage | Cloudflare R2 — **not added yet** |
+| Storage | Cloudflare R2 — direct presigned upload (built) |
 | Email | Resend — **not added yet** |
-| Worker | Separate `/worker` Node service (pg-boss + sharp + Puppeteer + archiver) — **not added yet** |
+| Worker | Separate `/worker` Node service — **image hardening built** (pg-boss + sharp + file-type + exifr + heic-convert). PDF render (Puppeteer + archiver) is part 2, **not added yet** |
 
 ---
 
@@ -65,12 +65,14 @@ src/
       albums.ts               createAlbum server action
       builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
     builder/
-      model.ts                Shared builder types + accounting + render transform (no I/O)
+      model.ts                Shared builder types + accounting + render helpers (no I/O)
+    queue.ts                  App-side pg-boss (ENQUEUE only) — enqueueImageHardening
     supabase/
       client.ts               createBrowserClient() — 'use client' components
       server.ts               createServerClient() — Server Components, Server Actions
       service.ts              createServiceClient() — service role, bypasses RLS
     validations.ts            Zod schemas
+    app/api/photos/route.ts   GET ?albumId= — status + signed sanitized URLs (builder polls)
 drizzle/
   0001_init.sql               Tables, RLS policies, trigger, product seed
   0002_backfill_profiles.sql  Backfill + idempotent trigger fix
@@ -78,6 +80,13 @@ drizzle/
   0004_album_sizes.sql        Album sizes 50/100/200 → 24/36/48 (CHECK + product rows)
   0005_album_pages_layout.sql album_pages.layout_config jsonb + template/photo_ids guards
   0006_generic_overlays.sql   Generic unlimited overlays; retire pip; relax photo_ids CHECK
+  0007_photo_processing.sql   photos: status + sanitized_key/thumb_key + width/height/taken_at
+worker/                       Separate Node service (own package.json; pnpm install inside)
+  src/index.ts                Boot: start pg-boss, register worker, self-healing sweep
+  src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
+  src/lib/image.ts            sharp + file-type + exifr + heic-convert helpers
+  src/{env,queue,r2,supabase}.ts   env, pg-boss conn, R2 client, service-role client
+  tsconfig.json               @builder/* -> ../src/lib/builder/* (part-2 PDF reuses model.ts)
 ```
 
 ---
@@ -232,13 +241,18 @@ Album `size` is data-driven: the create-album form renders `products.pages`, and
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | JWT anon key — safe for client, used in `server.ts` and `client.ts` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role JWT — **server-only, never expose**; used in `service.ts` and `db/index.ts` |
 | `DATABASE_URL` | Transaction pooler (port 6543) — Drizzle runtime |
-| `DIRECT_URL` | Session pooler (port 5432) — drizzle-kit migrations |
+| `DIRECT_URL` | Session pooler (port 5432) — drizzle-kit migrations **and pg-boss** (the worker + the app's enqueue; pg-boss can't use the 6543 transaction pooler) |
 | `R2_ACCESS_KEY_ID` | Cloudflare R2 access key — **server-only** |
 | `R2_SECRET_ACCESS_KEY` | Cloudflare R2 secret — **server-only, never expose** |
 | `R2_ENDPOINT` | Account-level S3 endpoint `https://<account_id>.r2.cloudflarestorage.com` |
 | `R2_BUCKET_NAME` | Private R2 bucket name |
 | `R2_REGION` | `auto` (R2 ignores region; SDK needs a value) |
 | `R2_ACCOUNT_ID` | Cloudflare account id |
+| `KEEP_RAW_ORIGINAL` | Worker-only; `false` (default) deletes the raw upload after sanitizing |
+| `WORKER_SWEEP_INTERVAL_MS` | Worker-only; how often to re-scan for stuck `pending` photos (default 60000) |
+
+The worker reads these from the **repo-root `.env.local`** (single source of secrets);
+see `worker/.env.example`.
 
 **R2 bucket CORS** (Cloudflare dashboard → bucket → Settings) must allow `PUT` and
 `GET` from the app origin, with `content-type`/`content-length` headers and `ETag`
@@ -249,8 +263,17 @@ exposed — direct browser uploads/displays fail without it.
 ## Running locally
 
 ```bash
+# Terminal 1 — the Next.js app (repo root)
 pnpm dev          # http://localhost:3000
+
+# Terminal 2 — the background worker (FIRST TIME: install its own deps)
+cd worker && pnpm install   # standalone package; has its own pnpm-workspace.yaml
+pnpm dev                    # = tsx watch src/index.ts
 ```
+
+The worker connects to the same Supabase Postgres (pg-boss creates its own `pgboss`
+schema automatically) and reads the repo-root `.env.local`. Without it running,
+uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`.
 
 **First-run SQL migrations (run in order in Supabase SQL Editor):**
 1. `drizzle/0001_init.sql` — tables, RLS, trigger, seed
@@ -259,6 +282,7 @@ pnpm dev          # http://localhost:3000
 4. `drizzle/0004_album_sizes.sql` — album sizes 50/100/200 → 24/36/48
 5. `drizzle/0005_album_pages_layout.sql` — album_pages.layout_config + layout guards
 6. `drizzle/0006_generic_overlays.sql` — generic overlays; retire pip; relax CHECKs
+7. `drizzle/0007_photo_processing.sql` — photos status + sanitized/thumb keys + EXIF date
 
 **Supabase dashboard config:**
 - Authentication → URL Configuration → Site URL: `http://localhost:3000`
@@ -288,20 +312,51 @@ through our server. Bucket is **private**; all reads are presigned GETs.
   the file straight to R2 with a progress bar → client `POST /api/photos/confirm`
   → server inserts the `photos` row via the **authenticated** Supabase client (RLS
   applies). Display + delete use presigned GET / server-side `DeleteObject`.
-- **Object key**: `{user_id}/albums/{album_id}/{uuid}.{ext}`
+- **Object key (raw upload)**: `{user_id}/albums/{album_id}/{uuid}.{ext}` — this raw
+  object is processed then **deleted** by the worker; only sanitized derivatives are served.
 - **R2 access lives only in `src/lib/r2.ts`** (`import 'server-only'`): `presignPut`,
   `presignGet`, `deleteObject`. Credentials read from env, never sent to the browser.
-- **Routes**: `app/api/photos/presign`, `app/api/photos/confirm`, `app/api/photos/[id]`
-  (DELETE — removes both the R2 object and the row, ownership-checked via RLS).
-- **UI**: `app/(app)/albums/[id]/build/_uploader.tsx` — drag-drop bulk upload with
-  per-file progress. Now **upload-only and controlled**: it reports each finished
-  photo to the Builder via `onUploaded`; the tray (not the uploader) shows/deletes.
+- **Routes**: `presign`, `confirm` (inserts row `status='pending'` + **enqueues** the
+  hardening job), `photos/[id]` DELETE (removes raw + sanitized + thumb objects + row),
+  `photos?albumId=` GET (status + signed sanitized URLs for polling).
+- **UI**: `_uploader.tsx` — drag-drop bulk upload, **upload-only and controlled**;
+  finished photos enter the tray as `pending` until the worker marks them `ready`.
 
-> ⚠️ **Uploaded images are NOT yet re-validated or re-encoded server-side.** We
-> store originals as-is and serve them defensively (private bucket, presigned URLs,
-> CSP). Server-side hardening — re-encoding to strip malicious payloads, thumbnail
-> generation, HEIC→JPEG conversion, and EXIF date auto-ordering — is the **next
-> background worker job**, not done in this slice.
+> ✅ **Server-side image hardening is now done by the worker** (see below). The raw
+> upload is validated, re-encoded, and deleted; the app serves only sanitized
+> derivatives. The remaining deferral is the **downloadable print PDF** (worker part 2).
+
+## Background worker — image hardening (built)
+
+Separate Node service in `/worker` (own `package.json`; `pnpm install` inside it).
+Queue is **pg-boss on the same Supabase Postgres** (no Redis); pg-boss owns its
+`pgboss` schema. The worker is **trusted backend**: it uses the service-role client
++ `DIRECT_URL` and intentionally bypasses RLS to process every user's jobs.
+
+- **Enqueue**: `confirm` calls `enqueueImageHardening(photoId)` (`src/lib/queue.ts`,
+  a send-only pg-boss singleton). Best-effort — if it fails the row stays `pending`
+  and the worker's periodic **sweep** re-enqueues it, so uploads are never lost.
+- **Job** (`worker/src/jobs/image-hardening.ts`): download raw from R2 → **validate
+  magic bytes** (`file-type`; reject spoofed types) → extract **EXIF capture date**
+  (`exifr` → `taken_at`) → **re-encode** with `sharp` (auto-orient, strip metadata,
+  HEIC→JPEG via `heic-convert`) into a sanitized **full-res master** (ORIGINAL
+  resolution, JPEG q90 — it's the print master, so no downscale) + a **~400px
+  thumbnail** → upload both → update the row (`sanitized_key`, `thumb_key`,
+  `width`, `height`, `taken_at`, `status='ready'`) → **delete the raw** (unless
+  `KEEP_RAW_ORIGINAL=true`) and null `r2_key`.
+- **Decompression-bomb guard**: sharp's input pixel limit is kept (never disabled)
+  and images over ~100 MP / 30k px are **rejected** (not retried).
+- **Failure model**: invalid/undecodable/bomb → `status='rejected'` (no retry);
+  transient errors throw → pg-boss retries (limit 3, backoff). Idempotent: a `ready`
+  row is skipped; `singletonKey=photoId` dedupes queued jobs.
+- **Serve-only-sanitized**: the app NEVER presigns `r2_key` — only `sanitized_key` /
+  `thumb_key`, and only for `ready` photos. `photos.status` drives the UI: `pending`
+  → "Processing…" spinner (not placeable), `rejected` → error, `ready` → usable.
+  The builder polls `GET /api/photos?albumId=` while any photo is `pending`. Photos
+  are auto-ordered by `taken_at` (EXIF), nulls last.
+- **Reusing the renderer**: `worker/tsconfig.json` maps `@builder/*` →
+  `../src/lib/builder/*` so part 2's PDF job imports `computeFrameLayout` /
+  `cssFilter` / `sharpenKernel` from `model.ts` — no duplicated rendering logic.
 
 ## Album builder (layout + editing + preview + submit) — built
 
@@ -363,14 +418,14 @@ action input; ownership is re-verified on every server action.
 - **Always editable**: drafts AND submitted albums re-load their saved layout +
   edits on re-entry (until an order is placed — a later slice).
 
-> Out of scope this slice (both in the next **worker** slice): the downloadable
-> preview/print **PDF**, and server-side image **re-validation / thumbnails**. The
-> worker will reuse `model.ts`'s `computeFrameLayout` / `cssFilter` / `sharpenKernel`
-> to render the exact same edits server-side.
+> Server-side image **re-validation / thumbnails** are now built (worker, above).
+> The **downloadable print PDF** is worker **part 2** — it will reuse `model.ts`'s
+> `computeFrameLayout` / `cssFilter` / `sharpenKernel` to render the exact same edits.
 
 ## What's NOT built yet (do not add until asked)
 
 - Order + payment flow (needs Razorpay)
 - Email notifications (needs Resend)
-- Worker service (print/preview PDF render + server-side image hardening/thumbnails)
+- Worker **part 2**: downloadable print/preview **PDF** (Puppeteer + archiver),
+  reusing the builder's pure renderer
 - Travel agency portal (`/agency`)

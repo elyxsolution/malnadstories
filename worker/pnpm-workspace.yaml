@@ -1,0 +1,9 @@
+# Makes /worker its OWN pnpm root: pnpm stops walking up to the app's lockfile, so
+# `pnpm install` here installs into worker/node_modules. Also the home (pnpm v11) for
+# the build-script allowlist — sharp + esbuild ship native binaries via install
+# scripts that pnpm otherwise blocks.
+packages:
+  - '.'
+allowBuilds:
+  esbuild: true
+  sharp: true

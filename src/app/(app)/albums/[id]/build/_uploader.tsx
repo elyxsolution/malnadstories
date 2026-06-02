@@ -4,11 +4,16 @@ import { useCallback, useRef, useState } from 'react';
 import { UploadCloud } from 'lucide-react';
 import type { EditConfig } from '@/lib/builder/model';
 
+export type PhotoStatus = 'pending' | 'ready' | 'rejected';
+
 export type Photo = {
   id: string;
-  url: string;
+  url: string; // sanitized full-res signed URL (empty until status='ready')
+  thumbUrl: string; // sanitized thumbnail signed URL (empty until status='ready')
   filename: string;
   edit: EditConfig | null;
+  status: PhotoStatus;
+  takenAt: string | null;
 };
 
 type Upload = {
@@ -117,7 +122,17 @@ export default function Uploader({
         const confirm = await confirmRes.json();
         if (!confirmRes.ok) throw new Error(confirm.error || 'Could not save photo');
 
-        onUploaded({ id: confirm.id, url: confirm.url, filename: file.name, edit: null });
+        // The photo enters 'pending'; the worker sanitizes it and the tray polls
+        // until status='ready'. The raw upload is never served.
+        onUploaded({
+          id: confirm.id,
+          url: '',
+          thumbUrl: '',
+          filename: file.name,
+          edit: null,
+          status: 'pending',
+          takenAt: null,
+        });
         setUploads((prev) => prev.filter((u) => u.tempId !== tempId));
       } catch (err) {
         setUpload(tempId, {
