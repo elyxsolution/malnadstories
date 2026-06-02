@@ -24,6 +24,17 @@ export const TEMPLATE_LABEL: Record<LayoutTemplate, string> = {
   'spread-full': 'Full spread',
 };
 
+/**
+ * Max photos uploadable per album, keyed by album size (pages). With generic
+ * overlays a page can use more than one photo, so the cap is higher than the page
+ * count. Falls back to ~2× for any size not in the table.
+ */
+export const PHOTO_CAP: Record<number, number> = { 24: 50, 36: 75, 48: 100 };
+
+export function photoCap(size: number): number {
+  return PHOTO_CAP[size] ?? size * 2;
+}
+
 /** Non-destructive edit applied at render time. R2 originals are never modified. */
 export type Rect = { x: number; y: number; w: number; h: number };
 

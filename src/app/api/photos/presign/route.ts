@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
 import { PresignUploadSchema } from '@/lib/validations';
 import { presignPut, ALLOWED_CONTENT_TYPES, type AllowedContentType } from '@/lib/r2';
+import { photoCap } from '@/lib/builder/model';
 
 /**
  * POST /api/photos/presign
@@ -47,15 +48,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Album not found' }, { status: 404 });
   }
 
-  // Per-album cap = the album's page size. RLS scopes the count to this user.
+  // Per-album upload cap (see photoCap: 24→50, 36→75, 48→100). RLS scopes the count.
+  const cap = photoCap((album as { size: number }).size);
   const { count } = await supabase
     .from('photos')
     .select('id', { count: 'exact', head: true })
     .eq('album_id', albumId);
 
-  if ((count ?? 0) >= (album as { size: number }).size) {
+  if ((count ?? 0) >= cap) {
     return NextResponse.json(
-      { error: `This album is full (${(album as { size: number }).size} photos max).` },
+      { error: `This album is full (${cap} photos max).` },
       { status: 409 },
     );
   }

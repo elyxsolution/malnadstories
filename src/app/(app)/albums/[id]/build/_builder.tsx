@@ -13,6 +13,7 @@ import {
   TEMPLATE_LABEL,
   PAGE_COST,
   DEFAULT_OVERLAY_GEOM,
+  photoCap,
   pagesConsumed,
   canAdd,
   isAlbumComplete,
@@ -237,7 +238,7 @@ export default function Builder({
         <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
           {/* Sidebar: upload + tray */}
           <aside className="space-y-4">
-            <Uploader albumId={albumId} remaining={size - photos.length} onUploaded={onUploaded} />
+            <Uploader albumId={albumId} remaining={photoCap(size) - photos.length} onUploaded={onUploaded} />
             <div>
               <h2 className="mb-2 text-sm font-semibold">Photos</h2>
               <Tray photos={photos} placedIds={placed} onEdit={setEditingPhoto} onDeleted={onPhotoDeleted} />
