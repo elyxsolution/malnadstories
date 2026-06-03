@@ -7,8 +7,10 @@ import { env } from './env.js';
  * coupling the two packages just to share one constant.
  */
 export const IMAGE_HARDENING_QUEUE = 'image-hardening';
+export const ALBUM_PDF_QUEUE = 'album-pdf';
 
 export type ImageHardeningJob = { photoId: string };
+export type AlbumPdfJob = { albumId: string; token: string };
 
 /**
  * Worker-side pg-boss instance. Connects with DIRECT_URL — a SESSION connection

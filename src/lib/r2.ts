@@ -73,10 +73,21 @@ export async function presignPut(params: {
 }
 
 /**
- * Short-lived presigned GET URL for displaying a private object in an <img> tag.
+ * Short-lived presigned GET URL for a private object. Pass `downloadFilename` to
+ * force a browser download (Content-Disposition: attachment) — used for the PDF.
  */
-export async function presignGet(key: string, expiresIn = 600): Promise<string> {
-  const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
+export async function presignGet(
+  key: string,
+  expiresIn = 600,
+  opts?: { downloadFilename?: string },
+): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+    ...(opts?.downloadFilename
+      ? { ResponseContentDisposition: `attachment; filename="${opts.downloadFilename}"` }
+      : {}),
+  });
   return getSignedUrl(r2(), command, { expiresIn });
 }
 

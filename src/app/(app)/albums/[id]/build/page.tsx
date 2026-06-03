@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
 import Builder from './_builder';
 import { type Photo } from './_uploader';
@@ -83,10 +84,25 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
     }));
 
+  // Initial preview-PDF status (album_pdfs is service-only; ownership already proven
+  // by the RLS-scoped album load above). The builder polls for updates.
+  const admin = createServiceClient();
+  const { data: pdfRow } = await admin
+    .from('album_pdfs')
+    .select('status')
+    .eq('album_id', album.id)
+    .maybeSingle();
+  const initialPdfStatus = ((pdfRow as { status: string } | null)?.status ?? 'idle') as
+    | 'idle'
+    | 'generating'
+    | 'ready'
+    | 'failed';
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <Builder
         albumId={album.id}
+        initialPdfStatus={initialPdfStatus}
         title={album.title}
         size={album.size}
         initialStatus={album.status}

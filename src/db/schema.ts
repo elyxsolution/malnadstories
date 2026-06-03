@@ -102,6 +102,19 @@ export const orders = pgTable('orders', {
   placedAt: timestamp('placed_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const albumPdfs = pgTable('album_pdfs', {
+  albumId: uuid('album_id')
+    .primaryKey()
+    .references(() => albums.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('idle'),
+  r2Key: text('r2_key'),
+  generatedAt: timestamp('generated_at', { withTimezone: true }),
+  error: text('error'),
+  tokenHash: text('token_hash'),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+  tokenUsedAt: timestamp('token_used_at', { withTimezone: true }),
+});
+
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   orderId: uuid('order_id')

@@ -1,6 +1,13 @@
 import type PgBoss from 'pg-boss';
-import { createBoss, IMAGE_HARDENING_QUEUE, type ImageHardeningJob } from './queue.js';
+import {
+  createBoss,
+  IMAGE_HARDENING_QUEUE,
+  ALBUM_PDF_QUEUE,
+  type ImageHardeningJob,
+  type AlbumPdfJob,
+} from './queue.js';
 import { processPhoto } from './jobs/image-hardening.js';
+import { generateAlbumPdf, closeBrowser } from './jobs/album-pdf.js';
 import { supabase } from './supabase.js';
 import { env } from './env.js';
 
@@ -35,6 +42,7 @@ async function main(): Promise<void> {
   boss.on('error', (e) => console.error('[worker] pg-boss error:', e));
   await boss.start();
   await boss.createQueue(IMAGE_HARDENING_QUEUE);
+  await boss.createQueue(ALBUM_PDF_QUEUE);
 
   await boss.work<ImageHardeningJob>(
     IMAGE_HARDENING_QUEUE,
@@ -46,7 +54,18 @@ async function main(): Promise<void> {
     },
   );
 
-  console.log('[worker] image-hardening worker started');
+  // PDF jobs are heavy (Chromium); process one at a time.
+  await boss.work<AlbumPdfJob>(
+    ALBUM_PDF_QUEUE,
+    { pollingIntervalSeconds: 2, batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await generateAlbumPdf(job.data);
+      }
+    },
+  );
+
+  console.log('[worker] image-hardening + album-pdf workers started');
 
   await sweepPending(boss);
   const timer = setInterval(() => {
@@ -56,6 +75,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     clearInterval(timer);
     await boss.stop({ graceful: true }).catch(() => {});
+    await closeBrowser();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

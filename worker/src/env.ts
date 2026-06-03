@@ -19,6 +19,8 @@ const EnvSchema = z.object({
   R2_ENDPOINT: z.string().url(),
   R2_BUCKET_NAME: z.string().min(1),
   R2_REGION: z.string().default('auto'),
+  // Base URL the worker's headless Chromium uses to reach the print route.
+  APP_URL: z.string().url().default('http://localhost:3000'),
   KEEP_RAW_ORIGINAL: z
     .string()
     .optional()

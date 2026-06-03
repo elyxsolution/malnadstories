@@ -26,7 +26,7 @@ printed photo albums (24/36/48 pages), and order for printing.
 | Payments | Razorpay — **not added yet** |
 | Storage | Cloudflare R2 — direct presigned upload (built) |
 | Email | Resend — **not added yet** |
-| Worker | Separate `/worker` Node service — **image hardening built** (pg-boss + sharp + file-type + exifr + heic-convert). PDF render (Puppeteer + archiver) is part 2, **not added yet** |
+| Worker | Separate `/worker` Node service — **built**: image hardening (pg-boss + sharp + file-type + exifr + heic-convert) and album **preview-PDF** render (Puppeteer driving the app's print route) |
 
 ---
 
@@ -64,15 +64,18 @@ src/
       auth.ts                 signOut server action
       albums.ts               createAlbum server action
       builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
+      pdf.ts                  requestAlbumPdf server action (mint print token, enqueue)
     builder/
       model.ts                Shared builder types + accounting + render helpers (no I/O)
-    queue.ts                  App-side pg-boss (ENQUEUE only) — enqueueImageHardening
+    queue.ts                  App-side pg-boss (ENQUEUE only) — image-hardening + album-pdf
     supabase/
       client.ts               createBrowserClient() — 'use client' components
       server.ts               createServerClient() — Server Components, Server Actions
       service.ts              createServiceClient() — service role, bypasses RLS
     validations.ts            Zod schemas
-    app/api/photos/route.ts   GET ?albumId= — status + signed sanitized URLs (builder polls)
+  app/albums/[id]/print/      Token-gated print route (OUTSIDE (app); service access) → PDF
+  app/api/photos/route.ts     GET ?albumId= — status + signed sanitized URLs (builder polls)
+  app/api/albums/[id]/pdf/route.ts  GET — PDF status + short-lived signed download URL
 drizzle/
   0001_init.sql               Tables, RLS policies, trigger, product seed
   0002_backfill_profiles.sql  Backfill + idempotent trigger fix
@@ -81,12 +84,14 @@ drizzle/
   0005_album_pages_layout.sql album_pages.layout_config jsonb + template/photo_ids guards
   0006_generic_overlays.sql   Generic unlimited overlays; retire pip; relax photo_ids CHECK
   0007_photo_processing.sql   photos: status + sanitized_key/thumb_key + width/height/taken_at
+  0008_album_pdfs.sql         album_pdfs (service-only): PDF status/key + single-use print token
 worker/                       Separate Node service (own package.json; pnpm install inside)
-  src/index.ts                Boot: start pg-boss, register worker, self-healing sweep
+  src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
+  src/jobs/album-pdf.ts       Puppeteer → print route → page.pdf → upload PDF to R2
   src/lib/image.ts            sharp + file-type + exifr + heic-convert helpers
   src/{env,queue,r2,supabase}.ts   env, pg-boss conn, R2 client, service-role client
-  tsconfig.json               @builder/* -> ../src/lib/builder/* (part-2 PDF reuses model.ts)
+  tsconfig.json               @builder/* -> ../src/lib/builder/* (PDF reuses model.ts)
 ```
 
 ---
@@ -248,6 +253,7 @@ Album `size` is data-driven: the create-album form renders `products.pages`, and
 | `R2_BUCKET_NAME` | Private R2 bucket name |
 | `R2_REGION` | `auto` (R2 ignores region; SDK needs a value) |
 | `R2_ACCOUNT_ID` | Cloudflare account id |
+| `APP_URL` | Worker-only; base URL the PDF job's Chromium navigates to (default `http://localhost:3000`) |
 | `KEEP_RAW_ORIGINAL` | Worker-only; `false` (default) deletes the raw upload after sanitizing |
 | `WORKER_SWEEP_INTERVAL_MS` | Worker-only; how often to re-scan for stuck `pending` photos (default 60000) |
 
@@ -283,6 +289,7 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 5. `drizzle/0005_album_pages_layout.sql` — album_pages.layout_config + layout guards
 6. `drizzle/0006_generic_overlays.sql` — generic overlays; retire pip; relax CHECKs
 7. `drizzle/0007_photo_processing.sql` — photos status + sanitized/thumb keys + EXIF date
+8. `drizzle/0008_album_pdfs.sql` — album_pdfs (service-only PDF state + print token)
 
 **Supabase dashboard config:**
 - Authentication → URL Configuration → Site URL: `http://localhost:3000`
@@ -355,8 +362,47 @@ Queue is **pg-boss on the same Supabase Postgres** (no Redis); pg-boss owns its
   The builder polls `GET /api/photos?albumId=` while any photo is `pending`. Photos
   are auto-ordered by `taken_at` (EXIF), nulls last.
 - **Reusing the renderer**: `worker/tsconfig.json` maps `@builder/*` →
-  `../src/lib/builder/*` so part 2's PDF job imports `computeFrameLayout` /
-  `cssFilter` / `sharpenKernel` from `model.ts` — no duplicated rendering logic.
+  `../src/lib/builder/*` (the PDF print route reuses `model.ts`/`_photo-frame` — no
+  duplicated rendering logic).
+
+## Background worker — album preview PDF (built)
+
+True WYSIWYG by construction: a **print route renders the album with the app's own
+renderer**, and the worker prints it to PDF with Puppeteer — no rendering is
+re-implemented in the worker.
+
+- **Print route** `app/albums/[id]/print` — server component **outside the `(app)`
+  group** (so the auth layout doesn't redirect headless Chromium; middleware doesn't
+  guard `/albums/*`). It is **token-gated**: validates `?t=` against `album_pdfs`
+  (service role), marks the token used, then renders every page/spread in order via
+  `_print-album.tsx` → the same `_photo-frame` + `model.ts`, with **sanitized
+  full-res** images. One PDF page per album page (spread = one wide page) via named
+  CSS `@page` + `preferCSSPageSize`; page sizes/margins are parameterized for the
+  print partner's later bleed/DPI (now a faithful **preview**, not a pre-press file).
+- **Readiness gate**: `_photo-frame` gained an optional `onReady` (fires on image
+  load OR error). `_print-album` counts exactly the frames that render an image
+  (base + overlays; empty slots excluded), treats a load **or error** as ready (a
+  broken/expired URL can't hang the PDF), handles a zero-image album immediately,
+  and sets `window.__ALBUM_PRINT_READY`. Puppeteer waits on `networkidle0` + that
+  flag with a 60s timeout → clean `failed` instead of hanging.
+- **Token scheme**: `requestAlbumPdf` (server action) verifies ownership (RLS),
+  mints a `randomBytes(32)` token, stores only its **sha256 hash** + 5-min expiry on
+  `album_pdfs` (service-only table), and enqueues `{ albumId, token }`. Short-lived,
+  **single-use** (`token_used_at`), per-album. The raw token is never logged.
+- **Worker job** `worker/src/jobs/album-pdf.ts`: a **shared** headless Chromium with
+  a **fresh page per job** (closed after), `deviceScaleFactor: 2`, `printBackground`
+  (so brightness CSS filter + SVG `feConvolveMatrix` sharpness rasterize into the
+  PDF). Uploads to private R2 `{user}/albums/{album}/preview.pdf`; sets
+  `album_pdfs.status='ready'`. `retryLimit: 0` keeps the token single-use; any
+  failure → `status='failed'`.
+- **Trigger/UI**: a "Preview PDF" button (debounced; `singletonKey` also dedupes
+  server-side) enqueues and shows "Generating…"; the builder polls
+  `GET /api/albums/[id]/pdf` until `ready`, then "Download PDF" fetches a **fresh
+  ~2-min signed URL** (Content-Disposition: attachment). `failed` → retry.
+- **Security**: only the owner can request (ownership checked before minting) or
+  download (ownership-checked route, short-lived URL); `album_pdfs` is service-only
+  (RLS on, no policies/grants); the worker uses the service role; the PDF R2 key is
+  private (never public).
 
 ## Album builder (layout + editing + preview + submit) — built
 
@@ -418,14 +464,13 @@ action input; ownership is re-verified on every server action.
 - **Always editable**: drafts AND submitted albums re-load their saved layout +
   edits on re-entry (until an order is placed — a later slice).
 
-> Server-side image **re-validation / thumbnails** are now built (worker, above).
-> The **downloadable print PDF** is worker **part 2** — it will reuse `model.ts`'s
-> `computeFrameLayout` / `cssFilter` / `sharpenKernel` to render the exact same edits.
+> Server-side image **re-validation / thumbnails** and the **downloadable preview
+> PDF** are both built (worker, above). The PDF is a faithful **preview**, not the
+> final pre-press file (exact bleed/DPI is a later tuning of the print-route page sizes).
 
 ## What's NOT built yet (do not add until asked)
 
 - Order + payment flow (needs Razorpay)
 - Email notifications (needs Resend)
-- Worker **part 2**: downloadable print/preview **PDF** (Puppeteer + archiver),
-  reusing the builder's pure renderer
+- Pre-press PDF tuning (exact bleed/DPI/ICC for the print partner)
 - Travel agency portal (`/agency`)

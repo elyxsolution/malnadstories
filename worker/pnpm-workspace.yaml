@@ -7,3 +7,4 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
+  puppeteer: true

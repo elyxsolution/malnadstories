@@ -19,17 +19,33 @@ export default function PhotoFrame({
   edit,
   alt = '',
   className,
+  onReady,
 }: {
   url: string;
   edit?: EditConfig | null;
   alt?: string;
   className?: string;
+  // Fires exactly once when the image has loaded OR failed (used by the print route
+  // to know every frame has settled). A failed image still counts as "ready" so one
+  // broken/expired URL can't hang PDF generation. The app UI ignores this.
+  onReady?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ w: 0, h: 0 });
   const [nat, setNat] = useState({ w: 0, h: 0 });
   const rawId = useId();
   const sharpenId = `ms-sharpen-${rawId.replace(/:/g, '')}`;
+
+  const readyRef = useRef(false);
+  const fireReady = () => {
+    if (readyRef.current) return;
+    readyRef.current = true;
+    onReady?.();
+  };
+  const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
+    fireReady();
+  };
 
   useEffect(() => {
     const el = ref.current;
@@ -69,7 +85,8 @@ export default function PhotoFrame({
             src={url}
             alt={alt}
             draggable={false}
-            onLoad={(e) => setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            onLoad={handleLoad}
+            onError={fireReady}
             className="absolute left-1/2 top-1/2 max-w-none select-none"
             style={{ width: layout.img.width, height: layout.img.height, transform: layout.img.transform, willChange: 'transform' }}
           />
@@ -81,7 +98,8 @@ export default function PhotoFrame({
           src={url}
           alt={alt}
           draggable={false}
-          onLoad={(e) => setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          onLoad={handleLoad}
+          onError={fireReady}
           className="absolute inset-0 h-full w-full select-none object-cover"
         />
       )}

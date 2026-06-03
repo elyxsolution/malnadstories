@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye } from 'lucide-react';
+import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye, FileDown, AlertTriangle } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
 import BlockCard from './_block';
@@ -24,7 +24,10 @@ import {
   type EditConfig,
 } from '@/lib/builder/model';
 import { saveLayout, submitAlbum } from '@/lib/actions/builder';
+import { requestAlbumPdf } from '@/lib/actions/pdf';
 import { Button } from '@/components/ui/button';
+
+type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -33,6 +36,7 @@ export default function Builder({
   title,
   size,
   initialStatus,
+  initialPdfStatus,
   initialPhotos,
   initialBlocks,
 }: {
@@ -40,6 +44,7 @@ export default function Builder({
   title: string;
   size: number;
   initialStatus: string;
+  initialPdfStatus: PdfStatus;
   initialPhotos: Photo[];
   initialBlocks: Block[];
 }) {
@@ -52,6 +57,10 @@ export default function Builder({
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const [pdfStatus, setPdfStatus] = useState<PdfStatus>(initialPdfStatus);
+  const [pdfBusy, setPdfBusy] = useState(false); // debounce: blocks double-trigger
+  const [downloading, setDownloading] = useState(false);
 
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const placed = useMemo(() => placedPhotoIds(blocks), [blocks]);
@@ -213,6 +222,58 @@ export default function Builder({
     }
   };
 
+  // ── preview PDF ───────────────────────────────────────────────────────────────
+  // Poll while generating; stop on ready/failed.
+  useEffect(() => {
+    if (pdfStatus !== 'generating') return;
+    let active = true;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/albums/${albumId}/pdf`);
+        if (!res.ok) return;
+        const body = (await res.json()) as { status: PdfStatus };
+        if (active && body.status !== 'generating') setPdfStatus(body.status);
+      } catch {
+        // transient — retry next tick
+      }
+    };
+    const id = setInterval(tick, 3000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [pdfStatus, albumId]);
+
+  // Debounced: ignore re-entrant clicks while a request is in flight or generating.
+  const requestPdf = async () => {
+    if (pdfBusy || pdfStatus === 'generating') return;
+    setPdfBusy(true);
+    setMessage(null);
+    const res = await requestAlbumPdf(albumId);
+    setPdfBusy(false);
+    if (res.ok) setPdfStatus('generating');
+    else setMessage({ kind: 'err', text: res.error });
+  };
+
+  // Fetch a FRESH short-lived signed URL at click time, then download.
+  const downloadPdf = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/albums/${albumId}/pdf`);
+      const body = (await res.json()) as { status: PdfStatus; url: string | null };
+      if (body.status === 'ready' && body.url) {
+        window.location.href = body.url;
+      } else {
+        setPdfStatus(body.status);
+        setMessage({ kind: 'err', text: 'The PDF is no longer available — please regenerate.' });
+      }
+    } catch {
+      setMessage({ kind: 'err', text: 'Could not fetch the PDF download link.' });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header / actions */}
@@ -250,6 +311,30 @@ export default function Builder({
           <Button size="sm" onClick={submit} disabled={!complete || saving || submitting}>
             {submitting ? <Loader2 className="animate-spin" /> : <Send />} Submit
           </Button>
+
+          {/* Preview PDF */}
+          {pdfStatus === 'generating' ? (
+            <Button variant="outline" size="sm" disabled>
+              <Loader2 className="animate-spin" /> Generating PDF…
+            </Button>
+          ) : pdfStatus === 'ready' ? (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" onClick={downloadPdf} disabled={downloading}>
+                {downloading ? <Loader2 className="animate-spin" /> : <FileDown />} Download PDF
+              </Button>
+              <Button variant="ghost" size="sm" onClick={requestPdf} disabled={pdfBusy}>
+                Regenerate
+              </Button>
+            </div>
+          ) : pdfStatus === 'failed' ? (
+            <Button variant="outline" size="sm" onClick={requestPdf} disabled={pdfBusy}>
+              <AlertTriangle className="text-destructive" /> Retry PDF
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={requestPdf} disabled={pdfBusy}>
+              {pdfBusy ? <Loader2 className="animate-spin" /> : <FileDown />} Preview PDF
+            </Button>
+          )}
         </div>
       </div>
 
