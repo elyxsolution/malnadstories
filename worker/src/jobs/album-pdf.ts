@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import puppeteer, { type Browser } from 'puppeteer';
 import { supabase } from '../supabase.js';
@@ -50,6 +51,36 @@ export async function generateAlbumPdf(rawInput: unknown): Promise<void> {
   }
   const userId = (album as { user_id: string }).user_id;
 
+  // Stale-job guard: only the token currently stored in album_pdfs may be processed.
+  // A newer Preview-PDF request overwrites the token, so any older queued job carries
+  // an outdated token. Skip such jobs WITHOUT touching status (the current job sets it)
+  // — this is what makes removing singletonKey safe and prevents a stale job clobbering
+  // the row the newest job will write.
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const { data: pdfRow } = await supabase
+    .from('album_pdfs')
+    .select('token_hash, token_expires_at')
+    .eq('album_id', albumId)
+    .maybeSingle();
+  const stored = pdfRow as { token_hash: string | null; token_expires_at: string | null } | null;
+
+  console.log('[worker] album-pdf start', {
+    albumId,
+    jobTokenHash: tokenHash.slice(0, 8),
+    storedTokenHash: stored?.token_hash?.slice(0, 8) ?? null,
+    tokenExpiresAt: stored?.token_expires_at ?? null,
+    now: new Date().toISOString(),
+  });
+
+  if (!stored || stored.token_hash !== tokenHash) {
+    console.warn(`[worker] album-pdf skipping stale job for ${albumId} (token superseded by a newer request)`);
+    return; // do NOT fail — a newer job owns the current token and will set status
+  }
+  if (!stored.token_expires_at || new Date(stored.token_expires_at).getTime() <= Date.now()) {
+    await fail(albumId, 'print token expired before generation');
+    return;
+  }
+
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
@@ -57,8 +88,28 @@ export async function generateAlbumPdf(rawInput: unknown): Promise<void> {
 
     // Token rides in the URL only; it is never written to logs.
     const url = `${env.APP_URL}/albums/${albumId}/print?t=${encodeURIComponent(token)}`;
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: READY_TIMEOUT_MS });
+    const response = await page.goto(url, { waitUntil: 'networkidle0', timeout: READY_TIMEOUT_MS });
+
+    // A non-2xx here means the print route rejected the token (used/expired/invalid)
+    // and returned its 404 page — which never sets the readiness flag. Fail FAST with
+    // a clear message instead of hanging the full 60s on waitForFunction.
+    if (!response || !response.ok()) {
+      throw new Error(`print route returned HTTP ${response?.status() ?? 'no response'}`);
+    }
+
+    // The print page flips this once every image frame has settled (load or error).
     await page.waitForFunction('window.__ALBUM_PRINT_READY === true', { timeout: READY_TIMEOUT_MS });
+
+    // Deterministic paint guarantee: wait for fonts + actual image DECODE before the
+    // snapshot, so the PDF is never blank even if the readiness flag raced painting.
+    await page.evaluate(async () => {
+      if (document.fonts?.ready) await document.fonts.ready;
+      await Promise.all(
+        Array.from(document.images).map((img) =>
+          img.complete && img.naturalWidth > 0 ? Promise.resolve() : img.decode().catch(() => undefined),
+        ),
+      );
+    });
 
     const pdf = await page.pdf({ printBackground: true, preferCSSPageSize: true });
 

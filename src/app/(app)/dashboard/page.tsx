@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import AlbumCard from './_album-card';
 
 type AlbumRow = {
   id: string;
@@ -45,19 +45,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {userAlbums.map((album) => (
-              <Link key={album.id} href={`/albums/${album.id}/build`} className="block">
-                <Card className="h-full hover:ring-2 hover:ring-foreground/20 transition-shadow">
-                  <CardHeader>
-                    <CardTitle className="text-base">{album.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground">{album.size} pages</p>
-                    <p className="text-xs mt-1 capitalize text-muted-foreground">
-                      {album.status}
-                    </p>
-                  </CardContent>
-                </Card>
-              </Link>
+              <AlbumCard key={album.id} album={album} />
             ))}
           </div>
         )}

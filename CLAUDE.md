@@ -41,6 +41,7 @@ src/
     (auth)/                   Route group — public (login, signup)
     (app)/                    Route group — protected; layout redirects if no session
       dashboard/page.tsx      Albums grid — queries via Supabase server client (RLS)
+      dashboard/_album-card.tsx   Client card with delete control + confirm dialog
       albums/
         new/page.tsx          Create album — server component fetches products
         new/_form.tsx         Client component with useFormState
@@ -62,7 +63,7 @@ src/
   lib/
     actions/
       auth.ts                 signOut server action
-      albums.ts               createAlbum server action
+      albums.ts               createAlbum + deleteAlbum server actions
       builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
       pdf.ts                  requestAlbumPdf server action (mint print token, enqueue)
     builder/
@@ -89,6 +90,7 @@ worker/                       Separate Node service (own package.json; pnpm inst
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
   src/jobs/album-pdf.ts       Puppeteer → print route → page.pdf → upload PDF to R2
+  src/jobs/r2-cleanup.ts      delete a batch of R2 keys (album deletion; idempotent)
   src/lib/image.ts            sharp + file-type + exifr + heic-convert helpers
   src/{env,queue,r2,supabase}.ts   env, pg-boss conn, R2 client, service-role client
   tsconfig.json               @builder/* -> ../src/lib/builder/* (PDF reuses model.ts)
@@ -403,6 +405,24 @@ re-implemented in the worker.
   download (ownership-checked route, short-lived URL); `album_pdfs` is service-only
   (RLS on, no policies/grants); the worker uses the service role; the PDF R2 key is
   private (never public).
+
+## Delete album — built
+
+Each dashboard card has a delete control → confirm dialog → `deleteAlbum` server
+action (`src/lib/actions/albums.ts`).
+- Ownership via the authenticated client + RLS (a non-owner's album resolves to null
+  → rejected). Input validated with Zod (`uuid`).
+- It gathers every R2 key (each photo's `sanitized_key` / `thumb_key` / remaining raw
+  `r2_key`, plus the `album_pdfs` preview-PDF key), **enqueues an `r2-cleanup` worker
+  job** with the key list (idempotent deletes, transient retries) instead of deleting
+  many objects in the request, then deletes the rows. If enqueue fails it aborts and
+  leaves everything intact (so keys aren't lost / objects orphaned).
+- `photos.album_id` is `ON DELETE SET NULL`, so the album cascade does NOT remove
+  photo rows — `deleteAlbum` deletes them explicitly; the cascade removes
+  `album_pages` and the `album_pdfs` row.
+- ⚠️ **When checkout lands, deletion MUST be blocked/restricted for albums with an
+  active or paid order** (e.g. only `draft`/`submitted` with no order may be deleted).
+  Not enforceable yet — orders don't exist. Enforce it in `deleteAlbum` when orders ship.
 
 ## Album builder (layout + editing + preview + submit) — built
 

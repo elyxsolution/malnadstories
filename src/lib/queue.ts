@@ -18,6 +18,7 @@ import PgBoss from 'pg-boss';
  */
 export const IMAGE_HARDENING_QUEUE = 'image-hardening';
 export const ALBUM_PDF_QUEUE = 'album-pdf';
+export const R2_CLEANUP_QUEUE = 'r2-cleanup';
 
 let bossPromise: Promise<PgBoss> | null = null;
 
@@ -33,6 +34,7 @@ function getBoss(): Promise<PgBoss> {
       await boss.start();
       await boss.createQueue(IMAGE_HARDENING_QUEUE);
       await boss.createQueue(ALBUM_PDF_QUEUE);
+      await boss.createQueue(R2_CLEANUP_QUEUE);
       return boss;
     })().catch((e) => {
       bossPromise = null; // allow a later retry if startup failed
@@ -53,12 +55,27 @@ export async function enqueueImageHardening(photoId: string): Promise<void> {
 }
 
 /**
- * Enqueue album PDF generation. The raw single-use print token rides in the payload
- * (the pgboss tables live in the trusted DB). retryLimit 0 keeps the token truly
- * single-use — a failure surfaces as status='failed' and the user re-requests.
- * singletonKey collapses double-clicks into one job.
+ * Enqueue album PDF generation. The raw print token rides in the payload (the pgboss
+ * tables live in the trusted DB). retryLimit 0: no retries.
+ *
+ * NO singletonKey: it would drop the new job when an older album-pdf job for the same
+ * album is still queued, leaving the newest token with no job while a STALE job runs
+ * with an outdated token (→ HTTP 404 at the print route). Instead every request gets
+ * its own job, and the worker processes only the job whose token still matches the
+ * current album_pdfs row (older jobs skip). Returns the job id for diagnostics.
  */
-export async function enqueueAlbumPdf(albumId: string, token: string): Promise<void> {
+export async function enqueueAlbumPdf(albumId: string, token: string): Promise<string | null> {
   const boss = await getBoss();
-  await boss.send(ALBUM_PDF_QUEUE, { albumId, token }, { retryLimit: 0, singletonKey: albumId });
+  return boss.send(ALBUM_PDF_QUEUE, { albumId, token }, { retryLimit: 0 });
+}
+
+/**
+ * Enqueue deletion of a list of R2 object keys (album cleanup). The worker deletes
+ * each key idempotently; transient failures retry. We hand the key list to the
+ * worker instead of deleting many objects in the request so the UI returns at once
+ * and cleanup is reliable.
+ */
+export async function enqueueR2Cleanup(keys: string[]): Promise<string | null> {
+  const boss = await getBoss();
+  return boss.send(R2_CLEANUP_QUEUE, { keys }, { retryLimit: 5, retryDelay: 30, retryBackoff: true });
 }

@@ -59,16 +59,25 @@ export default function PrintAlbum({ blocks, photos }: { blocks: Block[]; photos
   const loadedRef = useRef(0);
 
   const markReady = useCallback(() => {
-    // One rAF lets the (cached) image paint before Puppeteer captures the PDF.
-    requestAnimationFrame(() => {
-      window.__ALBUM_PRINT_READY = true;
-    });
+    // Signal that all frames have mounted and their images settled (load/error). The
+    // worker still awaits real image decode before snapshotting, so this need not (and
+    // must not) depend on requestAnimationFrame, which is unreliable in headless.
+    window.__ALBUM_PRINT_READY = true;
   }, []);
 
   // Zero-image album: ready immediately.
   useEffect(() => {
     if (totalFrames === 0) markReady();
   }, [totalFrames, markReady]);
+
+  // Safety net: never let the worker hang the full 60s. If, for any edge case, the
+  // per-frame onReady count doesn't reach totalFrames (e.g. an <img> that fires
+  // neither load nor error), flip the flag after a bounded delay anyway. The worker
+  // still awaits real image decode before the snapshot, so this can't blank the PDF.
+  useEffect(() => {
+    const t = setTimeout(markReady, 12_000);
+    return () => clearTimeout(t);
+  }, [markReady]);
 
   const onFrameReady = useCallback(() => {
     loadedRef.current += 1;

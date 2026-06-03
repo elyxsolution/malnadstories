@@ -3,11 +3,14 @@ import {
   createBoss,
   IMAGE_HARDENING_QUEUE,
   ALBUM_PDF_QUEUE,
+  R2_CLEANUP_QUEUE,
   type ImageHardeningJob,
   type AlbumPdfJob,
+  type R2CleanupJob,
 } from './queue.js';
 import { processPhoto } from './jobs/image-hardening.js';
 import { generateAlbumPdf, closeBrowser } from './jobs/album-pdf.js';
+import { cleanupR2 } from './jobs/r2-cleanup.js';
 import { supabase } from './supabase.js';
 import { env } from './env.js';
 
@@ -43,6 +46,7 @@ async function main(): Promise<void> {
   await boss.start();
   await boss.createQueue(IMAGE_HARDENING_QUEUE);
   await boss.createQueue(ALBUM_PDF_QUEUE);
+  await boss.createQueue(R2_CLEANUP_QUEUE);
 
   await boss.work<ImageHardeningJob>(
     IMAGE_HARDENING_QUEUE,
@@ -65,7 +69,17 @@ async function main(): Promise<void> {
     },
   );
 
-  console.log('[worker] image-hardening + album-pdf workers started');
+  await boss.work<R2CleanupJob>(
+    R2_CLEANUP_QUEUE,
+    { pollingIntervalSeconds: 2 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await cleanupR2(job.data);
+      }
+    },
+  );
+
+  console.log('[worker] image-hardening + album-pdf + r2-cleanup workers started');
 
   await sweepPending(boss);
   const timer = setInterval(() => {

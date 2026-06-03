@@ -6,7 +6,12 @@ import PrintAlbum, { type PrintPhoto } from './_print-album';
 import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
 
 // No caching: this route is token-gated and renders live album data for the worker.
+// `force-dynamic` forces dynamic RENDERING, but the per-fetch Data Cache can still
+// serve a stale supabase-js GET (the PostgREST URL is identical every request) — that
+// made the route validate a cached album_pdfs row (old token/expiry) while the worker
+// read live. `force-no-store` makes every fetch in this route read live.
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 type PhotoRow = { id: string; edit_config: EditConfig | null; sanitized_key: string | null };
 type PageRow = {
@@ -33,12 +38,24 @@ export default async function PrintPage({
   searchParams: { t?: string };
 }) {
   const token = searchParams.t;
-  if (!token) notFound();
+  if (!token) {
+    console.warn('[print] 404: no token', { albumId: params.id, tokenPresent: false });
+    notFound();
+  }
 
   const supabase = createServiceClient();
   const tokenHash = createHash('sha256').update(token).digest('hex');
 
-  // Validate: matches this album, not expired, not yet used.
+  // Bounded-reuse window: a single page.goto by the worker triggers more than one
+  // request to this route (the HTML document AND Next's RSC/data fetch), so strict
+  // first-hit invalidation 404s the second one. Instead the token is valid while:
+  //   - the hash matches this album, AND
+  //   - it has not passed its absolute expiry (token_expires_at), AND
+  //   - it is unused OR was first used within REUSE_WINDOW_MS.
+  // The window is anchored to FIRST use (we stamp token_used_at only when null), so
+  // reuse is bounded to one short burst — it can't be replayed later.
+  const REUSE_WINDOW_MS = 2 * 60 * 1000; // covers one PDF job's in-render requests
+
   const { data: pdfRow } = await supabase
     .from('album_pdfs')
     .select('album_id, token_hash, token_expires_at, token_used_at')
@@ -46,25 +63,61 @@ export default async function PrintPage({
     .maybeSingle();
 
   const row = pdfRow as
-    | { token_hash: string | null; token_expires_at: string | null; token_used_at: string | null }
+    | {
+        album_id: string;
+        token_hash: string | null;
+        token_expires_at: string | null;
+        token_used_at: string | null;
+      }
     | null;
 
-  const valid =
-    !!row &&
-    !!row.token_hash &&
-    row.token_hash === tokenHash &&
-    !row.token_used_at &&
-    !!row.token_expires_at &&
-    new Date(row.token_expires_at).getTime() > Date.now();
+  // Diagnostics: the exact row (PK + expiry) the route actually loaded. With the
+  // Data Cache disabled this must now match what the worker logs.
+  console.log('[print] loaded album_pdfs row', {
+    requestedAlbumId: params.id,
+    rowPk: row?.album_id ?? null,
+    tokenHash: row?.token_hash?.slice(0, 8) ?? null,
+    tokenExpiresAt: row?.token_expires_at ?? null,
+    tokenUsedAt: row?.token_used_at ?? null,
+  });
 
-  if (!valid) notFound();
+  const now = Date.now();
+  const usedAt = row?.token_used_at ? new Date(row.token_used_at).getTime() : null;
+  const notExpired = !!row?.token_expires_at && new Date(row.token_expires_at).getTime() > now;
+  const withinReuse = usedAt === null || now - usedAt <= REUSE_WINDOW_MS;
 
-  // Single-use: consume the token now (scoped to the matching hash).
-  await supabase
-    .from('album_pdfs')
-    .update({ token_used_at: new Date().toISOString() })
-    .eq('album_id', params.id)
-    .eq('token_hash', tokenHash);
+  const hashMatch = !!row?.token_hash && row.token_hash === tokenHash;
+  const valid = !!row && hashMatch && notExpired && withinReuse;
+
+  if (!valid) {
+    // Log the PRECISE rejection reason before returning the generic 404. (These land
+    // in the Next app terminal — `pnpm dev` — not the worker terminal.) The token
+    // itself is never logged.
+    console.warn('[print] 404: token rejected', {
+      albumId: params.id,
+      tokenPresent: true,
+      rowFound: !!row,
+      hashMatch,
+      expired: !notExpired,
+      tokenExpiresAt: row?.token_expires_at ?? null,
+      tokenUsedAt: row?.token_used_at ?? null,
+      withinReuse,
+      now: new Date(now).toISOString(),
+    });
+    notFound();
+  }
+
+  // Anchor the window to first use only. The `.is('token_used_at', null)` guard makes
+  // this idempotent + race-safe: when the document and RSC requests arrive together,
+  // both pass validation, only the first stamps, and neither moves the window forward.
+  if (usedAt === null) {
+    await supabase
+      .from('album_pdfs')
+      .update({ token_used_at: new Date(now).toISOString() })
+      .eq('album_id', params.id)
+      .eq('token_hash', tokenHash)
+      .is('token_used_at', null);
+  }
 
   const { data: albumData } = await supabase
     .from('albums')
@@ -111,6 +164,19 @@ export default async function PrintPage({
       caption: r.caption ?? '',
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
     }));
+
+  // Exactly the frames the client must wait for (base + overlays with a known photo).
+  // If this is 0, the readiness flag fires immediately client-side.
+  const expectedFrames = blocks.reduce(
+    (n, b) => n + (b.photoIds[0] ? 1 : 0) + b.overlays.length,
+    0,
+  );
+  console.log('[print] rendering album', {
+    albumId: params.id,
+    blocks: blocks.length,
+    readyPhotos: photos.length,
+    expectedFrames,
+  });
 
   return <PrintAlbum blocks={blocks} photos={photos} />;
 }

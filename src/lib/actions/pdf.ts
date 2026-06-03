@@ -35,6 +35,7 @@ export async function requestAlbumPdf(albumId: unknown): Promise<ActionResult> {
 
   // Service role: album_pdfs is service-only. Upsert keeps r2_key/generated_at from a
   // prior run (still downloadable) while we flip status to 'generating'.
+  const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
   const admin = createServiceClient();
   const { error } = await admin.from('album_pdfs').upsert(
     {
@@ -42,7 +43,7 @@ export async function requestAlbumPdf(albumId: unknown): Promise<ActionResult> {
       status: 'generating',
       error: null,
       token_hash: tokenHash,
-      token_expires_at: new Date(Date.now() + TOKEN_TTL_MS).toISOString(),
+      token_expires_at: tokenExpiresAt,
       token_used_at: null,
     },
     { onConflict: 'album_id' },
@@ -53,7 +54,16 @@ export async function requestAlbumPdf(albumId: unknown): Promise<ActionResult> {
   }
 
   try {
-    await enqueueAlbumPdf(albumId, token);
+    const jobId = await enqueueAlbumPdf(albumId, token);
+    // Diagnostics: which job carries this token, and the token's expiry. (Raw token
+    // is never logged; tokenHash prefix is enough to correlate with the worker log.)
+    console.log('[pdf] enqueued album-pdf', {
+      albumId,
+      jobId,
+      tokenHash: tokenHash.slice(0, 8),
+      tokenExpiresAt,
+      createdAt: new Date().toISOString(),
+    });
   } catch (e) {
     console.error('enqueue album-pdf failed:', e);
     await admin
