@@ -126,3 +126,12 @@ export const payments = pgTable('payments', {
   status: text('status').notNull().default('pending'),
   capturedAt: timestamp('captured_at', { withTimezone: true }),
 });
+
+// Service-only idempotency log for Razorpay webhooks (see 0010). Keyed by
+// X-Razorpay-Event-Id; RLS is ON with no policies, so only the service role
+// touches it (via process_razorpay_event). Never read by user-facing code.
+export const webhookEvents = pgTable('webhook_events', {
+  id: text('id').primaryKey(),
+  eventType: text('event_type'),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+});

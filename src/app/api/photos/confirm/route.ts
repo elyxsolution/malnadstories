@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { ConfirmUploadSchema } from '@/lib/validations';
 import { enqueueImageHardening } from '@/lib/queue';
+import { hasPaidOrder } from '@/lib/orders/album-lock';
 
 /**
  * POST /api/photos/confirm
@@ -45,6 +46,14 @@ export async function POST(request: Request) {
 
   if (!album) {
     return NextResponse.json({ error: 'Album not found' }, { status: 404 });
+  }
+
+  // Edit lock: can't add photos to an album that's part of a paid order.
+  if (await hasPaidOrder(supabase, albumId)) {
+    return NextResponse.json(
+      { error: 'This album is part of a paid order and can no longer be changed.' },
+      { status: 409 },
+    );
   }
 
   // The key must live under this user's own album prefix. Stops a client from

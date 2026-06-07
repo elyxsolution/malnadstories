@@ -7,6 +7,7 @@ import { createServiceClient } from '@/lib/supabase/service';
 import { redirect } from 'next/navigation';
 import { CreateAlbumSchema } from '@/lib/validations';
 import { enqueueR2Cleanup } from '@/lib/queue';
+import { hasActiveOrder } from '@/lib/orders/album-lock';
 
 export type AlbumActionState = { error: string } | null;
 export type DeleteResult = { ok: true } | { ok: false; error: string };
@@ -90,6 +91,15 @@ export async function deleteAlbum(albumId: unknown): Promise<DeleteResult> {
   // Ownership gate (RLS): a foreign/nonexistent album returns null.
   const { data: album } = await supabase.from('albums').select('id').eq('id', id).maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
+
+  // Delete lock: an album with a live order (pending or paid+) can't be deleted.
+  // A pending order can be released via the checkout/confirmation "Cancel" control.
+  if (await hasActiveOrder(supabase, id)) {
+    return {
+      ok: false,
+      error: 'This album has an active order and can’t be deleted. Cancel the order first.',
+    };
+  }
 
   // Gather photo object keys (authenticated client → RLS scopes to the owner).
   const { data: photoData } = await supabase

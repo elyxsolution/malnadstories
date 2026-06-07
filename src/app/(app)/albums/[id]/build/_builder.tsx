@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye, FileDown, AlertTriangle } from 'lucide-react';
+import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye, FileDown, AlertTriangle, ShoppingCart } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
 import BlockCard from './_block';
@@ -311,6 +311,12 @@ export default function Builder({
           <Button size="sm" onClick={submit} disabled={!complete || saving || submitting}>
             {submitting ? <Loader2 className="animate-spin" /> : <Send />} Submit
           </Button>
+
+          {status === 'submitted' && (
+            <Button variant="secondary" size="sm" render={<Link href={`/checkout/${albumId}`} />}>
+              <ShoppingCart /> Proceed to checkout
+            </Button>
+          )}
 
           {/* Preview PDF */}
           {pdfStatus === 'generating' ? (

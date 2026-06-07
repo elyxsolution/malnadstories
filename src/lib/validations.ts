@@ -102,6 +102,32 @@ export const PhotoEditSchema = z.object({
   edit: EditConfigSchema,
 });
 
+// ── Addresses & checkout ─────────────────────────────────────────────────────
+
+export const AddressSchema = z.object({
+  fullName: z.string().min(2, 'Full name is required').max(100),
+  line1: z.string().min(1, 'Address is required').max(200),
+  city: z.string().min(1, 'City is required').max(100),
+  state: z.string().min(1, 'State is required').max(100),
+  pincode: z.string().regex(/^\d{6}$/, 'Enter a valid 6-digit pincode'),
+  isDefault: z.boolean().optional().default(false),
+});
+
+// Checkout inputs carry NO amount — the total is always computed server-side from
+// the album's product. Only references cross the wire.
+export const CreateOrderSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  addressId: z.string().uuid('Please select a delivery address'),
+});
+
+export const CancelOrderSchema = z.object({
+  orderId: z.string().uuid('Invalid order'),
+});
+
+export type AddressInput = z.infer<typeof AddressSchema>;
+export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
+export type CancelOrderInput = z.infer<typeof CancelOrderSchema>;
+
 export type EditConfigInput = z.infer<typeof EditConfigSchema>;
 export type SaveLayoutInput = z.infer<typeof SaveLayoutSchema>;
 export type PhotoEditInput = z.infer<typeof PhotoEditSchema>;

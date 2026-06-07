@@ -86,6 +86,8 @@ drizzle/
   0006_generic_overlays.sql   Generic unlimited overlays; retire pip; relax photo_ids CHECK
   0007_photo_processing.sql   photos: status + sanitized_key/thumb_key + width/height/taken_at
   0008_album_pdfs.sql         album_pdfs (service-only): PDF status/key + single-use print token
+  0009_service_role_grants.sql service_role table/sequence grants (worker 42501 fix)
+  0010_orders_payments.sql    orders 'failed' status; dedupe indexes; webhook_events (service-only) + atomic process_razorpay_event()
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
@@ -255,6 +257,9 @@ Album `size` is data-driven: the create-album form renders `products.pages`, and
 | `R2_BUCKET_NAME` | Private R2 bucket name |
 | `R2_REGION` | `auto` (R2 ignores region; SDK needs a value) |
 | `R2_ACCOUNT_ID` | Cloudflare account id |
+| `RAZORPAY_KEY_ID` | Razorpay TEST key id. Server-side Basic-auth for the Orders API **and** returned to the client per-order by `createOrder` so Checkout can open. **Not** `NEXT_PUBLIC` (non-sensitive, but delivered via the action response). |
+| `RAZORPAY_KEY_SECRET` | Razorpay TEST key secret — **server-only, never expose**. Orders-API auth + client-callback payment-signature check. |
+| `RAZORPAY_WEBHOOK_SECRET` | Webhook secret (matches the Razorpay dashboard webhook) — **server-only**. Verifies `X-Razorpay-Signature`. |
 | `APP_URL` | Worker-only; base URL the PDF job's Chromium navigates to (default `http://localhost:3000`) |
 | `KEEP_RAW_ORIGINAL` | Worker-only; `false` (default) deletes the raw upload after sanitizing |
 | `WORKER_SWEEP_INTERVAL_MS` | Worker-only; how often to re-scan for stuck `pending` photos (default 60000) |
@@ -292,6 +297,8 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 6. `drizzle/0006_generic_overlays.sql` — generic overlays; retire pip; relax CHECKs
 7. `drizzle/0007_photo_processing.sql` — photos status + sanitized/thumb keys + EXIF date
 8. `drizzle/0008_album_pdfs.sql` — album_pdfs (service-only PDF state + print token)
+9. `drizzle/0009_service_role_grants.sql` — service_role table/sequence grants
+10. `drizzle/0010_orders_payments.sql` — orders 'failed' status, dedupe indexes, webhook_events + process_razorpay_event()
 
 **Supabase dashboard config:**
 - Authentication → URL Configuration → Site URL: `http://localhost:3000`
@@ -420,9 +427,60 @@ action (`src/lib/actions/albums.ts`).
 - `photos.album_id` is `ON DELETE SET NULL`, so the album cascade does NOT remove
   photo rows — `deleteAlbum` deletes them explicitly; the cascade removes
   `album_pages` and the `album_pdfs` row.
-- ⚠️ **When checkout lands, deletion MUST be blocked/restricted for albums with an
-  active or paid order** (e.g. only `draft`/`submitted` with no order may be deleted).
-  Not enforceable yet — orders don't exist. Enforce it in `deleteAlbum` when orders ship.
+- ✅ **Order-commit delete lock (now enforced):** `deleteAlbum` calls
+  `hasActiveOrder` (`src/lib/orders/album-lock.ts`) and refuses if any order with
+  `status NOT IN ('failed','cancelled')` exists. A `pending` order blocks deletion
+  too (a live Razorpay order could still be paid) — the checkout/confirmation
+  "Cancel" control (`cancelOrder`) releases a pending one. See **Checkout** below.
+
+## Checkout + payment (Razorpay) — built
+
+Real money, so the DB carries the guarantees (see "Why orders/payments writes go
+through service role" above). TEST-mode Razorpay; INR.
+
+- **Three secrets** (`RAZORPAY_KEY_ID` / `_KEY_SECRET` / `_WEBHOOK_SECRET`): secret +
+  webhook secret are **server-only**; `key_id` is handed to the client per-order by
+  `createOrder` (never `NEXT_PUBLIC`). All Razorpay server calls + HMAC live in
+  `src/lib/razorpay.ts` (`import 'server-only'`, dependency-free: REST + Node crypto).
+- **Amount is computed server-side** (`src/lib/pricing.ts`: product `base_price` by
+  album `size` + flat `SHIPPING_INR = 99`). The client sends only `albumId` /
+  `addressId` — never a price.
+- **Address UI**: `addAddress` (`src/lib/actions/addresses.ts`, authenticated + RLS)
+  + an embedded picker on the checkout page (`checkout/[albumId]/_address-picker.tsx`).
+- **Order creation** (`src/lib/actions/orders.ts` → `createOrder`): authenticated
+  client + RLS verifies a **submitted** album + the address are the user's; a
+  double-submit guard reuses an existing `pending` order (and blocks if already
+  paid); creates the Razorpay order; then inserts the `orders` row via the
+  **service-role** client (`authenticated` has no INSERT grant on `orders`).
+- **Webhook** `app/api/webhooks/razorpay/route.ts` — the **single source of truth
+  for "paid"**. Outside `(app)`, `runtime='nodejs'`. Generous IP rate-limit →
+  **HMAC over the raw body verified before any state change** (400 on mismatch) →
+  calls the **atomic** `process_razorpay_event()` SQL function (one transaction:
+  find+lock order → dedupe-insert into service-only `webhook_events` keyed on
+  `X-Razorpay-Event-Id` → flip order + upsert payment). Because dedupe and the state
+  change share the transaction, **a failed write never leaves a dedupe marker
+  behind**; duplicates are no-ops. Maps to HTTP: 200 processed/duplicate, 503
+  order-not-found/error (Razorpay retries), 400 bad signature. `payment.captured` →
+  order `paid`; `payment.failed` → order `failed` (retry = fresh order/checkout).
+- **Secondary check** `app/api/payments/verify/route.ts`: verifies the Checkout
+  callback's payment signature (HMAC `order_id|payment_id`) so the client can
+  navigate to confirmation — but it **never sets `paid`** (webhook-driven only).
+- **Pages**: `checkout/[albumId]` (summary + address + Razorpay Checkout via
+  `next/script`) and `orders/[id]` (status badge + 3s poller on
+  `GET /api/orders/[id]` until the webhook flips it). Entry: a "Proceed to checkout"
+  button in the builder when the album is `submitted`.
+- **Edit lock**: `hasPaidOrder` (paid+ only — a pending order does **not** freeze
+  edits, since `size` drives price and is fixed at creation) guards `saveLayout` /
+  `savePhotoEdit` / `submitAlbum` + the add/delete-photo routes. **Cancel escape**:
+  `cancelOrder` flips a `pending` order → `cancelled` (owner via RLS; the write via
+  service-role, guarded to a still-pending row) so an abandoned checkout never traps
+  the album.
+- **Rate limiting** (`src/lib/rate-limit.ts`, in-memory fixed-window): `createOrder`
+  per user, webhook per IP. ⚠️ Per-process — fine for a single server; move to a
+  shared store before any multi-instance deploy (same caveat as pg-boss enqueue).
+- ⚠️ **Local webhooks need a tunnel** (`cloudflared tunnel --url http://localhost:3001`
+  — dev runs on **3001**); register `https://<host>/api/webhooks/razorpay` + events
+  `payment.captured`, `payment.failed` in the Razorpay dashboard.
 
 ## Album builder (layout + editing + preview + submit) — built
 
@@ -481,8 +539,9 @@ action input; ownership is re-verified on every server action.
   - `submitAlbum` — **re-reads the saved layout from the DB** (never trusts the
     client), requires leaves == `size` with every **base** slot filled (overlays
     optional), then sets `status='submitted'`. Handoff to the future checkout slice.
-- **Always editable**: drafts AND submitted albums re-load their saved layout +
-  edits on re-entry (until an order is placed — a later slice).
+- **Editable until paid**: drafts AND submitted albums re-load their saved layout +
+  edits on re-entry. Once an order is **paid**, the edit lock (`hasPaidOrder`)
+  freezes content — see **Checkout + payment** above.
 
 > Server-side image **re-validation / thumbnails** and the **downloadable preview
 > PDF** are both built (worker, above). The PDF is a faithful **preview**, not the
@@ -490,7 +549,7 @@ action input; ownership is re-verified on every server action.
 
 ## What's NOT built yet (do not add until asked)
 
-- Order + payment flow (needs Razorpay)
-- Email notifications (needs Resend)
+- Email notifications (needs Resend) — incl. order confirmation email
+- Post-paid order lifecycle (`processing`/`shipped`/`delivered`) + refunds
 - Pre-press PDF tuning (exact bleed/DPI/ICC for the print partner)
 - Travel agency portal (`/agency`)

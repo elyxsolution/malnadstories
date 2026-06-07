@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { deleteObject } from '@/lib/r2';
+import { hasPaidOrder } from '@/lib/orders/album-lock';
 
 /**
  * DELETE /api/photos/:id
@@ -31,7 +32,7 @@ export async function DELETE(
   // RLS scopes this to the user's own photos — null means "not yours / not found".
   const { data: photo } = await supabase
     .from('photos')
-    .select('id, r2_key, sanitized_key, thumb_key')
+    .select('id, album_id, r2_key, sanitized_key, thumb_key')
     .eq('id', params.id)
     .maybeSingle();
 
@@ -39,12 +40,21 @@ export async function DELETE(
     return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
   }
 
-  const { r2_key, sanitized_key, thumb_key } = photo as {
+  const { album_id, r2_key, sanitized_key, thumb_key } = photo as {
     id: string;
+    album_id: string | null;
     r2_key: string | null;
     sanitized_key: string | null;
     thumb_key: string | null;
   };
+
+  // Edit lock: can't remove photos from an album that's part of a paid order.
+  if (album_id && (await hasPaidOrder(supabase, album_id))) {
+    return NextResponse.json(
+      { error: 'This album is part of a paid order and can no longer be changed.' },
+      { status: 409 },
+    );
+  }
 
   // Delete every R2 object for this photo (raw if retained, sanitized master,
   // thumbnail) before the row, so a failure leaves the row for a retry.

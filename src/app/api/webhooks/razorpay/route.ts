@@ -1,0 +1,96 @@
+import { NextResponse } from 'next/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { verifyWebhookSignature } from '@/lib/razorpay';
+import { rateLimit, sweepRateLimits } from '@/lib/rate-limit';
+
+// Node runtime: we need the raw request body + Node crypto for HMAC.
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const HANDLED = new Set(['payment.captured', 'payment.failed']);
+
+/**
+ * Razorpay webhook — the single source of truth for "paid".
+ *
+ * Order of guarantees:
+ *   1. Generous IP rate-limit (cheap shed of junk; real webhooks come from
+ *      Razorpay's IPs and a 429 is retried, so legitimate bursts are never lost).
+ *   2. HMAC verification over the RAW body BEFORE any parse or state change.
+ *   3. Atomic dedupe + state change inside process_razorpay_event (one txn), so a
+ *      duplicate is a no-op and a failed write never leaves a dedupe marker behind.
+ *
+ * HTTP mapping: 400 only for signature failure; 503 when the order isn't found yet
+ * or the txn errored (Razorpay retries); 200 for processed/duplicate/ignored.
+ */
+export async function POST(request: Request) {
+  sweepRateLimits();
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  const rl = rateLimit(`webhook:${ip}`, 300, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
+
+  const raw = await request.text();
+  const signature = request.headers.get('x-razorpay-signature');
+  if (!verifyWebhookSignature(raw, signature)) {
+    return NextResponse.json({ error: 'invalid signature' }, { status: 400 });
+  }
+
+  // Stable across delivery retries — our idempotency key.
+  const eventId = request.headers.get('x-razorpay-event-id');
+  if (!eventId) {
+    return NextResponse.json({ error: 'missing event id' }, { status: 400 });
+  }
+
+  let body: {
+    event?: string;
+    payload?: { payment?: { entity?: Record<string, unknown> } };
+  };
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
+  }
+
+  const event = body.event ?? '';
+  if (!HANDLED.has(event)) {
+    return NextResponse.json({ ok: true, ignored: event }, { status: 200 });
+  }
+
+  const entity = body.payload?.payment?.entity ?? {};
+  const razorpayOrderId = entity.order_id as string | undefined;
+  const paymentId = entity.id as string | undefined;
+  const method = (entity.method as string | undefined) ?? null;
+  const amountPaise = (entity.amount as number | undefined) ?? 0;
+  if (!razorpayOrderId || !paymentId) {
+    // Verified but unusable payload — ack so Razorpay stops retrying.
+    return NextResponse.json({ ok: true, skipped: 'missing ids' }, { status: 200 });
+  }
+
+  const outcome = event === 'payment.captured' ? 'captured' : 'failed';
+
+  // Service role: orders/payments/webhook_events are off-limits to authenticated.
+  const admin = createServiceClient();
+  const { data: result, error } = await admin.rpc('process_razorpay_event', {
+    p_event_id: eventId,
+    p_event_type: event,
+    p_razorpay_order_id: razorpayOrderId,
+    p_payment_id: paymentId,
+    p_method: method,
+    p_amount: amountPaise / 100, // entity.amount is paise; payments.amount is INR
+    p_outcome: outcome,
+  });
+
+  if (error) {
+    console.error('[razorpay-webhook] rpc error', { eventId, event, error: error.message });
+    return NextResponse.json({ error: 'processing failed' }, { status: 503 });
+  }
+
+  console.log('[razorpay-webhook]', { eventId, event, result });
+
+  if (result === 'order_not_found') {
+    // Webhook raced ahead of our orders INSERT — ask Razorpay to retry shortly.
+    return NextResponse.json({ ok: false, result }, { status: 503 });
+  }
+  return NextResponse.json({ ok: true, result }, { status: 200 });
+}

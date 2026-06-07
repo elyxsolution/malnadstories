@@ -3,8 +3,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { SaveLayoutSchema, PhotoEditSchema } from '@/lib/validations';
 import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
+import { hasPaidOrder } from '@/lib/orders/album-lock';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
+
+// Shown when a paid (or further) order has frozen an album's content.
+const LOCKED_MSG = 'This album is part of a paid order and can no longer be changed.';
 
 /**
  * Persist the whole layout for one album.
@@ -37,6 +41,9 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
     .maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
   const size = (album as { size: number }).size;
+
+  // Edit lock: a paid album's pages must not change under a placed order.
+  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   // Accounting: leaves consumed must not exceed the album size.
   const consumed = blocks.reduce((s, b) => s + PAGE_COST[b.template as LayoutTemplate], 0);
@@ -100,6 +107,19 @@ export async function savePhotoEdit(input: unknown): Promise<ActionResult> {
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const { photoId, edit } = parsed.data;
 
+  // Resolve the photo's album (RLS scopes to the owner) so we can enforce the edit
+  // lock: a paid album's photo edits must not change under a placed order.
+  const { data: photoRow } = await supabase
+    .from('photos')
+    .select('album_id')
+    .eq('id', photoId)
+    .maybeSingle();
+  const albumId = (photoRow as { album_id: string | null } | null)?.album_id ?? null;
+  if (!photoRow) return { ok: false, error: 'Photo not found' };
+  if (albumId && (await hasPaidOrder(supabase, albumId))) {
+    return { ok: false, error: LOCKED_MSG };
+  }
+
   const { data: updated, error } = await supabase
     .from('photos')
     .update({ edit_config: edit })
@@ -137,6 +157,9 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
     .maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
   const { size } = album as { size: number };
+
+  // A paid album is frozen — no re-submitting changed content.
+  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   const { data: pages } = await supabase
     .from('album_pages')
