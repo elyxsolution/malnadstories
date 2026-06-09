@@ -2,10 +2,16 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
+// Only allow same-site, single-slash relative paths as the post-auth redirect target
+// (prevents open redirects via ?next=//evil.com, ?next=https://evil.com, backslashes…).
+function safeNext(raw: string | null): string {
+  return raw && /^\/[^/\\]/.test(raw) ? raw : '/dashboard';
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/dashboard';
+  const next = safeNext(searchParams.get('next'));
 
   if (code) {
     const cookieStore = cookies();

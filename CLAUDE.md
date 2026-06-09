@@ -88,6 +88,16 @@ drizzle/
   0008_album_pdfs.sql         album_pdfs (service-only): PDF status/key + single-use print token
   0009_service_role_grants.sql service_role table/sequence grants (worker 42501 fix)
   0010_orders_payments.sql    orders 'failed' status; dedupe indexes; webhook_events (service-only) + atomic process_razorpay_event()
+  0011_one_pending_order_per_album.sql  partial unique index: ≤1 'pending' order per album (concurrent double-submit backstop)
+  0012_orders_payments_write_rls.sql  independent write-side RLS: SELECT-only user policy + RESTRICTIVE write-deny on orders/payments
+  0013_webhook_amount_currency.sql    process_razorpay_event gains p_currency + amount/currency match gate (mismatch → recorded, NOT paid)
+  0014_orders_fulfillment.sql         orders: copies + pricing breakdown + fulfillment fields + 'printing'/'packed' states + indexes + carrier-scoped unique tracking
+  0015_coupons.sql                    coupons + coupon_redemptions (min-order, starts_at, soft-cap); admin RLS + restrictive client write-deny
+  0016_audit_notes.sql                append-only audit_log + order_notes + log_audit() helper; admin-read, service-insert only
+  0017_admin_rpcs_and_consumption.sql admin RPCs (status/tracking/notes/coupons) + process_razorpay_event rewrite (paid-family guard + coupon consumption + audit)
+  0018_coupon_created_reason.sql      coupons.created_reason + admin_create_coupon extended (10-arg) to record + audit it
+  0019_lock_profile_role.sql          column-scoped profiles grants: authenticated can write only (id,name,phone)/(name,phone) — role/id/created_at/delete locked (anti self-promotion)
+  0022_email_log.sql                  email delivery audit + idempotency (claim 'sending' → 'sent'/'failed'); service-write, admin-read. (0020/0021 still pending backlog)
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
@@ -299,6 +309,19 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 8. `drizzle/0008_album_pdfs.sql` — album_pdfs (service-only PDF state + print token)
 9. `drizzle/0009_service_role_grants.sql` — service_role table/sequence grants
 10. `drizzle/0010_orders_payments.sql` — orders 'failed' status, dedupe indexes, webhook_events + process_razorpay_event()
+11. `drizzle/0011_one_pending_order_per_album.sql` — partial unique index: ≤1 pending order per album
+12. `drizzle/0012_orders_payments_write_rls.sql` — independent write-side RLS on orders/payments
+13. `drizzle/0013_webhook_amount_currency.sql` — webhook amount/currency validation (run WITH the matching app deploy)
+14. `drizzle/0014_orders_fulfillment.sql` — orders copies/pricing-breakdown/fulfillment + lifecycle states + indexes
+15. `drizzle/0015_coupons.sql` — coupons + coupon_redemptions (+ orders.coupon_id FK)
+16. `drizzle/0016_audit_notes.sql` — audit_log + order_notes + log_audit()
+17. `drizzle/0017_admin_rpcs_and_consumption.sql` — admin RPCs + process_razorpay_event rewrite (run WITH the matching app deploy)
+18. `drizzle/0018_coupon_created_reason.sql` — coupons.created_reason + admin_create_coupon extension
+19. `drizzle/0019_lock_profile_role.sql` — column-scoped profiles grants (anti self-promotion to admin)
+20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 are pending backlog, run when built)
+
+> **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
+> rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
 
 **Supabase dashboard config:**
 - Authentication → URL Configuration → Site URL: `http://localhost:3000`
@@ -451,7 +474,12 @@ through service role" above). TEST-mode Razorpay; INR.
   client + RLS verifies a **submitted** album + the address are the user's; a
   double-submit guard reuses an existing `pending` order (and blocks if already
   paid); creates the Razorpay order; then inserts the `orders` row via the
-  **service-role** client (`authenticated` has no INSERT grant on `orders`).
+  **service-role** client (`authenticated` has no INSERT grant on `orders`). That
+  read-then-insert guard is TOCTOU under true concurrency (rapid Pay/Retry clicks,
+  network retries) — so the **DB enforces ≤1 pending order per album** via the
+  `0011` partial unique index; the insert loser catches the `23505` and **reuses the
+  winning pending order** (idempotent). The client also holds a synchronous
+  `payInFlight` ref so only one `createOrder` is ever in flight per click sequence.
 - **Webhook** `app/api/webhooks/razorpay/route.ts` — the **single source of truth
   for "paid"**. Outside `(app)`, `runtime='nodejs'`. Generous IP rate-limit →
   **HMAC over the raw body verified before any state change** (400 on mismatch) →
@@ -471,10 +499,23 @@ through service role" above). TEST-mode Razorpay; INR.
   button in the builder when the album is `submitted`.
 - **Edit lock**: `hasPaidOrder` (paid+ only — a pending order does **not** freeze
   edits, since `size` drives price and is fixed at creation) guards `saveLayout` /
-  `savePhotoEdit` / `submitAlbum` + the add/delete-photo routes. **Cancel escape**:
-  `cancelOrder` flips a `pending` order → `cancelled` (owner via RLS; the write via
-  service-role, guarded to a still-pending row) so an abandoned checkout never traps
-  the album.
+  `savePhotoEdit` / `submitAlbum` + the add/delete-photo routes (incl. `presign`).
+  **Cancel escape**: `cancelOrder` flips a `pending` order → `cancelled` (owner via
+  RLS; the write via service-role, guarded to a still-pending row) so an abandoned
+  checkout never traps the album.
+- **Post-purchase (read-only) experience**: the authoritative "this album is paid"
+  signal is `orders.status ∈ PAID_STATES` (`getPaidOrder`/`hasPaidOrder` in
+  `src/lib/orders/album-lock.ts` — there is no separate ownership/fulfillment table;
+  `orders` *is* the purchase record). The build page (`/albums/[id]/build`) checks it
+  server-side and, when paid, renders `_purchased.tsx` **instead of** the editable
+  `Builder` — no edit/submit/checkout controls, only non-mutating actions (Preview
+  album, Download PDF, View order, Dashboard) + a live **order-status card** whose
+  copy comes from `src/lib/orders/status.ts` (`paid`/`processing`/`shipped`→"In
+  transit"/`delivered`; never hardcoded). The dashboard cards (`_album-card.tsx`)
+  show purchased albums with a ✓ Purchased badge, order id, purchase date, status,
+  and View order / View album / Download — no checkout, no delete. The order
+  confirmation page (`orders/[id]/_status.tsx`) `paid` state adds **Go to Dashboard**
+  + **View Album** ctas.
 - **Rate limiting** (`src/lib/rate-limit.ts`, in-memory fixed-window): `createOrder`
   per user, webhook per IP. ⚠️ Per-process — fine for a single server; move to a
   shared store before any multi-instance deploy (same caveat as pg-boss enqueue).
@@ -547,9 +588,75 @@ action input; ownership is re-verified on every server action.
 > PDF** are both built (worker, above). The PDF is a faithful **preview**, not the
 > final pre-press file (exact bleed/DPI is a later tuning of the print-route page sizes).
 
+## Admin console + fulfillment (Phase 1) — built
+
+Internal back-office at `/admin` (gated by `requireAdmin()` — server-side getUser →
+Drizzle role check — in the layout AND every page/action; never client-trusted).
+- **Reads**: admin Server Components query cross-user data via Drizzle `db` (postgres
+  superuser, BYPASSRLS); customer emails come from `auth.users` via `adminUserEmails`
+  (`src/lib/admin/users.ts`).
+- **Writes**: admins cannot touch `orders`/`payments`/`coupons` through the
+  authenticated client (RLS `0012`/`0015` restrictive deny). Every mutation goes
+  through a `SECURITY DEFINER` RPC (`admin_update_order_status`, `admin_set_tracking`,
+  `admin_add_order_note`, `admin_create_coupon`, `admin_set_coupon_active`) called by a
+  `requireAdmin()`-gated server action (`src/lib/actions/admin/*`). The RPC validates,
+  mutates, and writes the **audit row** in one transaction.
+- **Fulfillment state machine** (forward-only, enforced in the RPC): `paid →
+  processing → printing → packed → shipped → delivered`; `packed→shipped` requires
+  tracking+carrier; no admin cancel/refund (deferred). Customers see status + tracking
+  on `orders/[id]` via existing RLS (the fields live on `orders`).
+- **Coupons**: code generated server-side (`MS-XXXXXXXX`), validated against subtotal
+  (min-order, starts_at/expires_at, soft cap) in `src/lib/coupons.ts`; **consumed only
+  on payment success** inside `process_razorpay_event`. `previewCoupon` (rate-limited +
+  failed-attempt cooldown, `src/lib/coupon-abuse.ts`) gives a live checkout preview.
+- **Pages**: `/admin` (overview), `/admin/orders[/id]`, `/admin/coupons[/id]`,
+  `/admin/customers[/id]`, `/admin/albums[/id]`. Admin PDF download via
+  `/api/admin/albums/[id]/pdf` (admin-gated; service-role read). Album preview reuses
+  the customer `_preview` renderer via `loadAlbumForAdmin` (service-role, cross-user).
+
+## Email + password reset (Stage E) — built
+
+Provider-agnostic email layer in `src/lib/email/` (Resend + React Email). All
+sender/support/admin addresses come from env (`EMAIL_FROM`, `SUPPORT_EMAIL`,
+`ADMIN_EMAIL`, `NEXT_PUBLIC_SITE_URL`, `RESEND_API_KEY`) — never hardcoded; switching
+the Resend sender to `orders@malnadstories.com` is env-only. `resend.ts` is the sole
+SDK touchpoint (swap providers there); `send-email.ts` is idempotent + audited +
+never-throws; `events.tsx` are the typed senders; `templates/` hold shared React Email
+components (Header/Footer/Button/Section/OrderSummary) + per-event templates.
+- **Triggers reuse existing transitions** (no new business logic): order-confirmation
+  fires in the **webhook** when a capture first reaches `paid`; the five fulfilment
+  emails (`processing`/`printing`/`packed`/`shipped`/`delivered`) fire in the admin
+  `updateOrderStatus` action after the RPC returns `ok`.
+- **Idempotency/retry-safety:** `email_log` (`0022`) — claim a `sending` row before the
+  send; the partial unique index `(order_id, event_type) where status in (sending,sent)`
+  makes a duplicate webhook / transition a no-op. A `failed` row releases the slot for a
+  retry. No body is ever stored. If email is unconfigured, sends are skipped (logged),
+  so checkout/fulfilment never break. Admin order page shows recent email activity.
+- **Password reset:** `/forgot-password` (always-neutral response → no user
+  enumeration) → Supabase `resetPasswordForEmail` (server action; redirect built from
+  `NEXT_PUBLIC_SITE_URL`, never client input) → `/auth/callback` (now `safeNext()`-
+  guarded against open redirects) → `/reset-password` (recovery-session-gated;
+  `updateUser({password})`; success/failure/invalid states). Supabase owns the token.
+  > **Note:** the reset *email body* is Supabase's auth template (brand it in the
+  > Supabase dashboard, or move to an auth email hook → our Resend layer later).
+
 ## What's NOT built yet (do not add until asked)
 
-- Email notifications (needs Resend) — incl. order confirmation email
-- Post-paid order lifecycle (`processing`/`shipped`/`delivered`) + refunds
+- Refunds / post-paid cancellation (admin lifecycle is forward-only)
+- Welcome / album-submitted emails (optional; not built — low priority)
+- Auto-retry worker for `failed` emails (today: logged + idempotent; manual/cron resend)
 - Pre-press PDF tuning (exact bleed/DPI/ICC for the print partner)
 - Travel agency portal (`/agency`)
+- Pre-launch hardening backlog (`docs/SECURITY_BACKLOG.md`): `0020` photos column
+  lockdown, `0021` albums.status hardening — not yet implemented.
+
+## Checkout copies + coupon UI (Stage D) — built
+
+The checkout page (`checkout/[albumId]/_checkout.tsx`) has a **copies stepper** (1–10)
+and a **coupon field**. Every amount is server-computed: copy-count changes call
+`previewOrderAmount`, coupon apply/re-validate call `previewCoupon` — both advisory.
+The client sends only `{albumId, addressId, copies, couponCode?}`; `createOrder`
+recomputes the total + re-validates the coupon authoritatively (a stale preview can't
+underpay). Resuming a pending order rehydrates its exact copies/coupon from the stored
+breakdown. A coupon that stops validating when copies drop (e.g. min-order) is auto-
+removed with a message. Purchased albums still redirect to the order page (unchanged).

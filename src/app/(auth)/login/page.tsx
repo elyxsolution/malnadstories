@@ -58,6 +58,12 @@ export default function LoginPage() {
 
             <SubmitButton />
 
+            <p className="text-sm text-center">
+              <Link href="/forgot-password" className="text-muted-foreground underline">
+                Forgot your password?
+              </Link>
+            </p>
+
             <p className="text-sm text-center text-muted-foreground">
               Don&apos;t have an account?{' '}
               <Link href="/signup" className="underline text-foreground">

@@ -1,4 +1,18 @@
 /** @type {import('next').NextConfig} */
+// `'unsafe-eval'` is only needed by the Next.js dev server; a production build never
+// evals. Gate it to development so prod ships a tighter script-src. (`'unsafe-inline'`
+// for scripts is still required by the App Router's inline bootstrap until a nonce-
+// based CSP is wired through middleware — tracked in docs/DEPLOYMENT.md.)
+const isDev = process.env.NODE_ENV !== 'production';
+const scriptSrc = [
+  "script-src 'self'",
+  isDev ? "'unsafe-eval'" : '',
+  "'unsafe-inline'",
+  'https://checkout.razorpay.com',
+]
+  .filter(Boolean)
+  .join(' ');
+
 const nextConfig = {
   async headers() {
     return [
@@ -13,9 +27,9 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              // unsafe-eval required by Next.js dev server; tighten with nonces before prod.
-              // checkout.razorpay.com serves the Checkout script.
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://checkout.razorpay.com",
+              // checkout.razorpay.com serves the Checkout script. 'unsafe-eval' is
+              // dev-only (see scriptSrc above); 'unsafe-inline' pending nonce rollout.
+              scriptSrc,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co https://*.r2.cloudflarestorage.com https://*.razorpay.com",
               "font-src 'self'",

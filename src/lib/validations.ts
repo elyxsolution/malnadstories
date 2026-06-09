@@ -114,14 +114,93 @@ export const AddressSchema = z.object({
 });
 
 // Checkout inputs carry NO amount — the total is always computed server-side from
-// the album's product. Only references cross the wire.
+// the album's product × copies − coupon. Only references + copies + a code cross.
 export const CreateOrderSchema = z.object({
   albumId: z.string().uuid('Invalid album'),
   addressId: z.string().uuid('Please select a delivery address'),
+  copies: z.number().int().min(1, 'At least 1 copy').max(10, 'Maximum 10 copies').default(1),
+  couponCode: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim().toUpperCase() : undefined),
+    z.string().regex(/^MS-[A-Z0-9]{8}$/, 'That coupon code is not valid.').optional(),
+  ),
 });
 
 export const CancelOrderSchema = z.object({
   orderId: z.string().uuid('Invalid order'),
+});
+
+// Live discount preview on the checkout page (advisory; createOrder recomputes).
+export const PreviewCouponSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  copies: z.number().int().min(1).max(10),
+  code: z.preprocess(
+    (v) => (typeof v === 'string' ? v.trim().toUpperCase() : v),
+    z.string().min(1, 'Enter a coupon code').max(20),
+  ),
+});
+
+// Server-side price for a copy count (no coupon) — advisory checkout preview.
+export const PreviewOrderSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  copies: z.number().int().min(1).max(10),
+});
+
+// ── Admin ────────────────────────────────────────────────────────────────────
+
+/** Shipping carriers (allow-list — admin tracking forms validate against this). */
+export const CARRIERS = [
+  'Delhivery',
+  'Blue Dart',
+  'DTDC',
+  'India Post',
+  'Ekart',
+  'Xpressbees',
+  'Shadowfax',
+  'Other',
+] as const;
+
+// Admin may only advance fulfilment (forward-only; the RPC enforces adjacency).
+export const UpdateOrderStatusSchema = z.object({
+  orderId: z.string().uuid('Invalid order'),
+  status: z.enum(['processing', 'printing', 'packed', 'shipped', 'delivered']),
+});
+
+export const SetTrackingSchema = z.object({
+  orderId: z.string().uuid('Invalid order'),
+  trackingNumber: z.string().trim().min(3, 'Tracking number too short').max(64, 'Tracking number too long'),
+  carrier: z.enum(CARRIERS),
+});
+
+export const AddOrderNoteSchema = z.object({
+  orderId: z.string().uuid('Invalid order'),
+  body: z.string().trim().min(1, 'Note cannot be empty').max(2000, 'Note too long'),
+});
+
+// Code is generated server-side — never accepted from the client.
+export const CreateCouponSchema = z
+  .object({
+    description: z.string().trim().max(200).optional(),
+    createdReason: z.string().trim().max(300).optional(),
+    discountType: z.enum(['flat', 'percentage']),
+    discountValue: z.number().positive('Discount must be positive'),
+    minimumOrderAmount: z.number().nonnegative().optional(),
+    maxUses: z.number().int().positive().optional(),
+    startsAt: z.string().datetime().optional(),
+    expiresAt: z.string().datetime().optional(),
+    active: z.boolean().default(true),
+  })
+  .refine((d) => d.discountType !== 'percentage' || d.discountValue <= 100, {
+    message: 'Percentage discount cannot exceed 100',
+    path: ['discountValue'],
+  })
+  .refine((d) => !d.startsAt || !d.expiresAt || new Date(d.expiresAt) > new Date(d.startsAt), {
+    message: 'Expiry must be after the start date',
+    path: ['expiresAt'],
+  });
+
+export const SetCouponActiveSchema = z.object({
+  couponId: z.string().uuid('Invalid coupon'),
+  active: z.boolean(),
 });
 
 export type AddressInput = z.infer<typeof AddressSchema>;

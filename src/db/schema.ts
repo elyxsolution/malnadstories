@@ -97,7 +97,18 @@ export const orders = pgTable('orders', {
     .notNull()
     .references(() => addresses.id),
   status: text('status').notNull().default('pending'),
+  // Pricing breakdown — all server-computed (0014). total = subtotal + shipping - discount.
+  copies: integer('copies').notNull().default(1),
+  subtotalAmount: numeric('subtotal_amount', { precision: 10, scale: 2 }).notNull(),
+  shippingAmount: numeric('shipping_amount', { precision: 10, scale: 2 }).notNull().default('99'),
+  discountAmount: numeric('discount_amount', { precision: 10, scale: 2 }).notNull().default('0'),
   totalAmount: numeric('total_amount', { precision: 10, scale: 2 }).notNull(),
+  couponId: uuid('coupon_id'), // FK → coupons (0015); kept loose here (hand-written SQL owns the FK)
+  // Fulfillment (0014)
+  trackingNumber: text('tracking_number'),
+  carrier: text('carrier'),
+  shippedAt: timestamp('shipped_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   razorpayOrderId: text('razorpay_order_id'),
   placedAt: timestamp('placed_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -134,4 +145,79 @@ export const webhookEvents = pgTable('webhook_events', {
   id: text('id').primaryKey(),
   eventType: text('event_type'),
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Admin / fulfillment (Phase 1) ────────────────────────────────────────────
+
+// Discount coupons (0015). Codes stored UPPER; usable predicate lives in the app
+// (validateCoupon). Admin-managed via service-role RPCs; no client write.
+export const coupons = pgTable('coupons', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  code: text('code').notNull(),
+  description: text('description'),
+  createdReason: text('created_reason'), // internal "why issued" note (admin-only)
+  discountType: text('discount_type').notNull(), // 'flat' | 'percentage'
+  discountValue: numeric('discount_value', { precision: 10, scale: 2 }).notNull(),
+  minimumOrderAmount: numeric('minimum_order_amount', { precision: 10, scale: 2 }),
+  maxUses: integer('max_uses'), // null = unlimited
+  currentUses: integer('current_uses').notNull().default(0),
+  startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => profiles.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// One redemption per order (unique order_id) — consumed only on payment success
+// inside process_razorpay_event (0017).
+export const couponRedemptions = pgTable('coupon_redemptions', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  couponId: uuid('coupon_id')
+    .notNull()
+    .references(() => coupons.id),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => profiles.id),
+  amountDiscounted: numeric('amount_discounted', { precision: 10, scale: 2 }).notNull(),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Internal admin note timeline per order (0016). Append-only.
+export const orderNotes = pgTable('order_notes', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  authorId: uuid('author_id').references(() => profiles.id),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Transactional email delivery audit + idempotency (0022). Service-only writes;
+// admins read. Never stores the email body.
+export const emailLog = pgTable('email_log', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  eventType: text('event_type').notNull(),
+  recipient: text('recipient').notNull(),
+  orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+  providerMessageId: text('provider_message_id'),
+  status: text('status').notNull(), // 'sending' | 'sent' | 'failed' | 'skipped'
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Append-only audit trail (0016). Written only by SECURITY DEFINER functions;
+// admins read only. Order-related events embed {order_id, album_id, customer_id}.
+export const auditLog = pgTable('audit_log', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  actorId: uuid('actor_id').references(() => profiles.id), // null = system
+  actorType: text('actor_type').notNull(), // 'admin' | 'system' | 'customer'
+  action: text('action').notNull(),
+  entityType: text('entity_type').notNull(), // 'order' | 'coupon'
+  entityId: uuid('entity_id').notNull(),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

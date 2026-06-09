@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, Clock, XCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, XCircle, Loader2, LayoutDashboard, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cancelOrder } from '@/lib/actions/orders';
 
@@ -59,11 +59,27 @@ export default function OrderStatus({
 
   if (status === 'paid') {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
-        <CheckCircle2 className="h-5 w-5 text-primary" />
-        <div>
-          <p className="font-medium text-primary">Payment confirmed</p>
-          <p className="text-muted-foreground">Thank you! We&apos;ve received your order.</p>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
+          <CheckCircle2 className="h-5 w-5 text-primary" />
+          <div>
+            <p className="font-medium text-primary">Payment confirmed</p>
+            <p className="text-muted-foreground">Thank you! We&apos;ve received your order.</p>
+          </div>
+        </div>
+        {/* Clear next steps. Real links (Button render={<Link/>}) → keyboard- and
+            screen-reader-accessible; full-width stacked on mobile, inline on ≥sm. */}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button render={<Link href="/dashboard" />} className="w-full sm:w-auto">
+            <LayoutDashboard /> Go to Dashboard
+          </Button>
+          <Button
+            variant="outline"
+            render={<Link href={`/albums/${albumId}/build`} />}
+            className="w-full sm:w-auto"
+          >
+            <ImageIcon /> View Album
+          </Button>
         </div>
       </div>
     );

@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { PAID_STATES } from '@/lib/orders/album-lock';
 import { Button } from '@/components/ui/button';
-import AlbumCard from './_album-card';
+import AlbumCard, { type Purchase } from './_album-card';
 
 type AlbumRow = {
   id: string;
@@ -27,6 +29,50 @@ export default async function DashboardPage() {
   if (error) throw error;
   const userAlbums = (data ?? []) as AlbumRow[];
 
+  // Purchase records (RLS-scoped): the authoritative "this album is paid" signal is
+  // orders.status ∈ PAID_STATES — the same source the edit/checkout locks use. Map
+  // each album to its most recent paid order so cards can show ✓ Purchased + status.
+  const { data: orderData } = await supabase
+    .from('orders')
+    .select('id, album_id, status, placed_at')
+    .in('status', PAID_STATES as unknown as string[])
+    .order('placed_at', { ascending: false });
+  const orders = (orderData ?? []) as {
+    id: string;
+    album_id: string;
+    status: string;
+    placed_at: string;
+  }[];
+
+  const purchases = new Map<string, Purchase>();
+  for (const o of orders) {
+    if (!purchases.has(o.album_id)) {
+      purchases.set(o.album_id, {
+        orderId: o.id,
+        status: o.status,
+        placedAt: o.placed_at,
+        pdfReady: false,
+      });
+    }
+  }
+
+  // Preview-PDF availability for purchased albums (album_pdfs is service-only;
+  // ownership already proven by the RLS-scoped orders read above). Drives the
+  // dashboard "Download" action.
+  const purchasedIds = Array.from(purchases.keys());
+  if (purchasedIds.length > 0) {
+    const admin = createServiceClient();
+    const { data: pdfData } = await admin
+      .from('album_pdfs')
+      .select('album_id, status')
+      .in('album_id', purchasedIds)
+      .eq('status', 'ready');
+    for (const row of (pdfData ?? []) as { album_id: string; status: string }[]) {
+      const p = purchases.get(row.album_id);
+      if (p) p.pdfReady = true;
+    }
+  }
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <div className="flex items-start justify-between gap-4">
@@ -45,7 +91,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {userAlbums.map((album) => (
-              <AlbumCard key={album.id} album={album} />
+              <AlbumCard key={album.id} album={album} purchase={purchases.get(album.id) ?? null} />
             ))}
           </div>
         )}

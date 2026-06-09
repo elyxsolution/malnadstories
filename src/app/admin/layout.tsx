@@ -1,29 +1,21 @@
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
-import { db } from '@/db';
-import { profiles } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { requireAdmin, NotAdminError } from '@/lib/auth/require-admin';
 import AppHeader from '@/components/app-header';
+import AdminNav from './_nav';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect('/login');
-
-  const [profile] = await db
-    .select({ role: profiles.role })
-    .from(profiles)
-    .where(eq(profiles.id, user.id))
-    .limit(1);
-
-  if (!profile || profile.role !== 'admin') redirect('/dashboard');
+  // Backend authorization (same gate as every admin action). Non-admins are bounced.
+  let admin: { email: string | null };
+  try {
+    admin = await requireAdmin();
+  } catch (e) {
+    redirect(e instanceof NotAdminError && e.message === 'Not signed in' ? '/login' : '/dashboard');
+  }
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <AppHeader email={user.email!} />
+    <div className="flex min-h-screen flex-col">
+      <AppHeader email={admin.email ?? ''} />
+      <AdminNav />
       <main className="flex-1">{children}</main>
     </div>
   );

@@ -2,7 +2,9 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
+import { getPaidOrder } from '@/lib/orders/album-lock';
 import Builder from './_builder';
+import PurchasedAlbum from './_purchased';
 import { type Photo } from './_uploader';
 import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
 
@@ -37,6 +39,12 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   const album = data as AlbumRow | null;
   if (!album) notFound();
+
+  // Authoritative purchase check (orders.status ∈ PAID_STATES, RLS-scoped). When the
+  // album is purchased we render a READ-ONLY experience instead of the editable
+  // builder — no edit/submit/checkout controls (Parts 3–5). The DB is the source of
+  // truth; this is decided server-side, never from client state.
+  const paidOrder = await getPaidOrder(supabase, album.id);
 
   // Photos (RLS-scoped), auto-ordered by EXIF capture date (PRD auto-organise),
   // nulls last. We presign only the SANITIZED derivatives — never the raw original.
@@ -97,6 +105,22 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     | 'generating'
     | 'ready'
     | 'failed';
+
+  if (paidOrder) {
+    return (
+      <div className="p-6 max-w-3xl mx-auto">
+        <PurchasedAlbum
+          albumId={album.id}
+          title={album.title}
+          size={album.size}
+          order={{ id: paidOrder.id, status: paidOrder.status }}
+          photos={photos}
+          blocks={initialBlocks}
+          initialPdfStatus={initialPdfStatus}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">

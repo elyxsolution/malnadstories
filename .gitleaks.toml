@@ -1,0 +1,31 @@
+# Gitleaks config for Malnad Stories — blocks committed secrets (audit Finding 1).
+# Run locally:   gitleaks detect --config .gitleaks.toml --redact
+# Run on history: gitleaks detect --config .gitleaks.toml --log-opts="--all"
+# CI: see .github/workflows or docs/DEPLOYMENT.md.
+
+title = "malnad-stories-gitleaks"
+
+# Start from gitleaks' bundled rules, then add project-specific ones below.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "razorpay-key-secret"
+description = "Razorpay key secret / live or test API secret"
+# Razorpay key ids are non-sensitive (rzp_test_*, rzp_live_*) and are intentionally
+# NOT matched. This targets the *secret* shapes assigned to the secret env vars.
+regex = '''(?i)(RAZORPAY_KEY_SECRET|RAZORPAY_WEBHOOK_SECRET)\s*[=:]\s*['"]?(?!your-)[A-Za-z0-9_\-]{8,}'''
+tags = ["razorpay", "secret"]
+
+[[rules]]
+id = "supabase-service-role-key"
+description = "Supabase service_role JWT"
+regex = '''(?i)SUPABASE_SERVICE_ROLE_KEY\s*[=:]\s*['"]?(?!your-)eyJ[A-Za-z0-9_\-]+\.'''
+tags = ["supabase", "secret"]
+
+# Allowlist: the committed example file holds ONLY placeholders (your-*). Any future
+# real value there will still trip the rules above because placeholders start "your-".
+[allowlist]
+description = "Placeholders in the example env file are expected"
+paths = ['''\.env\.example$''']
+regexes = ['''your-[a-z-]+''', '''rzp_test_your-key-id''']

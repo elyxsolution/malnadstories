@@ -2,6 +2,7 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { LoginSchema } from '@/lib/validations';
 
@@ -65,4 +66,26 @@ export async function signOut() {
   cookieStore.delete('rm_login_at');
 
   redirect('/');
+}
+
+/**
+ * Request a password-reset email. Always reports success (no user enumeration) — the
+ * response never reveals whether the address has an account. Supabase owns the token
+ * and sends the email; the redirect target is built from the trusted site URL, never
+ * client input (no open redirect). The reset link lands on /auth/callback (which
+ * exchanges the code) → /reset-password.
+ */
+export async function requestPasswordReset(formData: FormData): Promise<{ sent: true }> {
+  const parsed = z.string().email().safeParse(String(formData.get('email') ?? '').trim());
+  if (parsed.success) {
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? '';
+    const supabase = createClient();
+    // Errors are intentionally ignored so timing/branching can't reveal account existence.
+    await supabase.auth
+      .resetPasswordForEmail(parsed.data, {
+        redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
+      })
+      .catch(() => undefined);
+  }
+  return { sent: true };
 }

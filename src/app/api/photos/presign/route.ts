@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { PresignUploadSchema } from '@/lib/validations';
 import { presignPut, ALLOWED_CONTENT_TYPES, type AllowedContentType } from '@/lib/r2';
 import { photoCap } from '@/lib/builder/model';
+import { hasPaidOrder } from '@/lib/orders/album-lock';
 
 /**
  * POST /api/photos/presign
@@ -46,6 +47,16 @@ export async function POST(request: Request) {
 
   if (!album) {
     return NextResponse.json({ error: 'Album not found' }, { status: 404 });
+  }
+
+  // Edit lock: a purchased album is frozen. The state-changing step (confirm) already
+  // enforces this; we also reject at presign so a paid album can't even mint upload
+  // URLs (no orphaned R2 objects, no wasted work). Same paid signal everywhere.
+  if (await hasPaidOrder(supabase, albumId)) {
+    return NextResponse.json(
+      { error: 'This album is part of a paid order and can no longer be changed.' },
+      { status: 403 },
+    );
   }
 
   // Per-album upload cap (see photoCap: 24→50, 36→75, 48→100). RLS scopes the count.

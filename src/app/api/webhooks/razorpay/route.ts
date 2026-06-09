@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { verifyWebhookSignature } from '@/lib/razorpay';
 import { rateLimit, sweepRateLimits } from '@/lib/rate-limit';
+import { sendOrderConfirmationEmail } from '@/lib/email/events';
 
 // Node runtime: we need the raw request body + Node crypto for HMAC.
 export const runtime = 'nodejs';
@@ -33,6 +34,14 @@ export async function POST(request: Request) {
   const raw = await request.text();
   const signature = request.headers.get('x-razorpay-signature');
   if (!verifyWebhookSignature(raw, signature)) {
+    // Monitoring (Finding 7): signature failures are the canonical sign of a forged
+    // webhook or a secret mismatch. Log enough to alert on without leaking the body.
+    console.error('[razorpay-webhook] signature verification FAILED', {
+      ip,
+      eventId: request.headers.get('x-razorpay-event-id'),
+      hasSignature: !!signature,
+      bodyBytes: raw.length,
+    });
     return NextResponse.json({ error: 'invalid signature' }, { status: 400 });
   }
 
@@ -62,6 +71,7 @@ export async function POST(request: Request) {
   const paymentId = entity.id as string | undefined;
   const method = (entity.method as string | undefined) ?? null;
   const amountPaise = (entity.amount as number | undefined) ?? 0;
+  const currency = (entity.currency as string | undefined) ?? null;
   if (!razorpayOrderId || !paymentId) {
     // Verified but unusable payload — ack so Razorpay stops retrying.
     return NextResponse.json({ ok: true, skipped: 'missing ids' }, { status: 200 });
@@ -78,6 +88,7 @@ export async function POST(request: Request) {
     p_payment_id: paymentId,
     p_method: method,
     p_amount: amountPaise / 100, // entity.amount is paise; payments.amount is INR
+    p_currency: currency, // verified against orders.total_amount + 'INR' inside the txn
     p_outcome: outcome,
   });
 
@@ -92,5 +103,40 @@ export async function POST(request: Request) {
     // Webhook raced ahead of our orders INSERT — ask Razorpay to retry shortly.
     return NextResponse.json({ ok: false, result }, { status: 503 });
   }
+
+  if (result === 'amount_mismatch') {
+    // Monitoring (Findings 4 + 7): a captured payment whose amount/currency did NOT
+    // match the order — recorded but deliberately NOT fulfilled. Alert on this.
+    console.error('[razorpay-webhook] AMOUNT/CURRENCY MISMATCH — order NOT fulfilled', {
+      eventId,
+      event,
+      razorpayOrderId,
+      paymentId,
+      amountPaise,
+      currency,
+    });
+    // Ack so Razorpay stops retrying a payload we will never fulfil; ops follows up.
+    return NextResponse.json({ ok: false, result }, { status: 200 });
+  }
+
+  // Order-confirmation email — attached to the existing 'paid' transition, not a new
+  // path. Only a genuine capture that processed reaches here; the email layer is
+  // idempotent (email_log claim) so a duplicate/retry webhook never re-sends, and it
+  // never throws, so email problems can't fail the webhook. We need the orders.id, not
+  // the razorpay order id, so resolve it via the service client.
+  if (event === 'payment.captured' && result === 'processed') {
+    try {
+      const { data: orderRow } = await admin
+        .from('orders')
+        .select('id')
+        .eq('razorpay_order_id', razorpayOrderId)
+        .maybeSingle();
+      const oid = (orderRow as { id: string } | null)?.id;
+      if (oid) await sendOrderConfirmationEmail(oid);
+    } catch (e) {
+      console.error('[razorpay-webhook] confirmation email error', { eventId, error: String(e) });
+    }
+  }
+
   return NextResponse.json({ ok: true, result }, { status: 200 });
 }
