@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye, FileDown, AlertTriangle, ShoppingCart, BookImage, X } from 'lucide-react';
+import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye, ShoppingCart, BookImage, X } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
 import BlockCard, { type BaseSlot } from './_block';
@@ -16,7 +16,6 @@ import {
   pagesConsumed,
   canAdd,
   isAlbumComplete,
-  validateAlbumForPdf,
   placedPhotoIds,
   type Block,
   type LayoutTemplate,
@@ -24,12 +23,9 @@ import {
   type EditConfig,
 } from '@/lib/builder/model';
 import { saveLayout, submitAlbum, selectCover } from '@/lib/actions/builder';
-import { requestAlbumPdf } from '@/lib/actions/pdf';
 import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { useWorkerGate } from '@/components/worker/use-worker-gate';
-
-type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 // "Add" button labels keyed to the user's vocabulary.
@@ -43,7 +39,6 @@ export default function Builder({
   title,
   size,
   initialStatus,
-  initialPdfStatus,
   initialPhotos,
   initialBlocks,
   covers,
@@ -53,7 +48,6 @@ export default function Builder({
   title: string;
   size: number;
   initialStatus: string;
-  initialPdfStatus: PdfStatus;
   initialPhotos: Photo[];
   initialBlocks: Block[];
   covers: CoverOption[];
@@ -72,17 +66,12 @@ export default function Builder({
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
-  // Dirty-state (REQUIREMENT 5/6): true after ANY content change; cleared ONLY by a
-  // successful save. PDF generate + download are locked while dirty.
+  // Dirty-state: true after ANY content change; cleared ONLY by a successful save.
   const [dirty, setDirty] = useState(false);
-  const [saveFirst, setSaveFirst] = useState(false); // the "please save first" modal
 
-  const [pdfStatus, setPdfStatus] = useState<PdfStatus>(initialPdfStatus);
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-
-  // Worker readiness gate — PDF generation and uploads both require the (sleepable)
-  // worker. `ensureReady` wakes it (with a modal) before the operation runs.
+  // Worker readiness gate — uploads require the (sleepable) worker for image hardening.
+  // `ensureReady` wakes it (with a modal) before an upload begins. PDF generation is now
+  // a BACKEND workflow (auto-run after payment / admin-triggered), not a customer action.
   const { ensureReady, modal: workerModal } = useWorkerGate();
 
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
@@ -154,10 +143,6 @@ export default function Builder({
   const consumed = pagesConsumed(blocks);
   const remaining = size - consumed;
   const complete = isAlbumComplete(blocks, size) && !!coverId;
-  const pdfCheck = useMemo(
-    () => validateAlbumForPdf(blocks, size, !!coverId),
-    [blocks, size, coverId],
-  );
 
   // ── dirty-aware block mutation ────────────────────────────────────────────────
   const mutateBlocks = (updater: (prev: Block[]) => Block[]) => {
@@ -325,71 +310,6 @@ export default function Builder({
     }
   };
 
-  // ── preview PDF ───────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (pdfStatus !== 'generating') return;
-    let active = true;
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/albums/${albumId}/pdf`);
-        if (!res.ok) return;
-        const body = (await res.json()) as { status: PdfStatus };
-        if (active && body.status !== 'generating') setPdfStatus(body.status);
-      } catch {
-        /* transient */
-      }
-    };
-    const id = setInterval(tick, 3000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [pdfStatus, albumId]);
-
-  // Generation requires a clean save AND a valid book (REQUIREMENT 5/7).
-  const requestPdf = async () => {
-    if (pdfBusy || pdfStatus === 'generating') return;
-    if (dirty) {
-      setSaveFirst(true);
-      return;
-    }
-    if (!pdfCheck.ok) {
-      setMessage({ kind: 'err', text: pdfCheck.errors[0] });
-      return;
-    }
-    // Worker is required to render the PDF — wake it first (modal) so we never enqueue
-    // a job no worker will run before the print token expires.
-    if (!(await ensureReady())) return;
-    setPdfBusy(true);
-    setMessage(null);
-    const res = await requestAlbumPdf(albumId);
-    setPdfBusy(false);
-    if (res.ok) setPdfStatus('generating');
-    else setMessage({ kind: 'err', text: res.error });
-  };
-
-  const downloadPdf = async () => {
-    if (dirty) {
-      setSaveFirst(true);
-      return;
-    }
-    setDownloading(true);
-    try {
-      const res = await fetch(`/api/albums/${albumId}/pdf`);
-      const body = (await res.json()) as { status: PdfStatus; url: string | null };
-      if (body.status === 'ready' && body.url) {
-        window.location.href = body.url;
-      } else {
-        setPdfStatus(body.status);
-        setMessage({ kind: 'err', text: 'The PDF is no longer available — please regenerate.' });
-      }
-    } catch {
-      setMessage({ kind: 'err', text: 'Could not fetch the PDF download link.' });
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
       {/* Header / actions */}
@@ -432,30 +352,6 @@ export default function Builder({
           {status === 'submitted' && (
             <Button variant="secondary" size="sm" render={<Link href={`/checkout/${albumId}`} />}>
               <ShoppingCart /> Proceed to checkout
-            </Button>
-          )}
-
-          {/* Preview PDF */}
-          {pdfStatus === 'generating' ? (
-            <Button variant="outline" size="sm" disabled>
-              <Loader2 className="animate-spin" /> Generating PDF…
-            </Button>
-          ) : pdfStatus === 'ready' ? (
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" onClick={downloadPdf} disabled={downloading || dirty}>
-                {downloading ? <Loader2 className="animate-spin" /> : <FileDown />} Download PDF
-              </Button>
-              <Button variant="ghost" size="sm" onClick={requestPdf} disabled={pdfBusy || dirty}>
-                Regenerate
-              </Button>
-            </div>
-          ) : pdfStatus === 'failed' ? (
-            <Button variant="outline" size="sm" onClick={requestPdf} disabled={pdfBusy}>
-              <AlertTriangle className="text-destructive" /> Retry PDF
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" onClick={requestPdf} disabled={pdfBusy}>
-              {pdfBusy ? <Loader2 className="animate-spin" /> : <FileDown />} Preview PDF
             </Button>
           )}
         </div>
@@ -578,32 +474,6 @@ export default function Builder({
 
       {coverPicker && (
         <CoverPicker covers={covers} selectedId={coverId} onPick={chooseCover} onClose={() => setCoverPicker(false)} />
-      )}
-
-      {saveFirst && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setSaveFirst(false)}>
-          <div className="w-full max-w-sm rounded-xl border bg-background p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-base font-semibold">Save your changes first</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Please save your changes before generating the PDF, so the file matches what you see.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setSaveFirst(false)}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={async () => {
-                  const ok = await save();
-                  if (ok) setSaveFirst(false);
-                }}
-                disabled={saving}
-              >
-                {saving ? <Loader2 className="animate-spin" /> : <Save />} Save now
-              </Button>
-            </div>
-          </div>
-        </div>
       )}
 
       {workerModal}

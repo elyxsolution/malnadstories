@@ -12,6 +12,7 @@ import {
   Loader2,
   ReceiptText,
   LayoutDashboard,
+  Clock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Preview from './_preview';
@@ -63,17 +64,19 @@ export default function PurchasedAlbum({
   const view = orderStatusView(order.status);
   const StatusIcon = STATUS_ICON[order.status as PurchasedStatus] ?? CheckCircle2;
 
-  // If a PDF is mid-generation (e.g. requested elsewhere), reflect it. Read-only —
-  // this never alters the album, only the cached preview artifact.
+  // PDF generation is a BACKEND workflow that starts automatically on payment — the
+  // customer never triggers it. Poll until it's ready (the poll also nudges the worker
+  // awake server-side). We keep polling on any non-ready status so a worker-side
+  // recovery or an admin regenerate flips us to "Download" without a refresh.
   useEffect(() => {
-    if (pdfStatus !== 'generating') return;
+    if (pdfStatus === 'ready') return;
     let active = true;
     const tick = async () => {
       try {
         const res = await fetch(`/api/albums/${albumId}/pdf`);
         if (!res.ok) return;
         const body = (await res.json()) as { status: PdfStatus };
-        if (active && body.status !== 'generating') setPdfStatus(body.status);
+        if (active) setPdfStatus(body.status);
       } catch {
         // transient — retry next tick
       }
@@ -170,13 +173,19 @@ export default function PurchasedAlbum({
             disabled={downloading}
             className="w-full sm:w-auto"
           >
-            {downloading ? <Loader2 className="animate-spin" /> : <FileDown />} Download album
+            {downloading ? <Loader2 className="animate-spin" /> : <FileDown />} Download PDF
           </Button>
-        ) : pdfStatus === 'generating' ? (
+        ) : pdfStatus === 'failed' ? (
+          // Terminal failure is rare (the worker retries with a timeout/attempt cap).
+          // Never expose a manual "generate" — reassure the customer; admin can step in.
+          <span className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
+            <Clock className="h-4 w-4" /> Your PDF is being finalized — we’ll email it shortly.
+          </span>
+        ) : (
           <Button variant="outline" disabled className="w-full sm:w-auto">
-            <Loader2 className="animate-spin" /> Preparing PDF…
+            <Loader2 className="animate-spin" /> Generating your PDF…
           </Button>
-        ) : null}
+        )}
 
         <Button
           variant="secondary"

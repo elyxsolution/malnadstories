@@ -144,6 +144,10 @@ export const albumPdfs = pgTable('album_pdfs', {
   tokenHash: text('token_hash'),
   tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
   tokenUsedAt: timestamp('token_used_at', { withTimezone: true }),
+  // Reliability/recovery (0025): when the current attempt started + how many attempts
+  // have been driven, so the worker sweep can time out + cap retries.
+  requestedAt: timestamp('requested_at', { withTimezone: true }),
+  attempts: integer('attempts').notNull().default(0),
 });
 
 export const payments = pgTable('payments', {

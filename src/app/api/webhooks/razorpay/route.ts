@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service';
 import { verifyWebhookSignature } from '@/lib/razorpay';
 import { rateLimit, sweepRateLimits } from '@/lib/rate-limit';
 import { sendOrderConfirmationEmail } from '@/lib/email/events';
+import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
 
 // Node runtime: we need the raw request body + Node crypto for HMAC.
 export const runtime = 'nodejs';
@@ -125,16 +126,30 @@ export async function POST(request: Request) {
   // never throws, so email problems can't fail the webhook. We need the orders.id, not
   // the razorpay order id, so resolve it via the service client.
   if (event === 'payment.captured' && result === 'processed') {
+    let albumId: string | null = null;
     try {
       const { data: orderRow } = await admin
         .from('orders')
-        .select('id')
+        .select('id, album_id')
         .eq('razorpay_order_id', razorpayOrderId)
         .maybeSingle();
-      const oid = (orderRow as { id: string } | null)?.id;
-      if (oid) await sendOrderConfirmationEmail(oid);
+      const row = orderRow as { id: string; album_id: string } | null;
+      albumId = row?.album_id ?? null;
+      if (row?.id) await sendOrderConfirmationEmail(row.id);
     } catch (e) {
       console.error('[razorpay-webhook] confirmation email error', { eventId, error: String(e) });
+    }
+
+    // Auto-generate the album PDF on the FIRST transition to paid (backend workflow —
+    // the customer never triggers this). Best-effort + idempotent: validate:false (a
+    // paid album was already completeness-checked at submit), nudge wakes the worker.
+    if (albumId) {
+      try {
+        const r = await startAlbumPdfGeneration(albumId, { validate: false, nudge: true });
+        console.log('[razorpay-webhook] album-pdf auto-start', { eventId, albumId, result: r });
+      } catch (e) {
+        console.error('[razorpay-webhook] album-pdf auto-start error', { eventId, albumId, error: String(e) });
+      }
     }
   }
 

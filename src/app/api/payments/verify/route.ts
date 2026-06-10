@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { verifyPaymentSignature, fetchRazorpayPayment } from '@/lib/razorpay';
 import { sendOrderConfirmationEmail } from '@/lib/email/events';
+import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
 
 export const runtime = 'nodejs';
 
@@ -52,10 +53,11 @@ export async function POST(request: Request) {
   // The order must belong to this user (RLS scopes the read).
   const { data: order } = await supabase
     .from('orders')
-    .select('id')
+    .select('id, album_id')
     .eq('razorpay_order_id', razorpay_order_id)
     .maybeSingle();
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  const orderAlbumId = (order as { id: string; album_id: string }).album_id;
 
   if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
@@ -96,6 +98,14 @@ export async function POST(request: Request) {
         await sendOrderConfirmationEmail(order.id as string);
       } catch (e) {
         console.error('[payments/verify] confirmation email error', { orderId: order.id, error: String(e) });
+      }
+
+      // Auto-generate the album PDF (backend workflow). Best-effort + idempotent; the
+      // webhook path does the same, and startAlbumPdfGeneration no-ops if already done.
+      try {
+        await startAlbumPdfGeneration(orderAlbumId, { validate: false, nudge: true });
+      } catch (e) {
+        console.error('[payments/verify] album-pdf auto-start error', { orderId: order.id, error: String(e) });
       }
     }
     // result 'duplicate' | 'amount_mismatch' | 'order_not_found' → leave to webhook; ok below.

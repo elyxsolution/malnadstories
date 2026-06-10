@@ -7,7 +7,7 @@ import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmail } from '@/lib/admin/users';
 import { loadAlbumForAdmin } from '@/lib/admin/album-view';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
-import AdminPdfDownload from '../../_pdf-download';
+import AdminPdfControls from './_pdf-controls';
 import AlbumPreview from './_album-preview';
 
 export default async function AdminAlbumDetail({ params }: { params: { id: string } }) {
@@ -60,7 +60,7 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <AdminPdfDownload albumId={album.id} />
+        <AdminPdfControls albumId={album.id} />
       </div>
 
       <h2 className="mt-6 mb-2 text-sm font-semibold">Related orders</h2>

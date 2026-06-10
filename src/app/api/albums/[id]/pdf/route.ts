@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
+import { probeWorker } from '@/lib/worker/health';
 
 /**
  * GET /api/albums/:id/pdf
@@ -40,6 +41,14 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     .maybeSingle();
 
   const row = (data ?? null) as { status: string; r2_key: string | null; generated_at: string | null } | null;
+
+  // While a PDF isn't ready, the customer is actively waiting — use the poll to NUDGE
+  // the sleepable worker awake (best-effort). Waking it lets its sweep drain the queued
+  // job or heal a paid-album-without-PDF, so generation can't stall on a dormant worker.
+  if (!row || row.status !== 'ready') {
+    probeWorker(2500).catch(() => {});
+  }
+
   if (!row) {
     return NextResponse.json({ status: 'idle' });
   }

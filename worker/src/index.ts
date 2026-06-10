@@ -14,6 +14,7 @@ import { processPhoto } from './jobs/image-hardening.js';
 import { generateAlbumPdf, closeBrowser } from './jobs/album-pdf.js';
 import { cleanupR2 } from './jobs/r2-cleanup.js';
 import { generateCoverThumbnail } from './jobs/cover-thumbnail.js';
+import { sweepPdfs } from './jobs/pdf-recovery.js';
 import { startHealthServer } from './health-server.js';
 import { supabase } from './supabase.js';
 import { env } from './env.js';
@@ -101,8 +102,10 @@ async function main(): Promise<void> {
   console.log('[worker] image-hardening + album-pdf + r2-cleanup + cover-thumbnail workers started');
 
   await sweepPending(boss);
+  await sweepPdfs(boss).catch((e) => console.error('[worker] pdf-recovery sweep error:', e));
   const timer = setInterval(() => {
     sweepPending(boss).catch((e) => console.error('[worker] sweep error:', e));
+    sweepPdfs(boss).catch((e) => console.error('[worker] pdf-recovery sweep error:', e));
   }, env.WORKER_SWEEP_INTERVAL_MS);
 
   const shutdown = async () => {

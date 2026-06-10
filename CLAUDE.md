@@ -65,7 +65,9 @@ src/
       auth.ts                 signOut server action
       albums.ts               createAlbum + deleteAlbum server actions
       builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
-      pdf.ts                  requestAlbumPdf server action (mint print token, enqueue)
+      pdf.ts (REMOVED)        customer PDF action gone — generation is backend-only now
+    pdf/
+      generate.ts             startAlbumPdfGeneration (service-role: validate→mint→enqueue→nudge)
     builder/
       model.ts                Shared builder types + accounting + render helpers (no I/O)
     queue.ts                  App-side pg-boss (ENQUEUE only) — image-hardening + album-pdf
@@ -98,6 +100,7 @@ drizzle/
   0018_coupon_created_reason.sql      coupons.created_reason + admin_create_coupon extended (10-arg) to record + audit it
   0019_lock_profile_role.sql          column-scoped profiles grants: authenticated can write only (id,name,phone)/(name,phone) — role/id/created_at/delete locked (anti self-promotion)
   0022_email_log.sql                  email delivery audit + idempotency (claim 'sending' → 'sent'/'failed'); service-write, admin-read. (0020/0021 still pending backlog)
+  0025_album_pdf_recovery.sql         album_pdfs.requested_at + attempts — backend PDF stuck-job recovery (timeout + retry cap)
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
@@ -321,6 +324,7 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 18. `drizzle/0018_coupon_created_reason.sql` — coupons.created_reason + admin_create_coupon extension
 19. `drizzle/0019_lock_profile_role.sql` — column-scoped profiles grants (anti self-promotion to admin)
 20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 are pending backlog, run when built)
+21. `drizzle/0025_album_pdf_recovery.sql` — album_pdfs.requested_at + attempts (backend PDF recovery)
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
 > rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
@@ -419,24 +423,34 @@ re-implemented in the worker.
   broken/expired URL can't hang the PDF), handles a zero-image album immediately,
   and sets `window.__ALBUM_PRINT_READY`. Puppeteer waits on `networkidle0` + that
   flag with a 60s timeout → clean `failed` instead of hanging.
-- **Token scheme**: `requestAlbumPdf` (server action) verifies ownership (RLS),
-  mints a `randomBytes(32)` token, stores only its **sha256 hash** + 5-min expiry on
-  `album_pdfs` (service-only table), and enqueues `{ albumId, token }`. Short-lived,
-  **single-use** (`token_used_at`), per-album. The raw token is never logged.
-- **Worker job** `worker/src/jobs/album-pdf.ts`: a **shared** headless Chromium with
-  a **fresh page per job** (closed after), `deviceScaleFactor: 2`, `printBackground`
-  (so brightness CSS filter + SVG `feConvolveMatrix` sharpness rasterize into the
-  PDF). Uploads to private R2 `{user}/albums/{album}/preview.pdf`; sets
-  `album_pdfs.status='ready'`. `retryLimit: 0` keeps the token single-use; any
-  failure → `status='failed'`.
-- **Trigger/UI**: a "Preview PDF" button (debounced; `singletonKey` also dedupes
-  server-side) enqueues and shows "Generating…"; the builder polls
-  `GET /api/albums/[id]/pdf` until `ready`, then "Download PDF" fetches a **fresh
-  ~2-min signed URL** (Content-Disposition: attachment). `failed` → retry.
-- **Security**: only the owner can request (ownership checked before minting) or
-  download (ownership-checked route, short-lived URL); `album_pdfs` is service-only
-  (RLS on, no policies/grants); the worker uses the service role; the PDF R2 key is
-  private (never public).
+- **PDF is a BACKEND workflow — customers never trigger it.** The single generator is
+  `startAlbumPdfGeneration(albumId, {force?, validate?, nudge?})` (`src/lib/pdf/generate.ts`,
+  service-role; callers authorize first). It mints a `randomBytes(32)` token, stores only
+  its **sha256 hash** + 5-min expiry on `album_pdfs` (service-only), flips status →
+  `generating` (with `requested_at`/`attempts` for recovery), enqueues `{albumId, token}`,
+  and **best-effort nudges the sleepable worker** awake. Short-lived, single-use
+  (`token_used_at`), per-album; raw token never logged.
+- **Triggers**: (1) **auto on payment** — the Razorpay webhook AND `/api/payments/verify`
+  call `startAlbumPdfGeneration` on the first transition to `paid` (idempotent, `validate:false`);
+  (2) **admin** — `adminGenerateAlbumPdf` (`requireAdmin`) for Generate/Regenerate on
+  `/admin/albums/[id]`. There is **no customer generate/regenerate** control anywhere.
+- **Worker job** `worker/src/jobs/album-pdf.ts`: shared headless Chromium, fresh page per
+  job, `deviceScaleFactor: 2`, `printBackground`; uploads to private R2
+  `{user}/albums/{album}/preview.pdf`; sets `status='ready'`. `retryLimit: 0` (app-level
+  retry instead — see recovery); any failure → `status='failed'`.
+- **Reliability/recovery** `worker/src/jobs/pdf-recovery.ts` (`sweepPdfs`, run on boot +
+  the periodic sweep): (a) **stuck** — re-drives any `generating` row older than 3 min with
+  a fresh token, capped at 5 `attempts` → then `failed` (no infinite "Generating…"); (b)
+  **paid-heal** — ensures every PAID album has a PDF, (re)starting `idle`/`failed`(<cap)/
+  missing rows. The customer poll `GET /api/albums/[id]/pdf` also nudges the worker awake
+  while not ready. Logs: `[pdf] queued` / `[worker] album-pdf start|ready|failed` /
+  `[worker] pdf-recovery …`.
+- **Customer UI**: builder keeps only the in-app **Preview Album** toggle (no PDF buttons).
+  The purchased view auto-shows **"Generating your PDF…"** (polling) → **"Download PDF"**
+  when ready; terminal `failed` shows a neutral "being finalized" note (admin recovers).
+- **Security**: customer download is ownership-checked (RLS) with a short-lived URL; admin
+  generate/download is `requireAdmin`-gated; `album_pdfs` stays service-only (RLS on, no
+  policies/grants); the worker uses the service role; the PDF R2 key is private.
 
 ## Delete album — built
 

@@ -155,7 +155,6 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       <WorkerPrewarm />
       <Builder
         albumId={album.id}
-        initialPdfStatus={initialPdfStatus}
         title={album.title}
         size={album.size}
         initialStatus={album.status}
