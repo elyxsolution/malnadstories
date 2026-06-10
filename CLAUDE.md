@@ -99,6 +99,8 @@ drizzle/
   0017_admin_rpcs_and_consumption.sql admin RPCs (status/tracking/notes/coupons) + process_razorpay_event rewrite (paid-family guard + coupon consumption + audit)
   0018_coupon_created_reason.sql      coupons.created_reason + admin_create_coupon extended (10-arg) to record + audit it
   0019_lock_profile_role.sql          column-scoped profiles grants: authenticated can write only (id,name,phone)/(name,phone) — role/id/created_at/delete locked (anti self-promotion)
+  0020_photos_column_lockdown.sql     column-scoped photos grants: authenticated writes only INSERT(user_id,album_id,r2_key,original_filename)/UPDATE(edit_config)/DELETE — worker columns service-role-only (no hardening bypass)
+  0021_album_status_hardening.sql     column-scoped albums grants: status is server-only (submitAlbum→service role); INSERT(user_id,title,size,cover_template_id)/UPDATE(title,cover_template_id,updated_at); CHECK narrowed to (draft,submitted)
   0022_email_log.sql                  email delivery audit + idempotency (claim 'sending' → 'sent'/'failed'); service-write, admin-read. (0020/0021 still pending backlog)
   0025_album_pdf_recovery.sql         album_pdfs.requested_at + attempts — backend PDF stuck-job recovery (timeout + retry cap)
 worker/                       Separate Node service (own package.json; pnpm install inside)
@@ -323,6 +325,8 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 17. `drizzle/0017_admin_rpcs_and_consumption.sql` — admin RPCs + process_razorpay_event rewrite (run WITH the matching app deploy)
 18. `drizzle/0018_coupon_created_reason.sql` — coupons.created_reason + admin_create_coupon extension
 19. `drizzle/0019_lock_profile_role.sql` — column-scoped profiles grants (anti self-promotion to admin)
+19a. `drizzle/0020_photos_column_lockdown.sql` — column-scoped photos grants (deploy code first)
+19b. `drizzle/0021_album_status_hardening.sql` — column-scoped albums grants + status server-only (deploy code first)
 20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 are pending backlog, run when built)
 21. `drizzle/0025_album_pdf_recovery.sql` — album_pdfs.requested_at + attempts (backend PDF recovery)
 
@@ -663,8 +667,10 @@ components (Header/Footer/Button/Section/OrderSummary) + per-event templates.
 - Auto-retry worker for `failed` emails (today: logged + idempotent; manual/cron resend)
 - Pre-press PDF tuning (exact bleed/DPI/ICC for the print partner)
 - Travel agency portal (`/agency`)
-- Pre-launch hardening backlog (`docs/SECURITY_BACKLOG.md`): `0020` photos column
-  lockdown, `0021` albums.status hardening — not yet implemented.
+- ✅ Pre-launch hardening `0020` (photos column lockdown) + `0021` (albums.status
+  hardening) are now WRITTEN + paired code shipped (createAlbum drops explicit status;
+  submitAlbum writes status via service role). **Deploy order: ship code FIRST, then run
+  the SQL.** Not yet applied to the production DB.
 
 ## Checkout copies + coupon UI (Stage D) — built
 

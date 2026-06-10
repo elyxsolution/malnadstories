@@ -61,13 +61,16 @@ export async function createAlbum(
 
   // user_id is always taken from the verified JWT session, never from form input.
   // The RLS INSERT check (user_id = auth.uid()) enforces this at the DB level too.
+  // NOTE (0021): `status` is intentionally NOT set here — it defaults to 'draft' in the
+  // DB, and the column-scoped INSERT grant deliberately excludes `status` so a client
+  // can never insert an album already 'submitted'. The only writer of 'submitted' is
+  // submitAlbum (service role, after validation).
   const { data: album, error: insertError } = await supabase
     .from('albums')
     .insert({
       user_id: user.id,
       title: parsed.data.title,
       size: (product as { pages: number }).pages,
-      status: 'draft',
       cover_template_id: parsed.data.coverTemplateId,
     })
     .select('id')

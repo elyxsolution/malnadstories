@@ -1,9 +1,16 @@
 # Pre-launch Security Hardening Backlog
 
-Tracked, **not yet implemented**. These close the remaining "client can write
-server-controlled columns" findings from the admin/payment security reviews — the same
-class as the `0019` `profiles.role` fix. Do **not** run these before they're built and
-verified; each needs a small code change shipped *with* the migration.
+> **STATUS (authored):** `0020` and `0021` are now WRITTEN as
+> `drizzle/0020_photos_column_lockdown.sql` and `drizzle/0021_album_status_hardening.sql`,
+> with their paired code changes shipped (`createAlbum` no longer inserts `status`;
+> `submitAlbum` writes `status` via the service role). The migration designs below were
+> **drift-corrected** before authoring — the original `0021` sketch predated the cover
+> feature and omitted `cover_template_id`/`updated_at` from the album grants (which would
+> have broken `selectCover` and `createAlbum`). **Deploy order: ship the code FIRST, then
+> run the SQL in the Supabase Dashboard.** They are NOT yet applied to production.
+
+These close the remaining "client can write server-controlled columns" findings from the
+admin/payment security reviews — the same class as the `0019` `profiles.role` fix.
 
 ---
 

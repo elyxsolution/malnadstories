@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema } from '@/lib/validations';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
@@ -198,10 +199,18 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
     return { ok: false, error: `Album must fill exactly ${size} content pages (currently ${consumed}).` };
   }
 
-  const { error } = await supabase
+  // status='submitted' is a SERVER-CONTROLLED transition (0021): `authenticated` no
+  // longer holds an UPDATE grant on albums.status, so this write goes through the
+  // service role — AFTER the RLS-scoped ownership + completeness checks above. We
+  // re-pin user_id + id so the service-role write can only touch THIS owner's album
+  // (belt-and-suspenders, mirroring cancelOrder), and require the album to still be a
+  // draft/submitted (never resurrecting a different lifecycle).
+  const admin = createServiceClient();
+  const { error } = await admin
     .from('albums')
     .update({ status: 'submitted', updated_at: new Date().toISOString() })
-    .eq('id', albumId);
+    .eq('id', albumId)
+    .eq('user_id', user.id);
   if (error) {
     console.error('submitAlbum error:', error);
     return { ok: false, error: 'Could not submit album.' };
