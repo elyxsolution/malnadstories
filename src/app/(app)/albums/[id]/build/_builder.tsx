@@ -11,8 +11,6 @@ import PhotoEditor from './_photo-editor';
 import QuickCrop from './_quick-crop';
 import {
   LAYOUT_TEMPLATES,
-  TEMPLATE_LABEL,
-  PAGE_COST,
   DEFAULT_OVERLAY_GEOM,
   photoCap,
   pagesConsumed,
