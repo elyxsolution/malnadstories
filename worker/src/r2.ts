@@ -23,8 +23,18 @@ export async function getObjectBuffer(key: string): Promise<Buffer> {
   return Buffer.from(bytes);
 }
 
-export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {
-  await client.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
+export async function putObject(
+  key: string,
+  body: Buffer,
+  contentType: string,
+  abortSignal?: AbortSignal,
+): Promise<void> {
+  // abortSignal lets a caller (the album-pdf watchdog) actually CANCEL a stalled
+  // upload instead of merely abandoning the await — the S3 client aborts the socket.
+  await client.send(
+    new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }),
+    { abortSignal },
+  );
 }
 
 export async function deleteObject(key: string): Promise<void> {
