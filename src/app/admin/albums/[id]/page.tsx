@@ -88,7 +88,7 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
       <h2 className="mt-6 mb-2 text-sm font-semibold">Album preview</h2>
       {view && view.blocks.length > 0 ? (
         <div className="rounded-lg border bg-card p-4">
-          <AlbumPreview photos={view.photos} blocks={view.blocks} />
+          <AlbumPreview photos={view.photos} blocks={view.blocks} cover={view.cover} />
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">This album has no layout to preview yet.</p>

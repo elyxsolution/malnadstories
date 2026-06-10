@@ -28,6 +28,7 @@ export async function createAlbum(
   const parsed = CreateAlbumSchema.safeParse({
     title: formData.get('title'),
     productId: formData.get('productId'),
+    coverTemplateId: formData.get('coverTemplateId'),
   });
 
   if (!parsed.success) {
@@ -46,6 +47,18 @@ export async function createAlbum(
     return { error: 'Invalid size selected. Please try again.' };
   }
 
+  // Cover is mandatory at creation and must be an ACTIVE template (RLS exposes only
+  // active rows to authenticated). Never trust the client's id without this check.
+  const { data: cover } = await supabase
+    .from('cover_templates')
+    .select('id')
+    .eq('id', parsed.data.coverTemplateId)
+    .eq('active', true)
+    .maybeSingle();
+  if (!cover) {
+    return { error: 'That cover design is unavailable. Please choose another.' };
+  }
+
   // user_id is always taken from the verified JWT session, never from form input.
   // The RLS INSERT check (user_id = auth.uid()) enforces this at the DB level too.
   const { data: album, error: insertError } = await supabase
@@ -55,6 +68,7 @@ export async function createAlbum(
       title: parsed.data.title,
       size: (product as { pages: number }).pages,
       status: 'draft',
+      cover_template_id: parsed.data.coverTemplateId,
     })
     .select('id')
     .single();

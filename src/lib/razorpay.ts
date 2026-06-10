@@ -58,6 +58,39 @@ export async function createRazorpayOrder(args: {
   return (await res.json()) as RazorpayOrder;
 }
 
+export type RazorpayPayment = {
+  id: string;
+  order_id: string;
+  status: string; // 'created' | 'authorized' | 'captured' | 'refunded' | 'failed'
+  amount: number; // paise
+  currency: string;
+  method: string | null;
+};
+
+/**
+ * Fetch the authoritative payment object from Razorpay (Payments API). Used by the
+ * verify-callback reconciliation path so the amount/currency fed to
+ * process_razorpay_event come from Razorpay, never the client. Returns null on any
+ * non-2xx (treated as "can't reconcile now" — the webhook remains the backstop).
+ */
+export async function fetchRazorpayPayment(paymentId: string): Promise<RazorpayPayment | null> {
+  const auth = Buffer.from(`${keyId()}:${keySecret()}`).toString('base64');
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+    headers: { Authorization: `Basic ${auth}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const p = (await res.json()) as Record<string, unknown>;
+  return {
+    id: p.id as string,
+    order_id: p.order_id as string,
+    status: p.status as string,
+    amount: (p.amount as number) ?? 0,
+    currency: (p.currency as string) ?? 'INR',
+    method: (p.method as string | undefined) ?? null,
+  };
+}
+
 /** Constant-time hex-digest comparison; false on any length/format mismatch. */
 function safeEqualHex(a: string, b: string): boolean {
   const ab = Buffer.from(a, 'utf8');

@@ -1,39 +1,43 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import PhotoFrame from '@/app/(app)/albums/[id]/build/_photo-frame';
+import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
 import type { Block, EditConfig } from '@/lib/builder/model';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
+export type PrintCover = { url: string } | null;
 
 /**
- * Print-only album renderer. One .pdf-page per album page (a spread is one wide
- * page) using the SAME PhotoFrame as the builder/preview, so the PDF matches the
- * screen exactly. Page sizes are parameterized for the print partner's later
- * bleed/DPI; for now they mirror the on-screen preview aspects (3:4 / 2:1).
+ * Print-only album renderer — the PHYSICAL photobook, one PDF page per physical page:
  *
- * Readiness: Puppeteer waits on `window.__ALBUM_PRINT_READY`. We count exactly the
- * frames that actually render an image (base + overlays with a known photo); a
- * load OR error counts (a broken/expired URL can't hang the PDF); a zero-image
- * album is ready immediately.
+ *   Page 1 = Cover (selected template, full-bleed; no user content)
+ *   Page 2 = Blank (inside front cover, left)
+ *   Page 3 = Blank (inside front cover, right)
+ *   Page 4… = content. Each content PAIR emits TWO portrait pages:
+ *             • single-pair   → left photo page, right photo page
+ *             • double-spread → ONE image split exactly at centre (left half | right half)
+ *
+ * The split is achieved by rendering the SAME open-pair (PairContent, 2 pages wide)
+ * into a clip window per physical page — identical geometry to the builder preview, so
+ * PDF == preview. Every page is the same portrait size; there are NO landscape pages.
  */
 
-// Parameterize here — later set to the print partner's exact page box + bleed.
-const PRINT = {
-  single: { w: '6in', h: '8in' }, // 3:4
-  spread: { w: '16in', h: '8in' }, // 2:1
-  margin: '0',
-};
+// Uniform portrait page. Two of these side by side form one open pair (the 2-wide
+// coordinate space PairContent draws into). Parameterized for the print partner later.
+const PAGE = { w: '6in', h: '8in', margin: '0' };
 
 const PRINT_CSS = `
-  @page single { size: ${PRINT.single.w} ${PRINT.single.h}; margin: ${PRINT.margin}; }
-  @page spread { size: ${PRINT.spread.w} ${PRINT.spread.h}; margin: ${PRINT.margin}; }
-  @page { margin: ${PRINT.margin}; }
+  @page { size: ${PAGE.w} ${PAGE.h}; margin: ${PAGE.margin}; }
   html, body { margin: 0; padding: 0; background: #fff; }
-  .pdf-page { position: relative; overflow: hidden; background: #fff; break-after: page; page-break-after: always; }
+  .pdf-page {
+    position: relative; width: ${PAGE.w}; height: ${PAGE.h};
+    overflow: hidden; background: #fff;
+    break-after: page; page-break-after: always;
+  }
   .pdf-page:last-child { break-after: auto; page-break-after: auto; }
-  .pdf-page.single { page: single; width: ${PRINT.single.w}; height: ${PRINT.single.h}; }
-  .pdf-page.spread { page: spread; width: ${PRINT.spread.w}; height: ${PRINT.spread.h}; }
+  /* The open pair is 2 pages wide (200%); each physical page is a clip window onto it. */
+  .pair-clip { position: absolute; top: 0; height: 100%; width: 200%; }
+  .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 `;
 
 declare global {
@@ -42,38 +46,60 @@ declare global {
   }
 }
 
-export default function PrintAlbum({ blocks, photos }: { blocks: Block[]; photos: PrintPhoto[] }) {
+export default function PrintAlbum({
+  blocks,
+  photos,
+  cover,
+}: {
+  blocks: Block[];
+  photos: PrintPhoto[];
+  cover: PrintCover;
+}) {
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
+  const photoFor = useCallback(
+    (id: string | undefined) => {
+      const p = id ? photoMap.get(id) : undefined;
+      return p ? { url: p.url, edit: p.edit } : undefined;
+    },
+    [photoMap],
+  );
 
-  // Exact count of frames that will render an image (empty slots/missing overlays excluded).
+  // Frames the worker must wait for — counted to MATCH what each physical page renders
+  // (memory opt: single-pair photos render once on their own page, not twice; overlays
+  // only on the page(s) they overlap; a double-spread image renders on both pages).
   const totalFrames = useMemo(() => {
-    let n = 0;
-    for (const b of blocks) {
-      if (b.photoIds[0] && photoMap.has(b.photoIds[0])) n += 1;
-      for (const o of b.overlays) if (photoMap.has(o.photoId)) n += 1;
-    }
-    return n;
-  }, [blocks, photoMap]);
+    const framesOnHalf = (b: Block, half: 'left' | 'right') => {
+      let n = 0;
+      if (b.template === 'double-spread') {
+        if (b.photoIds[0] && photoMap.has(b.photoIds[0])) n += 1; // image spans both pages
+      } else {
+        const id = half === 'left' ? b.photoIds[0] : b.photoIds[1];
+        if (id && photoMap.has(id)) n += 1;
+      }
+      for (const o of b.overlays) {
+        const onHalf = half === 'left' ? o.x < 0.5 : o.x + o.w > 0.5;
+        if (onHalf && photoMap.has(o.photoId)) n += 1;
+      }
+      return n;
+    };
+    return (
+      (cover ? 1 : 0) +
+      blocks.reduce((s, b) => s + framesOnHalf(b, 'left') + framesOnHalf(b, 'right'), 0)
+    );
+  }, [blocks, photoMap, cover]);
 
   const [, setLoaded] = useState(0);
   const loadedRef = useRef(0);
 
   const markReady = useCallback(() => {
-    // Signal that all frames have mounted and their images settled (load/error). The
-    // worker still awaits real image decode before snapshotting, so this need not (and
-    // must not) depend on requestAnimationFrame, which is unreliable in headless.
     window.__ALBUM_PRINT_READY = true;
   }, []);
 
-  // Zero-image album: ready immediately.
   useEffect(() => {
     if (totalFrames === 0) markReady();
   }, [totalFrames, markReady]);
 
-  // Safety net: never let the worker hang the full 60s. If, for any edge case, the
-  // per-frame onReady count doesn't reach totalFrames (e.g. an <img> that fires
-  // neither load nor error), flip the flag after a bounded delay anyway. The worker
-  // still awaits real image decode before the snapshot, so this can't blank the PDF.
+  // Safety net so a stuck <img> can't hang the worker the full 60s.
   useEffect(() => {
     const t = setTimeout(markReady, 12_000);
     return () => clearTimeout(t);
@@ -88,38 +114,50 @@ export default function PrintAlbum({ blocks, photos }: { blocks: Block[]; photos
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />
-      {blocks.map((block) => {
-        const wide = block.template === 'spread-full';
-        const base = block.photoIds[0] ? photoMap.get(block.photoIds[0]) : undefined;
-        return (
-          <div key={block.key} className={`pdf-page ${wide ? 'spread' : 'single'}`}>
-            {base ? (
-              <PhotoFrame url={base.url} edit={base.edit} onReady={onFrameReady} />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">Empty</div>
-            )}
-            {block.overlays.map((o, i) => {
-              const photo = photoMap.get(o.photoId);
-              if (!photo) return null;
-              return (
-                <div
-                  key={i}
-                  className="absolute overflow-hidden"
-                  style={{
-                    left: `${o.x * 100}%`,
-                    top: `${o.y * 100}%`,
-                    width: `${o.w * 100}%`,
-                    height: `${o.h * 100}%`,
-                    border: '2px solid #fff',
-                  }}
-                >
-                  <PhotoFrame url={photo.url} edit={photo.edit} onReady={onFrameReady} />
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+
+      {/* Page 1 — Cover */}
+      <div className="pdf-page">
+        {cover ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={cover.url} alt="" className="cover-img" onLoad={onFrameReady} onError={onFrameReady} />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">Cover</div>
+        )}
+      </div>
+
+      {/* Pages 2 & 3 — Blank inside front cover (left, right) */}
+      <div className="pdf-page" />
+      <div className="pdf-page" />
+
+      {/* Content — each pair → two physical pages (left half, right half). */}
+      {blocks.map((block) => (
+        <div key={block.key} style={{ display: 'contents' }}>
+          <PhysicalPage side="left" block={block} photoFor={photoFor} onFrameReady={onFrameReady} />
+          <PhysicalPage side="right" block={block} photoFor={photoFor} onFrameReady={onFrameReady} />
+        </div>
+      ))}
     </>
+  );
+}
+
+function PhysicalPage({
+  side,
+  block,
+  photoFor,
+  onFrameReady,
+}: {
+  side: 'left' | 'right';
+  block: Block;
+  photoFor: (id: string | undefined) => { url: string; edit?: EditConfig | null } | undefined;
+  onFrameReady: () => void;
+}) {
+  // Left page shows x∈[0,6in] of the 12in open pair; right page shifts it by one page.
+  // `half` makes PairContent render ONLY this page's frames (memory opt).
+  return (
+    <div className="pdf-page">
+      <div className="pair-clip" style={{ left: side === 'left' ? '0' : '-100%' }}>
+        <PairContent block={block} photoFor={photoFor} onFrameReady={onFrameReady} half={side} />
+      </div>
+    </div>
   );
 }

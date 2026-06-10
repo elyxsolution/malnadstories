@@ -19,6 +19,7 @@ import PgBoss from 'pg-boss';
 export const IMAGE_HARDENING_QUEUE = 'image-hardening';
 export const ALBUM_PDF_QUEUE = 'album-pdf';
 export const R2_CLEANUP_QUEUE = 'r2-cleanup';
+export const COVER_THUMBNAIL_QUEUE = 'cover-thumbnail';
 
 let bossPromise: Promise<PgBoss> | null = null;
 
@@ -35,6 +36,7 @@ function getBoss(): Promise<PgBoss> {
       await boss.createQueue(IMAGE_HARDENING_QUEUE);
       await boss.createQueue(ALBUM_PDF_QUEUE);
       await boss.createQueue(R2_CLEANUP_QUEUE);
+      await boss.createQueue(COVER_THUMBNAIL_QUEUE);
       return boss;
     })().catch((e) => {
       bossPromise = null; // allow a later retry if startup failed
@@ -78,4 +80,18 @@ export async function enqueueAlbumPdf(albumId: string, token: string): Promise<s
 export async function enqueueR2Cleanup(keys: string[]): Promise<string | null> {
   const boss = await getBoss();
   return boss.send(R2_CLEANUP_QUEUE, { keys }, { retryLimit: 5, retryDelay: 30, retryBackoff: true });
+}
+
+/**
+ * Enqueue thumbnail + dimension extraction for a newly-uploaded cover template.
+ * singletonKey dedupes per cover; transient failures retry. Best-effort from the
+ * admin createCover action — if it never runs, pickers fall back to the master image.
+ */
+export async function enqueueCoverThumbnail(coverTemplateId: string): Promise<string | null> {
+  const boss = await getBoss();
+  return boss.send(
+    COVER_THUMBNAIL_QUEUE,
+    { coverTemplateId },
+    { retryLimit: 3, retryDelay: 30, retryBackoff: true, singletonKey: coverTemplateId },
+  );
 }

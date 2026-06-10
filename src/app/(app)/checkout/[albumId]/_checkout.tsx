@@ -114,6 +114,13 @@ export default function Checkout({
     };
   }, [activeOrderId, orderStatus, router]);
 
+  // Final safety net for the next/script cache case: if the SDK is already present on
+  // this render (loaded by a previous mount), mark ready immediately so neither the
+  // button gating nor the pay() guard can wedge waiting for an onLoad that won't re-fire.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.Razorpay) setScriptReady(true);
+  }, []);
+
   // Server-priced recompute. With a code → previewCoupon (re-validates min-order etc.
   // at the new copy count); without → previewOrderAmount. If a previously-applied coupon
   // no longer validates (e.g. copies dropped below its minimum), it is dropped and the
@@ -185,7 +192,10 @@ export default function Checkout({
       setError('Please select a delivery address.');
       return;
     }
-    if (!scriptReady || !window.Razorpay) {
+    // Readiness is derived from the actual SDK (onReady + the mount check above), and the
+    // button is disabled until then — so this is now a safety net rather than the thing
+    // that strands the flow. Trust window.Razorpay directly, not just the state flag.
+    if (typeof window === 'undefined' || !window.Razorpay) {
       setError('Payment is still loading — please try again in a moment.');
       return;
     }
@@ -194,58 +204,68 @@ export default function Checkout({
     setPaying(true);
     setError(null);
 
-    // The client sends only ids + copies + the code. createOrder recomputes the amount
-    // server-side and re-validates the coupon — a stale/invalid preview cannot underpay.
-    const res = await createOrder({
-      albumId,
-      addressId: selectedId,
-      copies,
-      couponCode: appliedCode ?? undefined,
-    });
-    if (!res.ok) {
-      payInFlight.current = false;
-      setPaying(false);
-      setError(res.error);
-      return;
-    }
-    setActiveOrderId(res.orderId);
-    setOrderStatus('pending');
-
-    const rzp = new window.Razorpay({
-      key: res.keyId,
-      amount: res.amountPaise, // server-issued; the client never supplies an amount
-      currency: res.currency,
-      order_id: res.razorpayOrderId,
-      name: 'Malnad Stories',
-      description: albumTitle,
-      prefill: res.prefill,
-      theme: { color: '#0f172a' },
-      handler: async (r) => {
-        try {
-          const v = await fetch('/api/payments/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(r),
-          });
-          if (v.ok) {
-            router.push(`/orders/${res.orderId}`);
-            return;
-          }
-        } catch {
-          // fall through
-        }
+    try {
+      // The client sends only ids + copies + the code. createOrder recomputes the amount
+      // server-side and re-validates the coupon — a stale/invalid preview cannot underpay.
+      const res = await createOrder({
+        albumId,
+        addressId: selectedId,
+        copies,
+        couponCode: appliedCode ?? undefined,
+      });
+      if (!res.ok) {
         payInFlight.current = false;
         setPaying(false);
-        setError('We could not verify the payment. If you were charged, it will confirm shortly.');
-      },
-      modal: {
-        ondismiss: () => {
+        setError(res.error);
+        return;
+      }
+      setActiveOrderId(res.orderId);
+      setOrderStatus('pending');
+
+      const rzp = new window.Razorpay({
+        key: res.keyId,
+        amount: res.amountPaise, // server-issued; the client never supplies an amount
+        currency: res.currency,
+        order_id: res.razorpayOrderId,
+        name: 'Malnad Stories',
+        description: albumTitle,
+        prefill: res.prefill,
+        theme: { color: '#0f172a' },
+        handler: async (r) => {
+          try {
+            const v = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(r),
+            });
+            if (v.ok) {
+              router.push(`/orders/${res.orderId}`);
+              return;
+            }
+          } catch {
+            // fall through
+          }
           payInFlight.current = false;
           setPaying(false);
+          setError('We could not verify the payment. If you were charged, it will confirm shortly.');
         },
-      },
-    });
-    rzp.open();
+        modal: {
+          ondismiss: () => {
+            payInFlight.current = false;
+            setPaying(false);
+          },
+        },
+      });
+      rzp.open();
+    } catch {
+      // createOrder rejected (network/server throw) or Checkout failed to construct/open.
+      // Without this, paying/payInFlight stay set and the button is stuck disabled until a
+      // refresh. Reset so the user can retry in place. (No finally: on the success path we
+      // intentionally KEEP paying=true while the Razorpay modal is open.)
+      payInFlight.current = false;
+      setPaying(false);
+      setError('Something went wrong starting the payment. Please try again.');
+    }
   };
 
   const albumHref = `/albums/${albumId}/build`;
@@ -271,8 +291,17 @@ export default function Checkout({
     <div className="space-y-6">
       <Script
         src="https://checkout.razorpay.com/v1/checkout.js"
-        onLoad={() => setScriptReady(true)}
         strategy="afterInteractive"
+        // onReady fires on EVERY mount — including when next/script has already cached
+        // the script after a client-side nav back to checkout. onLoad fires only once on
+        // the real network load and is SKIPPED on a cached remount, which used to leave
+        // scriptReady stuck false (Pay then wedged on "Payment still loading"). Keep both
+        // so we're covered regardless; setting the flag twice is harmless.
+        onReady={() => setScriptReady(true)}
+        onLoad={() => setScriptReady(true)}
+        onError={() =>
+          setError('Could not load the payment library. Please refresh and try again.')
+        }
       />
 
       <section className="space-y-3">
@@ -373,8 +402,12 @@ export default function Checkout({
             Your payment didn’t go through. You can try again.
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
-            <Button onClick={pay} disabled={busyControls || !selectedId} className="w-full sm:w-auto">
-              {paying ? <Loader2 className="animate-spin" /> : <CreditCard />} Retry payment{' '}
+            <Button
+              onClick={pay}
+              disabled={busyControls || !selectedId || !scriptReady}
+              className="w-full sm:w-auto"
+            >
+              {paying || !scriptReady ? <Loader2 className="animate-spin" /> : <CreditCard />} Retry payment{' '}
               {inr(breakdown.totalInr)}
             </Button>
             <Button variant="ghost" render={<Link href={albumHref} />} className="w-full sm:w-auto">
@@ -384,8 +417,13 @@ export default function Checkout({
         </div>
       ) : (
         <div className="space-y-2">
-          <Button onClick={pay} disabled={busyControls || !selectedId} className="w-full sm:w-auto">
-            {paying ? <Loader2 className="animate-spin" /> : <CreditCard />} Pay {inr(breakdown.totalInr)}
+          <Button
+            onClick={pay}
+            disabled={busyControls || !selectedId || !scriptReady}
+            className="w-full sm:w-auto"
+          >
+            {paying || !scriptReady ? <Loader2 className="animate-spin" /> : <CreditCard />}{' '}
+            {scriptReady ? `Pay ${inr(breakdown.totalInr)}` : 'Loading payment…'}
           </Button>
           {(orderStatus === null || orderStatus === 'pending') && (
             <Button

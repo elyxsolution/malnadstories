@@ -5,6 +5,7 @@ import { PresignUploadSchema } from '@/lib/validations';
 import { presignPut, ALLOWED_CONTENT_TYPES, type AllowedContentType } from '@/lib/r2';
 import { photoCap } from '@/lib/builder/model';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { workerConfigOk } from '@/lib/worker/health';
 
 /**
  * POST /api/photos/presign
@@ -22,6 +23,18 @@ export async function POST(request: Request) {
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Fail-closed in production: every uploaded photo MUST be hardened by the worker
+  // before it's usable, so refuse to even mint an upload URL when the worker is
+  // unconfigured (a broken deploy). Cheap + network-free; in dev this is a no-op.
+  // (The transient "worker asleep" case is handled by the client wake-up gate before
+  // upload, and the worker's sweep is the eventual backstop.)
+  if (!workerConfigOk()) {
+    return NextResponse.json(
+      { error: 'Photo processing is temporarily unavailable. Please try again later.' },
+      { status: 503 },
+    );
   }
 
   let body: unknown;

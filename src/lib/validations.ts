@@ -17,6 +17,8 @@ export const CreateAlbumSchema = z.object({
     .min(1, 'Album title is required')
     .max(100, 'Title must be 100 characters or less'),
   productId: z.string().uuid('Please select an album size'),
+  // Cover is chosen at creation (Phase F.1) — mandatory, must be an active template.
+  coverTemplateId: z.string().uuid('Please choose a cover design'),
 });
 
 // Photo upload — presign + confirm. Mirrors the server-side limits in src/lib/r2.ts.
@@ -53,8 +55,13 @@ const RectSchema = z.object({
   h: z.number().gt(0).max(1),
 });
 
+// Two composable crop systems: free-form `crop` (full editor) + fixed-frame zoom/pan
+// (quick crop). Both optional; defaults compose to a plain cover-fit.
 export const EditConfigSchema = z.object({
   crop: RectSchema.optional(),
+  zoom: z.number().min(1).max(5).optional(),
+  offsetX: z.number().min(-1).max(1).optional(),
+  offsetY: z.number().min(-1).max(1).optional(),
   rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional(),
   tilt: z.number().min(-15).max(15).optional(),
   flipH: z.boolean().optional(),
@@ -72,8 +79,9 @@ const OverlaySchema = z.object({
 });
 
 const BlockSchema = z.object({
-  template: z.enum(['single-full', 'spread-full']),
-  photoIds: z.array(z.string().uuid()).max(1), // base slot only
+  template: z.enum(['single-pair', 'double-spread']),
+  // single-pair: [leftId?, rightId?]; double-spread: [imageId?]. Up to 2 base slots.
+  photoIds: z.array(z.string().uuid()).max(2),
   caption: z.string().max(200).optional().default(''),
   overlays: z.array(OverlaySchema).max(50).optional().default([]),
 });
@@ -100,6 +108,38 @@ export const SaveLayoutSchema = z
 export const PhotoEditSchema = z.object({
   photoId: z.string().uuid('Invalid photo'),
   edit: EditConfigSchema,
+});
+
+// User selecting a cover design for their album (authenticated + RLS on the album).
+export const SelectCoverSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  coverTemplateId: z.string().uuid('Invalid cover'),
+});
+
+// ── Admin: cover templates ───────────────────────────────────────────────────
+// Admin uploads cover artwork to R2 (presign → PUT), then registers it. Image only.
+export const CoverPresignSchema = z.object({
+  filename: z.string().min(1).max(255),
+  contentType: z.enum(ALLOWED_UPLOAD_TYPES, {
+    message: 'Only JPEG, PNG, HEIC, or WebP images are allowed',
+  }),
+  size: z.number().int().positive('File is empty').max(MAX_UPLOAD_BYTES, 'Each file must be 20 MB or smaller'),
+});
+
+export const CreateCoverSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100),
+  description: z.string().trim().max(300).optional(),
+  imageKey: z.string().min(1).max(512),
+  sort: z.number().int().min(0).max(9999).optional().default(0),
+});
+
+export const SetCoverActiveSchema = z.object({
+  coverTemplateId: z.string().uuid('Invalid cover'),
+  active: z.boolean(),
+});
+
+export const DeleteCoverSchema = z.object({
+  coverTemplateId: z.string().uuid('Invalid cover'),
 });
 
 // ── Addresses & checkout ─────────────────────────────────────────────────────

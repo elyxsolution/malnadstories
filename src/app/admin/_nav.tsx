@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, Ticket, Users, Image as ImageIcon } from 'lucide-react';
+import { LayoutDashboard, Package, Ticket, Users, Image as ImageIcon, BookImage } from 'lucide-react';
 
 const ITEMS = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -10,6 +10,7 @@ const ITEMS = [
   { href: '/admin/coupons', label: 'Coupons', icon: Ticket, exact: false },
   { href: '/admin/customers', label: 'Customers', icon: Users, exact: false },
   { href: '/admin/albums', label: 'Albums', icon: ImageIcon, exact: false },
+  { href: '/admin/covers', label: 'Covers', icon: BookImage, exact: false },
 ];
 
 export default function AdminNav() {

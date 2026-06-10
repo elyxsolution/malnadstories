@@ -13,17 +13,23 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 type Handle = 'nw' | 'ne' | 'sw' | 'se';
 
 /**
- * Non-destructive photo editor. The LEFT canvas shows the full oriented (rotate +
- * flip) image at brightness/sharpness with an interactive rule-of-thirds crop rect
- * laid over it — so the crop is authored in the same space the renderer crops in.
- * The RIGHT "result" preview is just a PhotoFrame fed the real EditConfig, so it is
- * pixel-identical to what the slot and album preview show.
+ * FULL advanced photo editor. The LEFT canvas shows the full oriented (rotate + flip)
+ * image with an interactive **free-form crop rect** laid over it (resize from any
+ * corner, drag to move) — so the crop is authored in the same space the renderer
+ * crops in. The RIGHT "result" preview is a PhotoFrame fed the real EditConfig at the
+ * photo's actual print frame aspect, so it is pixel-identical to the slot + PDF.
+ *
+ * This editor owns: crop (free-form), rotate, tilt/straighten, flip, brightness,
+ * sharpness. It deliberately leaves zoom/offset (the fixed-frame QUICK crop) untouched
+ * so the two systems compose — see model.ts. Overlays live on the page block, not here.
  */
 export default function PhotoEditor({
   photoId,
   url,
   filename,
   initial,
+  frameAspect,
+  showGutter,
   onClose,
   onSaved,
 }: {
@@ -31,6 +37,8 @@ export default function PhotoEditor({
   url: string;
   filename: string;
   initial: EditConfig | null;
+  frameAspect: number; // print frame aspect for the result preview (3:4 single, 3:2 double)
+  showGutter: boolean;
   onClose: () => void;
   onSaved: (edit: EditConfig) => void;
 }) {
@@ -64,16 +72,12 @@ export default function PhotoEditor({
   const set = (patch: Partial<EditConfig>) => setEdit((e) => ({ ...e, ...patch }));
   const crop = edit.crop ?? FULL_CROP;
 
-  // Oriented aspect: 90/270 swaps the natural dimensions. The canvas matches it so
-  // the crop overlay maps 1:1 to the displayed image (no letterboxing).
   const quarter = (edit.rotate ?? 0) === 90 || (edit.rotate ?? 0) === 270;
   const ow = quarter ? nat.h : nat.w;
   const oh = quarter ? nat.w : nat.h;
   const orientedAspect = ow > 0 && oh > 0 ? ow / oh : 1;
 
-  // Size the crop canvas in JS so it matches the oriented aspect EXACTLY within the
-  // available area — fitting the crop overlay to the displayed image (CSS
-  // aspect-ratio + max-height can violate the ratio and break the mapping).
+  // Size the crop canvas so it matches the oriented aspect EXACTLY within the area.
   const canvas = (() => {
     if (wrap.w <= 0 || wrap.h <= 0) return { w: 0, h: 0 };
     let w = wrap.w;
@@ -85,8 +89,8 @@ export default function PhotoEditor({
     return { w, h };
   })();
 
-  // The crop canvas shows the image with crop disabled + tilt 0 (crop is defined on
-  // the un-tilted oriented image; tilt straightens the framed crop afterwards).
+  // The crop canvas shows the whole oriented image: crop full, tilt 0, and NO fixed-frame
+  // zoom/pan (those belong to quick crop) so the free-crop rect maps 1:1 to the image.
   const baseEdit: EditConfig = {
     rotate: edit.rotate,
     flipH: edit.flipH,
@@ -95,30 +99,29 @@ export default function PhotoEditor({
     sharpness: edit.sharpness,
     crop: FULL_CROP,
     tilt: 0,
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0,
   };
 
-  // ── crop rect drag / resize (fractions of the canvas = oriented image) ───────
+  // ── free crop rect drag / resize (fractions of the oriented image) ───────────
   const startDrag = (mode: 'move' | Handle) => (e: React.PointerEvent) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     drag.current = { mode, x: e.clientX, y: e.clientY, rect: crop };
   };
   const onMove = (e: React.PointerEvent) => {
-    const canvas = canvasRef.current;
-    if (!drag.current || !canvas) return;
-    const r = canvas.getBoundingClientRect();
+    const c = canvasRef.current;
+    if (!drag.current || !c) return;
+    const r = c.getBoundingClientRect();
     const dx = (e.clientX - drag.current.x) / r.width;
     const dy = (e.clientY - drag.current.y) / r.height;
     const o = drag.current.rect;
 
     if (drag.current.mode === 'move') {
-      set({
-        crop: { ...o, x: clamp(o.x + dx, 0, 1 - o.w), y: clamp(o.y + dy, 0, 1 - o.h) },
-      });
+      set({ crop: { ...o, x: clamp(o.x + dx, 0, 1 - o.w), y: clamp(o.y + dy, 0, 1 - o.h) } });
       return;
     }
-
-    // Resize from a corner: adjust the dragged edges, keep the opposite ones pinned.
     let { x, y, w, h } = o;
     const m = drag.current.mode;
     if (m === 'nw' || m === 'sw') {
@@ -126,17 +129,13 @@ export default function PhotoEditor({
       w = o.x + o.w - nx;
       x = nx;
     }
-    if (m === 'ne' || m === 'se') {
-      w = clamp(o.w + dx, MIN_CROP, 1 - o.x);
-    }
+    if (m === 'ne' || m === 'se') w = clamp(o.w + dx, MIN_CROP, 1 - o.x);
     if (m === 'nw' || m === 'ne') {
       const ny = clamp(o.y + dy, 0, o.y + o.h - MIN_CROP);
       h = o.y + o.h - ny;
       y = ny;
     }
-    if (m === 'sw' || m === 'se') {
-      h = clamp(o.h + dy, MIN_CROP, 1 - o.y);
-    }
+    if (m === 'sw' || m === 'se') h = clamp(o.h + dy, MIN_CROP, 1 - o.y);
     set({ crop: { x, y, w, h } });
   };
   const endDrag = (e: React.PointerEvent) => {
@@ -146,8 +145,7 @@ export default function PhotoEditor({
 
   const rotate90 = () => {
     const next = (((edit.rotate ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
-    // Orientation changed → the crop rect's frame swapped; reset to full.
-    set({ rotate: next, crop: FULL_CROP });
+    set({ rotate: next, crop: FULL_CROP }); // orientation changed → reset the crop frame
   };
   const reset = () => setEdit({});
 
@@ -187,7 +185,7 @@ export default function PhotoEditor({
         </div>
 
         <div className="mt-3 grid gap-4 md:grid-cols-[1fr_200px]">
-          {/* Crop canvas */}
+          {/* Free-form crop canvas */}
           <div ref={wrapRef} className="flex h-[55vh] items-center justify-center">
             <div
               ref={canvasRef}
@@ -198,7 +196,6 @@ export default function PhotoEditor({
               {nat.w > 0 && canvas.w > 0 && (
                 <>
                   <PhotoFrame url={url} edit={baseEdit} alt={filename} />
-                  {/* Crop rectangle with dimmed surroundings + rule-of-thirds grid */}
                   <div
                     onPointerDown={startDrag('move')}
                     onPointerUp={endDrag}
@@ -212,12 +209,11 @@ export default function PhotoEditor({
                       outline: '1px solid rgba(255,255,255,0.9)',
                     }}
                   >
-                    {/* thirds grid */}
                     <div className="pointer-events-none absolute inset-0">
                       <div className="absolute left-1/3 top-0 h-full w-px bg-white/40" />
                       <div className="absolute left-2/3 top-0 h-full w-px bg-white/40" />
-                      <div className="absolute top-1/3 left-0 w-full h-px bg-white/40" />
-                      <div className="absolute top-2/3 left-0 w-full h-px bg-white/40" />
+                      <div className="absolute top-1/3 left-0 h-px w-full bg-white/40" />
+                      <div className="absolute top-2/3 left-0 h-px w-full bg-white/40" />
                     </div>
                     {(['nw', 'ne', 'sw', 'se'] as Handle[]).map((h) => (
                       <div
@@ -233,12 +229,16 @@ export default function PhotoEditor({
             </div>
           </div>
 
-          {/* Live result (identical pipeline to slots + preview) + controls */}
+          {/* Live result (real print frame aspect) + controls */}
           <div className="space-y-3">
             <div>
-              <p className="mb-1 text-xs text-muted-foreground">Result</p>
-              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-md border bg-muted">
+              <p className="mb-1 text-xs text-muted-foreground">Result (print frame)</p>
+              <div
+                className="relative w-full overflow-hidden rounded-md border bg-muted"
+                style={{ aspectRatio: String(frameAspect) }}
+              >
                 <PhotoFrame url={url} edit={edit} alt="result preview" />
+                {showGutter && <div className="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-amber-400/90" />}
               </div>
             </div>
 
@@ -246,49 +246,18 @@ export default function PhotoEditor({
               <Button variant="outline" size="sm" onClick={rotate90}>
                 <RotateCw /> 90°
               </Button>
-              <Button
-                variant={edit.flipH ? 'secondary' : 'outline'}
-                size="icon-sm"
-                onClick={() => set({ flipH: !edit.flipH })}
-                aria-label="Flip horizontal"
-              >
+              <Button variant={edit.flipH ? 'secondary' : 'outline'} size="icon-sm" onClick={() => set({ flipH: !edit.flipH })} aria-label="Flip horizontal">
                 <FlipHorizontal />
               </Button>
-              <Button
-                variant={edit.flipV ? 'secondary' : 'outline'}
-                size="icon-sm"
-                onClick={() => set({ flipV: !edit.flipV })}
-                aria-label="Flip vertical"
-              >
+              <Button variant={edit.flipV ? 'secondary' : 'outline'} size="icon-sm" onClick={() => set({ flipV: !edit.flipV })} aria-label="Flip vertical">
                 <FlipVertical />
               </Button>
             </div>
 
-            <Slider
-              label="Straighten"
-              value={edit.tilt ?? 0}
-              min={-15}
-              max={15}
-              step={0.5}
-              suffix="°"
-              onChange={(v) => set({ tilt: v })}
-            />
-            <Slider
-              label="Brightness"
-              value={edit.brightness ?? 1}
-              min={0.3}
-              max={2}
-              step={0.01}
-              onChange={(v) => set({ brightness: v })}
-            />
-            <Slider
-              label="Sharpness"
-              value={edit.sharpness ?? 0}
-              min={0}
-              max={2}
-              step={0.05}
-              onChange={(v) => set({ sharpness: v })}
-            />
+            <Slider label="Straighten" value={edit.tilt ?? 0} min={-15} max={15} step={0.5} suffix="°" onChange={(v) => set({ tilt: v })} />
+            <Slider label="Brightness" value={edit.brightness ?? 1} min={0.3} max={2} step={0.01} onChange={(v) => set({ brightness: v })} />
+            <Slider label="Sharpness" value={edit.sharpness ?? 0} min={0} max={2} step={0.05} onChange={(v) => set({ sharpness: v })} />
+            <p className="text-[11px] text-muted-foreground">Tip: use “Adjust crop” on the page for quick pan/zoom inside the print frame.</p>
           </div>
         </div>
 
@@ -338,15 +307,7 @@ function Slider({
           {suffix}
         </span>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full"
-      />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
     </label>
   );
 }

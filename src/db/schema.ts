@@ -50,8 +50,28 @@ export const albums = pgTable('albums', {
   title: text('title').notNull(),
   size: integer('size').notNull(),
   status: text('status').notNull().default('draft'),
+  // Selected cover design (admin-managed template). Null until chosen; required to
+  // submit / generate the PDF. ON DELETE SET NULL handled in 0023.
+  coverTemplateId: uuid('cover_template_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Admin-managed cover catalogue (0023). Artwork bytes live in private R2 under
+// cover-templates/…; only metadata + keys here. Users SELECT active rows to pick a
+// cover; admins write via service-role. Served by presigned GET like photos.
+export const coverTemplates = pgTable('cover_templates', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull(),
+  description: text('description'),
+  imageKey: text('image_key').notNull(),
+  thumbKey: text('thumb_key'),
+  width: integer('width'),
+  height: integer('height'),
+  sort: integer('sort').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => profiles.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const albumPages = pgTable('album_pages', {

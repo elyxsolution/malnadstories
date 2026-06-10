@@ -35,11 +35,28 @@ type PageRow = {
  */
 export async function loadAlbumForAdmin(
   albumId: string,
-): Promise<{ photos: Photo[]; blocks: Block[] } | null> {
+): Promise<{ photos: Photo[]; blocks: Block[]; cover: { url: string; name: string } | null } | null> {
   const svc = createServiceClient();
 
-  const { data: albumRow } = await svc.from('albums').select('id').eq('id', albumId).maybeSingle();
+  const { data: albumRow } = await svc
+    .from('albums')
+    .select('id, cover_template_id')
+    .eq('id', albumId)
+    .maybeSingle();
   if (!albumRow) return null;
+
+  // Selected cover (admin template), presigned for the preview.
+  let cover: { url: string; name: string } | null = null;
+  const coverTemplateId = (albumRow as { cover_template_id: string | null }).cover_template_id;
+  if (coverTemplateId) {
+    const { data: coverRow } = await svc
+      .from('cover_templates')
+      .select('name, image_key')
+      .eq('id', coverTemplateId)
+      .maybeSingle();
+    const c = coverRow as { name: string; image_key: string } | null;
+    if (c) cover = { url: await presignGet(c.image_key, 900), name: c.name };
+  }
 
   const { data: photoData } = await svc
     .from('photos')
@@ -81,5 +98,5 @@ export async function loadAlbumForAdmin(
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
     }));
 
-  return { photos, blocks };
+  return { photos, blocks, cover };
 }

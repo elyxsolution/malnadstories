@@ -9,10 +9,12 @@ import { env } from './env.js';
 export const IMAGE_HARDENING_QUEUE = 'image-hardening';
 export const ALBUM_PDF_QUEUE = 'album-pdf';
 export const R2_CLEANUP_QUEUE = 'r2-cleanup';
+export const COVER_THUMBNAIL_QUEUE = 'cover-thumbnail';
 
 export type ImageHardeningJob = { photoId: string };
 export type AlbumPdfJob = { albumId: string; token: string };
 export type R2CleanupJob = { keys: string[] };
+export type CoverThumbnailJob = { coverTemplateId: string };
 
 /**
  * Worker-side pg-boss instance. Connects with DIRECT_URL — a SESSION connection

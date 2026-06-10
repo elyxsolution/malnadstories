@@ -1,8 +1,8 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { SaveLayoutSchema, PhotoEditSchema } from '@/lib/validations';
-import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
+import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema } from '@/lib/validations';
+import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -152,14 +152,24 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
 
   const { data: album } = await supabase
     .from('albums')
-    .select('id, size, status')
+    .select('id, size, status, cover_template_id')
     .eq('id', albumId)
     .maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
-  const { size } = album as { size: number };
+  const { size, cover_template_id } = album as { size: number; cover_template_id: string | null };
 
   // A paid album is frozen — no re-submitting changed content.
   if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+
+  // Cover is mandatory (physical page 1). It must be a currently-active template.
+  if (!cover_template_id) return { ok: false, error: 'Choose a cover design before submitting.' };
+  const { data: cover } = await supabase
+    .from('cover_templates')
+    .select('id')
+    .eq('id', cover_template_id)
+    .eq('active', true)
+    .maybeSingle();
+  if (!cover) return { ok: false, error: 'Your selected cover is no longer available — please pick another.' };
 
   const { data: pages } = await supabase
     .from('album_pages')
@@ -172,13 +182,20 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
   for (const r of rows) {
     if (!r.layout_template) return { ok: false, error: 'A page is missing its layout.' };
     consumed += PAGE_COST[r.layout_template];
-    const baseFilled = (r.photo_ids ?? []).filter(Boolean).length >= 1;
-    if (!baseFilled) {
-      return { ok: false, error: 'Every page must have its main photo before submitting.' };
+    // single-pair needs BOTH pages filled; double-spread needs its one image.
+    const filled = (r.photo_ids ?? []).filter(Boolean).length;
+    if (filled < requiredBaseCount(r.layout_template)) {
+      return {
+        ok: false,
+        error:
+          r.layout_template === 'single-pair'
+            ? 'Every single page needs a photo on both the left and right.'
+            : 'Every double-page spread needs its image.',
+      };
     }
   }
   if (consumed !== size) {
-    return { ok: false, error: `Album must fill exactly ${size} pages (currently ${consumed}).` };
+    return { ok: false, error: `Album must fill exactly ${size} content pages (currently ${consumed}).` };
   }
 
   const { error } = await supabase
@@ -188,6 +205,47 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
   if (error) {
     console.error('submitAlbum error:', error);
     return { ok: false, error: 'Could not submit album.' };
+  }
+  return { ok: true };
+}
+
+/**
+ * Set the album's cover design (an admin-managed template). The cover is chosen, never
+ * edited — users can't put photos on it. RLS scopes the album to the owner; we verify
+ * the template exists and is active. Blocked once the album is part of a paid order.
+ */
+export async function selectCover(input: unknown): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const parsed = SelectCoverSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId, coverTemplateId } = parsed.data;
+
+  // Ownership gate (RLS).
+  const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
+  if (!album) return { ok: false, error: 'Album not found' };
+  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+
+  // The cover must be a real, active template (active rows are SELECT-visible via RLS).
+  const { data: cover } = await supabase
+    .from('cover_templates')
+    .select('id')
+    .eq('id', coverTemplateId)
+    .eq('active', true)
+    .maybeSingle();
+  if (!cover) return { ok: false, error: 'That cover is no longer available.' };
+
+  const { error } = await supabase
+    .from('albums')
+    .update({ cover_template_id: coverTemplateId, updated_at: new Date().toISOString() })
+    .eq('id', albumId);
+  if (error) {
+    console.error('selectCover error:', error);
+    return { ok: false, error: 'Could not save the cover selection.' };
   }
   return { ok: true };
 }

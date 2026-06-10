@@ -4,13 +4,17 @@ import {
   IMAGE_HARDENING_QUEUE,
   ALBUM_PDF_QUEUE,
   R2_CLEANUP_QUEUE,
+  COVER_THUMBNAIL_QUEUE,
   type ImageHardeningJob,
   type AlbumPdfJob,
   type R2CleanupJob,
+  type CoverThumbnailJob,
 } from './queue.js';
 import { processPhoto } from './jobs/image-hardening.js';
 import { generateAlbumPdf, closeBrowser } from './jobs/album-pdf.js';
 import { cleanupR2 } from './jobs/r2-cleanup.js';
+import { generateCoverThumbnail } from './jobs/cover-thumbnail.js';
+import { startHealthServer } from './health-server.js';
 import { supabase } from './supabase.js';
 import { env } from './env.js';
 
@@ -41,12 +45,17 @@ async function sweepPending(boss: PgBoss): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Bind the availability port immediately so an inbound wake-up request (Render
+  // routing / the app's readiness probe) is answered the moment the process is up.
+  startHealthServer();
+
   const boss = createBoss();
   boss.on('error', (e) => console.error('[worker] pg-boss error:', e));
   await boss.start();
   await boss.createQueue(IMAGE_HARDENING_QUEUE);
   await boss.createQueue(ALBUM_PDF_QUEUE);
   await boss.createQueue(R2_CLEANUP_QUEUE);
+  await boss.createQueue(COVER_THUMBNAIL_QUEUE);
 
   await boss.work<ImageHardeningJob>(
     IMAGE_HARDENING_QUEUE,
@@ -79,7 +88,17 @@ async function main(): Promise<void> {
     },
   );
 
-  console.log('[worker] image-hardening + album-pdf + r2-cleanup workers started');
+  await boss.work<CoverThumbnailJob>(
+    COVER_THUMBNAIL_QUEUE,
+    { pollingIntervalSeconds: 2 },
+    async (jobs) => {
+      for (const job of jobs) {
+        await generateCoverThumbnail(job.data);
+      }
+    },
+  );
+
+  console.log('[worker] image-hardening + album-pdf + r2-cleanup + cover-thumbnail workers started');
 
   await sweepPending(boss);
   const timer = setInterval(() => {

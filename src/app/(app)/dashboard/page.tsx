@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/service';
 import { PAID_STATES } from '@/lib/orders/album-lock';
 import { Button } from '@/components/ui/button';
 import AlbumCard, { type Purchase } from './_album-card';
+import WorkerPrewarm from '@/components/worker/worker-prewarm';
 
 type AlbumRow = {
   id: string;
@@ -75,6 +76,8 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
+      {/* Opportunistic worker pre-warm (≤ once / 10 min) — see WorkerPrewarm. */}
+      <WorkerPrewarm />
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-2xl font-bold">My Albums</h1>
         <Button render={<Link href="/albums/new" />}>+ New album</Button>

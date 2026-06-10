@@ -5,10 +5,12 @@ import { presignGet } from '@/lib/r2';
 import { getPaidOrder } from '@/lib/orders/album-lock';
 import Builder from './_builder';
 import PurchasedAlbum from './_purchased';
+import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import { type Photo } from './_uploader';
 import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
+import { listActiveCoverOptions } from '@/lib/covers';
 
-type AlbumRow = { id: string; title: string; size: number; status: string };
+type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null };
 type PhotoRow = {
   id: string;
   original_filename: string;
@@ -33,7 +35,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   const { data } = await supabase
     .from('albums')
-    .select('id, title, size, status')
+    .select('id, title, size, status, cover_template_id')
     .eq('id', params.id)
     .maybeSingle();
 
@@ -92,6 +94,29 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
     }));
 
+  // Active cover designs (admin-managed; RLS exposes only active rows), with thumbnail
+  // + full URLs. The album's stored cover is resolved from this list for the preview.
+  const covers = await listActiveCoverOptions();
+  let selectedCover = covers.find((c) => c.id === album.cover_template_id) ?? null;
+
+  // The album may reference a now-INACTIVE (soft-deleted) cover. It still renders in the
+  // PDF (the print route resolves by id regardless of active), so resolve it for the
+  // preview too — even though it won't appear in the active "Change cover" grid. RLS
+  // hides inactive rows from the user client, so read it via the service role.
+  if (!selectedCover && album.cover_template_id) {
+    const svc = createServiceClient();
+    const { data: c } = await svc
+      .from('cover_templates')
+      .select('name, image_key')
+      .eq('id', album.cover_template_id)
+      .maybeSingle();
+    const row = c as { name: string; image_key: string } | null;
+    if (row) {
+      const url = await presignGet(row.image_key, 3600);
+      selectedCover = { id: album.cover_template_id, name: row.name, description: null, url, thumbUrl: url };
+    }
+  }
+
   // Initial preview-PDF status (album_pdfs is service-only; ownership already proven
   // by the RLS-scoped album load above). The builder polls for updates.
   const admin = createServiceClient();
@@ -116,6 +141,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
           order={{ id: paidOrder.id, status: paidOrder.status }}
           photos={photos}
           blocks={initialBlocks}
+          cover={selectedCover ? { url: selectedCover.url, name: selectedCover.name } : null}
           initialPdfStatus={initialPdfStatus}
         />
       </div>
@@ -124,6 +150,9 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {/* Opportunistic worker pre-warm (≤ once / 10 min): the user is in the builder
+          and will likely upload or generate a PDF soon, so wake the worker early. */}
+      <WorkerPrewarm />
       <Builder
         albumId={album.id}
         initialPdfStatus={initialPdfStatus}
@@ -132,6 +161,8 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialStatus={album.status}
         initialPhotos={photos}
         initialBlocks={initialBlocks}
+        covers={covers}
+        initialCoverId={album.cover_template_id}
       />
     </div>
   );

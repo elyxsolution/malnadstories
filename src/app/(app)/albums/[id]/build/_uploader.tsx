@@ -66,10 +66,15 @@ export default function Uploader({
   albumId,
   remaining,
   onUploaded,
+  ensureWorkerReady,
 }: {
   albumId: string;
   remaining: number;
   onUploaded: (photo: Photo) => void;
+  // Gate that wakes the (sleepable) worker before uploads begin — the worker hardens
+  // each upload, so starting one while it's unavailable would strand photos as
+  // 'pending' until the next sweep. Resolves false if the user cancels the wake-up.
+  ensureWorkerReady?: () => Promise<boolean>;
 }) {
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -145,12 +150,17 @@ export default function Uploader({
   );
 
   const handleFiles = useCallback(
-    (files: FileList | null) => {
+    async (files: FileList | null) => {
       if (!files) return;
+      const batch = Array.from(files).slice(0, Math.max(0, slotsLeft));
+      if (batch.length === 0) return;
+      // Wake the worker before any bytes move — it hardens each upload, so we never
+      // start while it's unavailable. Cancelling the wake-up aborts the whole batch.
+      if (ensureWorkerReady && !(await ensureWorkerReady())) return;
       // Respect the album-wide cap on the client too (server enforces it as the gate).
-      Array.from(files).slice(0, Math.max(0, slotsLeft)).forEach(uploadOne);
+      batch.forEach(uploadOne);
     },
-    [slotsLeft, uploadOne],
+    [slotsLeft, uploadOne, ensureWorkerReady],
   );
 
   return (

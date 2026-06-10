@@ -270,6 +270,8 @@ Album `size` is data-driven: the create-album form renders `products.pages`, and
 | `RAZORPAY_KEY_ID` | Razorpay TEST key id. Server-side Basic-auth for the Orders API **and** returned to the client per-order by `createOrder` so Checkout can open. **Not** `NEXT_PUBLIC` (non-sensitive, but delivered via the action response). |
 | `RAZORPAY_KEY_SECRET` | Razorpay TEST key secret — **server-only, never expose**. Orders-API auth + client-callback payment-signature check. |
 | `RAZORPAY_WEBHOOK_SECRET` | Webhook secret (matches the Razorpay dashboard webhook) — **server-only**. Verifies `X-Razorpay-Signature`. |
+| `WORKER_URL` | App-side, **server-only** (never `NEXT_PUBLIC`); base URL of the worker service. The app probes `WORKER_URL/health` to gate/wake worker-dependent ops (Phase G). Unset → gating disabled (probe reports "ready"), for local dev. |
+| `PORT` | Worker-only; port the worker's `/health` availability server binds to (Render injects it; default `8080`) |
 | `APP_URL` | Worker-only; base URL the PDF job's Chromium navigates to (default `http://localhost:3000`) |
 | `KEEP_RAW_ORIGINAL` | Worker-only; `false` (default) deletes the raw upload after sanitizing |
 | `WORKER_SWEEP_INTERVAL_MS` | Worker-only; how often to re-scan for stuck `pending` photos (default 60000) |

@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import { createHash } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
-import PrintAlbum, { type PrintPhoto } from './_print-album';
+import PrintAlbum, { type PrintPhoto, type PrintCover } from './_print-album';
 import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
 
 // No caching: this route is token-gated and renders live album data for the worker.
@@ -121,10 +121,24 @@ export default async function PrintPage({
 
   const { data: albumData } = await supabase
     .from('albums')
-    .select('id')
+    .select('id, cover_template_id')
     .eq('id', params.id)
     .maybeSingle();
   if (!albumData) notFound();
+
+  // Resolve the selected cover (admin template) and presign its artwork. Rendered as
+  // physical page 1; never carries user content. Null → renderer emits a plain cover.
+  const coverTemplateId = (albumData as { cover_template_id: string | null }).cover_template_id;
+  let cover: PrintCover = null;
+  if (coverTemplateId) {
+    const { data: coverRow } = await supabase
+      .from('cover_templates')
+      .select('image_key')
+      .eq('id', coverTemplateId)
+      .maybeSingle();
+    const key = (coverRow as { image_key: string } | null)?.image_key;
+    if (key) cover = { url: await presignGet(key, 900) };
+  }
 
   // Only 'ready' photos have a sanitized key; presign the full-res master (longer
   // TTL so the worker finishes within the window). Never the raw original.
@@ -165,18 +179,12 @@ export default async function PrintPage({
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
     }));
 
-  // Exactly the frames the client must wait for (base + overlays with a known photo).
-  // If this is 0, the readiness flag fires immediately client-side.
-  const expectedFrames = blocks.reduce(
-    (n, b) => n + (b.photoIds[0] ? 1 : 0) + b.overlays.length,
-    0,
-  );
   console.log('[print] rendering album', {
     albumId: params.id,
     blocks: blocks.length,
     readyPhotos: photos.length,
-    expectedFrames,
+    hasCover: !!cover,
   });
 
-  return <PrintAlbum blocks={blocks} photos={photos} />;
+  return <PrintAlbum blocks={blocks} photos={photos} cover={cover} />;
 }
