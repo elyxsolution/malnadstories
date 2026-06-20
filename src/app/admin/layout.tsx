@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { requireAdmin, NotAdminError } from '@/lib/auth/require-admin';
 import AppHeader from '@/components/app-header';
+import { brandFontVars } from '@/lib/fonts';
 import AdminNav from './_nav';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -13,7 +14,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className={`${brandFontVars} font-ui flex min-h-screen flex-col`}>
       <AppHeader email={admin.email ?? ''} />
       <AdminNav />
       <main className="flex-1">{children}</main>

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { RotateCw, FlipHorizontal, FlipVertical, Loader2, X } from 'lucide-react';
+import { RotateCw, FlipHorizontal, FlipVertical, Loader2, X, SlidersHorizontal } from 'lucide-react';
 import { FULL_CROP, type EditConfig, type Rect } from '@/lib/builder/model';
 import { savePhotoEdit } from '@/lib/actions/builder';
 import PhotoFrame from './_photo-frame';
 import { Button } from '@/components/ui/button';
+import { LUX_PRIMARY } from '@/components/brand';
 
 const MIN_CROP = 0.08;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -170,23 +171,35 @@ export default function PhotoEditor({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/55 p-4 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border bg-background p-4 shadow-lg"
+        className="animate-rise max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border bg-background shadow-elevated"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="truncate text-sm font-semibold" title={filename}>
-            Edit · {filename}
-          </h2>
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-secondary text-primary">
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Edit photo</p>
+              <h2 className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight" title={filename}>
+                {filename}
+              </h2>
+            </div>
+          </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
             <X />
           </Button>
         </div>
 
-        <div className="mt-3 grid gap-4 md:grid-cols-[1fr_200px]">
-          {/* Free-form crop canvas */}
-          <div ref={wrapRef} className="flex h-[55vh] items-center justify-center">
+        <div className="grid gap-4 p-4 md:grid-cols-[1fr_208px]">
+          {/* Free-form crop canvas on a recessed dark stage */}
+          <div
+            ref={wrapRef}
+            className="flex h-[55vh] items-center justify-center rounded-xl p-3 ring-1 ring-inset ring-black/20"
+            style={{ background: 'radial-gradient(120% 100% at 50% 0%, hsl(160 14% 14%), hsl(162 18% 9%))' }}
+          >
             <div
               ref={canvasRef}
               onPointerMove={onMove}
@@ -261,9 +274,9 @@ export default function PhotoEditor({
           </div>
         </div>
 
-        {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+        {error && <p className="px-4 text-xs text-destructive">{error}</p>}
 
-        <div className="mt-4 flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 border-t border-border/60 px-4 py-3">
           <Button variant="ghost" size="sm" onClick={reset} disabled={saving}>
             Reset all
           </Button>
@@ -271,7 +284,7 @@ export default function PhotoEditor({
             <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={apply} disabled={saving}>
+            <Button size="sm" onClick={apply} disabled={saving} className={LUX_PRIMARY}>
               {saving && <Loader2 className="animate-spin" />} Apply
             </Button>
           </div>
@@ -298,16 +311,28 @@ function Slider({
   suffix?: string;
   onChange: (v: number) => void;
 }) {
+  const fill = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <label className="block text-xs">
-      <div className="mb-1 flex justify-between text-muted-foreground">
-        <span>{label}</span>
-        <span>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="font-medium text-foreground/80">{label}</span>
+        <span className="rounded bg-secondary px-1.5 py-0.5 font-medium tabular-nums text-muted-foreground">
           {value.toFixed(2)}
           {suffix}
         </span>
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="lux-range"
+        style={{
+          background: `linear-gradient(to right, hsl(var(--primary)) ${fill}%, hsl(var(--muted)) ${fill}%)`,
+        }}
+      />
     </label>
   );
 }

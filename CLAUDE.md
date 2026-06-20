@@ -350,6 +350,76 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 
 ---
 
+## Design standards (MANDATORY for all UI/UX work)
+
+> **Applies to every UI, UX, frontend, component, layout, animation, micro-interaction,
+> branding, and visual task in this project — no exceptions.** The bar is high-end SaaS
+> quality on par with **Linear, Stripe, Vercel, Raycast, and Notion**. Generic or
+> AI-template-looking output is not acceptable. Craftsmanship and attention to detail
+> are the deliverable, not an extra.
+
+### Skills — invoke automatically (don't wait to be asked)
+
+Three project skills in `.claude/skills/` encode these standards. When a task touches
+UI/UX/frontend/components/layout/animation/branding/design, **consult and apply them**
+(via the `Skill` tool when an explicit invocation helps, otherwise follow their rules
+directly):
+
+| Skill | When it leads | Owns |
+|---|---|---|
+| `impeccable-design` | building/polishing any visual UI | spacing, typography, color, hierarchy, layout, component states, tokens |
+| `emil-kowalski-design-engineering` | anything that moves or responds | animations, transitions, gestures, micro-interactions, timing/easing, motion a11y |
+| `taste` | direction & final review | restraint, cohesion, avoiding AI/template tells, premium judgment |
+
+Typical flow: **taste** sets direction → **impeccable-design** executes the static layout
+→ **emil-kowalski-design-engineering** adds motion/interaction → **taste** does the final
+gut-check before "done." Run each skill's review checklist before considering UI complete.
+
+### Combined non-negotiable standards (all three skills, distilled)
+
+1. **Premium, production-ready** — every screen designs the full state matrix: default,
+   hover, active/pressed, **focus-visible**, disabled, loading, error, selected, **empty**.
+   No blank areas, no spinner-only loading (use skeletons matching final layout).
+2. **Exceptional visual hierarchy** — exactly **one** primary action per view; build
+   hierarchy with **size → weight → color → spacing**, in that order. No competing CTAs.
+3. **Consistent spacing & typography** — everything on the **4px spacing scale**;
+   inside-group gaps < between-group gaps. ≤ ~6 type sizes, 2–3 weights, ≤ 3 text colors;
+   `tabular-nums` for prices/tables (INR commerce). No magic numbers.
+4. **Thoughtful micro-interactions** — a press state (`active:scale-[0.97]`, ~100ms) on
+   every interactive element; popovers/menus scale from their trigger origin; optimistic UI.
+5. **Smooth, purposeful animation** — every animation has a purpose or is deleted.
+   Functional transitions ≤ 300ms, hover/press ≤ 150ms, exits faster than enters; animate
+   only `transform`/`opacity`; interruptible motion; honor `prefers-reduced-motion`.
+6. **Minimalist but visually rich** — neutral-dominant palette with **one** restrained
+   accent; soft layered shadows (never one hard dark shadow); barely-there borders;
+   consistent radius scale (nested radii: `inner = outer − padding`). White space is the
+   tool, not decoration.
+7. **High-end SaaS quality** — match the feel of Linear/Stripe/Vercel/Raycast/Notion:
+   content is the hero, chrome recedes, fast and keyboard-friendly.
+8. **Mobile-first responsive** — author base styles for mobile, enhance upward with
+   `sm:`/`md:`/`lg:`; hit targets ≥ 44×44px on touch.
+9. **Accessibility** — contrast ≥ 4.5:1 body / 3:1 UI; visible focus rings on everything
+   (never bare `outline: none`); correct focus management through dialogs/transitions;
+   semantic HTML and labels.
+10. **Avoid generic AI/template UI** — no purple→pink gradient blobs, no emoji feature
+    icons, no three-identical-icon-card rows, no everything-centered, no generic copy
+    ("Welcome to your dashboard", "Seamlessly…"), no unedited default component look.
+    Use lucide-react icons, intentional layout, and specific human copy.
+11. **Craftsmanship & detail** — optical alignment, no orphaned pixels, longest+emptiest
+    realistic content tested, one memorable intentional detail with everything calm around it.
+
+### Token/system discipline (project-specific)
+
+- Reuse the existing token system: CSS variables in `src/app/globals.css` consumed by
+  `tailwind.config.ts`. **Never hardcode hex** in components — reference semantic tokens
+  (`background`, `foreground`, `muted-foreground`, `border`, `primary`, `destructive`, …).
+- Icons: **lucide-react** only, consistent stroke/size, optically centered.
+- Components: **shadcn@4 / `@base-ui/react`** — customize them to the system; never ship
+  the raw default look. Motion lib (`framer-motion`) is **not installed** — prefer
+  CSS/Tailwind animation; confirm before adding the dependency.
+
+---
+
 ## Photo upload (Cloudflare R2) — built
 
 Direct browser → R2 upload via short-lived presigned URLs. File bytes never pass

@@ -35,6 +35,7 @@ export default function CreateCoupon() {
     setBusy(true);
     setMsg(null);
     const res = await createCoupon({
+      code: str('code'),
       description: str('description'),
       createdReason: str('createdReason'),
       discountType: type,
@@ -72,9 +73,19 @@ export default function CreateCoupon() {
         </Button>
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        The code is generated automatically (e.g. MS-AB12CD34). You cannot set it manually.
+        Leave the code blank to auto-generate one (e.g. MS-AB12CD34), or set your own custom code.
       </p>
       <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
+        <Field label="Code (optional — blank = auto)">
+          <Input
+            name="code"
+            placeholder="MALNAD10"
+            maxLength={20}
+            autoCapitalize="characters"
+            className="font-mono uppercase"
+            style={{ textTransform: 'uppercase' }}
+          />
+        </Field>
         <Field label="Discount type">
           <select
             value={type}

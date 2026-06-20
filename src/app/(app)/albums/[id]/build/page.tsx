@@ -9,6 +9,7 @@ import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import { type Photo } from './_uploader';
 import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
 import { listActiveCoverOptions } from '@/lib/covers';
+import { brandFontVars } from '@/lib/fonts';
 
 type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null };
 type PhotoRow = {
@@ -133,7 +134,8 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   if (paidOrder) {
     return (
-      <div className="p-6 max-w-3xl mx-auto">
+      <div className={`${brandFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
+        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-10">
         <PurchasedAlbum
           albumId={album.id}
           title={album.title}
@@ -144,15 +146,17 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
           cover={selectedCover ? { url: selectedCover.url, name: selectedCover.name } : null}
           initialPdfStatus={initialPdfStatus}
         />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className={`${brandFontVars} builder-studio min-h-[calc(100vh-3.5rem)] font-ui`}>
       {/* Opportunistic worker pre-warm (≤ once / 10 min): the user is in the builder
           and will likely upload or generate a PDF soon, so wake the worker early. */}
       <WorkerPrewarm />
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
       <Builder
         albumId={album.id}
         title={album.title}
@@ -163,6 +167,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         covers={covers}
         initialCoverId={album.cover_template_id}
       />
+      </div>
     </div>
   );
 }

@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#fbf8f1}
+  svg.lucide{width:1em;height:1em;display:block;stroke-width:1.5px}
+  @keyframes ms-spin{to{transform:rotate(360deg)}}
+  ::selection{background:#1e3a2f;color:#f5efe3}
+  @media (max-width:980px){ .ms-grid{grid-template-columns:1fr !important} .ms-rail{display:none !important} }
+</style>
+</helmet>
+
+<div style="position:relative;min-height:100vh;background:#fbf8f1;font-family:'Work Sans',sans-serif;-webkit-font-smoothing:antialiased">
+
+  <div id="ms-grain" style="position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0.045;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E&quot;)"></div>
+
+  <div class="ms-grid" style="max-width:1240px;margin:0 auto;padding:0 56px;display:grid;grid-template-columns:188px 1fr;gap:56px">
+
+    <!-- CONTENTS RAIL -->
+    <aside class="ms-rail" style="position:sticky;top:0;align-self:start;height:100vh;padding:56px 0;display:flex;flex-direction:column;gap:0;border-right:1px solid #e6dcc7">
+      <div style="font-family:'Cormorant Garamond',serif;font-size:23px;font-weight:600;color:#1e3a2f;line-height:1.05;margin-bottom:4px">Malnad<br>Stories</div>
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:#a8966f;margin-bottom:36px">Design System</div>
+      <sc-for list="{{ contents }}" as="c" hint-placeholder-count="12">
+        <a href="{{ c.href }}" style="display:flex;gap:10px;align-items:baseline;padding:7px 0;text-decoration:none;color:#5d5343;font-size:13px;transition:color .2s ease" style-hover="color:#1e3a2f">
+          <span style="font-family:'Courier New',monospace;font-size:10px;color:var(--gold,#a0813f);min-width:16px">{{ c.no }}</span>
+          <span>{{ c.label }}</span>
+        </a>
+      </sc-for>
+      <div style="margin-top:auto;font-size:11px;color:#a8966f;letter-spacing:0.04em;padding-top:24px">v1.0 — 2026</div>
+    </aside>
+
+    <!-- MAIN -->
+    <main style="padding:56px 0 140px;min-width:0">
+
+      <!-- COVER -->
+      <section id="cover" style="padding:48px 0 88px;border-bottom:1px solid #e6dcc7">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.24em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:28px">The Foundation</div>
+        <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:84px;line-height:0.98;letter-spacing:-0.01em;color:#1e3a2f;margin:0 0 28px;max-width:14ch">A system for telling stories.</h1>
+        <p style="font-size:18px;line-height:1.75;color:#3c352b;max-width:54ch;margin:0 0 40px;font-weight:300">The visual language behind Malnad Stories — built to feel timeless, warm and handcrafted. Every screen, every album, every printed page inherits from what is defined here. The interface should quietly disappear behind the memory.</p>
+        <div style="display:flex;gap:34px;flex-wrap:wrap">
+          <sc-for list="{{ moodChips }}" as="m" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:11px">
+              <div style="width:26px;height:26px;border-radius:50%;border:1px solid rgba(0,0,0,0.07);background:#000" data-swatch="{{ m.hex }}"></div>
+              <span style="font-size:12px;font-weight:500;letter-spacing:0.1em;text-transform:uppercase;color:#5d5343">{{ m.label }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- 01 COLOR -->
+      <section id="color" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">01</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Color</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 18px">Forest, paper & leather</h2>
+        <p style="font-size:16px;line-height:1.7;color:#3c352b;max-width:56ch;margin:0 0 44px;font-weight:300">A palette drawn from the things we keep — deep forest greens, the warm cream of uncoated paper, the charcoal of ink, and a whisper of muted gold reserved for the rarest highlights.</p>
+
+        <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Primary — Forest</div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:48px;border:1px solid #e6dcc7">
+          <div style="background:#122019;padding:18px 14px 16px;min-height:118px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#cfbfa3;font-size:11px;font-weight:600">950</div><div style="color:#9a8e76;font-family:'Courier New',monospace;font-size:10px">#122019</div></div>
+          <div style="background:#16271f;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#cfbfa3;font-size:11px;font-weight:600">900</div><div style="color:#9a8e76;font-family:'Courier New',monospace;font-size:10px">#16271f</div></div>
+          <div style="background:#1e3a2f;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end;position:relative"><div style="position:absolute;top:12px;left:14px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:#b89a5c">Primary</div><div style="color:#f5efe3;font-size:11px;font-weight:600">800</div><div style="color:#a9bdb0;font-family:'Courier New',monospace;font-size:10px">#1e3a2f</div></div>
+          <div style="background:#2a4a3b;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#f5efe3;font-size:11px;font-weight:600">700</div><div style="color:#a9bdb0;font-family:'Courier New',monospace;font-size:10px">#2a4a3b</div></div>
+          <div style="background:#3a5a49;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#f5efe3;font-size:11px;font-weight:600">600</div><div style="color:#cdd8cf;font-family:'Courier New',monospace;font-size:10px">#3a5a49</div></div>
+          <div style="background:#51735f;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#f5efe3;font-size:11px;font-weight:600">500</div><div style="color:#e3ece4;font-family:'Courier New',monospace;font-size:10px">#51735f</div></div>
+          <div style="background:#7a9384;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#16271f;font-size:11px;font-weight:600">400</div><div style="color:#2c3f33;font-family:'Courier New',monospace;font-size:10px">#7a9384</div></div>
+        </div>
+
+        <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Neutral — Paper & Cream</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;margin-bottom:48px;border:1px solid #e6dcc7">
+          <div style="background:#fbf8f1;padding:18px 14px 16px;min-height:104px;display:flex;flex-direction:column;justify-content:flex-end;border-right:1px solid #efe6d5"><div style="color:#3c352b;font-size:11px;font-weight:600">Paper 50</div><div style="color:#a8966f;font-family:'Courier New',monospace;font-size:10px">#fbf8f1</div></div>
+          <div style="background:#f5efe3;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#3c352b;font-size:11px;font-weight:600">100</div><div style="color:#a8966f;font-family:'Courier New',monospace;font-size:10px">#f5efe3</div></div>
+          <div style="background:#ede4d4;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#3c352b;font-size:11px;font-weight:600">200</div><div style="color:#8a7d68;font-family:'Courier New',monospace;font-size:10px">#ede4d4</div></div>
+          <div style="background:#e0d4be;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#3c352b;font-size:11px;font-weight:600">300</div><div style="color:#6f6453;font-family:'Courier New',monospace;font-size:10px">#e0d4be</div></div>
+          <div style="background:#cfbfa3;padding:18px 14px 16px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#2c271f;font-size:11px;font-weight:600">400</div><div style="color:#5d5343;font-family:'Courier New',monospace;font-size:10px">#cfbfa3</div></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px">
+          <div>
+            <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Ink — Warm Charcoal</div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;border:1px solid #e6dcc7">
+              <div style="background:#211d17;padding:14px 10px;min-height:92px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#cfbfa3;font-size:10px;font-weight:600">900</div><div style="color:#8a7d68;font-family:'Courier New',monospace;font-size:9px">#211d17</div></div>
+              <div style="background:#2c271f;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#cfbfa3;font-size:10px;font-weight:600">800</div><div style="color:#8a7d68;font-family:'Courier New',monospace;font-size:9px">#2c271f</div></div>
+              <div style="background:#3c352b;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#ede4d4;font-size:10px;font-weight:600">700</div><div style="color:#a8966f;font-family:'Courier New',monospace;font-size:9px">#3c352b</div></div>
+              <div style="background:#5d5343;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#f5efe3;font-size:10px;font-weight:600">500</div><div style="color:#d6c9af;font-family:'Courier New',monospace;font-size:9px">#5d5343</div></div>
+              <div style="background:#8a7d68;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#fbf8f1;font-size:10px;font-weight:600">400</div><div style="color:#efe6d5;font-family:'Courier New',monospace;font-size:9px">#8a7d68</div></div>
+            </div>
+          </div>
+          <div>
+            <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Accent — Muted Gold <span style="color:var(--gold,#a0813f);font-weight:400;text-transform:none;letter-spacing:0">· whisper</span></div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:2px;border:1px solid #e6dcc7">
+              <div style="background:#8a6d35;padding:14px 10px;min-height:92px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#f5efe3;font-size:10px;font-weight:600">Deep</div><div style="color:#e6d4a8;font-family:'Courier New',monospace;font-size:9px">#8a6d35</div></div>
+              <div style="background:#a0813f;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#fbf8f1;font-size:10px;font-weight:600">Gold</div><div style="color:#f3e7c4;font-family:'Courier New',monospace;font-size:9px">#a0813f</div></div>
+              <div style="background:#b89a5c;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#2c271f;font-size:10px;font-weight:600">Light</div><div style="color:#4a3c1f;font-family:'Courier New',monospace;font-size:9px">#b89a5c</div></div>
+              <div style="background:#ddc78f;padding:14px 10px;display:flex;flex-direction:column;justify-content:flex-end"><div style="color:#2c271f;font-size:10px;font-weight:600">Pale</div><div style="color:#6b5a2e;font-family:'Courier New',monospace;font-size:9px">#ddc78f</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:48px;margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Semantic</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px">
+          <div style="border:1px solid #e6dcc7;background:#fff;padding:18px"><div style="width:34px;height:34px;background:#3f6b4d;margin-bottom:14px;border-radius:var(--radius,2px)"></div><div style="font-size:13px;font-weight:600;color:#2c271f">Success</div><div style="font-family:'Courier New',monospace;font-size:11px;color:#8a7d68">#3f6b4d</div></div>
+          <div style="border:1px solid #e6dcc7;background:#fff;padding:18px"><div style="width:34px;height:34px;background:#9c7a2f;margin-bottom:14px;border-radius:var(--radius,2px)"></div><div style="font-size:13px;font-weight:600;color:#2c271f">Warning</div><div style="font-family:'Courier New',monospace;font-size:11px;color:#8a7d68">#9c7a2f</div></div>
+          <div style="border:1px solid #e6dcc7;background:#fff;padding:18px"><div style="width:34px;height:34px;background:#97402f;margin-bottom:14px;border-radius:var(--radius,2px)"></div><div style="font-size:13px;font-weight:600;color:#2c271f">Error</div><div style="font-family:'Courier New',monospace;font-size:11px;color:#8a7d68">#97402f</div></div>
+          <div style="border:1px solid #e6dcc7;background:#fff;padding:18px"><div style="width:34px;height:34px;background:#47606b;margin-bottom:14px;border-radius:var(--radius,2px)"></div><div style="font-size:13px;font-weight:600;color:#2c271f">Info</div><div style="font-family:'Courier New',monospace;font-size:11px;color:#8a7d68">#47606b</div></div>
+        </div>
+      </section>
+
+      <!-- 02 TYPE -->
+      <section id="type" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">02</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Typography</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 18px">An editorial voice</h2>
+        <p style="font-size:16px;line-height:1.7;color:#3c352b;max-width:56ch;margin:0 0 44px;font-weight:300">Cormorant Garamond carries every display and heading moment — high-contrast, literary, unhurried. Work Sans handles the working text: labels, body, and the quiet machinery of the interface.</p>
+
+        <div style="border-top:1px solid #e6dcc7">
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #efe6d5;align-items:baseline">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8a7d68">Display<div style="font-family:'Courier New',monospace;font-weight:400;letter-spacing:0;text-transform:none;color:#a8966f;font-size:11px;margin-top:4px">Cormorant · 84/0.98</div></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:64px;line-height:1;color:#1e3a2f">Every memory deserves paper</div>
+          </div>
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #efe6d5;align-items:baseline">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8a7d68">Heading<div style="font-family:'Courier New',monospace;font-weight:400;letter-spacing:0;text-transform:none;color:#a8966f;font-size:11px;margin-top:4px">Cormorant · 46/1.02</div></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:40px;line-height:1.05;color:#2c271f">The mountains of Malnad</div>
+          </div>
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #efe6d5;align-items:baseline">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8a7d68">Section<div style="font-family:'Courier New',monospace;font-weight:400;letter-spacing:0;text-transform:none;color:#a8966f;font-size:11px;margin-top:4px">Cormorant i · 28</div></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:500;font-size:26px;line-height:1.2;color:#2c271f">Chapter three — the long road home</div>
+          </div>
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #efe6d5;align-items:baseline">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8a7d68">Body<div style="font-family:'Courier New',monospace;font-weight:400;letter-spacing:0;text-transform:none;color:#a8966f;font-size:11px;margin-top:4px">Work Sans · 16/1.75</div></div>
+            <div style="font-family:'Work Sans',sans-serif;font-weight:300;font-size:16px;line-height:1.75;color:#3c352b;max-width:60ch">We drove for hours through tea estates wrapped in mist, the windows down, the smell of wet earth and cardamom filling the car. By dusk the road had narrowed to a single lane and the forest closed in around us like a held breath.</div>
+          </div>
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #efe6d5;align-items:baseline">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8a7d68">Label<div style="font-family:'Courier New',monospace;font-weight:400;letter-spacing:0;text-transform:none;color:#a8966f;font-size:11px;margin-top:4px">Work Sans · 11 · 0.2em</div></div>
+            <div style="font-family:'Work Sans',sans-serif;font-weight:600;font-size:11px;letter-spacing:0.2em;text-transform:uppercase;color:#5d5343">Album Details &nbsp;·&nbsp; 24 Pages &nbsp;·&nbsp; Layflat Binding</div>
+          </div>
+          <div style="display:grid;grid-template-columns:130px 1fr;gap:24px;padding:26px 0;border-bottom:1px solid #efe6d5;align-items:baseline">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#8a7d68">Caption<div style="font-family:'Courier New',monospace;font-weight:400;letter-spacing:0;text-transform:none;color:#a8966f;font-size:11px;margin-top:4px">Cormorant i · 15</div></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:400;font-size:15px;line-height:1.5;color:#8a7d68">Fig. 12 — Sunrise over the Western Ghats, photographed on the fourth morning.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 03 SPACING -->
+      <section id="space" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">03</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Spacing &amp; Layout</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 18px">An 8-point rhythm</h2>
+        <p style="font-size:16px;line-height:1.7;color:#3c352b;max-width:56ch;margin:0 0 44px;font-weight:300">Built on a 4px base and an 8px rhythm. Generous spacing keeps the interface calm; the larger steps separate sections and let pages breathe.</p>
+
+        <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:48px">
+          <sc-for list="{{ spacing }}" as="s" hint-placeholder-count="9">
+            <div style="display:flex;align-items:center;gap:20px">
+              <div style="width:64px;font-family:'Courier New',monospace;font-size:12px;color:#5d5343">{{ s.token }}</div>
+              <div style="width:48px;font-size:12px;color:#a8966f">{{ s.px }}</div>
+              <div style="height:14px;background:#1e3a2f" data-width="{{ s.px }}"></div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px">
+          <div>
+            <div style="margin-bottom:16px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Container widths</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="border:1px solid #e6dcc7;background:#fff;padding:14px 16px;display:flex;justify-content:space-between"><span style="font-size:14px;color:#3c352b">Prose / reading</span><span style="font-family:'Courier New',monospace;font-size:12px;color:#8a7d68">680px</span></div>
+              <div style="border:1px solid #e6dcc7;background:#fff;padding:14px 16px;display:flex;justify-content:space-between"><span style="font-size:14px;color:#3c352b">App content</span><span style="font-family:'Courier New',monospace;font-size:12px;color:#8a7d68">1240px</span></div>
+              <div style="border:1px solid #e6dcc7;background:#fff;padding:14px 16px;display:flex;justify-content:space-between"><span style="font-size:14px;color:#3c352b">Builder canvas</span><span style="font-family:'Courier New',monospace;font-size:12px;color:#8a7d68">1440px</span></div>
+              <div style="border:1px solid #e6dcc7;background:#fff;padding:14px 16px;display:flex;justify-content:space-between"><span style="font-size:14px;color:#3c352b">Full bleed</span><span style="font-family:'Courier New',monospace;font-size:12px;color:#8a7d68">100vw</span></div>
+            </div>
+          </div>
+          <div>
+            <div style="margin-bottom:16px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Section rhythm</div>
+            <div style="border:1px solid #e6dcc7;background:#fff;padding:24px">
+              <div style="font-size:13px;color:#5d5343;line-height:2.2">
+                <div>Component padding &nbsp;<span style="font-family:'Courier New',monospace;color:#8a7d68;float:right">16–24px</span></div>
+                <div>Card gap &nbsp;<span style="font-family:'Courier New',monospace;color:#8a7d68;float:right">16px</span></div>
+                <div>Block spacing &nbsp;<span style="font-family:'Courier New',monospace;color:#8a7d68;float:right">48px</span></div>
+                <div>Section spacing &nbsp;<span style="font-family:'Courier New',monospace;color:#8a7d68;float:right">80px</span></div>
+                <div>Page margin (desktop) &nbsp;<span style="font-family:'Courier New',monospace;color:#8a7d68;float:right">56px</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 04 ELEVATION -->
+      <section id="elevation" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">04</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Elevation</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 18px">Paper on paper</h2>
+        <p style="font-size:16px;line-height:1.7;color:#3c352b;max-width:56ch;margin:0 0 44px;font-weight:300">Shadows stay soft and warm-tinted — closer to a sheet of paper resting on a desk than a floating glass card. Depth is suggested, never announced.</p>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px">
+          <div style="background:#fff;padding:24px 20px;border:1px solid #efe6d5;border-radius:var(--radius,2px)"><div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:38px">e0 — flat</div><div style="font-size:13px;font-weight:600;color:#2c271f">Rests in flow</div><div style="font-size:12px;color:#8a7d68;margin-top:4px">Hairline only</div></div>
+          <div style="background:#fff;padding:24px 20px;border-radius:var(--radius,2px);box-shadow:0 1px 2px rgba(44,39,31,0.06),0 1px 1px rgba(44,39,31,0.04)"><div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:38px">e1 — raised</div><div style="font-size:13px;font-weight:600;color:#2c271f">Cards, tiles</div><div style="font-size:12px;color:#8a7d68;margin-top:4px">Resting state</div></div>
+          <div style="background:#fff;padding:24px 20px;border-radius:var(--radius,2px);box-shadow:0 6px 18px rgba(44,39,31,0.10),0 2px 6px rgba(44,39,31,0.06)"><div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:38px">e2 — lifted</div><div style="font-size:13px;font-weight:600;color:#2c271f">Hover, drag</div><div style="font-size:12px;color:#8a7d68;margin-top:4px">Interaction</div></div>
+          <div style="background:#fff;padding:24px 20px;border-radius:var(--radius,2px);box-shadow:0 24px 60px rgba(44,39,31,0.22),0 8px 20px rgba(44,39,31,0.10)"><div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:38px">e3 — overlay</div><div style="font-size:13px;font-weight:600;color:#2c271f">Modals</div><div style="font-size:12px;color:#8a7d68;margin-top:4px">Above all</div></div>
+        </div>
+      </section>
+
+      <!-- 05 BUTTONS -->
+      <section id="buttons" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">05</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Buttons</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Quiet calls to action</h2>
+
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:40px 56px">
+          <div>
+            <div style="margin-bottom:18px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Primary</div>
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+              <button style="background:#1e3a2f;color:#f5efe3;border:0;padding:13px 28px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;letter-spacing:0.02em;border-radius:var(--radius,2px);cursor:pointer;transition:transform .25s cubic-bezier(.2,.7,.3,1),background .25s ease,box-shadow .25s ease" style-hover="background:#2a4a3b;transform:translateY(-1px);box-shadow:0 8px 20px rgba(30,58,47,0.20)" style-active="transform:translateY(0);box-shadow:none">Create album</button>
+              <button style="background:#1e3a2f;opacity:0.38;color:#f5efe3;border:0;padding:13px 28px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:not-allowed">Disabled</button>
+              <button style="background:#1e3a2f;color:#f5efe3;border:0;padding:13px 24px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);display:inline-flex;align-items:center;gap:10px;cursor:default"><span style="width:14px;height:14px;border:2px solid rgba(245,239,227,0.35);border-top-color:#f5efe3;border-radius:50%;animation:ms-spin .8s linear infinite"></span>Saving…</button>
+            </div>
+          </div>
+          <div>
+            <div style="margin-bottom:18px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Secondary</div>
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+              <button style="background:transparent;color:#1e3a2f;border:1px solid #1e3a2f;padding:12px 27px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:pointer;transition:background .25s ease,transform .25s cubic-bezier(.2,.7,.3,1)" style-hover="background:rgba(30,58,47,0.06);transform:translateY(-1px)" style-active="transform:translateY(0)">Add photos</button>
+              <button style="background:transparent;color:#1e3a2f;border:1px solid #cfbfa3;opacity:0.5;padding:12px 27px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:not-allowed">Disabled</button>
+            </div>
+          </div>
+          <div>
+            <div style="margin-bottom:18px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Ghost</div>
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+              <button style="background:transparent;color:#1e3a2f;border:0;padding:12px 18px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:pointer;transition:background .25s ease" style-hover="background:#ede4d4">Preview</button>
+              <button style="background:transparent;color:var(--gold,#a0813f);border:0;padding:12px 4px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:600;letter-spacing:0.02em;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:gap .25s ease" style-hover="gap:12px">Continue <span style="font-size:14px"><i data-lucide="arrow-right"></i></span></button>
+            </div>
+          </div>
+          <div>
+            <div style="margin-bottom:18px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Icon</div>
+            <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+              <button style="width:42px;height:42px;background:#fff;color:#3c352b;border:1px solid #e0d4be;border-radius:var(--radius,2px);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:18px;transition:background .2s ease,border-color .2s ease,transform .25s cubic-bezier(.2,.7,.3,1)" style-hover="background:#ede4d4;border-color:#cfbfa3;transform:translateY(-1px)"><i data-lucide="heart"></i></button>
+              <button style="width:42px;height:42px;background:#fff;color:#3c352b;border:1px solid #e0d4be;border-radius:var(--radius,2px);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:18px;transition:background .2s ease" style-hover="background:#ede4d4"><i data-lucide="rotate-cw"></i></button>
+              <button style="width:42px;height:42px;background:#1e3a2f;color:#f5efe3;border:0;border-radius:var(--radius,2px);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:18px;transition:background .2s ease" style-hover="background:#2a4a3b"><i data-lucide="plus"></i></button>
+            </div>
+          </div>
+        </div>
+        <p style="margin-top:32px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:16px;color:#8a7d68">Hover any button — default · hover · active are live. Disabled &amp; loading shown statically.</p>
+      </section>
+
+      <!-- 06 INPUTS -->
+      <section id="inputs" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">06</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Inputs</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Forms that get out of the way</h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px 48px;max-width:840px">
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Album title</label>
+            <input type="text" value="A Week in the Western Ghats" style="width:100%;background:#fff;border:1px solid #e0d4be;border-radius:var(--radius,2px);padding:12px 14px;font-family:'Work Sans',sans-serif;font-size:15px;color:#2c271f;outline:none;transition:border-color .2s ease,box-shadow .2s ease" style-focus="border-color:#1e3a2f;box-shadow:0 0 0 3px rgba(30,58,47,0.10)">
+            <div style="font-size:12px;color:#8a7d68;margin-top:6px">The name printed on your spine.</div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Search photos</label>
+            <div style="position:relative">
+              <span style="position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:16px;color:#a8966f"><i data-lucide="search"></i></span>
+              <input type="text" placeholder="Search by date or place…" style="width:100%;background:#fff;border:1px solid #e0d4be;border-radius:var(--radius,2px);padding:12px 14px 12px 38px;font-family:'Work Sans',sans-serif;font-size:15px;color:#2c271f;outline:none;transition:border-color .2s ease,box-shadow .2s ease" style-focus="border-color:#1e3a2f;box-shadow:0 0 0 3px rgba(30,58,47,0.10)">
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Coupon code <span style="color:#97402f">· invalid</span></label>
+            <input type="text" value="TRAVEL99" style="width:100%;background:#fff;border:1px solid #97402f;border-radius:var(--radius,2px);padding:12px 14px;font-family:'Work Sans',sans-serif;font-size:15px;color:#2c271f;outline:none;box-shadow:0 0 0 3px rgba(151,64,47,0.10)">
+            <div style="font-size:12px;color:#97402f;margin-top:6px;display:flex;align-items:center;gap:6px"><span style="font-size:13px"><i data-lucide="alert-circle"></i></span>This code has expired.</div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Email <span style="color:#3f6b4d">· verified</span></label>
+            <input type="text" value="priya@malnadstories.com" style="width:100%;background:#fff;border:1px solid #3f6b4d;border-radius:var(--radius,2px);padding:12px 14px;font-family:'Work Sans',sans-serif;font-size:15px;color:#2c271f;outline:none;box-shadow:0 0 0 3px rgba(63,107,77,0.10)">
+            <div style="font-size:12px;color:#3f6b4d;margin-top:6px;display:flex;align-items:center;gap:6px"><span style="font-size:13px"><i data-lucide="check-circle-2"></i></span>Looks good.</div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Binding</label>
+            <div style="position:relative">
+              <select style="width:100%;appearance:none;background:#fff;border:1px solid #e0d4be;border-radius:var(--radius,2px);padding:12px 38px 12px 14px;font-family:'Work Sans',sans-serif;font-size:15px;color:#2c271f;outline:none;cursor:pointer;transition:border-color .2s ease" style-focus="border-color:#1e3a2f"><option>Layflat — premium</option><option>Perfect bound</option><option>Linen hardcover</option></select>
+              <span style="position:absolute;right:13px;top:50%;transform:translateY(-50%);font-size:16px;color:#8a7d68;pointer-events:none"><i data-lucide="chevron-down"></i></span>
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Cover finish</label>
+            <div style="display:flex;border:1px solid #e0d4be;border-radius:var(--radius,2px);overflow:hidden;background:#fff">
+              <div style="flex:1;text-align:center;padding:11px;font-size:13px;font-weight:500;background:#1e3a2f;color:#f5efe3;cursor:pointer">Matte</div>
+              <div style="flex:1;text-align:center;padding:11px;font-size:13px;color:#5d5343;cursor:pointer;border-left:1px solid #e0d4be;transition:background .2s ease" style-hover="background:#ede4d4">Satin</div>
+              <div style="flex:1;text-align:center;padding:11px;font-size:13px;color:#5d5343;cursor:pointer;border-left:1px solid #e0d4be;transition:background .2s ease" style-hover="background:#ede4d4">Gloss</div>
+            </div>
+          </div>
+          <div style="grid-column:1 / -1">
+            <label style="display:block;font-size:12px;font-weight:600;letter-spacing:0.08em;color:#5d5343;margin-bottom:8px">Dedication</label>
+            <textarea rows="3" style="width:100%;background:#fff;border:1px solid #e0d4be;border-radius:var(--radius,2px);padding:12px 14px;font-family:'Work Sans',sans-serif;font-size:15px;line-height:1.6;color:#2c271f;outline:none;resize:vertical;transition:border-color .2s ease,box-shadow .2s ease" style-focus="border-color:#1e3a2f;box-shadow:0 0 0 3px rgba(30,58,47,0.10)">For the ones who came along, and the ones we wished were there.</textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- 07 CARDS -->
+      <section id="cards" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">07</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Cards</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Containers with character</h2>
+
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px">
+          <!-- album card -->
+          <div style="background:#fff;border:1px solid #efe6d5;border-radius:var(--radius,2px);overflow:hidden;cursor:pointer;transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s ease" style-hover="transform:translateY(-4px);box-shadow:0 16px 36px rgba(44,39,31,0.14)">
+            <div style="aspect-ratio:4/3;background:repeating-linear-gradient(45deg,#dfe6df,#dfe6df 9px,#d6dfd6 9px,#d6dfd6 18px);display:flex;align-items:center;justify-content:center;border-bottom:1px solid #efe6d5"><span style="font-family:'Courier New',monospace;font-size:10px;color:#7a9384">[ cover image ]</span></div>
+            <div style="padding:18px 18px 20px">
+              <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:8px">Travel · 2026</div>
+              <div style="font-family:'Cormorant Garamond',serif;font-size:24px;font-weight:500;color:#2c271f;line-height:1.1">Western Ghats</div>
+              <div style="font-size:13px;color:#8a7d68;margin-top:8px">24 pages · 86 photos</div>
+            </div>
+          </div>
+          <!-- pricing card -->
+          <div style="background:#1e3a2f;border-radius:var(--radius,2px);padding:26px 24px;color:#f5efe3;display:flex;flex-direction:column">
+            <div style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#b89a5c;margin-bottom:14px">Heirloom</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:46px;line-height:1;font-weight:400">₹4,200</div>
+            <div style="font-size:13px;color:#a9bdb0;margin-top:6px;margin-bottom:20px">Layflat · linen hardcover</div>
+            <div style="display:flex;flex-direction:column;gap:10px;font-size:14px;color:#e3ece4;margin-bottom:24px">
+              <div style="display:flex;gap:10px;align-items:center"><span style="font-size:15px;color:#b89a5c"><i data-lucide="check"></i></span>Up to 40 layflat pages</div>
+              <div style="display:flex;gap:10px;align-items:center"><span style="font-size:15px;color:#b89a5c"><i data-lucide="check"></i></span>Archival matte paper</div>
+              <div style="display:flex;gap:10px;align-items:center"><span style="font-size:15px;color:#b89a5c"><i data-lucide="check"></i></span>Foil-stamped spine</div>
+            </div>
+            <button style="margin-top:auto;background:#f5efe3;color:#1e3a2f;border:0;padding:12px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:600;border-radius:var(--radius,2px);cursor:pointer;transition:background .2s ease" style-hover="background:#fff">Choose Heirloom</button>
+          </div>
+          <!-- review card -->
+          <div style="background:#f5efe3;border:1px solid #e6dcc7;border-radius:var(--radius,2px);padding:26px 24px;display:flex;flex-direction:column">
+            <div style="color:var(--gold,#a0813f);font-size:14px;letter-spacing:3px;margin-bottom:16px">★★★★★</div>
+            <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:21px;line-height:1.4;color:#2c271f">“It arrived heavier than I expected, in the best way. It feels like something we'll hand down.”</div>
+            <div style="margin-top:auto;padding-top:22px;display:flex;align-items:center;gap:12px">
+              <div style="width:38px;height:38px;border-radius:50%;background:#1e3a2f;color:#f5efe3;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:17px">A</div>
+              <div><div style="font-size:14px;font-weight:600;color:#2c271f">Ananya R.</div><div style="font-size:12px;color:#8a7d68">Bengaluru</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-top:24px">
+          <!-- info card -->
+          <div style="background:#fff;border:1px solid #efe6d5;border-radius:var(--radius,2px);padding:24px;display:flex;gap:18px;align-items:flex-start">
+            <div style="width:44px;height:44px;flex:none;background:#ede4d4;border-radius:var(--radius,2px);display:flex;align-items:center;justify-content:center;font-size:20px;color:#1e3a2f"><i data-lucide="info"></i></div>
+            <div><div style="font-size:15px;font-weight:600;color:#2c271f;margin-bottom:6px">About archival printing</div><div style="font-size:14px;line-height:1.65;color:#5d5343;font-weight:300">Our papers are rated to last over 100 years without fading — so the colours you print today look the same to your grandchildren.</div></div>
+          </div>
+          <!-- photo card -->
+          <div style="background:#fff;border:1px solid #efe6d5;border-radius:var(--radius,2px);overflow:hidden">
+            <div style="aspect-ratio:16/10;background:repeating-linear-gradient(45deg,#ece2d0,#ece2d0 9px,#e3d8c4 9px,#e3d8c4 18px);display:flex;align-items:center;justify-content:center"><span style="font-family:'Courier New',monospace;font-size:10px;color:#a89878">[ photo 1280×800 ]</span></div>
+            <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;color:#8a7d68;font-family:'Courier New',monospace">IMG_0421.jpg</span><span style="font-size:15px;color:#a8966f"><i data-lucide="more-horizontal"></i></span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 08 NAVIGATION -->
+      <section id="nav" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">08</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Navigation</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Finding the way, quietly</h2>
+
+        <!-- top nav -->
+        <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Top navigation</div>
+        <div style="border:1px solid #e6dcc7;background:#fbf8f1;border-radius:var(--radius,2px);padding:0 22px;height:62px;display:flex;align-items:center;justify-content:space-between;margin-bottom:40px">
+          <div style="display:flex;align-items:center;gap:34px">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:#1e3a2f">Malnad Stories</div>
+            <div style="display:flex;gap:26px;font-size:14px">
+              <span style="color:#1e3a2f;font-weight:500;position:relative">Albums<div style="position:absolute;bottom:-21px;left:0;right:0;height:2px;background:var(--gold,#a0813f)"></div></span>
+              <span style="color:#5d5343;cursor:pointer;transition:color .2s ease" style-hover="color:#1e3a2f">Orders</span>
+              <span style="color:#5d5343;cursor:pointer;transition:color .2s ease" style-hover="color:#1e3a2f">Help</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:16px">
+            <span style="font-size:18px;color:#5d5343;cursor:pointer"><i data-lucide="bell"></i></span>
+            <div style="width:34px;height:34px;border-radius:50%;background:#1e3a2f;color:#f5efe3;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;font-size:15px">P</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:240px 1fr;gap:40px;align-items:start">
+          <!-- side nav (interactive) -->
+          <div>
+            <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Side navigation</div>
+            <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:10px;display:flex;flex-direction:column;gap:2px">
+              <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="5">
+                <button onClick="{{ n.onClick }}" style="position:relative;text-align:left;border:0;background:transparent;cursor:pointer;padding:11px 14px;border-radius:var(--radius,2px);display:flex;align-items:center;gap:12px;font-family:'Work Sans',sans-serif;font-size:14px;color:#3c352b;transition:background .2s ease" style-hover="background:#f5efe3">
+                  <sc-if value="{{ n.active }}" hint-placeholder-val="{{ true }}">
+                    <div style="position:absolute;inset:0;background:#1e3a2f;border-radius:var(--radius,2px)"></div>
+                  </sc-if>
+                  <span style="position:relative;font-size:17px;color:{{ n.iconColor }}"><i data-lucide="{{ n.icon }}"></i></span>
+                  <span style="position:relative;color:{{ n.textColor }};font-weight:{{ n.weight }}">{{ n.label }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:40px">
+            <!-- breadcrumbs -->
+            <div>
+              <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Breadcrumbs</div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:#8a7d68">
+                <span style="cursor:pointer;transition:color .2s ease" style-hover="color:#1e3a2f">Albums</span>
+                <span style="color:#cfbfa3"><i data-lucide="chevron-right"></i></span>
+                <span style="cursor:pointer;transition:color .2s ease" style-hover="color:#1e3a2f">Western Ghats</span>
+                <span style="color:#cfbfa3"><i data-lucide="chevron-right"></i></span>
+                <span style="color:#2c271f;font-weight:500">Edit</span>
+              </div>
+            </div>
+            <!-- tabs (interactive) -->
+            <div>
+              <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Tabs</div>
+              <div style="display:flex;gap:30px;border-bottom:1px solid #e6dcc7">
+                <sc-for list="{{ tabItems }}" as="t" hint-placeholder-count="4">
+                  <button onClick="{{ t.onClick }}" style="position:relative;border:0;background:transparent;cursor:pointer;padding:0 0 14px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:{{ t.weight }};color:{{ t.color }};transition:color .2s ease">
+                    {{ t.label }}
+                    <sc-if value="{{ t.active }}" hint-placeholder-val="{{ true }}">
+                      <div style="position:absolute;bottom:-1px;left:0;right:0;height:2px;background:#1e3a2f"></div>
+                    </sc-if>
+                  </button>
+                </sc-for>
+              </div>
+              <div style="padding:22px 2px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:18px;color:#5d5343">{{ tabBody }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 09 MODALS -->
+      <section id="modals" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">09</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Modals</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Asking, gently</h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+          <!-- confirm -->
+          <div style="background:#fff;border-radius:var(--radius,2px);padding:30px 30px 26px;box-shadow:0 24px 60px rgba(44,39,31,0.18);border:1px solid #efe6d5">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:27px;font-weight:500;color:#2c271f;margin-bottom:10px">Send album to print?</div>
+            <div style="font-size:14px;line-height:1.7;color:#5d5343;font-weight:300;margin-bottom:26px">Once your album goes to print, layout and photos are locked. Take one last look before we begin.</div>
+            <div style="display:flex;gap:12px;justify-content:flex-end">
+              <button style="background:transparent;color:#5d5343;border:0;padding:11px 18px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:pointer;transition:background .2s ease" style-hover="background:#ede4d4">Keep editing</button>
+              <button style="background:#1e3a2f;color:#f5efe3;border:0;padding:11px 22px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:pointer;transition:background .2s ease" style-hover="background:#2a4a3b">Send to print</button>
+            </div>
+          </div>
+          <!-- warning -->
+          <div style="background:#fff;border-radius:var(--radius,2px);padding:30px;box-shadow:0 24px 60px rgba(44,39,31,0.18);border:1px solid #efe6d5">
+            <div style="width:46px;height:46px;border-radius:50%;background:rgba(151,64,47,0.10);color:#97402f;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:18px"><i data-lucide="alert-triangle"></i></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:27px;font-weight:500;color:#2c271f;margin-bottom:10px">Discard this spread?</div>
+            <div style="font-size:14px;line-height:1.7;color:#5d5343;font-weight:300;margin-bottom:26px">This spread and its 6 photos will be removed. This can't be undone.</div>
+            <div style="display:flex;gap:12px;justify-content:flex-end">
+              <button style="background:transparent;color:#5d5343;border:0;padding:11px 18px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:pointer;transition:background .2s ease" style-hover="background:#ede4d4">Cancel</button>
+              <button style="background:#97402f;color:#fbf8f1;border:0;padding:11px 22px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:500;border-radius:var(--radius,2px);cursor:pointer;transition:background .2s ease" style-hover="background:#84372a">Discard</button>
+            </div>
+          </div>
+          <!-- success -->
+          <div style="background:#1e3a2f;border-radius:var(--radius,2px);padding:34px 30px;box-shadow:0 24px 60px rgba(44,39,31,0.22);text-align:center;color:#f5efe3">
+            <div style="width:54px;height:54px;border-radius:50%;background:rgba(184,154,92,0.18);color:#ddc78f;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 18px"><i data-lucide="check"></i></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:30px;font-weight:500;margin-bottom:10px">Your album is on its way</div>
+            <div style="font-size:14px;line-height:1.7;color:#a9bdb0;font-weight:300;margin-bottom:24px;max-width:38ch;margin-left:auto;margin-right:auto">Order #MS-20418 confirmed. We'll email you when it ships — usually within five days.</div>
+            <button style="background:#f5efe3;color:#1e3a2f;border:0;padding:12px 26px;font-family:'Work Sans',sans-serif;font-size:14px;font-weight:600;border-radius:var(--radius,2px);cursor:pointer;transition:background .2s ease" style-hover="background:#fff">Track my order</button>
+          </div>
+          <!-- dialog / sheet -->
+          <div style="background:#fff;border-radius:var(--radius,2px);box-shadow:0 24px 60px rgba(44,39,31,0.18);border:1px solid #efe6d5;overflow:hidden">
+            <div style="padding:20px 24px;border-bottom:1px solid #efe6d5;display:flex;justify-content:space-between;align-items:center">
+              <div style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:500;color:#2c271f">Album settings</div>
+              <span style="font-size:18px;color:#8a7d68;cursor:pointer"><i data-lucide="x"></i></span>
+            </div>
+            <div style="padding:22px 24px;display:flex;flex-direction:column;gap:16px">
+              <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:14px;color:#3c352b">Layflat binding</span><div style="width:42px;height:24px;background:#1e3a2f;border-radius:999px;position:relative"><div style="position:absolute;top:3px;right:3px;width:18px;height:18px;background:#fff;border-radius:50%"></div></div></div>
+              <div style="height:1px;background:#efe6d5"></div>
+              <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:14px;color:#3c352b">Auto-enhance photos</span><div style="width:42px;height:24px;background:#cfbfa3;border-radius:999px;position:relative"><div style="position:absolute;top:3px;left:3px;width:18px;height:18px;background:#fff;border-radius:50%"></div></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10 ALBUM -->
+      <section id="album" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">10</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Album Components</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 18px">The raw materials</h2>
+        <p style="font-size:16px;line-height:1.7;color:#3c352b;max-width:56ch;margin:0 0 44px;font-weight:300">Foundations only — the pieces the builder will be assembled from. Thumbnails, trays, page blocks, spreads, indicators and upload zones.</p>
+
+        <!-- upload zone -->
+        <div style="border:1.5px dashed #cfbfa3;border-radius:var(--radius,2px);background:#fff;padding:46px;text-align:center;margin-bottom:32px;cursor:pointer;transition:background .25s ease,border-color .25s ease" style-hover="background:#f5efe3;border-color:#1e3a2f">
+          <div style="font-size:30px;color:var(--gold,#a0813f);margin-bottom:14px;display:flex;justify-content:center"><i data-lucide="upload-cloud"></i></div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#2c271f;margin-bottom:6px">Drop your photos here</div>
+          <div style="font-size:14px;color:#8a7d68;font-weight:300">or click to browse — JPG, PNG, HEIC up to 50MB each</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:36px">
+          <div>
+            <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Photo tray</div>
+            <div style="border:1px solid #e6dcc7;background:#f5efe3;border-radius:var(--radius,2px);padding:14px;display:flex;gap:10px;overflow:hidden">
+              <sc-for list="{{ trayPhotos }}" as="p" hint-placeholder-count="6">
+                <div style="flex:none;width:70px;height:70px;border-radius:var(--radius,2px);background:{{ p.bg }};position:relative;cursor:grab;border:1px solid rgba(44,39,31,0.06);transition:transform .25s cubic-bezier(.2,.7,.3,1),box-shadow .25s ease" style-hover="transform:translateY(-3px);box-shadow:0 8px 18px rgba(44,39,31,0.18)">
+                  <sc-if value="{{ p.used }}" hint-placeholder-val="{{ true }}">
+                    <div style="position:absolute;top:5px;right:5px;width:16px;height:16px;background:#1e3a2f;color:#f5efe3;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px"><i data-lucide="check"></i></div>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div>
+            <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Thumbnails &amp; states</div>
+            <div style="display:flex;gap:14px;align-items:flex-end">
+              <div><div style="width:78px;height:78px;border-radius:var(--radius,2px);background:repeating-linear-gradient(45deg,#dfe6df,#dfe6df 8px,#d6dfd6 8px,#d6dfd6 16px);border:1px solid #e6dcc7"></div><div style="font-size:11px;color:#8a7d68;text-align:center;margin-top:6px">Default</div></div>
+              <div><div style="width:78px;height:78px;border-radius:var(--radius,2px);background:repeating-linear-gradient(45deg,#dfe6df,#dfe6df 8px,#d6dfd6 8px,#d6dfd6 16px);border:2px solid #1e3a2f;box-shadow:0 0 0 3px rgba(30,58,47,0.12)"></div><div style="font-size:11px;color:#1e3a2f;text-align:center;margin-top:6px;font-weight:600">Selected</div></div>
+              <div><div style="width:78px;height:78px;border-radius:var(--radius,2px);background:repeating-linear-gradient(45deg,#dfe6df,#dfe6df 8px,#d6dfd6 8px,#d6dfd6 16px);border:1px solid #e6dcc7;opacity:0.45"></div><div style="font-size:11px;color:#8a7d68;text-align:center;margin-top:6px">Used</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- spread -->
+        <div style="margin-bottom:14px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Album spread &amp; page blocks</div>
+        <div style="background:#ede4d4;border-radius:var(--radius,2px);padding:34px;display:flex;justify-content:center;margin-bottom:18px">
+          <div style="display:flex;box-shadow:0 18px 44px rgba(44,39,31,0.18);position:relative">
+            <div style="width:240px;height:300px;background:#fff;padding:18px;display:grid;grid-template-rows:1.4fr 1fr;gap:10px;border-right:1px solid #e6dcc7">
+              <div style="background:repeating-linear-gradient(45deg,#ece2d0,#ece2d0 8px,#e3d8c4 8px,#e3d8c4 16px);border-radius:1px"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div style="background:repeating-linear-gradient(45deg,#ece2d0,#ece2d0 8px,#e3d8c4 8px,#e3d8c4 16px);border-radius:1px"></div>
+                <div style="background:repeating-linear-gradient(45deg,#ece2d0,#ece2d0 8px,#e3d8c4 8px,#e3d8c4 16px);border-radius:1px"></div>
+              </div>
+            </div>
+            <div style="position:absolute;top:0;bottom:0;left:50%;width:14px;transform:translateX(-50%);background:linear-gradient(90deg,rgba(44,39,31,0.16),rgba(44,39,31,0.02) 45%,rgba(44,39,31,0.02) 55%,rgba(44,39,31,0.16));pointer-events:none"></div>
+            <div style="width:240px;height:300px;background:#fff;padding:18px;display:flex;flex-direction:column;gap:12px">
+              <div style="flex:1;background:repeating-linear-gradient(45deg,#ece2d0,#ece2d0 8px,#e3d8c4 8px,#e3d8c4 16px);border-radius:1px"></div>
+              <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:14px;color:#5d5343;text-align:center">The road narrowed to a single lane.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- page indicators -->
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+          <span style="font-size:16px;color:#8a7d68;cursor:pointer"><i data-lucide="chevron-left"></i></span>
+          <div style="width:26px;height:34px;background:#1e3a2f;border-radius:1px"></div>
+          <div style="width:26px;height:34px;background:#cfbfa3;border-radius:1px;opacity:0.7"></div>
+          <div style="width:26px;height:34px;background:#cfbfa3;border-radius:1px;opacity:0.7"></div>
+          <div style="width:26px;height:34px;background:#cfbfa3;border-radius:1px;opacity:0.7"></div>
+          <span style="font-size:13px;color:#8a7d68;font-family:'Courier New',monospace;margin:0 6px">04 / 24</span>
+          <span style="font-size:16px;color:#5d5343;cursor:pointer"><i data-lucide="chevron-right"></i></span>
+        </div>
+      </section>
+
+      <!-- 11 MOTION -->
+      <section id="motion" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">11</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Motion</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Premium, subtle, intentional</h2>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px">
+          <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:24px">
+            <div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:12px">DURATION</div>
+            <div style="font-size:14px;line-height:2;color:#3c352b"><div>Micro &nbsp;<span style="float:right;color:#8a7d68">120ms</span></div><div>Standard &nbsp;<span style="float:right;color:#8a7d68">250ms</span></div><div>Entrance &nbsp;<span style="float:right;color:#8a7d68">400ms</span></div></div>
+          </div>
+          <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:24px">
+            <div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:12px">EASING</div>
+            <div style="font-size:13px;line-height:1.9;color:#3c352b">Soft ease-out for entrances. <span style="font-family:'Courier New',monospace;font-size:11px;color:#5d5343;display:block;margin-top:8px">cubic-bezier(.2,.7,.3,1)</span></div>
+          </div>
+          <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:24px;cursor:pointer;transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s ease" style-hover="transform:translateY(-5px);box-shadow:0 14px 30px rgba(44,39,31,0.14)">
+            <div style="font-family:'Courier New',monospace;font-size:11px;color:var(--gold,#a0813f);margin-bottom:12px">HOVER ME</div>
+            <div style="font-size:14px;line-height:1.7;color:#3c352b">Cards lift a few pixels and gain a soft shadow. Drag is the only place motion follows the cursor 1:1.</div>
+          </div>
+        </div>
+        <p style="margin-top:24px;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:17px;color:#8a7d68;max-width:60ch">Nothing bounces. Nothing flashes. Pages cross-fade; trays slide; the album turns like a real page would.</p>
+      </section>
+
+      <!-- 12 RESPONSIVE -->
+      <section id="responsive" style="padding:80px 0;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">12</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Responsive</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 44px">Three ways to hold a story</h2>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px">
+          <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:26px">
+            <div style="font-size:20px;color:#1e3a2f;margin-bottom:14px"><i data-lucide="monitor"></i></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#2c271f;margin-bottom:4px">Desktop</div>
+            <div style="font-family:'Courier New',monospace;font-size:11px;color:#a8966f;margin-bottom:16px">≥ 1024px</div>
+            <div style="font-size:14px;line-height:1.75;color:#5d5343;font-weight:300">The full builder. Tray, canvas and inspector side by side. Drag-and-drop arranging. The primary creation surface.</div>
+          </div>
+          <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:26px">
+            <div style="font-size:20px;color:#1e3a2f;margin-bottom:14px"><i data-lucide="tablet"></i></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#2c271f;margin-bottom:4px">Tablet</div>
+            <div style="font-family:'Courier New',monospace;font-size:11px;color:#a8966f;margin-bottom:16px">768 – 1023px</div>
+            <div style="font-size:14px;line-height:1.75;color:#5d5343;font-weight:300">Tray collapses to a drawer. Canvas takes the stage. Inspector becomes a bottom sheet. Touch-first targets, 44px minimum.</div>
+          </div>
+          <div style="border:1px solid #e6dcc7;background:#fff;border-radius:var(--radius,2px);padding:26px">
+            <div style="font-size:20px;color:#1e3a2f;margin-bottom:14px"><i data-lucide="smartphone"></i></div>
+            <div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#2c271f;margin-bottom:4px">Mobile</div>
+            <div style="font-family:'Courier New',monospace;font-size:11px;color:#a8966f;margin-bottom:16px">< 768px</div>
+            <div style="font-size:14px;line-height:1.75;color:#5d5343;font-weight:300">Review and light edits — reorder spreads, swap photos, approve. Heavy layout work nudges users back to a larger screen.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- INVENTORY -->
+      <section id="inventory" style="padding:80px 0 0">
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px">
+          <span style="font-family:'Courier New',monospace;font-size:12px;color:var(--gold,#a0813f)">＊</span>
+          <span style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#a8966f">Component Inventory</span>
+        </div>
+        <h2 style="font-family:'Cormorant Garamond',serif;font-weight:500;font-size:46px;line-height:1.02;color:#2c271f;margin:0 0 36px">Everything inherits from here</h2>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:2px;border:1px solid #e6dcc7;background:#e6dcc7">
+          <sc-for list="{{ inventory }}" as="i" hint-placeholder-count="20">
+            <div style="background:#fff;padding:16px 18px;display:flex;align-items:center;gap:10px">
+              <span style="color:var(--gold,#a0813f);font-size:13px"><i data-lucide="check"></i></span>
+              <span style="font-size:13px;color:#3c352b">{{ i }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:40px;padding-top:28px;border-top:1px solid #e6dcc7;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:12px">
+          <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:18px;color:#8a7d68">Malnad Stories — a system for telling stories.</div>
+          <div style="font-family:'Courier New',monospace;font-size:11px;color:#a8966f">Foundations v1.0 · Phase 1 · June 2026</div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;paperGrain&quot;: { &quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot; },
+  &quot;accentGold&quot;: { &quot;editor&quot;: &quot;color&quot;, &quot;default&quot;: &quot;#a0813f&quot;, &quot;tsType&quot;: &quot;string&quot; },
+  &quot;cornerStyle&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;Sharp&quot;, &quot;options&quot;: [&quot;Sharp&quot;, &quot;Soft&quot;], &quot;tsType&quot;: &quot;string&quot; }
+}">
+class Component extends DCLogic {
+  state = { activeNav: 0, activeTab: 0 };
+
+  componentDidMount() {
+    this.applyVars();
+    this.tryIcons(0);
+  }
+  componentDidUpdate() {
+    this.applyVars();
+    this.tryIcons(0);
+  }
+  applyVars() {
+    const r = document.documentElement;
+    r.style.setProperty('--gold', this.props.accentGold || '#a0813f');
+    r.style.setProperty('--radius', (this.props.cornerStyle === 'Soft') ? '8px' : '2px');
+    const g = document.getElementById('ms-grain');
+    if (g) g.style.opacity = (this.props.paperGrain === false) ? '0' : '0.045';
+    document.querySelectorAll('[data-swatch]').forEach((el) => { el.style.background = el.getAttribute('data-swatch'); });
+    document.querySelectorAll('[data-width]').forEach((el) => { el.style.width = el.getAttribute('data-width'); });
+  }
+  tryIcons(n) {
+    if (window.lucide && window.lucide.createIcons) {
+      window.lucide.createIcons();
+    } else if (n < 30) {
+      setTimeout(() => this.tryIcons(n + 1), 120);
+    }
+  }
+
+  renderVals() {
+    const navData = [
+      { label: 'Dashboard', icon: 'layout-grid' },
+      { label: 'My Albums', icon: 'book-open' },
+      { label: 'Photos', icon: 'image' },
+      { label: 'Orders', icon: 'package' },
+      { label: 'Account', icon: 'user' },
+    ];
+    const navItems = navData.map((d, i) => {
+      const active = i === this.state.activeNav;
+      return {
+        label: d.label,
+        icon: d.icon,
+        active,
+        iconColor: active ? '#ddc78f' : '#8a7d68',
+        textColor: active ? '#f5efe3' : '#3c352b',
+        weight: active ? '600' : '400',
+        onClick: () => this.setState({ activeNav: i }),
+      };
+    });
+
+    const tabData = ['Spreads', 'Photos', 'Cover', 'Settings'];
+    const tabBodies = [
+      'Arrange your story spread by spread.',
+      'Every photo you\u2019ve uploaded, ready to place.',
+      'Choose the face your album shows the world.',
+      'Binding, paper, finish \u2014 the lasting details.',
+    ];
+    const tabItems = tabData.map((label, i) => {
+      const active = i === this.state.activeTab;
+      return {
+        label,
+        active,
+        color: active ? '#1e3a2f' : '#8a7d68',
+        weight: active ? '600' : '400',
+        onClick: () => this.setState({ activeTab: i }),
+      };
+    });
+
+    const stripeA = 'repeating-linear-gradient(45deg,#dfe6df,#dfe6df 7px,#d6dfd6 7px,#d6dfd6 14px)';
+    const stripeB = 'repeating-linear-gradient(45deg,#ece2d0,#ece2d0 7px,#e3d8c4 7px,#e3d8c4 14px)';
+    const trayPhotos = [
+      { bg: stripeA, used: true },
+      { bg: stripeB, used: false },
+      { bg: stripeA, used: false },
+      { bg: stripeB, used: true },
+      { bg: stripeA, used: false },
+      { bg: stripeB, used: false },
+    ];
+
+    return {
+      contents: [
+        { no: '01', label: 'Color', href: '#color' },
+        { no: '02', label: 'Typography', href: '#type' },
+        { no: '03', label: 'Spacing', href: '#space' },
+        { no: '04', label: 'Elevation', href: '#elevation' },
+        { no: '05', label: 'Buttons', href: '#buttons' },
+        { no: '06', label: 'Inputs', href: '#inputs' },
+        { no: '07', label: 'Cards', href: '#cards' },
+        { no: '08', label: 'Navigation', href: '#nav' },
+        { no: '09', label: 'Modals', href: '#modals' },
+        { no: '10', label: 'Album', href: '#album' },
+        { no: '11', label: 'Motion', href: '#motion' },
+        { no: '12', label: 'Responsive', href: '#responsive' },
+      ],
+      moodChips: [
+        { label: 'Forest', hex: '#1e3a2f' },
+        { label: 'Cream', hex: '#f5efe3' },
+        { label: 'Paper', hex: '#fbf8f1' },
+        { label: 'Charcoal', hex: '#2c271f' },
+        { label: 'Gold', hex: '#a0813f' },
+      ],
+      spacing: [
+        { token: 'space-1', px: '4px' },
+        { token: 'space-2', px: '8px' },
+        { token: 'space-3', px: '12px' },
+        { token: 'space-4', px: '16px' },
+        { token: 'space-6', px: '24px' },
+        { token: 'space-8', px: '32px' },
+        { token: 'space-12', px: '48px' },
+        { token: 'space-16', px: '64px' },
+        { token: 'space-24', px: '96px' },
+      ],
+      navItems,
+      tabItems,
+      tabBody: tabBodies[this.state.activeTab],
+      trayPhotos,
+      inventory: [
+        'Button', 'Icon Button', 'Text Field', 'Text Area', 'Search Field',
+        'Dropdown', 'Selector', 'Album Card', 'Photo Card', 'Pricing Card',
+        'Review Card', 'Info Card', 'Top Nav', 'Side Nav', 'Breadcrumbs',
+        'Tabs', 'Dialog', 'Confirm Modal', 'Warning Modal', 'Success State',
+        'Photo Thumbnail', 'Photo Tray', 'Page Block', 'Album Spread',
+        'Page Indicators', 'Upload Zone', 'Toggle', 'Badge',
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

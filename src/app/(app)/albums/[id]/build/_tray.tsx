@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, Trash2, Loader2, Check, AlertTriangle } from 'lucide-react';
+import { Pencil, Trash2, Loader2, Check, AlertTriangle, Image as ImageIcon } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
 import type { Photo } from './_uploader';
 
@@ -42,12 +42,20 @@ export default function Tray({
   };
 
   if (photos.length === 0) {
-    return <p className="text-sm text-muted-foreground">No photos yet — add some above.</p>;
+    return (
+      <div className="rounded-2xl border border-dashed border-border/80 bg-gradient-to-b from-secondary/30 to-transparent px-4 py-10 text-center">
+        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-background text-muted-foreground/70 shadow-xs ring-1 ring-border">
+          <ImageIcon className="h-5 w-5" />
+        </div>
+        <p className="mt-3 font-display text-base font-semibold tracking-tight">Your photos live here</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Add photos above, then drag them onto a page.</p>
+      </div>
+    );
   }
 
   return (
     <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-      {photos.map((photo) => {
+      {photos.map((photo, i) => {
         const ready = photo.status === 'ready';
         const placed = placedIds.has(photo.id);
         return (
@@ -59,40 +67,48 @@ export default function Tray({
               e.dataTransfer.setData('text/photo-id', photo.id);
               e.dataTransfer.effectAllowed = 'copy';
             }}
-            className={`group relative aspect-square overflow-hidden rounded-md border bg-muted ${
-              ready ? 'cursor-grab active:cursor-grabbing' : ''
+            style={{ animationDelay: `${Math.min(i * 22, 260)}ms` }}
+            className={`group relative aspect-square animate-scale-in overflow-hidden rounded-xl bg-muted shadow-xs ring-1 ring-border/80 transition-all duration-200 ease-glide ${
+              ready
+                ? 'cursor-grab hover:-translate-y-1 hover:shadow-card hover:ring-2 hover:ring-primary/50 active:scale-[0.97] active:cursor-grabbing'
+                : ''
             }`}
             title={photo.filename}
           >
             {ready ? (
-              <div className={placed ? 'h-full w-full opacity-40' : 'h-full w-full'}>
+              <div className={placed ? 'h-full w-full opacity-40 saturate-[0.85]' : 'h-full w-full transition-transform duration-[400ms] ease-glide group-hover:scale-[1.05]'}>
                 <PhotoFrame url={photo.thumbUrl} edit={photo.edit} alt={photo.filename} />
               </div>
             ) : photo.status === 'pending' ? (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gradient-to-b from-secondary/60 to-muted text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-[10px]">Processing…</span>
+                <span className="text-[10px] font-medium">Processing…</span>
               </div>
             ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center text-destructive">
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 px-1 text-center text-destructive">
                 <AlertTriangle className="h-5 w-5" />
-                <span className="text-[10px] leading-tight">Couldn’t process</span>
+                <span className="text-[10px] font-medium leading-tight">Couldn’t process</span>
               </div>
+            )}
+
+            {/* hover scrim so the controls always read */}
+            {ready && (
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/35 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
             )}
 
             {ready && placed && (
-              <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-foreground/80 px-1 py-0.5 text-[10px] font-medium text-background">
-                <Check className="h-3 w-3" /> Placed
+              <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-success/95 px-1.5 py-0.5 text-[10px] font-semibold text-success-foreground shadow-sm ring-1 ring-white/20 backdrop-blur-sm">
+                <Check className="h-2.5 w-2.5" /> Placed
               </span>
             )}
 
-            <div className="absolute right-1 top-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-all duration-200 group-hover:opacity-100">
               {ready && (
                 <button
                   type="button"
                   onClick={() => onEdit(photo)}
                   aria-label={`Edit ${photo.filename}`}
-                  className="rounded bg-background/85 p-1 shadow-sm hover:bg-background"
+                  className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -102,7 +118,7 @@ export default function Tray({
                 onClick={() => handleDelete(photo.id)}
                 disabled={deleting === photo.id}
                 aria-label={`Delete ${photo.filename}`}
-                className="rounded bg-background/85 p-1 text-destructive shadow-sm hover:bg-background disabled:opacity-50"
+                className="rounded-lg bg-background/90 p-1.5 text-destructive shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
               >
                 {deleting === photo.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
               </button>

@@ -177,16 +177,35 @@ export default function Uploader({
           handleFiles(e.dataTransfer.files);
         }}
         onClick={() => inputRef.current?.click()}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-          dragOver ? 'border-foreground bg-muted' : 'border-muted-foreground/30'
+        className={`group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border border-dashed p-7 text-center transition-all duration-300 ease-glide ${
+          dragOver
+            ? 'scale-[1.015] border-primary/70 bg-accent/60 shadow-glow'
+            : 'border-border/80 bg-gradient-to-b from-secondary/40 to-background hover:border-primary/40 hover:shadow-card'
         } ${slotsLeft <= 0 ? 'pointer-events-none opacity-50' : ''}`}
       >
-        <UploadCloud className="h-7 w-7 text-muted-foreground" />
-        <p className="mt-2 text-sm font-medium">
-          {slotsLeft > 0 ? 'Add photos' : 'Photo limit reached'}
+        {/* soft radial wash that lights up on hover/drag */}
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${dragOver ? 'opacity-100' : 'opacity-0 group-hover:opacity-60'}`}
+          style={{ background: 'radial-gradient(60% 70% at 50% 0%, hsl(var(--accent) / 0.6), transparent 70%)' }}
+        />
+        <span
+          className={`relative flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm ring-1 transition-all duration-300 ease-glide ${
+            dragOver
+              ? 'scale-110 bg-primary text-primary-foreground ring-primary/30'
+              : 'bg-background text-primary ring-border group-hover:-translate-y-0.5 group-hover:ring-primary/30'
+          }`}
+        >
+          <UploadCloud className="h-5 w-5" />
+        </span>
+        <p className="relative mt-3 text-sm font-semibold tracking-tight">
+          {slotsLeft > 0 ? (dragOver ? 'Drop to upload' : 'Add your photos') : 'Photo limit reached'}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          JPEG, PNG, HEIC, WebP · up to 20 MB · {Math.max(0, slotsLeft)} more allowed
+        <p className="relative mt-1 text-xs text-muted-foreground">
+          Drag &amp; drop or <span className="font-medium text-foreground">browse</span>
+        </p>
+        <p className="relative mt-2 inline-flex items-center gap-1.5 rounded-full bg-secondary/70 px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground ring-1 ring-border/60">
+          JPEG · PNG · HEIC · WebP · 20 MB · {Math.max(0, slotsLeft)} left
         </p>
         <input
           ref={inputRef}
@@ -202,18 +221,21 @@ export default function Uploader({
       </div>
 
       {uploads.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="space-y-1.5">
           {uploads.map((u) => (
-            <li key={u.tempId} className="rounded-md border p-2 text-sm">
+            <li key={u.tempId} className="animate-scale-in rounded-xl border bg-card/80 p-2.5 text-sm shadow-xs">
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate">{u.filename}</span>
-                <span className={u.status === 'error' ? 'text-destructive' : 'text-muted-foreground'}>
+                <span className="truncate text-xs font-medium">{u.filename}</span>
+                <span className={`text-xs tabular-nums ${u.status === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {u.status === 'error' ? u.error : `${u.progress}%`}
                 </span>
               </div>
               {u.status === 'uploading' && (
-                <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-muted">
-                  <div className="h-full bg-foreground transition-all" style={{ width: `${u.progress}%` }} />
+                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-primary/80 to-primary transition-all duration-200"
+                    style={{ width: `${u.progress}%` }}
+                  />
                 </div>
               )}
             </li>

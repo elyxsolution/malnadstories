@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { MailCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { SignupSchema } from '@/lib/validations';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { LUX_PRIMARY } from '@/components/brand';
+import { brandFontVars } from '@/lib/fonts';
+import AuthShell from '../_auth-shell';
 
 export default function SignupPage() {
   const [fields, setFields] = useState({ name: '', email: '', password: '' });
@@ -51,79 +54,62 @@ export default function SignupPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Check your email</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p>
-              We sent a verification link to <strong>{fields.email}</strong>.
-            </p>
+      <div className={`${brandFontVars} font-ui`}>
+        <AuthShell eyebrow="Almost there" title="Check your email.">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <span className="grid h-12 w-12 place-items-center rounded-full bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+              <MailCheck className="h-6 w-6" />
+            </span>
             <p className="text-sm text-muted-foreground">
-              Click the link in the email to activate your account and log in.
+              We sent a verification link to <strong className="text-foreground">{fields.email}</strong>. Click it to
+              activate your account and start building.
             </p>
-          </CardContent>
-        </Card>
+            <Link href="/login" className="text-sm font-medium text-foreground underline-offset-2 hover:underline">
+              Back to log in
+            </Link>
+          </div>
+        </AuthShell>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Create an account</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full name</Label>
-              <Input
-                id="name"
-                type="text"
-                autoComplete="name"
-                value={fields.name}
-                onChange={update('name')}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={fields.email}
-                onChange={update('email')}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="new-password"
-                value={fields.password}
-                onChange={update('password')}
-                required
-              />
-              <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
-            </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Creating account…' : 'Sign up'}
-            </Button>
-            <p className="text-sm text-center text-muted-foreground">
-              Already have an account?{' '}
-              <Link href="/login" className="underline text-foreground">
-                Log in
-              </Link>
-            </p>
-          </form>
-        </CardContent>
-      </Card>
+    <div className={`${brandFontVars} font-ui`}>
+      <AuthShell eyebrow="Begin" title="Create your account." subtitle="Your travels, bound beautifully.">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Full name</Label>
+            <Input id="name" type="text" autoComplete="name" value={fields.name} onChange={update('name')} required />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" autoComplete="email" value={fields.email} onChange={update('email')} required />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              value={fields.password}
+              onChange={update('password')}
+              required
+            />
+            <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={loading}>
+            {loading ? 'Creating account…' : 'Create account'}
+          </Button>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-muted-foreground">
+          Already have an account?{' '}
+          <Link href="/login" className="font-medium text-foreground underline-offset-2 hover:underline">
+            Log in
+          </Link>
+        </p>
+      </AuthShell>
     </div>
   );
 }

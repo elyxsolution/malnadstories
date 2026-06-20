@@ -1,13 +1,16 @@
 import { notFound, redirect } from 'next/navigation';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { computeOrderAmount } from '@/lib/pricing';
+import { DEFAULT_SHIPPING_METHOD, isShippingMethod, type ShippingMethod } from '@/lib/shipping';
+import { isPaidStatus } from '@/lib/orders/status';
+import { presignGet } from '@/lib/r2';
+import { listActiveCoverOptions } from '@/lib/covers';
+import { brandFontVars } from '@/lib/fonts';
 import Checkout from './_checkout';
 import { type Address } from './_address-picker';
-
-// Full paid family — a paid/processing/printing/packed/shipped/delivered order means
-// the album is purchased; send the user to the order page (purchased albums stay locked).
-const PAID_STATES = ['paid', 'processing', 'printing', 'packed', 'shipped', 'delivered'];
 
 export default async function CheckoutPage({ params }: { params: { albumId: string } }) {
   const supabase = createClient();
@@ -15,10 +18,18 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // Album must exist + belong to the user (RLS). Must be submitted to check out.
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, title, size, status')
+    .select('id, title, size, status, cover_template_id, destination, travel_dates')
     .eq('id', params.albumId)
     .maybeSingle();
-  const album = albumRow as { id: string; title: string; size: number; status: string } | null;
+  const album = albumRow as {
+    id: string;
+    title: string;
+    size: number;
+    status: string;
+    cover_template_id: string | null;
+    destination: string | null;
+    travel_dates: string | null;
+  } | null;
   if (!album) notFound();
 
   // Orders already on this album: a paid+ one → straight to its confirmation; a pending
@@ -26,7 +37,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // charged on resume.
   const { data: orderRows } = await supabase
     .from('orders')
-    .select('id, status, copies, coupon_id, subtotal_amount, shipping_amount, discount_amount, total_amount')
+    .select('id, status, copies, coupon_id, subtotal_amount, shipping_amount, shipping_method, discount_amount, total_amount')
     .eq('album_id', album.id)
     .order('placed_at', { ascending: false });
   const orders = (orderRows ?? []) as {
@@ -36,11 +47,12 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     coupon_id: string | null;
     subtotal_amount: string;
     shipping_amount: string;
+    shipping_method: string;
     discount_amount: string;
     total_amount: string;
   }[];
 
-  const paid = orders.find((o) => PAID_STATES.includes(o.status));
+  const paid = orders.find((o) => isPaidStatus(o.status));
   if (paid) redirect(`/orders/${paid.id}`);
 
   if (album.status !== 'submitted') redirect(`/albums/${album.id}/build`);
@@ -67,10 +79,12 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // default single-copy, no-coupon price. All server-computed.
   let initialCopies = 1;
   let initialCouponCode: string | null = null;
+  let initialShippingMethod: ShippingMethod = DEFAULT_SHIPPING_METHOD;
   let amount: { subtotalInr: number; shippingInr: number; discountInr: number; totalInr: number };
 
   if (pending) {
     initialCopies = pending.copies;
+    if (isShippingMethod(pending.shipping_method)) initialShippingMethod = pending.shipping_method;
     amount = {
       subtotalInr: Number(pending.subtotal_amount),
       shippingInr: Number(pending.shipping_amount),
@@ -105,21 +119,66 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     .order('created_at', { ascending: false });
   const addresses = (addressRows ?? []) as Address[];
 
-  return (
-    <div className="mx-auto max-w-lg p-8">
-      <h1 className="text-2xl font-bold">Checkout</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{album.title}</p>
+  // Cover thumbnail for the album-summary preview (what the customer is buying).
+  // Mirrors the builder page: resolve from the active covers, with a service-role
+  // fallback for a now-inactive cover. Display only — never gates anything.
+  let coverUrl: string | null = null;
+  let coverName: string | null = null;
+  if (album.cover_template_id) {
+    const covers = await listActiveCoverOptions();
+    const active = covers.find((c) => c.id === album.cover_template_id);
+    if (active) {
+      coverUrl = active.thumbUrl;
+      coverName = active.name;
+    } else {
+      const svc = createServiceClient();
+      const { data: c } = await svc
+        .from('cover_templates')
+        .select('name, image_key')
+        .eq('id', album.cover_template_id)
+        .maybeSingle();
+      const row = c as { name: string; image_key: string } | null;
+      if (row) {
+        coverUrl = await presignGet(row.image_key, 3600);
+        coverName = row.name;
+      }
+    }
+  }
 
-      <div className="mt-6">
-        <Checkout
-          albumId={album.id}
-          albumTitle={album.title}
-          amount={amount}
-          addresses={addresses}
-          pendingOrderId={pending?.id ?? null}
-          initialCopies={initialCopies}
-          initialCouponCode={initialCouponCode}
-        />
+  return (
+    <div className={`${brandFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-10">
+        <Link
+          href={`/albums/${album.id}/build`}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to album
+        </Link>
+        <h1 className="mt-3 font-display text-[2.1rem] font-semibold leading-none tracking-[-0.01em]">Review &amp; pay</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          A few details away from turning <span className="font-medium text-foreground">{album.title}</span> into a printed keepsake.
+        </p>
+        {(album.destination || album.travel_dates) && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {[album.destination, album.travel_dates].filter(Boolean).join(' · ')}
+          </p>
+        )}
+
+        <div className="mt-8">
+          <Checkout
+            albumId={album.id}
+            albumTitle={album.title}
+            albumSize={album.size}
+            coverUrl={coverUrl}
+            coverName={coverName}
+            amount={amount}
+            addresses={addresses}
+            pendingOrderId={pending?.id ?? null}
+            initialCopies={initialCopies}
+            initialCouponCode={initialCouponCode}
+            initialShippingMethod={initialShippingMethod}
+          />
+        </div>
       </div>
     </div>
   );

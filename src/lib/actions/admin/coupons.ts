@@ -10,9 +10,14 @@ export type CreateCouponResult = { ok: true; code: string } | { ok: false; error
 export type AdminActionResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Create a coupon. The CODE is generated server-side (never accepted from the client)
- * and persisted via the audited admin_create_coupon RPC; on the rare code collision
- * (unique(upper(code)) → 23505) we regenerate and retry.
+ * Create a coupon via the audited admin_create_coupon RPC (which uppercases the code,
+ * enforces expiry/min-order/percentage rules, and writes the audit row).
+ *
+ * Phase 2C: the admin MAY supply a custom code. When supplied we attempt it ONCE —
+ * a uniqueness clash (unique(upper(code)) → 23505) is a clear, reported error rather
+ * than a silent regeneration. When omitted we keep the original behaviour: generate an
+ * MS-XXXXXXXX code and retry on the rare collision. Uniqueness, expiry and minimum-order
+ * validation are all unchanged (enforced by the DB index + RPC).
  */
 export async function createCoupon(input: unknown): Promise<CreateCouponResult> {
   let actor: { userId: string };
@@ -27,9 +32,8 @@ export async function createCoupon(input: unknown): Promise<CreateCouponResult> 
   const d = parsed.data;
 
   const svc = createServiceClient();
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const code = generateCouponCode();
-    const { data, error } = await svc.rpc('admin_create_coupon', {
+  const callRpc = (code: string) =>
+    svc.rpc('admin_create_coupon', {
       p_code: code,
       p_description: d.description ?? null,
       p_created_reason: d.createdReason ?? null,
@@ -41,21 +45,43 @@ export async function createCoupon(input: unknown): Promise<CreateCouponResult> 
       p_expires_at: d.expiresAt ?? null,
       p_actor_id: actor.userId,
     });
-    if (error?.code === '23505') continue; // code collision → regenerate
-    if (error || !data) {
-      console.error('[admin] createCoupon rpc error', error);
-      return { ok: false, error: 'Could not create the coupon.' };
-    }
-    // Created active by default; honour an explicit "create disabled" via the RPC.
+
+  // Disable-after-create helper (RPC honours the explicit "create disabled" request).
+  const finish = async (couponId: string, code: string): Promise<CreateCouponResult> => {
     if (!d.active) {
       await svc.rpc('admin_set_coupon_active', {
-        p_coupon_id: data,
+        p_coupon_id: couponId,
         p_active: false,
         p_actor_id: actor.userId,
       });
     }
     revalidatePath('/admin/coupons');
     return { ok: true, code };
+  };
+
+  // ── Custom code: one attempt; a clash is reported, not regenerated ──
+  if (d.code) {
+    const { data, error } = await callRpc(d.code);
+    if (error?.code === '23505') {
+      return { ok: false, error: `Coupon code ${d.code} already exists. Choose another.` };
+    }
+    if (error || !data) {
+      console.error('[admin] createCoupon (custom) rpc error', error);
+      return { ok: false, error: 'Could not create the coupon.' };
+    }
+    return finish(data, d.code);
+  }
+
+  // ── Auto code: generate + retry on the rare collision ──
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateCouponCode();
+    const { data, error } = await callRpc(code);
+    if (error?.code === '23505') continue; // code collision → regenerate
+    if (error || !data) {
+      console.error('[admin] createCoupon rpc error', error);
+      return { ok: false, error: 'Could not create the coupon.' };
+    }
+    return finish(data, code);
   }
   return { ok: false, error: 'Could not generate a unique code. Please try again.' };
 }

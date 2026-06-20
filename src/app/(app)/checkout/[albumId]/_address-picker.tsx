@@ -63,11 +63,11 @@ export default function AddressPicker({
   return (
     <div className="space-y-3">
       {addresses.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           {addresses.map((a) => (
             <label
               key={a.id}
-              className="flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 has-[:checked]:border-foreground has-[:checked]:bg-muted/50"
+              className="flex cursor-pointer items-start gap-3 rounded-xl border bg-card px-4 py-3 shadow-xs transition-all duration-200 ease-glide hover:border-primary/30 hover:shadow-card has-[:checked]:border-primary has-[:checked]:bg-primary/[0.04] has-[:checked]:shadow-card"
             >
               <input
                 type="radio"
@@ -75,11 +75,18 @@ export default function AddressPicker({
                 value={a.id}
                 checked={selectedId === a.id}
                 onChange={() => onSelect(a.id)}
-                className="mt-1"
+                className="mt-0.5 h-4 w-4"
               />
-              <div className="text-sm">
-                <p className="font-medium">{a.full_name}</p>
-                <p className="text-muted-foreground">
+              <div className="min-w-0 text-sm">
+                <p className="flex items-center gap-2 font-medium">
+                  {a.full_name}
+                  {a.is_default && (
+                    <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Default
+                    </span>
+                  )}
+                </p>
+                <p className="mt-0.5 text-muted-foreground">
                   {a.line1}, {a.city}, {a.state} — {a.pincode}
                 </p>
               </div>
@@ -89,7 +96,7 @@ export default function AddressPicker({
       )}
 
       {adding ? (
-        <form onSubmit={onSubmit} className="space-y-3 rounded-lg border p-4">
+        <form onSubmit={onSubmit} className="space-y-3 rounded-xl border bg-card p-4 shadow-xs">
           <div className="space-y-1.5">
             <Label htmlFor="fullName">Full name</Label>
             <Input id="fullName" name="fullName" required autoComplete="name" />
@@ -125,9 +132,13 @@ export default function AddressPicker({
           </div>
         </form>
       ) : (
-        <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
-          <Plus /> Add a new address
-        </Button>
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border/80 bg-secondary/30 px-4 py-3 text-sm font-medium text-muted-foreground transition-all duration-200 ease-glide hover:border-primary/40 hover:bg-accent/50 hover:text-foreground"
+        >
+          <Plus className="h-4 w-4" /> Add a new address
+        </button>
       )}
     </div>
   );

@@ -1,8 +1,11 @@
 import Link from 'next/link';
+import { Plus, Library } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { PAID_STATES } from '@/lib/orders/album-lock';
 import { Button } from '@/components/ui/button';
+import { LUX_PRIMARY } from '@/components/brand';
+import { brandFontVars } from '@/lib/fonts';
 import AlbumCard, { type Purchase } from './_album-card';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
 
@@ -74,30 +77,50 @@ export default async function DashboardPage() {
     }
   }
 
+  const count = userAlbums.length;
+  const subtitle =
+    count === 0
+      ? 'Your shelf is waiting for its first story.'
+      : `${count} ${count === 1 ? 'story' : 'stories'} on your shelf.`;
+
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className={`${brandFontVars} brand-surface font-ui min-h-[calc(100vh-3.5rem)]`}>
       {/* Opportunistic worker pre-warm (≤ once / 10 min) — see WorkerPrewarm. */}
       <WorkerPrewarm />
-      <div className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-bold">My Albums</h1>
-        <Button render={<Link href="/albums/new" />}>+ New album</Button>
-      </div>
+      <div className="animate-rise mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary/70">Your library</p>
+            <h1 className="mt-2 font-display text-[2.4rem] font-semibold leading-none tracking-tight">Your stories</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{subtitle}</p>
+          </div>
+          <Button render={<Link href="/albums/new" />} className={LUX_PRIMARY}>
+            <Plus /> New album
+          </Button>
+        </div>
 
-      <div className="mt-8">
-        {userAlbums.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-16 text-center">
-            <p className="font-medium">No albums yet</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Create your first album to get started.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {userAlbums.map((album) => (
-              <AlbumCard key={album.id} album={album} purchase={purchases.get(album.id) ?? null} />
-            ))}
-          </div>
-        )}
+        <div className="mt-9">
+          {userAlbums.length === 0 ? (
+            <div className="flex flex-col items-center rounded-2xl border border-dashed bg-card/50 px-6 py-20 text-center">
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+                <Library className="h-6 w-6" />
+              </span>
+              <p className="mt-4 font-display text-xl font-semibold tracking-tight">No stories yet</p>
+              <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                Every album begins with a few photos and a name. Start your first chapter.
+              </p>
+              <Button render={<Link href="/albums/new" />} className={`mt-6 ${LUX_PRIMARY}`}>
+                <Plus /> Begin a new story
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {userAlbums.map((album) => (
+                <AlbumCard key={album.id} album={album} purchase={purchases.get(album.id) ?? null} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

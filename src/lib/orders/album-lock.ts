@@ -1,7 +1,13 @@
 import 'server-only';
 import type { createClient } from '@/lib/supabase/server';
+import { PAID_STATES } from '@/lib/orders/status';
 
 type SupabaseServerClient = ReturnType<typeof createClient>;
+
+// Re-exported so existing importers (`@/lib/orders/album-lock`) keep working while the
+// definition lives in ONE place (status.ts). The paid family is the full lifecycle:
+// paid · processing · printing · packed · shipped · delivered.
+export { PAID_STATES };
 
 /**
  * Order-commit locks — the user-data integrity layer that keeps an album's content
@@ -18,9 +24,9 @@ type SupabaseServerClient = ReturnType<typeof createClient>;
  *                     pay. The cancelOrder escape clears a pending one.
  *
  * Both take the AUTHENTICATED Supabase client so RLS scopes the check to the owner.
+ * PAID_STATES is the canonical paid family (imported from status.ts, re-exported above)
+ * so an order in ANY fulfilment state — including printing/packed — freezes the album.
  */
-
-export const PAID_STATES = ['paid', 'processing', 'shipped', 'delivered'] as const;
 
 async function existsOrderWithStatus(
   supabase: SupabaseServerClient,

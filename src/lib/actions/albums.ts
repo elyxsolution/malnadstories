@@ -29,6 +29,9 @@ export async function createAlbum(
     title: formData.get('title'),
     productId: formData.get('productId'),
     coverTemplateId: formData.get('coverTemplateId'),
+    destination: formData.get('destination'),
+    travelDates: formData.get('travelDates'),
+    description: formData.get('description'),
   });
 
   if (!parsed.success) {
@@ -72,6 +75,10 @@ export async function createAlbum(
       title: parsed.data.title,
       size: (product as { pages: number }).pages,
       cover_template_id: parsed.data.coverTemplateId,
+      // Optional metadata (0026) — null when blank.
+      destination: parsed.data.destination ?? null,
+      travel_dates: parsed.data.travelDates ?? null,
+      description: parsed.data.description ?? null,
     })
     .select('id')
     .single();

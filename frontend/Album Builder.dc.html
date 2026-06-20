@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#ece4d4;height:100%;overflow:hidden}
+  svg.lucide{width:1em;height:1em;display:block;stroke-width:1.5px}
+  ::selection{background:#1e3a2f;color:#f5efe3}
+  @keyframes ms-spin{to{transform:rotate(360deg)}}
+  @keyframes ms-drawer{from{transform:translateX(24px);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes ms-veil{from{opacity:0}to{opacity:1}}
+  @keyframes ms-pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:3px;background:#d8ccb4;border-radius:3px;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:#1e3a2f;cursor:pointer;border:2px solid #fbf8f1;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .ms-scroll::-webkit-scrollbar{width:9px;height:9px}
+  .ms-scroll::-webkit-scrollbar-thumb{background:#cfbfa3;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+  .ms-tray-grid::-webkit-scrollbar{width:8px}
+  .ms-tray-grid::-webkit-scrollbar-thumb{background:#cfbfa3;border-radius:8px}
+</style>
+</helmet>
+
+<div style="position:relative;height:100vh;display:flex;flex-direction:column;background:#ece4d4;font-family:'Work Sans',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden">
+
+  <div id="ms-grain" style="position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0.04;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E&quot;)"></div>
+
+  <!-- TOOLBAR -->
+  <header style="flex:none;height:60px;background:#fbf8f1;border-bottom:1px solid #ddd0b8;display:flex;align-items:center;justify-content:space-between;padding:0 20px;z-index:60">
+    <div style="display:flex;align-items:center;gap:18px;min-width:0">
+      <span style="font-size:17px;color:#8a7d68;cursor:pointer;display:flex" style-hover="color:#1e3a2f"><i data-lucide="arrow-left"></i></span>
+      <div style="width:1px;height:26px;background:#e0d4be"></div>
+      <div style="min-width:0">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:#1e3a2f;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">A Week in the Western Ghats</div>
+        <div style="display:flex;align-items:center;gap:7px;margin-top:2px">
+          <span style="width:6px;height:6px;border-radius:50%;background:{{ saveDot }};transition:background .3s ease"></span>
+          <span style="font-size:11px;color:#8a7d68;letter-spacing:0.02em">{{ saveLabel }}</span>
+        </div>
+      </div>
+      <div style="width:1px;height:26px;background:#e0d4be"></div>
+      <div style="display:flex;align-items:center;gap:5px">
+        <button onClick="{{ onUndo }}" title="Undo (⌘Z)" style="width:33px;height:33px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#3c352b;font-size:15px;opacity:{{ undoOp }};transition:opacity .2s,background .2s" style-hover="background:#ede4d4"><i data-lucide="undo-2"></i></button>
+        <button onClick="{{ onRedo }}" title="Redo (⌘⇧Z)" style="width:33px;height:33px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#3c352b;font-size:15px;opacity:{{ redoOp }};transition:opacity .2s,background .2s" style-hover="background:#ede4d4"><i data-lucide="redo-2"></i></button>
+        <button onClick="{{ openShortcuts }}" title="Keyboard shortcuts (?)" style="width:33px;height:33px;background:transparent;border:1px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#8a7d68;font-size:15px;transition:color .2s" style-hover="color:#1e3a2f"><i data-lucide="keyboard"></i></button>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:28px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="text-align:right">
+          <div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#a8966f">Completion</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:18px;color:#1e3a2f;line-height:1">{{ completion }}%</div>
+        </div>
+        <div style="width:90px;height:5px;background:#e6dcc7;border-radius:5px;overflow:hidden">
+          <div style="height:100%;background:linear-gradient(90deg,#2a4a3b,#51735f);transition:width .4s cubic-bezier(.2,.7,.3,1)" data-w="{{ completionW }}"></div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;font-size:12px;color:#5d5343">
+        <div style="display:flex;align-items:center;gap:7px"><span style="color:var(--gold,#a0813f);font-size:14px"><i data-lucide="book-open"></i></span>{{ pageCount }} pages</div>
+        <div style="display:flex;align-items:center;gap:7px"><span style="color:var(--gold,#a0813f);font-size:14px"><i data-lucide="image"></i></span>{{ usedCount }}/{{ totalPhotos }} used</div>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px">
+      <button onClick="{{ toggleAssistant }}" style="display:inline-flex;align-items:center;gap:8px;background:{{ assistantBtnBg }};color:{{ assistantBtnColor }};border:1px solid {{ assistantBtnBorder }};padding:9px 16px;font-family:'Work Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:all .2s ease"><span style="font-size:15px"><i data-lucide="sparkles"></i></span>Assistant</button>
+      <button onClick="{{ openPreview }}" style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:#1e3a2f;border:1px solid #1e3a2f;padding:9px 16px;font-size:13px;font-weight:500;cursor:pointer;transition:background .2s ease" style-hover="background:rgba(30,58,47,0.06)"><span style="font-size:15px"><i data-lucide="eye"></i></span>Preview</button>
+      <button style="display:inline-flex;align-items:center;gap:8px;background:#1e3a2f;color:#f5efe3;border:0;padding:10px 20px;font-size:13px;font-weight:500;cursor:pointer;transition:background .2s ease" style-hover="background:#2a4a3b">Order album</button>
+    </div>
+  </header>
+
+  <!-- MAIN -->
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- LEFT TRAY -->
+    <aside style="flex:none;width:284px;background:#fbf8f1;border-right:1px solid #ddd0b8;display:flex;flex-direction:column;min-height:0">
+      <div style="padding:18px 18px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Your photos</div>
+          <span style="font-size:11px;color:#a8966f">{{ trayCountLabel }}</span>
+        </div>
+        <div style="position:relative;margin-bottom:14px">
+          <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:14px;color:#a8966f"><i data-lucide="search"></i></span>
+          <input value="{{ search }}" onInput="{{ onSearch }}" placeholder="Search photos…" style="width:100%;background:#fff;border:1px solid #e0d4be;padding:9px 11px 9px 32px;font-family:'Work Sans',sans-serif;font-size:13px;color:#2c271f;outline:none;transition:border-color .2s ease" style-focus="border-color:#1e3a2f">
+        </div>
+        <div class="ms-scroll" style="display:flex;gap:7px;overflow-x:auto;padding-bottom:6px">
+          <sc-for list="{{ filterChips }}" as="f" hint-placeholder-count="6">
+            <button onClick="{{ f.onClick }}" style="flex:none;border:1px solid {{ f.border }};background:{{ f.bg }};color:{{ f.color }};padding:6px 12px;font-size:11px;font-weight:{{ f.weight }};cursor:pointer;white-space:nowrap;border-radius:999px;transition:all .2s ease;display:inline-flex;align-items:center;gap:5px">{{ f.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- BATCH BAR -->
+      <sc-if value="{{ multiActive }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:0 18px 12px;border:1px solid #1e3a2f;background:#1e3a2f;color:#f5efe3;padding:12px 14px;animation:ms-pop .25s ease both">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-size:13px;font-weight:600">{{ multiCount }} selected</span>
+            <button onClick="{{ clearMulti }}" style="background:transparent;border:0;color:#a9bdb0;font-size:11px;cursor:pointer" style-hover="color:#f5efe3">Clear</button>
+          </div>
+          <div style="display:flex;gap:7px;margin-bottom:9px">
+            <button onClick="{{ batchFavorite }}" style="flex:1;background:rgba(245,239,227,0.1);border:0;color:#ecd9ad;padding:8px;font-size:11px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .2s" style-hover="background:rgba(245,239,227,0.2)"><span style="font-size:12px"><i data-lucide="star"></i></span>Favorite</button>
+            <button onClick="{{ batchPlace }}" style="flex:1;background:rgba(245,239,227,0.1);border:0;color:#ecd9ad;padding:8px;font-size:11px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .2s" style-hover="background:rgba(245,239,227,0.2)"><span style="font-size:12px"><i data-lucide="layout-template"></i></span>Place</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#a9bdb0">Move to</span>
+            <sc-for list="{{ moveTargets }}" as="m" hint-placeholder-count="4">
+              <button onClick="{{ m.onClick }}" style="background:transparent;border:1px solid rgba(236,217,173,0.4);color:#ecd9ad;padding:4px 9px;font-size:10px;cursor:pointer;border-radius:999px;transition:background .2s" style-hover="background:rgba(236,217,173,0.15)">{{ m.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <div class="ms-tray-grid ms-scroll" style="flex:1;overflow-y:auto;padding:4px 18px 14px;min-height:0">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px">
+          <sc-for list="{{ trayPhotos }}" as="p" hint-placeholder-count="18">
+            <div draggable="true" onDragStart="{{ p.onDragStart }}" onClick="{{ p.onClick }}" title="{{ p.name }}" style="aspect-ratio:1;background:{{ p.bg }};background-size:cover;background-position:center;background-repeat:no-repeat;border-radius:1px;position:relative;cursor:grab;border:1px solid rgba(44,39,31,0.06);transition:transform .2s ease,box-shadow .2s ease;opacity:{{ p.opacity }}" style-hover="transform:translateY(-2px);box-shadow:0 5px 12px rgba(44,39,31,0.2)">
+              <sc-if value="{{ p.fav }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:3px;left:3px;color:#ecd9ad;font-size:12px;filter:drop-shadow(0 1px 1px rgba(0,0,0,0.4))"><i data-lucide="star"></i></div>
+              </sc-if>
+              <sc-if value="{{ p.used }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:3px;right:3px;width:15px;height:15px;background:#1e3a2f;color:#ecd9ad;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px"><i data-lucide="check"></i></div>
+              </sc-if>
+              <sc-if value="{{ p.ring }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;inset:0;border:2px solid {{ p.ringColor }};box-shadow:0 0 0 3px {{ p.ringGlow }}"></div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ pickedActive }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:14px;padding:12px;background:rgba(160,129,63,0.1);border:1px solid rgba(160,129,63,0.3);font-size:12px;color:#7a6428;line-height:1.5;display:flex;gap:9px;align-items:flex-start"><span style="font-size:14px;color:var(--gold,#a0813f);margin-top:1px"><i data-lucide="hand"></i></span>Photo picked up — tap any empty frame on the page to place it.</div>
+        </sc-if>
+      </div>
+
+      <div style="flex:none;border-top:1px solid #e6dcc7;padding:10px 18px;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:11px;color:#a8966f">{{ unusedLabel }}</span>
+        <sc-if value="{{ canRemoveUnused }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ onRemoveUnused }}" style="background:transparent;border:0;color:#97402f;font-size:11px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:5px" style-hover="text-decoration:underline"><span style="font-size:12px"><i data-lucide="trash-2"></i></span>Remove unused</button>
+        </sc-if>
+        <sc-if value="{{ hasRemoved }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ onRestore }}" style="background:transparent;border:0;color:#1e3a2f;font-size:11px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:5px" style-hover="text-decoration:underline"><span style="font-size:12px"><i data-lucide="rotate-ccw"></i></span>Restore {{ removedCount }}</button>
+        </sc-if>
+      </div>
+    </aside>
+
+    <!-- CENTER CANVAS -->
+    <main style="flex:1;display:flex;flex-direction:column;min-width:0;background:linear-gradient(160deg,#ede4d4,#e4d9c4)">
+      <!-- chapter strip -->
+      <div style="flex:none;height:48px;display:flex;align-items:center;justify-content:center;gap:0;border-bottom:1px solid rgba(44,39,31,0.07);padding:0 20px;overflow-x:auto" class="ms-scroll">
+        <sc-for list="{{ chapterStrip }}" as="c" hint-placeholder-count="4">
+          <button onClick="{{ c.onClick }}" style="flex:none;display:flex;align-items:center;gap:9px;background:transparent;border:0;cursor:pointer;padding:0 16px">
+            <span style="font-family:'Courier New',monospace;font-size:10px;color:{{ c.numColor }}">{{ c.num }}</span>
+            <span style="font-family:'Cormorant Garamond',serif;font-size:17px;font-style:italic;color:{{ c.color }};transition:color .2s ease">{{ c.title }}</span>
+          </button>
+          <sc-if value="{{ c.hasNext }}" hint-placeholder-val="{{ true }}"><span style="flex:none;color:#cbbf9f;font-size:11px"><i data-lucide="dot"></i></span></sc-if>
+        </sc-for>
+      </div>
+
+      <!-- canvas stage -->
+      <div class="ms-scroll" style="flex:1;display:flex;align-items:center;justify-content:center;padding:34px 40px;overflow:auto;min-height:0;position:relative">
+        <div style="position:absolute;top:18px;left:24px;font-family:'Courier New',monospace;font-size:11px;color:#a8966f;letter-spacing:0.05em">Spread {{ spreadLabel }} · {{ layoutName }}</div>
+        <div style="position:absolute;top:14px;right:24px;display:flex;gap:8px">
+          <button onClick="{{ toggleGuides }}" title="Margins &amp; safe zone" style="width:32px;height:32px;background:{{ guideBtnBg }};border:1px solid #d8ccb4;color:{{ guideBtnColor }};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;border-radius:1px;transition:all .2s ease"><i data-lucide="frame"></i></button>
+        </div>
+
+        <div style="width:100%;max-width:740px;aspect-ratio:2/1;position:relative;filter:drop-shadow(0 30px 50px rgba(44,39,31,0.28))">
+          <div style="position:absolute;inset:0;background:{{ pageBg }};transition:background .3s ease">
+            <!-- gutter -->
+            <div style="position:absolute;top:0;bottom:0;left:50%;width:26px;transform:translateX(-50%);background:linear-gradient(90deg,rgba(44,39,31,0.13),rgba(44,39,31,0.02) 42%,rgba(0,0,0,0) 50%,rgba(44,39,31,0.02) 58%,rgba(44,39,31,0.13));pointer-events:none;z-index:30"></div>
+            <div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(44,39,31,0.12);z-index:30;pointer-events:none"></div>
+            <!-- guides -->
+            <sc-if value="{{ showGuides }}" hint-placeholder-val="{{ false }}">
+              <div style="position:absolute;top:5%;left:3%;width:44%;height:90%;border:1px dashed rgba(151,64,47,0.5);pointer-events:none;z-index:25"></div>
+              <div style="position:absolute;top:5%;right:3%;width:44%;height:90%;border:1px dashed rgba(151,64,47,0.5);pointer-events:none;z-index:25"></div>
+            </sc-if>
+            <!-- slots -->
+            <sc-for list="{{ slots }}" as="s" hint-placeholder-count="2">
+              <div onClick="{{ s.onClick }}" onDragOver="{{ s.onDragOver }}" onDrop="{{ s.onDrop }}" style="{{ s.box }}">
+                <sc-if value="{{ s.empty }}" hint-placeholder-val="{{ true }}">
+                  <div style="{{ s.emptyStyle }}">
+                    <span style="font-size:20px;color:#b6a886"><i data-lucide="plus"></i></span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ s.filled }}" hint-placeholder-val="{{ false }}">
+                  <div onMouseDown="{{ s.onMouseDown }}" style="position:absolute;inset:0;overflow:hidden;cursor:grab">
+                    <div style="{{ s.img }}"></div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ s.selected }}" hint-placeholder-val="{{ false }}">
+                  <div style="position:absolute;inset:0;border:2px solid var(--gold,#a0813f);box-shadow:0 0 0 3px rgba(160,129,63,0.3);pointer-events:none;z-index:20"></div>
+                  <div style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--gold,#a0813f);color:#fbf8f1;font-size:9px;letter-spacing:0.08em;text-transform:uppercase;padding:2px 8px;white-space:nowrap;z-index:21;pointer-events:none">Drag to reposition</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT PANEL -->
+    <aside style="flex:none;width:312px;background:#fbf8f1;border-left:1px solid #ddd0b8;display:flex;flex-direction:column;min-height:0">
+      <div class="ms-scroll" style="flex:1;overflow-y:auto;min-height:0">
+
+        <!-- EDIT MODE -->
+        <sc-if value="{{ editMode }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:20px;animation:ms-pop .3s ease both">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68">Edit photo</div>
+              <button onClick="{{ deselect }}" style="background:transparent;border:0;color:#a8966f;font-size:15px;cursor:pointer" style-hover="color:#1e3a2f"><i data-lucide="x"></i></button>
+            </div>
+
+            <div style="aspect-ratio:4/3;position:relative;overflow:hidden;border:1px solid #e0d4be;margin-bottom:16px;background:#ece4d4">
+              <div style="{{ editPreviewImg }}"></div>
+            </div>
+
+            <button onClick="{{ openCrop }}" style="width:100%;padding:11px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid #1e3a2f;background:#1e3a2f;color:#f5efe3;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:14px;transition:background .2s ease" style-hover="background:#2a4a3b"><span style="font-size:15px"><i data-lucide="crop"></i></span>Crop &amp; straighten</button>
+
+            <div style="display:flex;gap:8px;margin-bottom:16px">
+              <button onClick="{{ setFill }}" style="flex:1;padding:9px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid {{ fillBorder }};background:{{ fillBg }};color:{{ fillColor }};transition:all .2s ease;display:flex;align-items:center;justify-content:center;gap:6px"><span style="font-size:13px"><i data-lucide="maximize"></i></span>Fill</button>
+              <button onClick="{{ setFit }}" style="flex:1;padding:9px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid {{ fitBorder }};background:{{ fitBg }};color:{{ fitColor }};transition:all .2s ease;display:flex;align-items:center;justify-content:center;gap:6px"><span style="font-size:13px"><i data-lucide="minimize"></i></span>Fit</button>
+              <button onClick="{{ rotate }}" title="Rotate" style="flex:none;width:38px;padding:9px;font-size:14px;cursor:pointer;border:1px solid #d8ccb4;background:#fff;color:#3c352b;display:flex;align-items:center;justify-content:center;transition:background .2s ease" style-hover="background:#ede4d4"><i data-lucide="rotate-cw"></i></button>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;background:#f3eee2;margin-bottom:18px;font-size:11.5px;color:#8a7d68;line-height:1.4"><span style="font-size:14px;color:var(--gold,#a0813f)"><i data-lucide="move"></i></span>Drag the photo inside its frame to reposition.</div>
+
+            <div style="display:flex;flex-direction:column;gap:17px">
+              <div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:#5d5343">Zoom</span><span style="font-size:11px;color:#a8966f;font-family:'Courier New',monospace">{{ zoomLabel }}</span></div>
+                <input type="range" min="100" max="400" value="{{ zoomVal }}" onInput="{{ onZoom }}" onMouseDown="{{ beginAdj }}" style="width:100%">
+              </div>
+              <div style="height:1px;background:#e6dcc7;margin:2px 0"></div>
+              <div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:#5d5343">Brightness</span><span style="font-size:11px;color:#a8966f;font-family:'Courier New',monospace">{{ brightLabel }}</span></div>
+                <input type="range" min="60" max="140" value="{{ brightVal }}" onInput="{{ onBright }}" onMouseDown="{{ beginAdj }}" style="width:100%">
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:#5d5343">Contrast</span><span style="font-size:11px;color:#a8966f;font-family:'Courier New',monospace">{{ contrastLabel }}</span></div>
+                <input type="range" min="70" max="130" value="{{ contrastVal }}" onInput="{{ onContrast }}" onMouseDown="{{ beginAdj }}" style="width:100%">
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:22px;padding-top:18px;border-top:1px solid #e6dcc7">
+              <button onClick="{{ replacePhoto }}" style="flex:1;padding:10px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid #d8ccb4;background:#fff;color:#1e3a2f;display:flex;align-items:center;justify-content:center;gap:7px;transition:background .2s ease" style-hover="background:#ede4d4"><span style="font-size:13px"><i data-lucide="repeat"></i></span>Replace</button>
+              <button onClick="{{ deletePhoto }}" style="flex:1;padding:10px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid rgba(151,64,47,0.4);background:#fff;color:#97402f;display:flex;align-items:center;justify-content:center;gap:7px;transition:background .2s ease" style-hover="background:rgba(151,64,47,0.07)"><span style="font-size:13px"><i data-lucide="trash-2"></i></span>Remove</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- LAYOUT MODE -->
+        <sc-if value="{{ layoutMode }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:20px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68;margin-bottom:6px">Layout</div>
+            <p style="font-size:12px;line-height:1.6;color:#8a7d68;font-weight:300;margin:0 0 18px">Choose how this spread is composed. Your photos move with it.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <sc-for list="{{ layoutOptions }}" as="l" hint-placeholder-count="5">
+                <button onClick="{{ l.onClick }}" style="background:{{ l.bg }};border:1px solid {{ l.border }};cursor:pointer;padding:10px;transition:all .2s ease" style-hover="border-color:#1e3a2f">
+                  <div style="aspect-ratio:2/1;position:relative;background:#fff;border:1px solid #eee6d6;margin-bottom:8px">
+                    <div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#eadfca"></div>
+                    <sc-for list="{{ l.mini }}" as="m" hint-placeholder-count="2"><div style="{{ m }}"></div></sc-for>
+                  </div>
+                  <div style="font-size:11px;color:{{ l.labelColor }};font-weight:{{ l.weight }};text-align:center">{{ l.name }}</div>
+                </button>
+              </sc-for>
+            </div>
+
+            <div style="margin-top:24px;font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68;margin-bottom:12px">Page theme</div>
+            <div style="display:flex;gap:8px">
+              <sc-for list="{{ themeOptions }}" as="t" hint-placeholder-count="3">
+                <button onClick="{{ t.onClick }}" style="flex:1;border:1px solid {{ t.border }};background:{{ t.swatch }};height:42px;cursor:pointer;position:relative;transition:all .2s ease" title="{{ t.name }}">
+                  <sc-if value="{{ t.active }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:{{ t.check }};font-size:15px"><i data-lucide="check"></i></span></sc-if>
+                </button>
+              </sc-for>
+            </div>
+
+            <div style="margin-top:26px;padding:16px;background:#1e3a2f;color:#e3ece4">
+              <div style="font-size:12px;line-height:1.6;font-weight:300;display:flex;gap:9px;align-items:flex-start"><span style="font-size:15px;color:#b89a5c;margin-top:1px"><i data-lucide="lightbulb"></i></span>Select any frame on the page to edit a photo, or drag one in from your tray.</div>
+            </div>
+          </div>
+        </sc-if>
+
+      </div>
+    </aside>
+  </div>
+
+  <!-- BOTTOM NAVIGATOR -->
+  <footer style="flex:none;height:128px;background:#fbf8f1;border-top:1px solid #ddd0b8;display:flex;align-items:stretch;z-index:55">
+    <div style="flex:none;width:284px;display:flex;flex-direction:column;justify-content:center;padding:0 18px;border-right:1px solid #e6dcc7">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68;margin-bottom:4px">Pages</div>
+      <div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#1e3a2f;line-height:1.05">{{ spreadCount }} spreads</div>
+      <div style="font-size:12px;color:#a8966f;margin-bottom:9px">{{ pageCount }} printed pages</div>
+      <div style="display:flex;gap:7px">
+        <button onClick="{{ duplicateSpread }}" title="Duplicate (⌘D)" style="flex:1;background:#fff;border:1px solid #d8ccb4;cursor:pointer;padding:6px;font-size:11px;color:#3c352b;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .2s" style-hover="background:#ede4d4"><span style="font-size:12px"><i data-lucide="copy"></i></span>Duplicate</button>
+        <button onClick="{{ deleteSpread }}" title="Delete spread" style="flex:none;width:32px;background:#fff;border:1px solid rgba(151,64,47,0.35);cursor:pointer;padding:6px;font-size:12px;color:#97402f;display:flex;align-items:center;justify-content:center;transition:background .2s" style-hover="background:rgba(151,64,47,0.07)"><i data-lucide="trash-2"></i></button>
+      </div>
+    </div>
+    <div class="ms-scroll" style="flex:1;display:flex;align-items:center;gap:0;overflow-x:auto;padding:0 16px;min-width:0">
+      <sc-for list="{{ navSpreads }}" as="n" hint-placeholder-count="8">
+        <sc-if value="{{ n.chapterStart }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:none;align-self:stretch;display:flex;flex-direction:column;justify-content:center;padding:0 14px 0 6px;border-left:1px solid #eadfca;margin-left:8px">
+            <div style="font-family:'Courier New',monospace;font-size:9px;color:var(--gold,#a0813f);writing-mode:vertical-rl;transform:rotate(180deg);letter-spacing:0.1em;text-transform:uppercase;max-height:74px">{{ n.chapterTitle }}</div>
+          </div>
+        </sc-if>
+        <button draggable="true" onDragStart="{{ n.onDragStart }}" onDragOver="{{ n.onDragOver }}" onDrop="{{ n.onDrop }}" onDragEnd="{{ n.onDragEnd }}" onClick="{{ n.onClick }}" style="flex:none;background:transparent;border:0;cursor:grab;padding:0;margin-right:12px;text-align:center;opacity:{{ n.dragOpacity }}">
+          <div style="width:96px;height:48px;background:#fff;position:relative;border:2px {{ n.borderStyle }} {{ n.border }};box-shadow:0 2px 5px rgba(44,39,31,0.1);transition:border-color .2s ease">
+            <div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#eadfca"></div>
+            <sc-for list="{{ n.mini }}" as="m" hint-placeholder-count="2"><div style="{{ m }}"></div></sc-for>
+          </div>
+          <div style="font-family:'Courier New',monospace;font-size:9px;color:{{ n.labelColor }};margin-top:5px">{{ n.label }}</div>
+        </button>
+      </sc-for>
+      <button onClick="{{ addSpread }}" style="flex:none;width:96px;height:48px;background:transparent;border:1.5px dashed #cfbfa3;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#a8966f;font-size:18px;transition:all .2s ease" style-hover="border-color:#1e3a2f;color:#1e3a2f" title="Add spread"><i data-lucide="plus"></i></button>
+    </div>
+    <div style="flex:none;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:0 18px;border-left:1px solid #e6dcc7">
+      <button onClick="{{ prevSpread }}" style="width:34px;height:34px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#3c352b;font-size:16px;transition:background .2s ease" style-hover="background:#ede4d4"><i data-lucide="chevron-left"></i></button>
+      <button onClick="{{ nextSpread }}" style="width:34px;height:34px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#3c352b;font-size:16px;transition:background .2s ease" style-hover="background:#ede4d4"><i data-lucide="chevron-right"></i></button>
+    </div>
+  </footer>
+
+  <!-- CROP MODAL -->
+  <sc-if value="{{ cropOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:280;background:rgba(18,32,25,0.6);display:flex;align-items:center;justify-content:center;animation:ms-veil .3s ease both;padding:30px">
+      <div style="background:#fbf8f1;width:600px;max-width:100%;box-shadow:0 30px 80px rgba(0,0,0,0.4);animation:ms-pop .3s ease both">
+        <div style="padding:20px 24px;border-bottom:1px solid #e6dcc7;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--gold,#a0813f);font-size:18px"><i data-lucide="crop"></i></span><span style="font-family:'Cormorant Garamond',serif;font-size:23px;color:#1e3a2f">Crop &amp; straighten</span></div>
+          <button onClick="{{ closeCrop }}" style="background:transparent;border:0;color:#8a7d68;font-size:17px;cursor:pointer" style-hover="color:#1e3a2f"><i data-lucide="x"></i></button>
+        </div>
+        <div style="padding:24px">
+          <div id="ms-crop-preview" style="position:relative;width:100%;aspect-ratio:4/3;background:{{ cropPhotoBg }};background-size:cover;background-position:center;overflow:hidden;user-select:none;border:1px solid #d8ccb4">
+            <div onMouseDown="{{ cropOnMove }}" style="{{ cropRectStyle }}">
+              <div style="position:absolute;left:33.3%;top:0;bottom:0;width:1px;background:rgba(245,239,227,0.5)"></div>
+              <div style="position:absolute;left:66.6%;top:0;bottom:0;width:1px;background:rgba(245,239,227,0.5)"></div>
+              <div style="position:absolute;top:33.3%;left:0;right:0;height:1px;background:rgba(245,239,227,0.5)"></div>
+              <div style="position:absolute;top:66.6%;left:0;right:0;height:1px;background:rgba(245,239,227,0.5)"></div>
+              <div onMouseDown="{{ cropNW }}" style="position:absolute;top:-6px;left:-6px;width:14px;height:14px;border-top:3px solid #ecd9ad;border-left:3px solid #ecd9ad;cursor:nwse-resize"></div>
+              <div onMouseDown="{{ cropNE }}" style="position:absolute;top:-6px;right:-6px;width:14px;height:14px;border-top:3px solid #ecd9ad;border-right:3px solid #ecd9ad;cursor:nesw-resize"></div>
+              <div onMouseDown="{{ cropSW }}" style="position:absolute;bottom:-6px;left:-6px;width:14px;height:14px;border-bottom:3px solid #ecd9ad;border-left:3px solid #ecd9ad;cursor:nesw-resize"></div>
+              <div onMouseDown="{{ cropSE }}" style="position:absolute;bottom:-6px;right:-6px;width:14px;height:14px;border-bottom:3px solid #ecd9ad;border-right:3px solid #ecd9ad;cursor:nwse-resize"></div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px;margin-top:18px;flex-wrap:wrap">
+            <span style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8a7d68;margin-right:4px">Aspect</span>
+            <sc-for list="{{ cropAspects }}" as="a" hint-placeholder-count="5">
+              <button onClick="{{ a.onClick }}" style="background:{{ a.bg }};border:1px solid {{ a.border }};color:{{ a.color }};padding:6px 13px;font-size:12px;font-weight:{{ a.weight }};cursor:pointer;transition:all .2s">{{ a.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid #e6dcc7;display:flex;align-items:center;justify-content:space-between">
+          <button onClick="{{ resetCrop }}" style="background:transparent;border:0;color:#8a7d68;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px" style-hover="color:#1e3a2f"><span style="font-size:14px"><i data-lucide="rotate-ccw"></i></span>Reset</button>
+          <div style="display:flex;gap:10px">
+            <button onClick="{{ closeCrop }}" style="background:transparent;border:1px solid #d8ccb4;color:#5d5343;padding:10px 20px;font-size:13px;font-weight:500;cursor:pointer;transition:background .2s" style-hover="background:#ede4d4">Cancel</button>
+            <button onClick="{{ applyCrop }}" style="background:#1e3a2f;border:0;color:#f5efe3;padding:10px 24px;font-size:13px;font-weight:500;cursor:pointer;transition:background .2s" style-hover="background:#2a4a3b">Apply crop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ASSISTANT DRAWER -->
+  <sc-if value="{{ assistantOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ toggleAssistant }}" style="position:fixed;inset:0;background:rgba(22,39,31,0.32);z-index:200;animation:ms-veil .3s ease both"></div>
+    <div style="position:fixed;top:0;right:0;bottom:0;width:368px;background:#fbf8f1;z-index:201;box-shadow:-20px 0 50px rgba(44,39,31,0.2);display:flex;flex-direction:column;animation:ms-drawer .35s cubic-bezier(.2,.7,.3,1) both">
+      <div style="padding:24px 24px 18px;border-bottom:1px solid #e6dcc7">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--gold,#a0813f);font-size:19px"><i data-lucide="sparkles"></i></span><span style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#1e3a2f">Story Assistant</span></div>
+          <button onClick="{{ toggleAssistant }}" style="background:transparent;border:0;color:#8a7d68;font-size:17px;cursor:pointer" style-hover="color:#1e3a2f"><i data-lucide="x"></i></button>
+        </div>
+        <p style="font-size:13px;line-height:1.6;color:#5d5343;font-weight:300;margin:14px 0 0">I can help arrange your spreads — but nothing happens until you approve it. You'll see exactly what changes before you accept.</p>
+      </div>
+      <div class="ms-scroll" style="flex:1;overflow-y:auto;padding:18px 24px">
+
+        <sc-if value="{{ hasPreview }}" hint-placeholder-val="{{ false }}">
+          <div style="border:1px solid var(--gold,#a0813f);background:#fff;margin-bottom:18px;animation:ms-pop .25s ease both">
+            <div style="padding:15px 16px 12px;border-bottom:1px solid #f0e7d6">
+              <div style="font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:7px">Proposed change</div>
+              <div style="font-size:15px;font-weight:600;color:#1e3a2f">{{ previewTitle }}</div>
+            </div>
+            <div style="padding:14px 16px">
+              <sc-for list="{{ previewLines }}" as="l" hint-placeholder-count="3">
+                <div style="display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#3c352b;line-height:1.5;margin-bottom:8px"><span style="color:#51735f;font-size:13px;margin-top:1px"><i data-lucide="{{ l.icon }}"></i></span>{{ l.text }}</div>
+              </sc-for>
+              <div style="display:flex;gap:9px;margin-top:14px">
+                <button onClick="{{ applyPreview }}" style="flex:1;background:#1e3a2f;color:#f5efe3;border:0;padding:10px;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .2s" style-hover="background:#2a4a3b">Apply changes</button>
+                <button onClick="{{ cancelPreview }}" style="flex:none;background:transparent;border:1px solid #d8ccb4;color:#5d5343;padding:10px 16px;font-size:12.5px;cursor:pointer;transition:background .2s" style-hover="background:#ede4d4">Not now</button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <sc-for list="{{ assistantActions }}" as="a" hint-placeholder-count="4">
+            <div style="border:1px solid #e6dcc7;background:#fff;padding:16px">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="color:var(--gold,#a0813f);font-size:16px"><i data-lucide="{{ a.icon }}"></i></span><span style="font-size:14px;font-weight:600;color:#2c271f">{{ a.title }}</span></div>
+              <p style="font-size:12.5px;line-height:1.6;color:#5d5343;font-weight:300;margin:0 0 14px">{{ a.desc }}</p>
+              <button onClick="{{ a.onClick }}" style="background:transparent;color:#1e3a2f;border:1px solid #1e3a2f;padding:9px 16px;font-size:12px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:all .2s ease" style-hover="background:rgba(30,58,47,0.06)">{{ a.cta }}<span style="font-size:13px"><i data-lucide="arrow-right"></i></span></button>
+            </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ assistantToast }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;padding:13px 15px;background:#1e3a2f;color:#e3ece4;font-size:13px;display:flex;align-items:center;gap:9px;animation:ms-pop .3s ease both"><span style="color:#b89a5c;font-size:15px"><i data-lucide="check-circle-2"></i></span>{{ assistantToast }}</div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- SHORTCUTS OVERLAY -->
+  <sc-if value="{{ shortcutsOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeShortcuts }}" style="position:fixed;inset:0;z-index:260;background:rgba(18,32,25,0.5);display:flex;align-items:center;justify-content:center;animation:ms-veil .3s ease both;padding:30px">
+      <div style="background:#fbf8f1;width:440px;max-width:100%;box-shadow:0 30px 80px rgba(0,0,0,0.4);animation:ms-pop .3s ease both" onClick="{{ stop }}">
+        <div style="padding:20px 24px;border-bottom:1px solid #e6dcc7;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:10px"><span style="color:var(--gold,#a0813f);font-size:18px"><i data-lucide="keyboard"></i></span><span style="font-family:'Cormorant Garamond',serif;font-size:23px;color:#1e3a2f">Keyboard shortcuts</span></div>
+          <button onClick="{{ closeShortcuts }}" style="background:transparent;border:0;color:#8a7d68;font-size:17px;cursor:pointer" style-hover="color:#1e3a2f"><i data-lucide="x"></i></button>
+        </div>
+        <div style="padding:14px 24px 24px">
+          <sc-for list="{{ shortcuts }}" as="k" hint-placeholder-count="7">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f0e7d6">
+              <span style="font-size:13px;color:#3c352b">{{ k.label }}</span>
+              <span style="font-family:'Courier New',monospace;font-size:12px;color:#5d5343;background:#ece4d4;padding:3px 9px;border:1px solid #ddd0b8">{{ k.keys }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- PREVIEW MODE -->
+  <sc-if value="{{ previewOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:300;background:#122019;display:flex;flex-direction:column;animation:ms-veil .5s ease both">
+      <div style="position:absolute;inset:0;opacity:0.05;mix-blend-mode:screen;pointer-events:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E&quot;)"></div>
+      <div style="flex:none;display:flex;align-items:center;justify-content:space-between;padding:24px 32px;position:relative;z-index:2">
+        <div>
+          <div style="font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:#b89a5c;margin-bottom:5px">Preview · {{ pvChapter }}</div>
+          <div style="font-family:'Cormorant Garamond',serif;font-size:22px;color:#f5efe3">A Week in the Western Ghats</div>
+        </div>
+        <button onClick="{{ closePreview }}" style="display:inline-flex;align-items:center;gap:9px;background:transparent;border:1px solid rgba(236,217,173,0.35);color:#ecd9ad;padding:10px 18px;font-size:13px;cursor:pointer;transition:background .2s ease" style-hover="background:rgba(236,217,173,0.1)"><span style="font-size:15px"><i data-lucide="x"></i></span>Close preview</button>
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:30px;padding:0 40px 20px;position:relative;z-index:2;min-height:0">
+        <button onClick="{{ pvPrev }}" style="flex:none;width:52px;height:52px;border-radius:50%;background:rgba(245,239,227,0.08);border:1px solid rgba(236,217,173,0.25);color:#ecd9ad;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;transition:background .2s ease" style-hover="background:rgba(245,239,227,0.16)"><i data-lucide="chevron-left"></i></button>
+        <div style="flex:1;max-width:860px;aspect-ratio:2/1;position:relative;filter:drop-shadow(0 40px 70px rgba(0,0,0,0.5));transition:opacity .25s ease,transform .25s ease;opacity:{{ pvOpacity }}">
+          <div style="position:absolute;inset:0;background:{{ pageBg }}">
+            <div style="position:absolute;top:0;bottom:0;left:50%;width:30px;transform:translateX(-50%);background:linear-gradient(90deg,rgba(0,0,0,0.22),rgba(0,0,0,0.03) 45%,transparent 50%,rgba(0,0,0,0.03) 55%,rgba(0,0,0,0.22));z-index:30;pointer-events:none"></div>
+            <sc-for list="{{ pvSlots }}" as="s" hint-placeholder-count="2">
+              <div style="{{ s.box }}">
+                <sc-if value="{{ s.filled }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;inset:0;overflow:hidden"><div style="{{ s.img }}"></div></div></sc-if>
+                <sc-if value="{{ s.empty }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,#f0e7d6,#f0e7d6 8px,#e8dcc7 8px,#e8dcc7 16px)"></div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <button onClick="{{ pvNext }}" style="flex:none;width:52px;height:52px;border-radius:50%;background:rgba(245,239,227,0.08);border:1px solid rgba(236,217,173,0.25);color:#ecd9ad;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;transition:background .2s ease" style-hover="background:rgba(245,239,227,0.16)"><i data-lucide="chevron-right"></i></button>
+      </div>
+      <div style="flex:none;text-align:center;padding:0 0 30px;position:relative;z-index:2">
+        <div style="font-family:'Courier New',monospace;font-size:12px;color:#a9bdb0;letter-spacing:0.1em">Spread {{ pvLabel }} of {{ spreadCount }}</div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  state = {
+    photos: null,
+    spreads: null,
+    chapters: [
+      { id: 'c1', title: 'Arrival' },
+      { id: 'c2', title: 'Exploration' },
+      { id: 'c3', title: 'Highlights' },
+      { id: 'c4', title: 'Final Memories' },
+    ],
+    cur: 0,
+    sel: null,
+    picked: null,
+    multi: [],
+    favorites: [],
+    removed: [],
+    search: '',
+    filter: 'all',
+    theme: 'classic',
+    showGuides: false,
+    assistantOpen: false,
+    assistantToast: '',
+    preview: null,
+    previewOpen: false,
+    pv: 0,
+    pvOpacity: 1,
+    saved: true,
+    cropOpen: false,
+    crop: { x: 0.1, y: 0.1, w: 0.8, h: 0.8, aspect: 'free' },
+    shortcutsOpen: false,
+    histTick: 0,
+    hu: false,
+    hr: false,
+    dragFrom: null,
+    dragOver: null,
+  };
+
+  tonePairs = [
+    ['#9fae9b', '#90a085'], ['#cbbf9f', '#bfb28d'], ['#a9b4ba', '#9aa6ad'],
+    ['#c2a58f', '#b39580'], ['#b5ac95', '#a79e85'], ['#8fa6a0', '#7f9890'],
+    ['#bfae93', '#b1a083'], ['#a0ac9c', '#92a08c'], ['#c8b49a', '#bba785'],
+  ];
+
+  TEMPLATES = {
+    solo:    [{ x: 30, y: 12, w: 40, h: 76 }],
+    pair:    [{ x: 5, y: 14, w: 41, h: 72 }, { x: 54, y: 14, w: 41, h: 72 }],
+    collage: [{ x: 5, y: 8, w: 41, h: 40 }, { x: 54, y: 8, w: 41, h: 40 }, { x: 5, y: 52, w: 41, h: 40 }, { x: 54, y: 52, w: 41, h: 40 }],
+    pano:    [{ x: 8, y: 24, w: 84, h: 52 }],
+    story:   [{ x: 5, y: 10, w: 41, h: 80 }, { x: 54, y: 10, w: 41, h: 37 }, { x: 54, y: 53, w: 41, h: 37 }],
+  };
+  TEMPLATE_ORDER = ['solo', 'pair', 'collage', 'pano', 'story'];
+  TEMPLATE_NAMES = { solo: 'Solo', pair: 'Pair', collage: 'Collage', pano: 'Panoramic', story: 'Story' };
+
+  THEMES = {
+    classic: { page: '#ffffff', name: 'Classic', swatch: '#ffffff' },
+    warm: { page: '#f7f1e6', name: 'Warm', swatch: '#f7f1e6' },
+    ink: { page: '#24201b', name: 'Ink', swatch: '#24201b' },
+  };
+
+  ASPECTS = [
+    { key: 'free', label: 'Free', r: null },
+    { key: '1:1', label: '1:1', r: 1 },
+    { key: '4:3', label: '4:3', r: 4 / 3 },
+    { key: '3:2', label: '3:2', r: 3 / 2 },
+    { key: '16:9', label: '16:9', r: 16 / 9 },
+  ];
+
+  componentDidMount() {
+    this.init(); this.paint(); this.tryIcons(0);
+    this._key = (e) => this.handleKey(e);
+    window.addEventListener('keydown', this._key);
+  }
+  componentDidUpdate() { this.paint(); this.tryIcons(0); }
+  componentWillUnmount() { if (this._save) clearTimeout(this._save); if (this._key) window.removeEventListener('keydown', this._key); }
+
+  init() {
+    if (this.state.spreads) return;
+    const DIM = { land: 'w=900&h=620', port: 'w=620&h=860', sq: 'w=760&h=760', pano: 'w=1400&h=560' };
+    const U = (id, o) => 'url("https://images.unsplash.com/photo-' + id + '?auto=format&fit=crop&q=72&' + DIM[o] + '")';
+    const POOL = {
+      mountains: ['1506905925346-21bda4d32df4', '1464822759023-fed622ff2c3b', '1454496522488-7a8e488e8606', '1469474968028-56623f02e42e', '1501785888041-af3ef285b470'],
+      forest: ['1441974231531-c6227db76b6e', '1448375240586-882707db888b', '1470071459604-3b5ec3a7fe05', '1511497584788-876760111969'],
+      waterfall: ['1432405972618-c60b0225b8f9', '1467890947394-8171244e5410', '1432889490240-84df33d47091'],
+      road: ['1426604966848-d7adac402bff', '1502082553048-f009c37129b9', '1469854523086-cc02fe5d8800'],
+      lake: ['1470770841072-f978cf4d019e', '1444703686981-a3abbc4d4fe3', '1470115636492-6d2b56f9146d'],
+      food: ['1447933601403-0c6688de566e', '1495474472287-4d71bcdd2085', '1504674900247-0877df9cc836', '1414235077428-338989a2e8c0'],
+      town: ['1477587458883-47145ed94245', '1480714378408-67cf0d13bc1b'],
+      portrait: ['1507003211169-0a1dd7228f2d', '1494790108377-be9c29b29330', '1438761681033-6461ffad8d80', '1500648767791-00dcc994a43e'],
+      group: ['1539635278303-d4002c07eae3', '1488646953014-85cb44e25828', '1530789253388-582c481c54b0'],
+    };
+    const CAP = { mountains: 'Mullayanagiri', forest: 'Shola forest', waterfall: 'Hebbe Falls', road: 'Ghat road', lake: 'Bhadra backwaters', food: 'Estate kitchen', town: 'Chikmagalur', portrait: 'Portrait', group: 'The group' };
+    const RECIPES = {
+      c1: [['road', 'land'], ['forest', 'land'], ['town', 'land'], ['mountains', 'pano'], ['road', 'port'], ['forest', 'port'], ['mountains', 'land'], ['town', 'sq'], ['road', 'land'], ['forest', 'land'], ['mountains', 'port'], ['mountains', 'pano']],
+      c2: [['mountains', 'land'], ['waterfall', 'port'], ['forest', 'land'], ['food', 'sq'], ['lake', 'pano'], ['road', 'land'], ['portrait', 'port'], ['mountains', 'land'], ['waterfall', 'land'], ['forest', 'port'], ['food', 'land'], ['lake', 'land']],
+      c3: [['portrait', 'port'], ['group', 'land'], ['mountains', 'pano'], ['food', 'sq'], ['portrait', 'port'], ['lake', 'land'], ['group', 'land'], ['mountains', 'land']],
+      c4: [['mountains', 'pano'], ['lake', 'land'], ['road', 'land'], ['forest', 'port'], ['group', 'land'], ['mountains', 'land'], ['road', 'port'], ['lake', 'pano'], ['portrait', 'port']],
+    };
+    const dist = [{ id: 'c1', n: 12 }, { id: 'c2', n: 32 }, { id: 'c3', n: 16 }, { id: 'c4', n: 26 }];
+    const photos = [];
+    let gi = 0;
+    dist.forEach((d) => {
+      const recipe = RECIPES[d.id];
+      const kc = {};
+      for (let k = 0; k < d.n; k++) {
+        const spec = recipe[k % recipe.length];
+        const kind = spec[0], orient = spec[1];
+        kc[kind] = (kc[kind] || 0);
+        const ids = POOL[kind];
+        const pid = ids[kc[kind] % ids.length];
+        kc[kind]++;
+        photos.push({ id: 'p' + gi, bg: U(pid, orient), chapter: d.id, kind, orient, name: CAP[kind] + ' · IMG_' + (4000 + gi) + '.jpg' });
+        gi++;
+      }
+    });
+
+    const plan = [
+      { id: 'c1', layouts: ['pano', 'pair'] },
+      { id: 'c2', layouts: ['story', 'collage', 'pair', 'solo'] },
+      { id: 'c3', layouts: ['pair', 'pano'] },
+      { id: 'c4', layouts: ['collage', 'story', 'pair'] },
+    ];
+    const spreads = [];
+    let sid = 0;
+    plan.forEach((ch) => {
+      const pool = photos.filter((p) => p.chapter === ch.id).map((p) => p.id);
+      let pc = 0;
+      ch.layouts.forEach((lay, li) => {
+        const rects = this.TEMPLATES[lay];
+        const slots = rects.map(() => this.newSlot());
+        const isLastEmpty = (ch.id === 'c4' && li === ch.layouts.length - 1);
+        slots.forEach((s, k) => {
+          if (isLastEmpty && k >= 1) return;
+          if (pc < pool.length) { s.photoId = pool[pc++]; }
+        });
+        spreads.push({ id: 's' + (sid++), chapter: ch.id, layout: lay, slots });
+      });
+    });
+    this.setState({ photos, spreads });
+  }
+  newSlot() { return { photoId: null, fit: 'cover', zoom: 100, posX: 50, posY: 50, rot: 0, bright: 100, contrast: 100 }; }
+
+  paint() {
+    document.querySelectorAll('[data-w]').forEach((el) => { el.style.width = el.getAttribute('data-w'); });
+    document.documentElement.style.setProperty('--gold', '#a0813f');
+  }
+  tryIcons(n) {
+    if (window.lucide && window.lucide.createIcons) window.lucide.createIcons();
+    else if (n < 30) setTimeout(() => this.tryIcons(n + 1), 120);
+  }
+  markSaved() {
+    this.setState({ saved: false });
+    if (this._save) clearTimeout(this._save);
+    this._save = setTimeout(() => this.setState({ saved: true }), 900);
+  }
+
+  // ---- history ----
+  cloneSpreads() { return (this.state.spreads || []).map((sp) => ({ ...sp, slots: sp.slots.map((s) => ({ ...s })) })); }
+  snapshot() { return { spreads: this.cloneSpreads(), theme: this.state.theme }; }
+  beginChange() {
+    if (!this._past) this._past = [];
+    this._past.push(this.snapshot());
+    if (this._past.length > 60) this._past.shift();
+    this._future = [];
+    this.setState({ histTick: Date.now(), hu: true, hr: false });
+  }
+  beginAdjustGroup() {
+    if (this._adjTimer) { clearTimeout(this._adjTimer); } else { this.beginChange(); }
+    this._adjTimer = setTimeout(() => { this._adjTimer = null; }, 700);
+  }
+  undo() {
+    if (!this._past || !this._past.length) return;
+    if (!this._future) this._future = [];
+    this._future.push(this.snapshot());
+    const s = this._past.pop();
+    this.setState({ spreads: s.spreads, theme: s.theme, sel: null, histTick: Date.now(), hu: this._past.length > 0, hr: true });
+    this.markSaved();
+  }
+  redo() {
+    if (!this._future || !this._future.length) return;
+    this._past.push(this.snapshot());
+    const s = this._future.pop();
+    this.setState({ spreads: s.spreads, theme: s.theme, sel: null, histTick: Date.now(), hu: true, hr: this._future.length > 0 });
+    this.markSaved();
+  }
+
+  photoById(id) { return (this.state.photos || []).find((p) => p.id === id); }
+  curSpread() { return (this.state.spreads || [])[this.state.cur]; }
+  selSlotObj() { const s = this.state.sel; return (s && this.state.spreads[s.sp]) ? this.state.spreads[s.sp].slots[s.sl] : null; }
+
+  // ---- mutation ----
+  mutSpread(idx, fn) {
+    this.setState((st) => {
+      const arr = st.spreads.slice();
+      const sp = { ...arr[idx], slots: arr[idx].slots.map((s) => ({ ...s })) };
+      fn(sp);
+      arr[idx] = sp;
+      return { spreads: arr };
+    });
+    this.markSaved();
+  }
+  setAdjRaw(field, val) { const s = this.state.sel; if (!s) return; this.mutSpread(s.sp, (sp) => { sp.slots[s.sl][field] = val; }); }
+  setAdjMulti(obj) { const s = this.state.sel; if (!s) return; this.mutSpread(s.sp, (sp) => { Object.assign(sp.slots[s.sl], obj); }); }
+  updateAdj(field, val) { this.beginAdjustGroup(); this.setAdjRaw(field, val); }
+  bumpZoom(d) { const sl = this.selSlotObj(); if (!sl) return; this.updateAdj('zoom', Math.max(100, Math.min(400, sl.zoom + d))); }
+
+  placePhoto(spreadIdx, slotIdx, photoId) {
+    this.beginChange();
+    this.mutSpread(spreadIdx, (sp) => { Object.assign(sp.slots[slotIdx], this.newSlot(), { photoId }); });
+    this.setState({ picked: null, sel: { sp: spreadIdx, sl: slotIdx } });
+  }
+  removeSelPhoto() { const s = this.state.sel; if (!s) return; this.beginChange(); this.mutSpread(s.sp, (sp) => { sp.slots[s.sl].photoId = null; }); this.setState({ sel: null }); }
+
+  applyLayout(idx, lay) {
+    this.beginChange();
+    this.setState((st) => {
+      const arr = st.spreads.slice();
+      const old = arr[idx];
+      const rects = this.TEMPLATES[lay];
+      const photoIds = old.slots.map((s) => s.photoId).filter(Boolean);
+      const slots = rects.map((r, i) => Object.assign(this.newSlot(), { photoId: photoIds[i] || null }));
+      arr[idx] = { ...old, layout: lay, slots };
+      return { spreads: arr, sel: null };
+    });
+    this.markSaved();
+  }
+  layoutForCount(n) { if (n <= 1) return 'solo'; if (n === 2) return 'pair'; if (n === 3) return 'story'; return 'collage'; }
+
+  go(i) { const max = (this.state.spreads || []).length - 1; this.setState({ cur: Math.max(0, Math.min(max, i)), sel: null }); }
+  jumpChapter(cid) { const idx = (this.state.spreads || []).findIndex((s) => s.chapter === cid); if (idx >= 0) this.go(idx); }
+
+  addSpread() {
+    this.beginChange();
+    this.setState((st) => {
+      const arr = st.spreads.slice();
+      const ch = arr[st.cur] ? arr[st.cur].chapter : 'c1';
+      const ns = { id: 's' + Date.now(), chapter: ch, layout: 'pair', slots: this.TEMPLATES.pair.map(() => this.newSlot()) };
+      arr.splice(st.cur + 1, 0, ns);
+      return { spreads: arr, cur: st.cur + 1, sel: null };
+    });
+    this.markSaved();
+  }
+  duplicateSpread() {
+    this.beginChange();
+    this.setState((st) => {
+      const arr = st.spreads.slice();
+      const src = arr[st.cur];
+      const ns = { id: 's' + Date.now(), chapter: src.chapter, layout: src.layout, slots: src.slots.map((s) => ({ ...s })) };
+      arr.splice(st.cur + 1, 0, ns);
+      return { spreads: arr, cur: st.cur + 1, sel: null };
+    });
+    this.markSaved();
+  }
+  deleteSpread() {
+    if ((this.state.spreads || []).length <= 1) return;
+    this.beginChange();
+    this.setState((st) => { const arr = st.spreads.slice(); arr.splice(st.cur, 1); return { spreads: arr, cur: Math.max(0, st.cur - 1), sel: null }; });
+    this.markSaved();
+  }
+  reorder(from, to) {
+    if (from == null || from === to) return;
+    this.beginChange();
+    this.setState((st) => {
+      const arr = st.spreads.slice();
+      const [m] = arr.splice(from, 1);
+      let t = to; if (from < to) t = to - 1;
+      t = Math.max(0, Math.min(arr.length, t));
+      arr.splice(t, 0, m);
+      const neighbor = arr[t - 1] || arr[t + 1];
+      if (neighbor) m.chapter = neighbor.chapter;
+      return { spreads: arr, cur: t, sel: null, dragFrom: null, dragOver: null };
+    });
+    this.markSaved();
+  }
+
+  // ---- frame drag ----
+  startFrameDrag(e, slotIdx) {
+    if (this.state.picked || this.state.multi.length) return;
+    const sp = this.curSpread(); if (!sp || !sp.slots[slotIdx].photoId) return;
+    this.setState({ sel: { sp: this.state.cur, sl: slotIdx } });
+    const rect = e.currentTarget.getBoundingClientRect();
+    const slot = sp.slots[slotIdx];
+    const sx = e.clientX, sy = e.clientY, px = slot.posX, py = slot.posY;
+    let started = false;
+    const move = (ev) => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (!started) { if (Math.abs(dx) + Math.abs(dy) < 3) return; started = true; this.beginChange(); this._moved = true; }
+      const nx = Math.max(0, Math.min(100, Math.round(px - dx / rect.width * 100)));
+      const ny = Math.max(0, Math.min(100, Math.round(py - dy / rect.height * 100)));
+      this.setAdjMulti({ posX: nx, posY: ny });
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); setTimeout(() => { this._moved = false; }, 60); };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    e.preventDefault();
+  }
+
+  // ---- crop ----
+  openCrop() { if (!this.selSlotObj()) return; this.setState({ cropOpen: true, crop: { x: 0.12, y: 0.12, w: 0.76, h: 0.76, aspect: 'free' } }); }
+  closeCrop() { this.setState({ cropOpen: false }); }
+  resetCrop() { this.setState({ crop: { x: 0.05, y: 0.05, w: 0.9, h: 0.9, aspect: 'free' } }); }
+  setCropAspect(key, r) {
+    if (!r) { this.setState((st) => ({ crop: { ...st.crop, aspect: 'free' } })); return; }
+    const boxAR = 4 / 3;
+    const arF = r / boxAR;
+    let wf, hf;
+    if (arF >= 1) { wf = 0.9; hf = wf / arF; } else { hf = 0.9; wf = hf * arF; }
+    this.setState({ crop: { x: (1 - wf) / 2, y: (1 - hf) / 2, w: wf, h: hf, aspect: key } });
+  }
+  startCropDrag(e, mode, corner) {
+    e.preventDefault(); e.stopPropagation();
+    const box = document.getElementById('ms-crop-preview'); if (!box) return;
+    const br = box.getBoundingClientRect();
+    const c = { ...this.state.crop };
+    const sx = e.clientX, sy = e.clientY;
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const move = (ev) => {
+      const dx = (ev.clientX - sx) / br.width, dy = (ev.clientY - sy) / br.height;
+      let n = { ...c };
+      if (mode === 'move') {
+        n.x = clamp(c.x + dx, 0, 1 - c.w); n.y = clamp(c.y + dy, 0, 1 - c.h);
+      } else {
+        let x1 = c.x, y1 = c.y, x2 = c.x + c.w, y2 = c.y + c.h;
+        if (corner.indexOf('w') >= 0) x1 = clamp(c.x + dx, 0, x2 - 0.08);
+        if (corner.indexOf('e') >= 0) x2 = clamp(c.x + c.w + dx, x1 + 0.08, 1);
+        if (corner.indexOf('n') >= 0) y1 = clamp(c.y + dy, 0, y2 - 0.08);
+        if (corner.indexOf('s') >= 0) y2 = clamp(c.y + c.h + dy, y1 + 0.08, 1);
+        n.x = x1; n.y = y1; n.w = x2 - x1; n.h = y2 - y1; n.aspect = 'free';
+      }
+      this.setState({ crop: n });
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+  }
+  applyCrop() {
+    const c = this.state.crop; const s = this.state.sel;
+    if (!s) { this.setState({ cropOpen: false }); return; }
+    this.beginChange();
+    const zoom = Math.max(100, Math.min(400, Math.round(100 / Math.max(c.w, c.h))));
+    const posX = (1 - c.w) > 0.001 ? Math.max(0, Math.min(100, Math.round(c.x / (1 - c.w) * 100))) : 50;
+    const posY = (1 - c.h) > 0.001 ? Math.max(0, Math.min(100, Math.round(c.y / (1 - c.h) * 100))) : 50;
+    this.setAdjMulti({ zoom, posX, posY, fit: 'cover' });
+    this.setState({ cropOpen: false });
+    this.markSaved();
+  }
+
+  // ---- multi-select / batch ----
+  toggleMulti(id) {
+    this.setState((st) => {
+      const has = st.multi.indexOf(id) >= 0;
+      return { multi: has ? st.multi.filter((x) => x !== id) : st.multi.concat([id]), picked: null };
+    });
+  }
+  clearMulti() { this.setState({ multi: [] }); }
+  batchFavorite() {
+    this.setState((st) => { const set = new Set(st.favorites); st.multi.forEach((id) => set.add(id)); return { favorites: Array.from(set), multi: [] }; });
+    this.toast('Added to favorites.');
+  }
+  batchMove(cid) {
+    this.setState((st) => {
+      const set = new Set(st.multi);
+      const photos = st.photos.map((p) => set.has(p.id) ? { ...p, chapter: cid } : p);
+      return { photos, multi: [] };
+    });
+    const t = (this.state.chapters.find((c) => c.id === cid) || {}).title;
+    this.toast('Moved photos to “' + t + '”.');
+  }
+  batchPlace() {
+    const ids = this.state.multi.slice(); if (!ids.length) return;
+    this.beginChange();
+    this.setState((st) => {
+      const arr = st.spreads.map((sp) => ({ ...sp, slots: sp.slots.map((s) => ({ ...s })) }));
+      let qi = 0;
+      for (let i = st.cur; i < arr.length && qi < ids.length; i++) {
+        arr[i].slots.forEach((s) => { if (!s.photoId && qi < ids.length) { Object.assign(s, this.newSlot(), { photoId: ids[qi++] }); } });
+      }
+      return { spreads: arr, multi: [] };
+    });
+    this.markSaved();
+    this.toast('Placed ' + ids.length + ' photos into open frames.');
+  }
+  removeUnused() {
+    const used = new Set();
+    this.state.spreads.forEach((sp) => sp.slots.forEach((s) => s.photoId && used.add(s.photoId)));
+    const removedSet = new Set(this.state.removed);
+    const newly = this.state.photos.filter((p) => !used.has(p.id) && !removedSet.has(p.id)).map((p) => p.id);
+    if (!newly.length) { this.toast('No unused photos to remove.'); return; }
+    this.setState({ removed: this.state.removed.concat(newly), multi: [] });
+  }
+  restoreRemoved() { this.setState({ removed: [] }); }
+
+  // ---- assistant ----
+  toast(msg) { this.setState({ assistantToast: msg }); if (this._toast) clearTimeout(this._toast); this._toast = setTimeout(() => this.setState({ assistantToast: '' }), 3400); }
+  countEmpties() { let e = 0; this.state.spreads.forEach((sp) => sp.slots.forEach((s) => { if (!s.photoId) e++; })); return e; }
+  previewAction(key) {
+    const st = this.state;
+    if (key === 'fill') {
+      const used = new Set(); st.spreads.forEach((sp) => sp.slots.forEach((s) => s.photoId && used.add(s.photoId)));
+      const removed = new Set(st.removed);
+      const empties = this.countEmpties();
+      const available = st.photos.filter((p) => !used.has(p.id) && !removed.has(p.id)).length;
+      const willFill = Math.min(empties, available);
+      this.setState({ preview: { key, title: 'Fill empty frames', lines: [
+        { icon: 'image', text: willFill + ' photos will be placed into ' + empties + ' open frame' + (empties === 1 ? '' : 's') + ', kept within their chapters.' },
+        { icon: 'layers', text: (available - willFill) + ' photos will remain in your tray for later.' },
+        { icon: 'check', text: 'Completion rises to about ' + this.projectedCompletion(willFill) + '%.' },
+      ] } });
+    } else if (key === 'regen') {
+      const sp = this.curSpread(); const cid = sp.chapter;
+      const inCh = st.spreads.filter((s) => s.chapter === cid);
+      const changing = inCh.filter((s) => this.layoutForCount(s.slots.filter((x) => x.photoId).length) !== s.layout).length;
+      const chT = (st.chapters.find((c) => c.id === cid) || {}).title;
+      this.setState({ preview: { key, title: 'Regenerate layouts — ' + chT, lines: [
+        { icon: 'layout-template', text: 'Layouts for ' + inCh.length + ' spreads in “' + chT + '” will be matched to their photo counts.' },
+        { icon: 'shuffle', text: changing + ' spread' + (changing === 1 ? '' : 's') + ' will change composition; the rest already fit.' },
+        { icon: 'image', text: 'No photos are added or removed — only how they sit on the page.' },
+      ] } });
+    } else if (key === 'rebalance') {
+      const byCh = {}; st.spreads.forEach((s) => { byCh[s.chapter] = byCh[s.chapter] || { sp: 0, fr: 0 }; byCh[s.chapter].sp++; byCh[s.chapter].fr += s.slots.filter((x) => x.photoId).length; });
+      const lines = st.chapters.map((c) => ({ icon: 'book-open', text: c.title + ' — ' + (byCh[c.id] ? byCh[c.id].fr : 0) + ' photos across ' + (byCh[c.id] ? byCh[c.id].sp : 0) + ' spreads.' }));
+      this.setState({ preview: { key, title: 'Rebalance album', lines } });
+    } else if (key === 'theme') {
+      const order = ['classic', 'warm', 'ink'];
+      const next = order[(order.indexOf(st.theme) + 1) % order.length];
+      this.setState({ preview: { key, next, title: 'Apply “' + this.THEMES[next].name + '” theme', lines: [
+        { icon: 'palette', text: 'Every one of your ' + st.spreads.length + ' spreads will switch to the ' + this.THEMES[next].name + ' page tone.' },
+        { icon: 'image', text: 'Photos and layouts are untouched — only the paper colour changes.' },
+      ] } });
+    }
+  }
+  projectedCompletion(add) {
+    let total = 0, filled = 0;
+    this.state.spreads.forEach((s) => s.slots.forEach((sl) => { total++; if (sl.photoId) filled++; }));
+    return total ? Math.round(((filled + add) / total) * 100) : 0;
+  }
+  applyPreview() {
+    const p = this.state.preview; if (!p) return;
+    if (p.key === 'fill') this.autoFill();
+    else if (p.key === 'regen') this.regenChapter(this.curSpread().chapter);
+    else if (p.key === 'rebalance') this.toast('Your album is already well balanced.');
+    else if (p.key === 'theme') { this.beginChange(); this.setState({ theme: p.next }); this.markSaved(); this.toast('Applied the “' + this.THEMES[p.next].name + '” theme.'); }
+    this.setState({ preview: null });
+  }
+  cancelPreview() { this.setState({ preview: null }); }
+  autoFill() {
+    this.beginChange();
+    const used = new Set();
+    this.state.spreads.forEach((sp) => sp.slots.forEach((s) => s.photoId && used.add(s.photoId)));
+    const removed = new Set(this.state.removed);
+    this.setState((st) => {
+      const arr = st.spreads.map((sp) => ({ ...sp, slots: sp.slots.map((s) => ({ ...s })) }));
+      arr.forEach((sp) => {
+        const pool = st.photos.filter((p) => p.chapter === sp.chapter && !used.has(p.id) && !removed.has(p.id)).map((p) => p.id);
+        sp.slots.forEach((s) => { if (!s.photoId && pool.length) { const id = pool.shift(); s.photoId = id; used.add(id); } });
+      });
+      return { spreads: arr };
+    });
+    this.markSaved();
+    this.toast('Filled the empty frames.');
+  }
+  regenChapter(cid) {
+    this.beginChange();
+    this.setState((st) => {
+      const arr = st.spreads.map((sp) => ({ ...sp, slots: sp.slots.map((s) => ({ ...s })) }));
+      arr.forEach((sp) => {
+        if (sp.chapter !== cid) return;
+        const n = sp.slots.filter((s) => s.photoId).length;
+        const lay = this.layoutForCount(n);
+        if (lay !== sp.layout) {
+          const ids = sp.slots.map((s) => s.photoId).filter(Boolean);
+          sp.layout = lay;
+          sp.slots = this.TEMPLATES[lay].map((r, i) => Object.assign(this.newSlot(), { photoId: ids[i] || null }));
+        }
+      });
+      return { spreads: arr, sel: null };
+    });
+    this.markSaved();
+    this.toast('Refreshed the layouts in this chapter.');
+  }
+
+  openPreview() { this.setState({ previewOpen: true, pv: this.state.cur, pvOpacity: 1, sel: null }); }
+  pvGo(d) {
+    const max = (this.state.spreads || []).length - 1;
+    const nx = this.state.pv + d; if (nx < 0 || nx > max) return;
+    this.setState({ pvOpacity: 0 });
+    setTimeout(() => this.setState({ pv: nx, pvOpacity: 1 }), 220);
+  }
+
+  handleKey(e) {
+    const tag = (e.target && e.target.tagName) || '';
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) this.redo(); else this.undo(); return; }
+    if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); this.redo(); return; }
+    if (this.state.cropOpen) { if (e.key === 'Escape') this.closeCrop(); else if (e.key === 'Enter') this.applyCrop(); return; }
+    if (typing) return;
+    if (e.key === 'Escape') {
+      if (this.state.previewOpen) this.setState({ previewOpen: false });
+      else if (this.state.shortcutsOpen) this.setState({ shortcutsOpen: false });
+      else if (this.state.assistantOpen) this.setState({ assistantOpen: false });
+      else if (this.state.multi.length) this.clearMulti();
+      else this.setState({ sel: null, picked: null });
+      return;
+    }
+    if (mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); this.duplicateSpread(); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { if (this.state.sel) { e.preventDefault(); this.removeSelPhoto(); } return; }
+    if (e.key === '+' || e.key === '=') { this.bumpZoom(10); return; }
+    if (e.key === '-' || e.key === '_') { this.bumpZoom(-10); return; }
+    if (e.key === 'ArrowLeft') { this.go(this.state.cur - 1); return; }
+    if (e.key === 'ArrowRight') { this.go(this.state.cur + 1); return; }
+    if (e.key === '?') { this.setState({ shortcutsOpen: !this.state.shortcutsOpen }); return; }
+  }
+
+  slotBox(r, base) { return Object.assign({ position: 'absolute', left: r.x + '%', top: r.y + '%', width: r.w + '%', height: r.h + '%', cursor: 'pointer', zIndex: 10 }, base || {}); }
+  imgStyle(photo, s) {
+    const cover = s.fit !== 'contain';
+    return {
+      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+      backgroundImage: photo ? photo.bg : 'none',
+      backgroundSize: cover ? 'cover' : 'contain', backgroundRepeat: 'no-repeat',
+      backgroundPosition: s.posX + '% ' + s.posY + '%',
+      backgroundColor: cover ? 'transparent' : '#efe7d7',
+      transform: 'scale(' + (s.zoom / 100) + ') rotate(' + s.rot + 'deg)', transformOrigin: 'center',
+      filter: 'brightness(' + (s.bright / 100) + ') contrast(' + (s.contrast / 100) + ')',
+    };
+  }
+  miniBlocks(sp) {
+    const rects = this.TEMPLATES[sp.layout];
+    return sp.slots.map((s, i) => {
+      const r = rects[i]; const ph = this.photoById(s.photoId);
+      return Object.assign({ position: 'absolute', left: r.x + '%', top: r.y + '%', width: r.w + '%', height: r.h + '%' }, ph ? { backgroundImage: ph.bg, backgroundSize: 'cover' } : { background: '#f0e7d6', border: '1px dashed #d8ccb4' });
+    });
+  }
+
+  renderVals() {
+    const st = this.state;
+    const spreads = st.spreads || [];
+    const photos = st.photos || [];
+    const sp = spreads[st.cur];
+    const theme = this.THEMES[st.theme];
+    const gold = '#a0813f';
+    const removedSet = new Set(st.removed);
+    const favSet = new Set(st.favorites);
+    const multiSet = new Set(st.multi);
+
+    const usedSet = new Set();
+    spreads.forEach((s) => s.slots.forEach((sl) => sl.photoId && usedSet.add(sl.photoId)));
+    let totalSlots = 0, filledSlots = 0;
+    spreads.forEach((s) => s.slots.forEach((sl) => { totalSlots++; if (sl.photoId) filledSlots++; }));
+    const completion = totalSlots ? Math.round((filledSlots / totalSlots) * 100) : 0;
+
+    const active = photos.filter((p) => !removedSet.has(p.id));
+    const q = st.search.trim().toLowerCase();
+    const trayPhotos = active.filter((p) => {
+      if (st.filter === 'fav') { if (!favSet.has(p.id)) return false; }
+      else if (st.filter !== 'all' && p.chapter !== st.filter) return false;
+      if (q && p.name.toLowerCase().indexOf(q) === -1) return false;
+      return true;
+    }).map((p) => {
+      const picked = st.picked === p.id; const inMulti = multiSet.has(p.id);
+      return {
+        bg: p.bg, name: p.name, used: usedSet.has(p.id), fav: favSet.has(p.id),
+        opacity: usedSet.has(p.id) ? '0.55' : '1',
+        ring: picked || inMulti, ringColor: picked ? gold : '#1e3a2f', ringGlow: picked ? 'rgba(160,129,63,0.25)' : 'rgba(30,58,47,0.22)',
+        onClick: (e) => {
+          if (e && (e.metaKey || e.ctrlKey || e.shiftKey)) { this.toggleMulti(p.id); return; }
+          if (st.multi.length) { this.toggleMulti(p.id); return; }
+          if (st.sel) { this.placePhoto(st.sel.sp, st.sel.sl, p.id); return; }
+          this.setState({ picked: picked ? null : p.id });
+        },
+        onDragStart: (e) => { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'copy'; },
+      };
+    });
+
+    const chMap = {}; st.chapters.forEach((c) => chMap[c.id] = c.title);
+    const baseChips = [{ id: 'all', label: 'All' }, { id: 'fav', label: '★ Favorites' }].concat(st.chapters.map((c) => ({ id: c.id, label: c.title })));
+    const filterChips = baseChips.map((c) => ({
+      label: c.label, bg: st.filter === c.id ? '#1e3a2f' : '#fff', color: st.filter === c.id ? '#f5efe3' : '#5d5343',
+      border: st.filter === c.id ? '#1e3a2f' : '#e0d4be', weight: st.filter === c.id ? '600' : '400',
+      onClick: () => this.setState({ filter: c.id }),
+    }));
+
+    const moveTargets = st.chapters.map((c) => ({ label: c.title, onClick: () => this.batchMove(c.id) }));
+
+    const unusedCount = active.filter((p) => !usedSet.has(p.id)).length;
+
+    const chapterStrip = st.chapters.map((c, i) => ({
+      num: '0' + (i + 1), title: c.title, hasNext: i < st.chapters.length - 1,
+      color: (sp && sp.chapter === c.id) ? '#1e3a2f' : '#a8966f',
+      numColor: (sp && sp.chapter === c.id) ? gold : '#cbbf9f',
+      onClick: () => this.jumpChapter(c.id),
+    }));
+
+    const slots = sp ? sp.slots.map((s, i) => {
+      const ph = this.photoById(s.photoId);
+      const selected = st.sel && st.sel.sp === st.cur && st.sel.sl === i;
+      return {
+        box: this.slotBox(this.TEMPLATES[sp.layout][i]),
+        empty: !s.photoId, filled: !!s.photoId, selected,
+        emptyStyle: { position: 'absolute', inset: 0, border: '1.5px dashed ' + (st.picked ? gold : '#c2b393'), background: st.picked ? 'rgba(160,129,63,0.08)' : 'rgba(255,255,255,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .2s ease' },
+        img: this.imgStyle(ph, s),
+        onClick: () => { if (this._moved) return; if (st.picked) this.placePhoto(st.cur, i, st.picked); else this.setState({ sel: selected ? null : { sp: st.cur, sl: i } }); },
+        onMouseDown: (e) => this.startFrameDrag(e, i),
+        onDragOver: (e) => e.preventDefault(),
+        onDrop: (e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) this.placePhoto(st.cur, i, id); },
+      };
+    }) : [];
+
+    const selSlot = this.selSlotObj();
+    const selPhoto = selSlot ? this.photoById(selSlot.photoId) : null;
+    const editMode = !!(selSlot && selSlot.photoId);
+
+    const layoutOptions = this.TEMPLATE_ORDER.map((t) => {
+      const rects = this.TEMPLATES[t];
+      const activeL = sp && sp.layout === t;
+      return {
+        name: this.TEMPLATE_NAMES[t], active: activeL,
+        bg: activeL ? '#f3eee2' : '#fff', border: activeL ? '#1e3a2f' : '#e6dcc7',
+        labelColor: activeL ? '#1e3a2f' : '#5d5343', weight: activeL ? '600' : '400',
+        mini: rects.map((r) => ({ position: 'absolute', left: r.x + '%', top: r.y + '%', width: r.w + '%', height: r.h + '%', background: activeL ? '#9aab93' : '#d8ccb4' })),
+        onClick: () => this.applyLayout(st.cur, t),
+      };
+    });
+    const themeOptions = Object.keys(this.THEMES).map((k) => ({
+      name: this.THEMES[k].name, swatch: this.THEMES[k].swatch,
+      border: st.theme === k ? '#1e3a2f' : '#d8ccb4', active: st.theme === k, check: k === 'ink' ? '#ecd9ad' : '#1e3a2f',
+      onClick: () => { this.beginChange(); this.setState({ theme: k }); this.markSaved(); },
+    }));
+
+    let lastCh = null;
+    const navSpreads = spreads.map((s, i) => {
+      const start = s.chapter !== lastCh; lastCh = s.chapter;
+      const isOver = st.dragOver === i && st.dragFrom !== null && st.dragFrom !== i;
+      return {
+        label: 'Sp ' + (i + 1), labelColor: i === st.cur ? '#1e3a2f' : '#a8966f',
+        border: isOver ? gold : (i === st.cur ? gold : '#e6dcc7'), borderStyle: isOver ? 'dashed' : 'solid',
+        dragOpacity: st.dragFrom === i ? '0.4' : '1',
+        chapterStart: start, chapterTitle: chMap[s.chapter], mini: this.miniBlocks(s),
+        onClick: () => this.go(i),
+        onDragStart: (e) => { e.dataTransfer.setData('text/plain', 'sp:' + i); e.dataTransfer.effectAllowed = 'move'; this.setState({ dragFrom: i }); },
+        onDragOver: (e) => { e.preventDefault(); if (st.dragFrom !== null && st.dragOver !== i) this.setState({ dragOver: i }); },
+        onDrop: (e) => { e.preventDefault(); const d = e.dataTransfer.getData('text/plain'); if (d && d.indexOf('sp:') === 0) this.reorder(parseInt(d.slice(3), 10), i); },
+        onDragEnd: () => this.setState({ dragFrom: null, dragOver: null }),
+      };
+    });
+
+    const assistantActions = [
+      { icon: 'wand-2', title: 'Fill empty frames', desc: 'Place your remaining photos into open frames, chapter by chapter.', cta: 'Preview', onClick: () => this.previewAction('fill') },
+      { icon: 'layout-template', title: 'Regenerate layouts', desc: 'Re-pick the best composition for each spread in this chapter, based on its photos.', cta: 'Preview', onClick: () => this.previewAction('regen') },
+      { icon: 'scale', title: 'Rebalance album', desc: 'See how photos are distributed across your chapters.', cta: 'Preview', onClick: () => this.previewAction('rebalance') },
+      { icon: 'palette', title: 'Apply a theme', desc: 'Set a consistent page tone across every spread.', cta: 'Preview', onClick: () => this.previewAction('theme') },
+    ];
+
+    const pvSp = spreads[st.pv];
+    const pvSlots = pvSp ? pvSp.slots.map((s, i) => { const ph = this.photoById(s.photoId); return { box: this.slotBox(this.TEMPLATES[pvSp.layout][i]), filled: !!s.photoId, empty: !s.photoId, img: this.imgStyle(ph, s) }; }) : [];
+
+    const cropRectStyle = {
+      position: 'absolute', left: (st.crop.x * 100) + '%', top: (st.crop.y * 100) + '%',
+      width: (st.crop.w * 100) + '%', height: (st.crop.h * 100) + '%',
+      border: '2px solid #ecd9ad', boxShadow: '0 0 0 9999px rgba(18,32,25,0.55)', cursor: 'move',
+    };
+    const cropAspects = this.ASPECTS.map((a) => ({
+      label: a.label, bg: st.crop.aspect === a.key ? '#1e3a2f' : '#fff', color: st.crop.aspect === a.key ? '#f5efe3' : '#3c352b',
+      border: st.crop.aspect === a.key ? '#1e3a2f' : '#d8ccb4', weight: st.crop.aspect === a.key ? '600' : '400',
+      onClick: () => this.setCropAspect(a.key, a.r),
+    }));
+
+    const shortcuts = [
+      { label: 'Undo / Redo', keys: '⌘Z · ⌘⇧Z' },
+      { label: 'Duplicate spread', keys: '⌘D' },
+      { label: 'Remove photo from frame', keys: 'Delete' },
+      { label: 'Zoom selected photo', keys: '+ / −' },
+      { label: 'Previous / next spread', keys: '← / →' },
+      { label: 'Deselect · close', keys: 'Esc' },
+      { label: 'This help', keys: '?' },
+    ];
+
+    return {
+      saveLabel: st.saved ? 'All changes saved' : 'Saving…', saveDot: st.saved ? '#3f6b4d' : gold,
+      completion, completionW: completion + '%',
+      pageCount: spreads.length * 2, spreadCount: spreads.length, usedCount: usedSet.size, totalPhotos: active.length,
+      onUndo: () => this.undo(), onRedo: () => this.redo(),
+      undoOp: st.hu ? '1' : '0.35', redoOp: st.hr ? '1' : '0.35',
+      openShortcuts: () => this.setState({ shortcutsOpen: true }), closeShortcuts: () => this.setState({ shortcutsOpen: false }),
+      shortcutsOpen: st.shortcutsOpen, shortcuts, stop: (e) => e.stopPropagation(),
+
+      assistantBtnBg: st.assistantOpen ? '#1e3a2f' : 'transparent', assistantBtnColor: st.assistantOpen ? '#ecd9ad' : '#1e3a2f', assistantBtnBorder: st.assistantOpen ? '#1e3a2f' : '#d8ccb4',
+      toggleAssistant: () => this.setState({ assistantOpen: !st.assistantOpen, preview: null }), openPreview: () => this.openPreview(),
+
+      search: st.search, onSearch: (e) => this.setState({ search: e.target.value }),
+      trayCountLabel: trayPhotos.length + ' of ' + active.length, filterChips, trayPhotos, pickedActive: !!st.picked,
+      multiActive: st.multi.length > 0, multiCount: st.multi.length, clearMulti: () => this.clearMulti(),
+      batchFavorite: () => this.batchFavorite(), batchPlace: () => this.batchPlace(), moveTargets,
+      unusedLabel: unusedCount + ' unused' + (st.removed.length ? ' · ' + st.removed.length + ' hidden' : ''),
+      canRemoveUnused: unusedCount > 0, onRemoveUnused: () => this.removeUnused(),
+      hasRemoved: st.removed.length > 0, removedCount: st.removed.length, onRestore: () => this.restoreRemoved(),
+
+      chapterStrip, spreadLabel: (st.cur + 1) + '/' + spreads.length, layoutName: sp ? this.TEMPLATE_NAMES[sp.layout] : '',
+      pageBg: theme.page, showGuides: st.showGuides, toggleGuides: () => this.setState({ showGuides: !st.showGuides }),
+      guideBtnBg: st.showGuides ? '#1e3a2f' : '#fff', guideBtnColor: st.showGuides ? '#ecd9ad' : '#5d5343', slots,
+
+      editMode, layoutMode: !editMode, deselect: () => this.setState({ sel: null }),
+      editPreviewImg: this.imgStyle(selPhoto, selSlot || this.newSlot()),
+      fillBg: selSlot && selSlot.fit === 'cover' ? '#1e3a2f' : '#fff', fillColor: selSlot && selSlot.fit === 'cover' ? '#f5efe3' : '#3c352b', fillBorder: selSlot && selSlot.fit === 'cover' ? '#1e3a2f' : '#d8ccb4',
+      fitBg: selSlot && selSlot.fit === 'contain' ? '#1e3a2f' : '#fff', fitColor: selSlot && selSlot.fit === 'contain' ? '#f5efe3' : '#3c352b', fitBorder: selSlot && selSlot.fit === 'contain' ? '#1e3a2f' : '#d8ccb4',
+      setFill: () => { this.beginChange(); this.setAdjRaw('fit', 'cover'); }, setFit: () => { this.beginChange(); this.setAdjRaw('fit', 'contain'); },
+      rotate: () => { this.beginChange(); this.setAdjRaw('rot', ((selSlot ? selSlot.rot : 0) + 90) % 360); },
+      beginAdj: () => this.beginAdjustGroup(),
+      zoomVal: selSlot ? selSlot.zoom : 100, zoomLabel: ((selSlot ? selSlot.zoom : 100) / 100).toFixed(2) + '×', onZoom: (e) => this.updateAdj('zoom', +e.target.value),
+      brightVal: selSlot ? selSlot.bright : 100, brightLabel: (selSlot ? selSlot.bright : 100) + '%', onBright: (e) => this.updateAdj('bright', +e.target.value),
+      contrastVal: selSlot ? selSlot.contrast : 100, contrastLabel: (selSlot ? selSlot.contrast : 100) + '%', onContrast: (e) => this.updateAdj('contrast', +e.target.value),
+      replacePhoto: () => this.setState({ picked: null, filter: 'all' }), deletePhoto: () => this.removeSelPhoto(),
+      openCrop: () => this.openCrop(),
+
+      layoutOptions, themeOptions,
+
+      navSpreads, addSpread: () => this.addSpread(), duplicateSpread: () => this.duplicateSpread(), deleteSpread: () => this.deleteSpread(),
+      prevSpread: () => this.go(st.cur - 1), nextSpread: () => this.go(st.cur + 1),
+
+      assistantOpen: st.assistantOpen, assistantActions, assistantToast: st.assistantToast,
+      hasPreview: !!st.preview, previewTitle: st.preview ? st.preview.title : '', previewLines: st.preview ? st.preview.lines : [],
+      applyPreview: () => this.applyPreview(), cancelPreview: () => this.cancelPreview(),
+
+      cropOpen: st.cropOpen, cropPhotoBg: selPhoto ? selPhoto.bg : '#ece4d4', cropRectStyle, cropAspects,
+      closeCrop: () => this.closeCrop(), applyCrop: () => this.applyCrop(), resetCrop: () => this.resetCrop(),
+      cropOnMove: (e) => this.startCropDrag(e, 'move'), cropNW: (e) => this.startCropDrag(e, 'resize', 'nw'), cropNE: (e) => this.startCropDrag(e, 'resize', 'ne'), cropSW: (e) => this.startCropDrag(e, 'resize', 'sw'), cropSE: (e) => this.startCropDrag(e, 'resize', 'se'),
+
+      previewOpen: st.previewOpen, pvSlots, pvOpacity: st.pvOpacity, pvLabel: st.pv + 1, pvChapter: pvSp ? chMap[pvSp.chapter] : '',
+      pvPrev: () => this.pvGo(-1), pvNext: () => this.pvGo(1), closePreview: () => this.setState({ previewOpen: false }),
+    };
+  }
+}
+</script>
+</body>
+</html>

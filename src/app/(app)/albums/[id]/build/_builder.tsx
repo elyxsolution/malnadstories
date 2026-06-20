@@ -26,6 +26,7 @@ import { saveLayout, submitAlbum, selectCover } from '@/lib/actions/builder';
 import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { useWorkerGate } from '@/components/worker/use-worker-gate';
+import { LUX_PRIMARY, CompletionSeal, Sprig } from '@/components/brand';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 // "Add" button labels keyed to the user's vocabulary.
@@ -310,31 +311,41 @@ export default function Builder({
     }
   };
 
+  const pct = Math.min(100, size ? (consumed / size) * 100 : 0);
+
   return (
-    <div className="space-y-4">
-      {/* Header / actions */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            <Link href="/dashboard" className="hover:underline">
+    <div className="space-y-5">
+      {/* ── Top bar: identity + primary actions ─────────────────────────────── */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <nav className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Link href="/dashboard" className="transition-colors hover:text-foreground">
               Dashboard
             </Link>
-            {' / '}
-            {title}
-          </p>
-          <div className="mt-1 flex items-center gap-2">
-            <h1 className="text-2xl font-bold">{title}</h1>
+            <span className="text-border">/</span>
+            <span className="truncate text-foreground/70">{title}</span>
+          </nav>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2.5">
+            <h1 className="font-display text-[1.9rem] font-semibold leading-none tracking-[-0.01em] text-foreground">{title}</h1>
             {status === 'submitted' && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success ring-1 ring-success/20">
                 <CheckCircle2 className="h-3.5 w-3.5" /> Submitted
               </span>
             )}
-            {dirty && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600">Unsaved changes</span>}
+            {dirty ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning/20">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" /> Unsaved
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-border/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-success" /> Saved
+              </span>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border p-0.5">
+          <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
             <Button variant={view === 'edit' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('edit')}>
               <LayoutGrid /> Edit
             </Button>
@@ -345,103 +356,190 @@ export default function Builder({
           <Button variant="outline" size="sm" onClick={save} disabled={saving || submitting || !dirty}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
           </Button>
-          <Button size="sm" onClick={submit} disabled={!complete || saving || submitting}>
+          <Button size="sm" onClick={submit} disabled={!complete || saving || submitting} className={LUX_PRIMARY}>
             {submitting ? <Loader2 className="animate-spin" /> : <Send />} Submit
           </Button>
 
           {status === 'submitted' && (
-            <Button variant="secondary" size="sm" render={<Link href={`/checkout/${albumId}`} />}>
-              <ShoppingCart /> Proceed to checkout
+            <Button size="sm" render={<Link href={`/checkout/${albumId}`} />} className={LUX_PRIMARY}>
+              <ShoppingCart /> Checkout
             </Button>
           )}
         </div>
       </div>
 
-      {/* Accounting + cover bar */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-card p-3 text-sm">
-        <span>
-          <span className="font-medium">{consumed}</span> / {size} content pages used
-        </span>
-        <span className={remaining < 0 ? 'text-destructive' : 'text-muted-foreground'}>
-          {remaining >= 0 ? `${remaining} remaining` : `${-remaining} over the limit`}
-        </span>
-        <span className="text-muted-foreground">· + cover & 2 blank pages added automatically</span>
+      {/* ── Album progress: page budget meter + cover chip ──────────────────── */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border bg-card/90 p-4 shadow-panel backdrop-blur-sm">
+        <div className="flex items-baseline gap-1.5">
+          <span
+            className={`font-display text-[1.9rem] font-semibold leading-none tabular-nums tracking-[-0.01em] transition-colors duration-300 ${
+              remaining < 0 ? 'text-destructive' : remaining === 0 ? 'text-success' : 'text-foreground'
+            }`}
+          >
+            {consumed}
+          </span>
+          <span className="font-display text-base text-muted-foreground/60">/</span>
+          <span className="font-display text-base text-muted-foreground">{size}</span>
+          <span className="ml-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">pages</span>
+        </div>
+
+        <div className="flex min-w-[180px] flex-1 flex-col gap-1.5">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-muted ring-1 ring-inset ring-border/60">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ease-out ${
+                remaining < 0
+                  ? 'bg-destructive'
+                  : pct >= 100
+                    ? 'bg-gradient-to-r from-success to-success'
+                    : 'bg-gradient-to-r from-primary/70 to-primary'
+              }`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="text-xs">
+            <span className={remaining < 0 ? 'font-semibold text-destructive' : 'font-medium text-foreground'}>
+              {remaining >= 0 ? `${remaining} page${remaining === 1 ? '' : 's'} remaining` : `${-remaining} over the limit`}
+            </span>
+            <span className="hidden text-muted-foreground sm:inline"> · cover &amp; blanks added automatically</span>
+          </p>
+        </div>
+
+        {complete && (
+          <div className="ml-auto">
+            <CompletionSeal />
+          </div>
+        )}
+
         <button
           type="button"
           onClick={() => setCoverPicker(true)}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted"
+          className={`group inline-flex items-center gap-2.5 rounded-xl border bg-background py-1.5 pl-1.5 pr-3 text-left shadow-xs transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card hover:ring-1 hover:ring-primary/30 ${complete ? '' : 'ml-auto'}`}
         >
-          <BookImage className="h-3.5 w-3.5" />
-          {selectedCover ? `Cover: ${selectedCover.name} · Change` : 'Choose cover'}
+          <span className="relative block h-11 w-9 overflow-hidden rounded-md bg-muted ring-1 ring-border">
+            {selectedCover ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={selectedCover.thumbUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center text-muted-foreground/60">
+                <BookImage className="h-4 w-4" />
+              </span>
+            )}
+          </span>
+          <span className="flex flex-col">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Cover</span>
+            <span className="max-w-[9rem] truncate font-display text-sm font-semibold tracking-tight">
+              {selectedCover ? selectedCover.name : 'Choose a design'}
+            </span>
+          </span>
         </button>
       </div>
 
-      {message && <p className={`text-sm ${message.kind === 'ok' ? 'text-primary' : 'text-destructive'}`}>{message.text}</p>}
+      {message && (
+        <p
+          className={`animate-scale-in rounded-xl border px-3.5 py-2.5 text-sm font-medium ${
+            message.kind === 'ok'
+              ? 'border-success/20 bg-success/5 text-success'
+              : 'border-destructive/20 bg-destructive/5 text-destructive'
+          }`}
+        >
+          {message.text}
+        </p>
+      )}
 
       {view === 'preview' ? (
         <Preview blocks={blocks} photoMap={photoMap} cover={selectedCover} />
       ) : (
-        <div className="grid items-start gap-6 lg:grid-cols-[320px_1fr]">
-          {/* Sticky, independently-scrollable photo library: it stays in view while the
-              page editor on the right scrolls. The upload area stays pinned at the top;
-              the thumbnail tray scrolls within the remaining height (Canva/Figma-style).
-              On lg it's a fixed-height sticky column (top: 20px); on mobile it stacks. */}
-          <aside className="lg:sticky lg:top-5 lg:flex lg:max-h-[calc(100vh-2.5rem)] lg:flex-col lg:gap-4">
-            <div className="mb-4 lg:mb-0 lg:shrink-0">
+        <div className="grid items-start gap-5 lg:grid-cols-[336px_1fr]">
+          {/* Floating photo library — sticky, frosted, independently scrollable. The
+              upload zone stays pinned; the thumbnail grid scrolls within the panel. */}
+          <aside className="builder-panel lg:sticky lg:top-5 lg:flex lg:max-h-[calc(100vh-2.5rem)] lg:flex-col overflow-hidden rounded-2xl border border-border/70 shadow-panel">
+            <div className="p-4 lg:shrink-0">
+              <div className="mb-3 flex items-center gap-2">
+                <Sprig className="h-4 w-4 text-primary" />
+                <h2 className="font-display text-[15px] font-semibold tracking-tight">Photo Library</h2>
+                {photos.length > 0 && (
+                  <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold tabular-nums text-secondary-foreground">
+                    {photos.length}
+                  </span>
+                )}
+              </div>
               <Uploader
                 albumId={albumId}
                 remaining={photoCap(size) - photos.length}
                 onUploaded={onUploaded}
                 ensureWorkerReady={ensureReady}
               />
+              <div className="seam mt-4" />
             </div>
-            <div className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-              <h2 className="mb-2 text-sm font-semibold">Photos</h2>
-              <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
-                <Tray photos={photos} placedIds={placed} onEdit={setEditingPhoto} onDeleted={onPhotoDeleted} />
-              </div>
+            <div className="p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+              <Tray photos={photos} placedIds={placed} onEdit={setEditingPhoto} onDeleted={onPhotoDeleted} />
             </div>
           </aside>
 
-          <main className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {LAYOUT_TEMPLATES.map((t) => (
-                <Button key={t} variant="outline" size="sm" onClick={() => addBlock(t)} disabled={!canAdd(blocks, size, t)}>
-                  <Plus /> {ADD_LABEL[t]}
-                  <span className="text-xs text-muted-foreground">(2 pages)</span>
-                </Button>
-              ))}
-            </div>
+          {/* Dark editing stage — album spreads float here as paper pages. */}
+          <main className="relative overflow-hidden rounded-3xl builder-stage p-5 shadow-elevated ring-1 ring-black/40 sm:p-6">
+            <div className="stage-grain pointer-events-none absolute inset-0" aria-hidden />
+            <div className="relative space-y-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-white/45">Add pages</span>
+                {LAYOUT_TEMPLATES.map((t) => {
+                  const disabled = !canAdd(blocks, size, t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => addBlock(t)}
+                      disabled={disabled}
+                      className="builder-glass group inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-white/90 shadow-sm transition-all duration-200 ease-glide hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-30"
+                    >
+                      <span className="grid h-5 w-5 place-items-center rounded-md bg-primary text-primary-foreground transition-transform duration-200 ease-glide group-hover:scale-110">
+                        <Plus className="h-3.5 w-3.5" />
+                      </span>
+                      {ADD_LABEL[t]}
+                      <span className="text-[11px] text-white/40">2 pages</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-            {blocks.length === 0 ? (
-              <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                No content yet. Add a Single Page (two photos) or a Double Page (one image across both) to begin.
-              </div>
-            ) : (
-              <div className="grid gap-4">
-                {blocks.map((block, i) => (
-                  <BlockCard
-                    key={block.key}
-                    block={block}
-                    index={i}
-                    blocks={blocks}
-                    photoMap={photoMap}
-                    availablePhotos={availablePhotos}
-                    isFirst={i === 0}
-                    isLast={i === blocks.length - 1}
-                    onPatch={(patch) => patchBlock(block.key, patch)}
-                    onAssignBase={(slot, photoId) => assignBaseSlot(block.key, slot, photoId)}
-                    onClearBase={(slot) => clearBaseSlot(block.key, slot)}
-                    onQuickCrop={openQuickCrop}
-                    onAddOverlay={(photoId) => addOverlay(block.key, photoId)}
-                    onReplaceOverlay={(index, photoId) => replaceOverlay(block.key, index, photoId)}
-                    onPatchOverlays={(overlays) => patchOverlays(block.key, overlays)}
-                    onRemove={() => removeBlock(block.key)}
-                    onMove={(dir) => moveBlock(block.key, dir)}
-                  />
-                ))}
-              </div>
-            )}
+              {blocks.length === 0 ? (
+                <div className="animate-scale-in rounded-2xl border border-dashed border-white/15 bg-white/[0.03] p-16 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-white/70 ring-1 ring-white/15">
+                    <LayoutGrid className="h-6 w-6" />
+                  </div>
+                  <p className="mt-4 font-display text-xl font-semibold tracking-tight text-white">Start your story</p>
+                  <p className="mx-auto mt-1.5 max-w-sm text-sm text-white/55">
+                    Add a <span className="font-medium text-white/80">Single Page</span> (two photos) or a{' '}
+                    <span className="font-medium text-white/80">Double Page</span> (one image across both) to begin.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-7">
+                  {blocks.map((block, i) => (
+                    <div key={block.key} className="animate-rise" style={{ animationDelay: `${Math.min(i * 55, 330)}ms` }}>
+                      <BlockCard
+                        block={block}
+                        index={i}
+                        blocks={blocks}
+                        photoMap={photoMap}
+                        availablePhotos={availablePhotos}
+                        isFirst={i === 0}
+                        isLast={i === blocks.length - 1}
+                        onPatch={(patch) => patchBlock(block.key, patch)}
+                        onAssignBase={(slot, photoId) => assignBaseSlot(block.key, slot, photoId)}
+                        onClearBase={(slot) => clearBaseSlot(block.key, slot)}
+                        onQuickCrop={openQuickCrop}
+                        onAddOverlay={(photoId) => addOverlay(block.key, photoId)}
+                        onReplaceOverlay={(index, photoId) => replaceOverlay(block.key, index, photoId)}
+                        onPatchOverlays={(overlays) => patchOverlays(block.key, overlays)}
+                        onRemove={() => removeBlock(block.key)}
+                        onMove={(dir) => moveBlock(block.key, dir)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </main>
         </div>
       )}
@@ -493,32 +591,48 @@ function CoverPicker({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-xl border bg-background p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="animate-rise w-full max-w-2xl rounded-2xl border bg-background p-5 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Change cover design</h2>
+          <div className="flex items-center gap-2">
+            <Sprig className="h-4 w-4 text-primary" />
+            <h2 className="font-display text-base font-semibold tracking-tight">Choose a cover design</h2>
+          </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
             <X />
           </Button>
         </div>
+        <div className="seam mt-3" />
         {covers.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">No cover designs are available yet. Please check back soon.</p>
+          <p className="mt-4 rounded-xl border border-dashed bg-muted/40 px-4 py-8 text-center text-sm text-muted-foreground">
+            No cover designs are available yet. Please check back soon.
+          </p>
         ) : (
-          <div className="mt-3 grid max-h-[65vh] grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3">
-            {covers.map((c) => (
+          <div className="mt-4 grid max-h-[65vh] grid-cols-2 gap-3 overflow-y-auto p-0.5 sm:grid-cols-3">
+            {covers.map((c, i) => (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => onPick(c.id)}
-                className={`overflow-hidden rounded-lg border bg-muted text-left transition-all hover:ring-2 hover:ring-ring ${
-                  selectedId === c.id ? 'ring-2 ring-foreground' : ''
+                style={{ animationDelay: `${Math.min(i * 35, 300)}ms` }}
+                className={`group animate-scale-in overflow-hidden rounded-xl border bg-muted text-left shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card ${
+                  selectedId === c.id ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : 'hover:ring-1 hover:ring-primary/40'
                 }`}
               >
-                <div className="relative aspect-[3/4] w-full">
+                <div className="relative aspect-[3/4] w-full overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={c.thumbUrl} alt={c.name} className="absolute inset-0 h-full w-full object-cover" />
+                  <img
+                    src={c.thumbUrl}
+                    alt={c.name}
+                    className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                  />
+                  {selectedId === c.id && (
+                    <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                      <CheckCircle2 className="h-4 w-4" />
+                    </span>
+                  )}
                 </div>
-                <span className="block truncate px-2 py-1.5 text-xs font-medium">{c.name}</span>
+                <span className="block truncate px-2.5 py-2 font-display text-[13px] font-medium tracking-tight">{c.name}</span>
               </button>
             ))}
           </div>

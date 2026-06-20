@@ -111,31 +111,62 @@ export default function BlockCard({
         : undefined;
 
   return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-sm">
-          <span className="font-medium">{TEMPLATE_LABEL[block.template]}</span>
-          <span className="ml-2 text-xs text-muted-foreground">{pageLabel}</span>
-          {isDouble && <span className="ml-2 text-xs text-primary">· one image, spans both pages</span>}
+    <div className="group/block">
+      <div className="mb-3 flex items-end justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-white/[0.08] text-[11px] font-semibold tabular-nums text-white/90 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.12)] ring-1 ring-white/15">
+            {index + 1}
+          </span>
+          <div className="flex flex-col leading-tight">
+            <span className="font-display text-[15px] font-semibold tracking-tight text-white/95">{TEMPLATE_LABEL[block.template]}</span>
+            <span className="text-[11px] text-white/50">
+              {pageLabel}
+              {isDouble && ' · one image across both pages'}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setPicking({ kind: 'add' })}>
-            <Layers /> Add overlay
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => onMove(-1)} disabled={isFirst} aria-label="Move up">
-            <ArrowUp />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={() => onMove(1)} disabled={isLast} aria-label="Move down">
-            <ArrowDown />
-          </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onRemove} aria-label="Remove pair" className="text-destructive">
-            <Trash2 />
-          </Button>
+        <div className="flex items-center gap-1.5 opacity-70 transition-opacity duration-200 group-hover/block:opacity-100">
+          <button
+            type="button"
+            onClick={() => setPicking({ kind: 'add' })}
+            className="builder-glass inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-white/90 shadow-sm transition-colors duration-150 ease-glide hover:bg-white/10 hover:text-white"
+          >
+            <Layers className="h-3.5 w-3.5" /> Add overlay
+          </button>
+          <div className="builder-glass flex items-center gap-0.5 rounded-lg p-0.5 shadow-sm">
+            <button
+              type="button"
+              onClick={() => onMove(-1)}
+              disabled={isFirst}
+              aria-label="Move up"
+              className="grid h-7 w-7 place-items-center rounded-md text-white/80 transition-colors duration-150 ease-glide hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onMove(1)}
+              disabled={isLast}
+              aria-label="Move down"
+              className="grid h-7 w-7 place-items-center rounded-md text-white/80 transition-colors duration-150 ease-glide hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </button>
+            <span className="mx-0.5 h-4 w-px bg-white/15" />
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label="Remove pair"
+              className="grid h-7 w-7 place-items-center rounded-md text-red-300/90 transition-colors hover:bg-red-500/20 hover:text-red-200"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Open-pair canvas (3:2 = two 3:4 pages) with a centre gutter. */}
-      <div ref={baseRef} className="group/slot relative aspect-[3/2] w-full overflow-hidden rounded-md border">
+      {/* Open-pair canvas (3:2 = two 3:4 pages) rendered as a floating paper page. */}
+      <div ref={baseRef} className="album-page group/slot relative aspect-[3/2] w-full overflow-hidden rounded-xl transition-transform duration-300 ease-premium group-hover/block:-translate-y-1">
         {isDouble ? (
           <BaseSlotView
             photo={leftPhoto}
@@ -170,8 +201,11 @@ export default function BlockCard({
           </>
         )}
 
-        {/* Centre gutter (the bound edge). */}
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[5] w-px -translate-x-1/2 bg-white/70 mix-blend-difference" />
+        {/* Signature bound spine — a fold groove carrying a faint running stitch. */}
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[5] -translate-x-1/2">
+          <div className="album-binding h-full" />
+          <div className="album-stitch absolute inset-y-0 left-1/2 -translate-x-1/2" />
+        </div>
 
         {/* Overlays */}
         {block.overlays.map((o, i) => {
@@ -179,7 +213,7 @@ export default function BlockCard({
           return (
             <div
               key={i}
-              className="group/ov absolute z-10 overflow-hidden rounded border-2 border-background shadow-md"
+              className="group/ov absolute z-10 overflow-hidden rounded-md border-2 border-background shadow-md ring-1 ring-transparent transition-shadow duration-150 hover:shadow-elevated hover:ring-primary/60"
               style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.w * 100}%`, height: `${o.h * 100}%` }}
             >
               <div
@@ -198,7 +232,7 @@ export default function BlockCard({
                   removeOverlay(i);
                 }}
                 aria-label="Delete overlay"
-                className="absolute left-1 top-1 z-10 rounded bg-background/85 p-0.5 text-destructive opacity-0 shadow-sm transition-opacity hover:bg-background group-hover/ov:opacity-100"
+                className="absolute left-1 top-1 z-10 rounded-md bg-background/80 p-1 text-destructive opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition-opacity duration-150 hover:bg-background group-hover/ov:opacity-100"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -210,7 +244,7 @@ export default function BlockCard({
                   setPicking({ kind: 'replace', index: i });
                 }}
                 aria-label="Replace overlay photo"
-                className="absolute right-1 top-1 z-10 rounded bg-background/85 p-0.5 opacity-0 shadow-sm transition-opacity hover:bg-background group-hover/ov:opacity-100"
+                className="absolute right-1 top-1 z-10 rounded-md bg-background/80 p-1 opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition-opacity duration-150 hover:bg-background group-hover/ov:opacity-100"
               >
                 <Replace className="h-3 w-3" />
               </button>
@@ -218,7 +252,7 @@ export default function BlockCard({
                 onPointerDown={startOverlay(i, 'resize')}
                 onPointerMove={moveOverlay}
                 onPointerUp={endOverlay}
-                className="absolute -bottom-1 -right-1 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded-sm border-2 border-background bg-foreground/70"
+                className="absolute -bottom-1 -right-1 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded-sm border-2 border-background bg-primary shadow-sm transition-transform duration-150 hover:scale-110"
               />
             </div>
           );
@@ -229,9 +263,9 @@ export default function BlockCard({
         type="text"
         value={block.caption}
         onChange={(e) => onPatch({ caption: e.target.value })}
-        placeholder="Caption (optional)"
+        placeholder="Add a caption…"
         maxLength={200}
-        className="mt-2 w-full rounded-md border bg-background px-2 py-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="builder-glass mt-3 h-9 w-full rounded-lg px-3 text-sm text-white shadow-sm outline-none transition-all duration-150 placeholder:text-white/40 focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary/60"
       />
 
       {picking && (
@@ -271,21 +305,32 @@ function BaseSlotView({
   onClear: () => void;
   onCrop?: () => void;
 }) {
+  const [over, setOver] = useState(false);
   return (
     <div
       onClick={onPick}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!over) setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
       onDrop={(e) => {
         e.preventDefault();
+        setOver(false);
         const id = e.dataTransfer.getData('text/photo-id');
         if (id) onDrop(id);
       }}
-      className="group/base absolute inset-0 cursor-pointer bg-muted"
+      className={`group/base absolute inset-0 cursor-pointer transition-all duration-200 ${
+        over ? 'ring-2 ring-inset ring-primary' : ''
+      }`}
     >
       {photo ? (
         <>
           <PhotoFrame url={photo.url} edit={photo.edit} alt={photo.filename} />
-          <div className="absolute right-1 top-1 z-[6] flex gap-1 opacity-0 transition-opacity group-hover/base:opacity-100">
+          {/* hover scrim so the controls always read on any photo */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/30 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
+          {over && <div className="pointer-events-none absolute inset-0 z-[6] bg-primary/20 ring-2 ring-inset ring-primary" />}
+          <div className="absolute right-1.5 top-1.5 z-[7] flex gap-1 opacity-0 transition-all duration-200 group-hover/base:opacity-100">
             {onCrop && (
               <button
                 type="button"
@@ -295,7 +340,7 @@ function BaseSlotView({
                 }}
                 aria-label="Adjust crop"
                 title="Adjust crop (pan/zoom)"
-                className="rounded bg-background/85 p-1 shadow-sm hover:bg-background"
+                className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
               >
                 <Crop className="h-3.5 w-3.5" />
               </button>
@@ -307,16 +352,34 @@ function BaseSlotView({
                 onClear();
               }}
               aria-label="Remove photo"
-              className="rounded bg-background/85 p-1 text-destructive shadow-sm hover:bg-background"
+              className="rounded-lg bg-background/90 p-1.5 text-destructive shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
         </>
       ) : (
-        <div className="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
-          <ImagePlus className="h-6 w-6" />
-          <span className="mt-1 px-2 text-center text-xs">{label}</span>
+        <div
+          className={`flex h-full w-full flex-col items-center justify-center gap-2.5 px-3 text-center transition-colors duration-200 ${
+            over ? 'bg-accent/60' : 'bg-gradient-to-b from-secondary/60 to-muted/40'
+          }`}
+        >
+          <span
+            className={`flex h-12 w-12 items-center justify-center rounded-2xl border border-dashed transition-all duration-200 ${
+              over
+                ? 'scale-110 border-primary bg-primary/10 text-primary'
+                : 'border-muted-foreground/30 text-muted-foreground/70 group-hover/base:-translate-y-0.5 group-hover/base:border-primary/40 group-hover/base:bg-primary/5 group-hover/base:text-primary'
+            }`}
+          >
+            <ImagePlus className="h-5 w-5" />
+          </span>
+          <span
+            className={`text-xs font-medium tracking-tight transition-colors duration-200 ${
+              over ? 'text-primary' : 'text-muted-foreground group-hover/base:text-foreground'
+            }`}
+          >
+            {over ? 'Drop to place' : label}
+          </span>
         </div>
       )}
     </div>
@@ -338,8 +401,8 @@ function PhotoPicker({
 }) {
   const options = current && !available.some((p) => p.id === current.id) ? [current, ...available] : available;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl border bg-background p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="animate-rise w-full max-w-lg rounded-2xl border bg-background p-4 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">{title}</h2>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
@@ -347,16 +410,18 @@ function PhotoPicker({
           </Button>
         </div>
         {options.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">All photos are already placed. Free one up or upload more.</p>
+          <p className="mt-4 rounded-lg border border-dashed bg-muted/40 px-4 py-8 text-center text-sm text-muted-foreground">
+            All photos are already placed. Free one up or upload more.
+          </p>
         ) : (
-          <div className="mt-3 grid max-h-[60vh] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+          <div className="mt-3 grid max-h-[60vh] grid-cols-3 gap-2.5 overflow-y-auto p-0.5 sm:grid-cols-4">
             {options.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => onPick(p.id)}
-                className={`relative aspect-square overflow-hidden rounded-md border bg-muted transition-all hover:ring-2 hover:ring-ring ${
-                  current?.id === p.id ? 'ring-2 ring-foreground' : ''
+                className={`relative aspect-square overflow-hidden rounded-lg bg-muted ring-1 ring-border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card hover:ring-primary/50 ${
+                  current?.id === p.id ? 'ring-2 ring-primary' : ''
                 }`}
                 title={p.filename}
               >

@@ -27,8 +27,11 @@ export type OrderAmount = {
 };
 
 /**
- * Compute the order total. `copies` defaults to 1 and `discountInr` to 0, so existing
- * single-copy / no-coupon callers are unaffected.
+ * Compute the order total. `copies` defaults to 1, `discountInr` to 0, and
+ * `shippingInr` to the flat SHIPPING_INR — so existing single-copy / no-coupon /
+ * standard-shipping callers are unaffected. `shippingInr` is always resolved
+ * SERVER-SIDE from the chosen tier (lib/shipping.shippingFeeInr); the client never
+ * supplies a shipping amount, only a tier key.
  *   subtotal = basePrice × copies
  *   discount = clamp(discount, 0..subtotal)        // applies to subtotal only
  *   total    = max(subtotal + shipping − discount, MIN_CHARGE)
@@ -37,9 +40,9 @@ export function computeOrderAmount(
   basePriceInr: number,
   copies = 1,
   discountInr = 0,
+  shippingInr: number = SHIPPING_INR,
 ): OrderAmount {
   const subtotalInr = round2(basePriceInr * copies);
-  const shippingInr = SHIPPING_INR;
   const discount = clamp(round2(discountInr), 0, subtotalInr);
   const totalInr = Math.max(round2(subtotalInr + shippingInr - discount), MIN_CHARGE_INR);
   return {

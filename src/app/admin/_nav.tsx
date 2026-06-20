@@ -16,7 +16,10 @@ const ITEMS = [
 export default function AdminNav() {
   const pathname = usePathname();
   return (
-    <nav className="flex gap-1 overflow-x-auto border-b bg-card px-4">
+    <nav className="flex items-center gap-1 overflow-x-auto border-b bg-card px-4">
+      <span className="mr-2 hidden shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:inline">
+        Operations
+      </span>
       {ITEMS.map((it) => {
         const active = it.exact ? pathname === it.href : pathname.startsWith(it.href);
         const Icon = it.icon;
@@ -32,7 +35,7 @@ export default function AdminNav() {
             prefetch={false}
             className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors ${
               active
-                ? 'border-foreground font-medium text-foreground'
+                ? 'border-primary font-medium text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >

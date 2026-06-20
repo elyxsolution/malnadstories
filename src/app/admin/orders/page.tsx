@@ -5,6 +5,7 @@ import { orders, albums, profiles, coupons } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmails } from '@/lib/admin/users';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
+import { adminStatusLabel } from '@/lib/orders/status';
 import OrdersFilters from './_filters';
 
 const PAGE_SIZE = 25;
@@ -127,7 +128,7 @@ export default async function AdminOrdersPage({
                   <td className="px-3 py-2 font-mono text-xs">{r.couponCode ?? '—'}</td>
                   <td className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
-                      {r.status}
+                      {adminStatusLabel(r.status)}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt as unknown as string)}</td>

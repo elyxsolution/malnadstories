@@ -6,6 +6,7 @@ import { MAX_ZOOM, frameOverflow, type EditConfig } from '@/lib/builder/model';
 import { savePhotoEdit } from '@/lib/actions/builder';
 import PhotoFrame from './_photo-frame';
 import { Button } from '@/components/ui/button';
+import { LUX_PRIMARY } from '@/components/brand';
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -106,24 +107,36 @@ export default function QuickCrop({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-xl rounded-xl border bg-background p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h2 className="truncate text-sm font-semibold" title={filename}>
-            Adjust crop · {filename}
-          </h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/55 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="animate-rise w-full max-w-xl rounded-2xl border bg-background shadow-elevated" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-secondary text-primary">
+              <Move className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Adjust crop</p>
+              <h2 className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight" title={filename}>
+                {filename}
+              </h2>
+            </div>
+          </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
             <X />
           </Button>
         </div>
 
-        <div ref={wrapRef} className="mt-3 flex h-[55vh] items-center justify-center">
+        <div
+          ref={wrapRef}
+          className="mx-4 mt-4 flex h-[55vh] items-center justify-center rounded-xl p-3 ring-1 ring-inset ring-black/20"
+          style={{ background: 'radial-gradient(120% 100% at 50% 0%, hsl(160 14% 14%), hsl(162 18% 9%))' }}
+        >
           <div
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onWheel={onWheel}
-            className="relative cursor-move touch-none select-none overflow-hidden rounded-lg border bg-muted"
+            className="relative cursor-move touch-none select-none overflow-hidden rounded-lg shadow-paper ring-1 ring-black/30"
             style={{ width: viewport.w, height: viewport.h }}
           >
             {nat.w > 0 && viewport.w > 0 && <PhotoFrame url={url} edit={edit} alt={filename} />}
@@ -138,7 +151,7 @@ export default function QuickCrop({
           </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex items-center gap-3 px-4">
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Move className="h-3.5 w-3.5" /> Drag · scroll to zoom
           </span>
@@ -150,15 +163,18 @@ export default function QuickCrop({
             step={0.01}
             value={zoom}
             onChange={(e) => setZoomOff({ zoom: Number(e.target.value) })}
-            className="w-full"
+            className="lux-range"
+            style={{
+              background: `linear-gradient(to right, hsl(var(--primary)) ${((zoom - 1) / (MAX_ZOOM - 1)) * 100}%, hsl(var(--muted)) ${((zoom - 1) / (MAX_ZOOM - 1)) * 100}%)`,
+            }}
           />
           <ZoomIn className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="w-12 text-right text-xs text-muted-foreground">{zoom.toFixed(2)}×</span>
+          <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">{zoom.toFixed(2)}×</span>
         </div>
 
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        {error && <p className="mt-2 px-4 text-xs text-destructive">{error}</p>}
 
-        <div className="mt-4 flex items-center justify-between gap-2">
+        <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/60 px-4 py-3">
           <Button variant="ghost" size="sm" onClick={() => setZoomOff({ zoom: 1, offsetX: 0, offsetY: 0 })} disabled={saving}>
             Reset position
           </Button>
@@ -166,7 +182,7 @@ export default function QuickCrop({
             <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={apply} disabled={saving}>
+            <Button size="sm" onClick={apply} disabled={saving} className={LUX_PRIMARY}>
               {saving && <Loader2 className="animate-spin" />} Apply
             </Button>
           </div>

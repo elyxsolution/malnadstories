@@ -50,6 +50,11 @@ export const albums = pgTable('albums', {
   title: text('title').notNull(),
   size: integer('size').notNull(),
   status: text('status').notNull().default('draft'),
+  // Optional customer-authored metadata (0026). Free text; authored at creation,
+  // editable later. Never gates anything — display only.
+  destination: text('destination'),
+  travelDates: text('travel_dates'),
+  description: text('description'),
   // Selected cover design (admin-managed template). Null until chosen; required to
   // submit / generate the PDF. ON DELETE SET NULL handled in 0023.
   coverTemplateId: uuid('cover_template_id'),
@@ -121,6 +126,9 @@ export const orders = pgTable('orders', {
   copies: integer('copies').notNull().default(1),
   subtotalAmount: numeric('subtotal_amount', { precision: 10, scale: 2 }).notNull(),
   shippingAmount: numeric('shipping_amount', { precision: 10, scale: 2 }).notNull().default('99'),
+  // Chosen delivery tier (0027). Server resolves the fee from lib/shipping; this is
+  // the tier label. Default 'standard' keeps existing rows + flow unchanged.
+  shippingMethod: text('shipping_method').notNull().default('standard'),
   discountAmount: numeric('discount_amount', { precision: 10, scale: 2 }).notNull().default('0'),
   totalAmount: numeric('total_amount', { precision: 10, scale: 2 }).notNull(),
   couponId: uuid('coupon_id'), // FK → coupons (0015); kept loose here (hand-written SQL owns the FK)

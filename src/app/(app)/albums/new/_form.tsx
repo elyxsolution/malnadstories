@@ -7,6 +7,7 @@ import { createAlbum, type AlbumActionState } from '@/lib/actions/albums';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { LUX_PRIMARY } from '@/components/brand';
 import type { CoverOption } from '@/lib/covers';
 
 type Product = {
@@ -16,11 +17,15 @@ type Product = {
   basePrice: string;
 };
 
+const SectionLabel = ({ children }: { children: React.ReactNode }) => (
+  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{children}</p>
+);
+
 function SubmitButton({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending || disabled} className="w-full">
-      {pending ? 'Creating…' : 'Create album'}
+    <Button type="submit" size="lg" disabled={pending || disabled} className={`w-full ${LUX_PRIMARY}`}>
+      {pending ? 'Creating…' : 'Open the builder'}
     </Button>
   );
 }
@@ -31,36 +36,75 @@ export default function CreateAlbumForm({ products, covers }: { products: Produc
   const [previewCover, setPreviewCover] = useState<CoverOption | null>(null);
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={formAction} className="space-y-7">
       <div className="space-y-2">
-        <Label htmlFor="title">Album title</Label>
-        <Input id="title" name="title" type="text" placeholder="E.g. Coorg trip 2024" autoComplete="off" required />
+        <Label htmlFor="title">The title</Label>
+        <Input
+          id="title"
+          name="title"
+          type="text"
+          placeholder="Name your story…"
+          autoComplete="off"
+          required
+          className="h-auto border-0 border-b border-input bg-transparent px-0 py-2 font-display text-2xl font-medium shadow-none focus-visible:border-primary focus-visible:ring-0"
+        />
       </div>
 
-      <div className="space-y-2">
-        <Label>Size</Label>
+      {/* Optional metadata (Phase 2A) — never blocks creation. */}
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
+          <Label htmlFor="destination">
+            Destination <span className="font-normal text-muted-foreground">· optional</span>
+          </Label>
+          <Input id="destination" name="destination" type="text" placeholder="Where to?" autoComplete="off" maxLength={120} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="travelDates">
+            Travel dates <span className="font-normal text-muted-foreground">· optional</span>
+          </Label>
+          <Input id="travelDates" name="travelDates" type="text" placeholder="When?" autoComplete="off" maxLength={60} />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="description">
+          A few words <span className="font-normal text-muted-foreground">· optional</span>
+        </Label>
+        <textarea
+          id="description"
+          name="description"
+          rows={2}
+          maxLength={500}
+          placeholder="What made this trip worth keeping?"
+          className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        />
+      </div>
+
+      <div className="space-y-3">
+        <SectionLabel>Choose its form</SectionLabel>
+        <div className="grid gap-2.5">
           {products.map((product, i) => (
             <label
               key={product.id}
-              className="flex items-center justify-between rounded-lg border px-4 py-3 cursor-pointer has-[:checked]:border-foreground has-[:checked]:bg-muted/50"
+              className="flex cursor-pointer items-center justify-between rounded-xl border bg-card px-4 py-3.5 transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/[0.04] has-[:checked]:ring-1 has-[:checked]:ring-primary/30"
             >
               <div className="flex items-center gap-3">
                 <input type="radio" name="productId" value={product.id} defaultChecked={i === 0} required />
                 <div>
-                  <p className="text-sm font-medium">{product.pages} pages</p>
+                  <p className="font-display text-base font-semibold tracking-tight">{product.pages} pages</p>
                   <p className="text-xs text-muted-foreground">{product.name}</p>
                 </div>
               </div>
-              <span className="text-sm font-medium">₹{Number(product.basePrice).toLocaleString('en-IN')}</span>
+              <span className="font-display text-lg font-semibold tabular-nums">
+                ₹{Number(product.basePrice).toLocaleString('en-IN')}
+              </span>
             </label>
           ))}
         </div>
       </div>
 
       {/* Cover template — mandatory, chosen here at creation. */}
-      <div className="space-y-2">
-        <Label>Cover design</Label>
+      <div className="space-y-3">
+        <SectionLabel>Cover design</SectionLabel>
         <input type="hidden" name="coverTemplateId" value={coverId ?? ''} />
         {covers.length === 0 ? (
           <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -73,8 +117,8 @@ export default function CreateAlbumForm({ products, covers }: { products: Produc
               return (
                 <div
                   key={c.id}
-                  className={`group relative overflow-hidden rounded-lg border bg-muted transition-all ${
-                    selected ? 'ring-2 ring-foreground' : 'hover:ring-2 hover:ring-ring'
+                  className={`group relative overflow-hidden rounded-xl border bg-muted transition-all ${
+                    selected ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-ring'
                   }`}
                 >
                   <button type="button" onClick={() => setCoverId(c.id)} className="block w-full text-left" aria-pressed={selected}>

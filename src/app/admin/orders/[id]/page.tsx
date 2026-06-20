@@ -6,6 +6,7 @@ import { orders, albums, coupons, addresses, payments, orderNotes, auditLog, pro
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmail, adminUserEmails } from '@/lib/admin/users';
 import { inr, shortId, fmtDateTime, statusChip } from '@/lib/admin/format';
+import { adminStatusLabel } from '@/lib/orders/status';
 import Fulfillment from './_fulfillment';
 import AdminPdfDownload from '../../_pdf-download';
 
@@ -121,7 +122,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       <div className="mt-1 flex flex-wrap items-center gap-3">
         <h1 className="font-mono text-xl font-bold">#{shortId(row.id)}</h1>
         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(row.status)}`}>
-          {row.status}
+          {adminStatusLabel(row.status)}
         </span>
         <span className="text-sm text-muted-foreground">Placed {fmtDateTime(row.placedAt as unknown as string)}</span>
       </div>

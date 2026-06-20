@@ -10,6 +10,8 @@ import {
   PreviewOrderSchema,
 } from '@/lib/validations';
 import { computeOrderAmount } from '@/lib/pricing';
+import { shippingFeeInr } from '@/lib/shipping';
+import { isPaidStatus } from '@/lib/orders/status';
 import { validateCoupon } from '@/lib/coupons';
 import { isCouponLocked, recordCouponFailure, clearCouponFailures } from '@/lib/coupon-abuse';
 import { createRazorpayOrder, publicKeyId } from '@/lib/razorpay';
@@ -44,9 +46,9 @@ export type PreviewOrderResult =
   | { ok: true; subtotalInr: number; shippingInr: number; totalInr: number }
   | { ok: false; error: string };
 
-// "Active" = a live order we must not duplicate. Paid+ (the full paid family, incl.
-// the fulfilment states) blocks a new order outright; a pending one is reused.
-const PAID_STATES = ['paid', 'processing', 'printing', 'packed', 'shipped', 'delivered'];
+// "Active" = a live order we must not duplicate. Membership in the paid family (the
+// canonical set in status.ts, incl. printing/packed) blocks a new order outright; a
+// pending one is reused. Use isPaidStatus() so there is one definition, not a copy.
 
 /**
  * Create (or resume) a checkout for a SUBMITTED album the user owns.
@@ -70,7 +72,9 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
 
   const parsed = CreateOrderSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const { albumId, addressId, copies, couponCode } = parsed.data;
+  const { albumId, addressId, copies, shippingMethod, couponCode } = parsed.data;
+  // Shipping fee is resolved SERVER-SIDE from the tier key (never client-supplied).
+  const shippingInr = shippingFeeInr(shippingMethod);
 
   // Album must exist, belong to the user (RLS), and be submitted.
   const { data: albumRow } = await supabase
@@ -106,18 +110,32 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
 
   // Coupon (optional): validated server-side against the SUBTOTAL. NOT consumed here
   // — consumption is on payment success (webhook). Invalid → reject so the user fixes
-  // it before paying. (Abuse cooldown lives on previewCoupon, the interactive surface.)
+  // it before paying. The SAME brute-force defence as previewCoupon applies here
+  // (M-1): a per-user cooldown after repeated INVALID attempts, so this path can't be
+  // used to enumerate codes around the previewCoupon cooldown. Only failures accrue;
+  // a valid code clears the counter.
   const subtotalInr = Math.round(basePrice * copies * 100) / 100;
   let couponId: string | null = null;
   let discountInr = 0;
   if (couponCode) {
+    const lock = isCouponLocked(user.id);
+    if (lock.locked) {
+      return {
+        ok: false,
+        error: `Too many invalid coupon attempts. Try again in ${lock.retryAfterSec}s.`,
+      };
+    }
     const result = await validateCoupon(couponCode, subtotalInr);
-    if (!result.ok) return { ok: false, error: result.message };
+    if (!result.ok) {
+      recordCouponFailure(user.id);
+      return { ok: false, error: result.message };
+    }
+    clearCouponFailures(user.id);
     couponId = result.coupon.id;
     discountInr = result.discountInr;
   }
 
-  const amount = computeOrderAmount(basePrice, copies, discountInr);
+  const amount = computeOrderAmount(basePrice, copies, discountInr, shippingInr);
 
   const admin = createServiceClient();
   const keyId = publicKeyId();
@@ -137,7 +155,7 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
     razorpay_order_id: string | null;
   }[];
 
-  if (existing.some((o) => PAID_STATES.includes(o.status))) {
+  if (existing.some((o) => isPaidStatus(o.status))) {
     return { ok: false, error: 'This album has already been ordered.' };
   }
 
@@ -179,7 +197,7 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
         .eq('id', pending.id)
         .maybeSingle();
       const freshStatus = (fresh as { status: string } | null)?.status;
-      if (freshStatus && PAID_STATES.includes(freshStatus)) {
+      if (freshStatus && isPaidStatus(freshStatus)) {
         return { ok: false, error: 'This album has already been ordered.' };
       }
       // else it failed/cancelled → safe to create a fresh order.
@@ -210,6 +228,7 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
       copies,
       subtotal_amount: amount.subtotalInr,
       shipping_amount: amount.shippingInr,
+      shipping_method: shippingMethod,
       discount_amount: amount.discountInr,
       total_amount: amount.totalInr,
       coupon_id: couponId,
@@ -290,7 +309,8 @@ export async function previewCoupon(input: unknown): Promise<PreviewCouponResult
 
   const parsed = PreviewCouponSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const { albumId, copies, code } = parsed.data;
+  const { albumId, copies, shippingMethod, code } = parsed.data;
+  const shippingInr = shippingFeeInr(shippingMethod);
 
   // Ownership (RLS) + product price by size.
   const { data: albumRow } = await supabase
@@ -319,7 +339,7 @@ export async function previewCoupon(input: unknown): Promise<PreviewCouponResult
   }
   clearCouponFailures(user.id);
 
-  const amount = computeOrderAmount(basePrice, copies, result.discountInr);
+  const amount = computeOrderAmount(basePrice, copies, result.discountInr, shippingInr);
   return {
     ok: true,
     code: result.coupon.code,
@@ -348,7 +368,8 @@ export async function previewOrderAmount(input: unknown): Promise<PreviewOrderRe
 
   const parsed = PreviewOrderSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const { albumId, copies } = parsed.data;
+  const { albumId, copies, shippingMethod } = parsed.data;
+  const shippingInr = shippingFeeInr(shippingMethod);
 
   const { data: albumRow } = await supabase
     .from('albums')
@@ -367,7 +388,7 @@ export async function previewOrderAmount(input: unknown): Promise<PreviewOrderRe
   const product = ((products ?? []) as { base_price: string }[])[0];
   if (!product) return { ok: false, error: 'Pricing for this album size is unavailable.' };
 
-  const amount = computeOrderAmount(Number(product.base_price), copies, 0);
+  const amount = computeOrderAmount(Number(product.base_price), copies, 0, shippingInr);
   return {
     ok: true,
     subtotalInr: amount.subtotalInr,

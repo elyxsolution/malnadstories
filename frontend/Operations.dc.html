@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#e9e6dc;height:100%}
+  svg.lucide{width:1em;height:1em;display:block;stroke-width:1.6px}
+  ::selection{background:#1e3a2f;color:#f5efe3}
+  @keyframes op-fade{from{transform:translateY(8px)}to{transform:translateY(0)}}
+  @keyframes op-veil{from{opacity:0}to{opacity:1}}
+  @keyframes op-slide{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
+  .op-scroll::-webkit-scrollbar{width:9px;height:9px}
+  .op-scroll::-webkit-scrollbar-thumb{background:#cfc2a6;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+  .op-nav::-webkit-scrollbar{width:7px}
+  .op-nav::-webkit-scrollbar-thumb{background:#2f4d40;border-radius:8px}
+  .op-row:hover{background:#f6f2e8 !important}
+  @media (max-width:960px){
+    .op-nav{width:60px !important}
+    .op-nav-text{display:none !important}
+    .op-kpi{grid-template-columns:repeat(2,1fr) !important}
+    .op-review2{grid-template-columns:1fr !important}
+  }
+</style>
+</helmet>
+
+<div style="position:relative;height:100vh;display:flex;background:#e9e6dc;font-family:'Work Sans',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden;font-size:14px;color:#2c271f">
+
+  <!-- LEFT RAIL -->
+  <nav class="op-nav op-scroll" style="flex:none;width:222px;background:#16271f;color:#a9bdb0;display:flex;flex-direction:column;overflow-y:auto;z-index:40">
+    <div style="padding:18px 18px 14px;display:flex;align-items:center;gap:10px;position:sticky;top:0;background:#16271f;z-index:2">
+      <div style="flex:none;width:28px;height:28px;border:1px solid #b89a5c;display:flex;align-items:center;justify-content:center;font-family:'Cormorant Garamond',serif;color:#ecd9ad;font-size:16px">M</div>
+      <div class="op-nav-text"><div style="font-size:13px;font-weight:600;color:#f5efe3;line-height:1.1">Malnad Ops</div><div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#5f7d6e">Command Center</div></div>
+    </div>
+    <div style="padding:4px 10px 20px">
+      <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="6">
+        <div style="margin-top:14px">
+          <div class="op-nav-text" style="font-size:10px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#5f7d6e;padding:0 10px 7px">{{ g.label }}</div>
+          <sc-for list="{{ g.items }}" as="n" hint-placeholder-count="4">
+            <button onClick="{{ n.onClick }}" title="{{ n.label }}" style="width:100%;display:flex;align-items:center;gap:11px;background:{{ n.bg }};border:0;border-left:2px solid {{ n.accent }};color:{{ n.color }};padding:9px 10px;cursor:pointer;text-align:left;transition:all .15s ease" style-hover="background:rgba(245,239,227,0.05)">
+              <span style="flex:none;font-size:16px"><i data-lucide="{{ n.icon }}"></i></span>
+              <span class="op-nav-text" style="font-size:13px;font-weight:{{ n.weight }};flex:1">{{ n.label }}</span>
+              <sc-if value="{{ n.badge }}" hint-placeholder-val="{{ false }}"><span class="op-nav-text" style="font-size:10px;font-weight:600;background:{{ n.badgeBg }};color:{{ n.badgeColor }};padding:1px 7px;border-radius:999px">{{ n.badgeNum }}</span></sc-if>
+            </button>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+  </nav>
+
+  <!-- RIGHT -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+
+    <!-- TOP BAR -->
+    <header style="flex:none;height:54px;background:#fbf8f1;border-bottom:1px solid #d8ccb4;display:flex;align-items:center;justify-content:space-between;padding:0 22px;z-index:30">
+      <div style="display:flex;align-items:center;gap:14px;min-width:0">
+        <span style="font-family:'Cormorant Garamond',serif;font-size:19px;color:#1e3a2f">{{ viewTitle }}</span>
+        <span style="font-size:12px;color:#a8966f">{{ viewSubtitle }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="position:relative">
+          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:13px;color:#a8966f"><i data-lucide="search"></i></span>
+          <input placeholder="Search orders, customers…" style="width:240px;background:#f4eee2;border:1px solid #e0d4be;padding:7px 10px 7px 30px;font-size:12.5px;color:#2c271f;outline:none;border-radius:2px;transition:border-color .2s" style-focus="border-color:#1e3a2f">
+        </div>
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.08em;color:#3f6b4d;background:rgba(63,107,77,0.12);padding:4px 10px;border-radius:2px">● LIVE</span>
+        <div style="display:flex;align-items:center;gap:8px;padding-left:6px;border-left:1px solid #e0d4be">
+          <div style="width:28px;height:28px;border-radius:50%;background:#1e3a2f;color:#ecd9ad;display:flex;align-items:center;justify-content:center;font-size:12px;font-family:'Cormorant Garamond',serif">R</div>
+          <div style="line-height:1.15"><div style="font-size:12px;font-weight:500;color:#2c271f">Ravi Menon</div><div style="font-size:10px;color:#a8966f">Production Admin</div></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="op-scroll" style="flex:1;overflow-y:auto;min-height:0;padding:24px;background:#e9e6dc">
+
+      <!-- ===== DASHBOARD ===== -->
+      <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div class="op-kpi" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="8">
+              <div onClick="{{ k.onClick }}" style="background:#fbf8f1;border:1px solid #e6dcc7;border-top:2px solid {{ k.accent }};padding:16px 18px;cursor:{{ k.cursor }};transition:box-shadow .2s ease" style-hover="box-shadow:0 6px 16px rgba(44,39,31,0.08)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                  <span style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8a7d68">{{ k.label }}</span>
+                  <span style="font-size:15px;color:{{ k.accent }}"><i data-lucide="{{ k.icon }}"></i></span>
+                </div>
+                <div style="font-family:'Cormorant Garamond',serif;font-size:34px;color:#1e3a2f;line-height:1">{{ k.value }}</div>
+                <div style="font-size:11px;color:{{ k.deltaColor }};margin-top:5px;display:flex;align-items:center;gap:4px"><span style="font-size:12px"><i data-lucide="{{ k.deltaIcon }}"></i></span>{{ k.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:14px">
+            <!-- queue snapshot -->
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+              <div style="padding:14px 18px;border-bottom:1px solid #efe6d5;display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5d5343">Live queue</span>
+                <button onClick="{{ goOrders }}" style="background:transparent;border:0;color:var(--gold,#a0813f);font-size:12px;font-weight:500;cursor:pointer">Open orders →</button>
+              </div>
+              <div style="padding:8px 0">
+                <sc-for list="{{ pipeSnapshot }}" as="p" hint-placeholder-count="6">
+                  <div onClick="{{ p.onClick }}" class="op-row" style="display:flex;align-items:center;gap:14px;padding:11px 18px;cursor:pointer;transition:background .15s ease">
+                    <span style="flex:none;width:30px;height:30px;border-radius:2px;background:{{ p.iconBg }};color:{{ p.iconColor }};display:flex;align-items:center;justify-content:center;font-size:14px"><i data-lucide="{{ p.icon }}"></i></span>
+                    <span style="flex:1;font-size:13px;color:#2c271f">{{ p.label }}</span>
+                    <span style="flex:none;font-family:'Cormorant Garamond',serif;font-size:22px;color:#1e3a2f;width:40px;text-align:right">{{ p.count }}</span>
+                    <span style="flex:none;width:90px;text-align:right;font-size:11px;color:#a8966f">{{ p.sub }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- alerts -->
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+              <div style="padding:14px 18px;border-bottom:1px solid #efe6d5;font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5d5343">Needs attention</div>
+              <div style="padding:6px 0">
+                <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="4">
+                  <div class="op-row" style="display:flex;gap:12px;padding:12px 18px;cursor:pointer;transition:background .15s ease">
+                    <span style="flex:none;font-size:15px;color:{{ a.color }};margin-top:1px"><i data-lucide="{{ a.icon }}"></i></span>
+                    <div style="flex:1;min-width:0"><div style="font-size:13px;color:#2c271f;font-weight:500">{{ a.title }}</div><div style="font-size:11.5px;color:#8a7d68;margin-top:1px">{{ a.detail }}</div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ORDERS ===== -->
+      <sc-if value="{{ isOrders }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both">
+          <!-- status tabs -->
+          <div class="op-scroll" style="display:flex;gap:0;border-bottom:1px solid #d8ccb4;margin-bottom:16px;overflow-x:auto">
+            <sc-for list="{{ orderTabs }}" as="t" hint-placeholder-count="6">
+              <button onClick="{{ t.onClick }}" style="flex:none;background:transparent;border:0;border-bottom:2px solid {{ t.border }};color:{{ t.color }};padding:11px 16px;font-size:13px;font-weight:{{ t.weight }};cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:8px;transition:all .15s ease">{{ t.label }}<span style="font-size:11px;color:{{ t.countColor }};background:{{ t.countBg }};padding:1px 7px;border-radius:999px">{{ t.count }}</span></button>
+            </sc-for>
+          </div>
+
+          <!-- toolbar -->
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:10px">
+              <sc-if value="{{ hasSelection }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size:13px;color:#1e3a2f;font-weight:600">{{ selCount }} selected</span>
+                <button onClick="{{ bulkApprove }}" style="background:#1e3a2f;color:#f5efe3;border:0;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;border-radius:2px;display:inline-flex;align-items:center;gap:6px" style-hover="background:#2a4a3b"><span style="font-size:13px"><i data-lucide="check"></i></span>Approve</button>
+                <button onClick="{{ bulkExport }}" style="background:#fff;color:#1e3a2f;border:1px solid #d8ccb4;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;border-radius:2px;display:inline-flex;align-items:center;gap:6px"><span style="font-size:13px"><i data-lucide="download"></i></span>Export</button>
+                <button onClick="{{ clearSel }}" style="background:transparent;border:0;color:#8a7d68;font-size:12px;cursor:pointer">Clear</button>
+              </sc-if>
+              <sc-if value="{{ noSelection }}" hint-placeholder-val="{{ true }}">
+                <span style="font-size:13px;color:#8a7d68">{{ orderCountLabel }}</span>
+              </sc-if>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button onClick="{{ toggleSort }}" style="background:#fff;border:1px solid #d8ccb4;color:#3c352b;padding:7px 12px;font-size:12px;cursor:pointer;border-radius:2px;display:inline-flex;align-items:center;gap:7px"><span style="font-size:13px"><i data-lucide="arrow-up-down"></i></span>{{ sortLabel }}</button>
+              <button style="background:#fff;border:1px solid #d8ccb4;color:#3c352b;padding:7px 12px;font-size:12px;cursor:pointer;border-radius:2px;display:inline-flex;align-items:center;gap:7px"><span style="font-size:13px"><i data-lucide="filter"></i></span>Filters</button>
+            </div>
+          </div>
+
+          <!-- table -->
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+            <div style="display:grid;grid-template-columns:36px 1.2fr 1.4fr 0.9fr 1fr 0.9fr 90px;gap:0;padding:10px 16px;border-bottom:1px solid #e0d4be;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f">
+              <span><button onClick="{{ toggleAll }}" style="width:15px;height:15px;border:1.5px solid {{ allCheckBorder }};background:{{ allCheckBg }};border-radius:2px;cursor:pointer;padding:0"></button></span>
+              <span>Order</span><span>Album / Customer</span><span>Format</span><span>Status</span><span>Total</span><span style="text-align:right">Action</span>
+            </div>
+            <sc-for list="{{ orderRows }}" as="o" hint-placeholder-count="8">
+              <div class="op-row" style="display:grid;grid-template-columns:36px 1.2fr 1.4fr 0.9fr 1fr 0.9fr 90px;gap:0;padding:13px 16px;border-bottom:1px solid #f2ebdc;align-items:center;transition:background .15s ease;background:{{ o.rowBg }}">
+                <span><button onClick="{{ o.onCheck }}" style="width:15px;height:15px;border:1.5px solid {{ o.checkBorder }};background:{{ o.checkBg }};border-radius:2px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;color:#f5efe3;font-size:9px"><sc-if value="{{ o.checked }}" hint-placeholder-val="{{ false }}"><i data-lucide="check"></i></sc-if></button></span>
+                <span><span style="font-family:'Courier New',monospace;font-size:12px;color:#1e3a2f;font-weight:600">{{ o.id }}</span><br><span style="font-size:11px;color:#a8966f">{{ o.date }}</span></span>
+                <span><span style="font-size:13px;color:#2c271f;font-weight:500">{{ o.album }}</span><br><span style="font-size:11.5px;color:#8a7d68">{{ o.customer }}</span></span>
+                <span style="font-size:12.5px;color:#5d5343">{{ o.format }}<br><span style="font-size:11px;color:#a8966f">{{ o.pages }}pp</span></span>
+                <span><span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:{{ o.statusColor }};background:{{ o.statusBg }};padding:4px 9px;border-radius:999px"><span style="width:5px;height:5px;border-radius:50%;background:{{ o.statusDot }}"></span>{{ o.status }}</span></span>
+                <span style="font-family:'Cormorant Garamond',serif;font-size:17px;color:#1e3a2f">{{ o.total }}</span>
+                <span style="text-align:right"><button onClick="{{ o.onOpen }}" style="background:transparent;border:1px solid #d8ccb4;color:#1e3a2f;padding:5px 11px;font-size:11.5px;font-weight:500;cursor:pointer;border-radius:2px" style-hover="background:#f3eee2">{{ o.actionLabel }}</button></span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ALBUM REVIEW (hero) ===== -->
+      <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1280px">
+          <button onClick="{{ goOrders }}" style="background:transparent;border:0;color:#5d5343;font-size:12.5px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;margin-bottom:14px" style-hover="color:#1e3a2f"><span style="font-size:14px"><i data-lucide="arrow-left"></i></span>Back to queue</button>
+          <div class="op-review2" style="display:grid;grid-template-columns:1.55fr 1fr;gap:18px;align-items:start">
+
+            <!-- preview -->
+            <div>
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="display:flex;align-items:center;gap:11px"><span style="font-family:'Courier New',monospace;font-size:13px;color:#1e3a2f;font-weight:600">{{ rev.id }}</span><span style="font-size:12px;color:#8a7d68">Spread {{ rev.spreadLabel }}</span></div>
+                <div style="display:flex;gap:6px">
+                  <button onClick="{{ revPrev }}" style="width:30px;height:30px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#3c352b;border-radius:2px" style-hover="background:#f3eee2"><i data-lucide="chevron-left"></i></button>
+                  <button onClick="{{ revNext }}" style="width:30px;height:30px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#3c352b;border-radius:2px" style-hover="background:#f3eee2"><i data-lucide="chevron-right"></i></button>
+                </div>
+              </div>
+              <div style="background:#3a3127;padding:26px;display:flex;align-items:center;justify-content:center">
+                <div style="width:100%;max-width:640px;aspect-ratio:2/1;position:relative;background:#fff;box-shadow:0 20px 40px rgba(0,0,0,0.4)">
+                  <div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(44,39,31,0.18);z-index:5"></div>
+                  <sc-for list="{{ revSlots }}" as="s" hint-placeholder-count="3">
+                    <div style="{{ s.box }}">
+                      <sc-if value="{{ s.filled }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;inset:0;background-size:cover;background-position:center;background-image:{{ s.img }}"></div></sc-if>
+                      <sc-if value="{{ s.empty }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,#f0e7d6,#f0e7d6 7px,#e2d6bf 7px,#e2d6bf 14px);display:flex;align-items:center;justify-content:center;color:#97402f;font-size:11px;font-weight:600">EMPTY</div></sc-if>
+                      <sc-if value="{{ s.flagged }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;top:6px;left:6px;background:#97402f;color:#fff;font-size:9px;font-weight:600;padding:2px 6px;border-radius:2px;z-index:6">{{ s.flag }}</div></sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <!-- thumbnail strip -->
+              <div class="op-scroll" style="display:flex;gap:7px;margin-top:10px;overflow-x:auto;padding-bottom:4px">
+                <sc-for list="{{ revThumbs }}" as="t" hint-placeholder-count="8">
+                  <button onClick="{{ t.onClick }}" style="flex:none;width:64px;height:32px;background:#fff;border:2px solid {{ t.border }};position:relative;cursor:pointer;padding:0">
+                    <div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#eadfca"></div>
+                    <sc-if value="{{ t.warn }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;top:1px;right:1px;width:7px;height:7px;border-radius:50%;background:#97402f"></span></sc-if>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- side: score + checks + info + actions -->
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <!-- print ready score -->
+              <div style="background:#1e3a2f;color:#f5efe3;padding:20px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                  <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#8aa395">Print-ready score</span>
+                  <span style="font-size:11px;font-weight:600;color:{{ scoreTagColor }};background:{{ scoreTagBg }};padding:3px 9px;border-radius:2px">{{ scoreTag }}</span>
+                </div>
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Cormorant Garamond',serif;font-size:54px;line-height:1;color:#ecd9ad">{{ printScore }}</span><span style="font-size:16px;color:#8aa395">/ 100</span></div>
+                <div style="height:5px;background:rgba(245,239,227,0.15);border-radius:5px;overflow:hidden;margin-top:14px"><div style="height:100%;background:linear-gradient(90deg,#b89a5c,#ecd9ad)" data-w="{{ printScore }}%"></div></div>
+              </div>
+
+              <!-- checks -->
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+                <div style="padding:13px 16px;border-bottom:1px solid #efe6d5;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#5d5343">Pre-flight checks</div>
+                <sc-for list="{{ revChecks }}" as="c" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:11px;padding:11px 16px;border-bottom:1px solid #f4eddd">
+                    <span style="flex:none;font-size:15px;color:{{ c.color }}"><i data-lucide="{{ c.icon }}"></i></span>
+                    <div style="flex:1"><div style="font-size:13px;color:#2c271f;font-weight:500">{{ c.label }}</div><div style="font-size:11px;color:#8a7d68">{{ c.detail }}</div></div>
+                    <span style="flex:none;font-size:11px;font-weight:600;color:{{ c.tagColor }}">{{ c.tag }}</span>
+                  </div>
+                </sc-for>
+              </div>
+
+              <!-- customer + order -->
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:16px">
+                <div class="op-grid-info" style="display:grid;grid-template-columns:1fr 1fr;gap:14px 16px">
+                  <sc-for list="{{ revInfo }}" as="i" hint-placeholder-count="4">
+                    <div><div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f;margin-bottom:3px">{{ i.label }}</div><div style="font-size:13px;color:#2c271f">{{ i.value }}</div></div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <!-- actions -->
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <button onClick="{{ approve }}" style="background:#1e3a2f;color:#f5efe3;border:0;padding:13px;font-size:14px;font-weight:600;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:9px;transition:background .2s" style-hover="background:#2a4a3b"><span style="font-size:16px"><i data-lucide="check-check"></i></span>Approve for production</button>
+                <div style="display:flex;gap:9px">
+                  <button onClick="{{ requestChanges }}" style="flex:1;background:#fff;color:#7a6428;border:1px solid #cdb87f;padding:11px;font-size:13px;font-weight:500;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:7px" style-hover="background:rgba(160,129,63,0.08)"><span style="font-size:14px"><i data-lucide="message-square"></i></span>Request changes</button>
+                  <button onClick="{{ reject }}" style="flex:1;background:#fff;color:#97402f;border:1px solid rgba(151,64,47,0.4);padding:11px;font-size:13px;font-weight:500;cursor:pointer;border-radius:2px;display:flex;align-items:center;justify-content:center;gap:7px" style-hover="background:rgba(151,64,47,0.07)"><span style="font-size:14px"><i data-lucide="x"></i></span>Reject</button>
+                </div>
+                <sc-if value="{{ reviewToast }}" hint-placeholder-val="{{ false }}">
+                  <div style="background:rgba(63,107,77,0.12);color:#3f6b4d;padding:11px 14px;font-size:13px;display:flex;align-items:center;gap:8px;animation:op-fade .3s ease both"><span style="font-size:14px"><i data-lucide="check-circle-2"></i></span>{{ reviewToast }}</div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== PRODUCTION ===== -->
+      <sc-if value="{{ isProduction }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both">
+          <div class="op-scroll" style="display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;align-items:flex-start">
+            <sc-for list="{{ prodColumns }}" as="col" hint-placeholder-count="5">
+              <div style="flex:none;width:248px;background:#fbf8f1;border:1px solid #e6dcc7">
+                <div style="padding:12px 15px;border-bottom:1px solid #efe6d5;display:flex;align-items:center;justify-content:space-between">
+                  <div style="display:flex;align-items:center;gap:9px"><span style="font-size:15px;color:{{ col.color }}"><i data-lucide="{{ col.icon }}"></i></span><span style="font-size:12.5px;font-weight:600;color:#2c271f">{{ col.title }}</span></div>
+                  <span style="font-size:11px;color:#8a7d68;background:#efe6d5;padding:1px 8px;border-radius:999px">{{ col.count }}</span>
+                </div>
+                <div style="padding:10px;display:flex;flex-direction:column;gap:9px">
+                  <sc-for list="{{ col.cards }}" as="c" hint-placeholder-count="2">
+                    <div style="background:#fff;border:1px solid #ece2cf;padding:12px;border-left:2px solid {{ col.color }}">
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px"><span style="font-family:'Courier New',monospace;font-size:11px;color:#1e3a2f;font-weight:600">{{ c.id }}</span><span style="font-size:10px;color:#a8966f">{{ c.elapsed }}</span></div>
+                      <div style="font-size:13px;color:#2c271f;font-weight:500;line-height:1.2">{{ c.album }}</div>
+                      <div style="font-size:11px;color:#8a7d68;margin:3px 0 9px">{{ c.spec }}</div>
+                      <div style="display:flex;align-items:center;gap:7px;padding-top:8px;border-top:1px solid #f4eddd"><span style="width:20px;height:20px;border-radius:50%;background:#1e3a2f;color:#ecd9ad;font-size:9px;display:flex;align-items:center;justify-content:center">{{ c.staffInitial }}</span><span style="font-size:11px;color:#5d5343">{{ c.staff }}</span></div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SHIPPING ===== -->
+      <sc-if value="{{ isShipping }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+            <div style="display:grid;grid-template-columns:1fr 1.3fr 1fr 1fr 1fr 0.8fr;padding:10px 18px;border-bottom:1px solid #e0d4be;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f">
+              <span>Order</span><span>Album / To</span><span>Courier</span><span>Tracking</span><span>Status</span><span style="text-align:right">ETA</span>
+            </div>
+            <sc-for list="{{ shipRows }}" as="s" hint-placeholder-count="6">
+              <div class="op-row" style="display:grid;grid-template-columns:1fr 1.3fr 1fr 1fr 1fr 0.8fr;padding:13px 18px;border-bottom:1px solid #f2ebdc;align-items:center;transition:background .15s ease">
+                <span style="font-family:'Courier New',monospace;font-size:12px;color:#1e3a2f;font-weight:600">{{ s.id }}</span>
+                <span><span style="font-size:13px;color:#2c271f;font-weight:500">{{ s.album }}</span><br><span style="font-size:11px;color:#8a7d68">{{ s.dest }}</span></span>
+                <span style="font-size:12.5px;color:#5d5343">{{ s.courier }}</span>
+                <span style="font-family:'Courier New',monospace;font-size:11.5px;color:#7a6428">{{ s.tracking }}</span>
+                <span><span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:{{ s.statusColor }};background:{{ s.statusBg }};padding:4px 9px;border-radius:999px"><span style="width:5px;height:5px;border-radius:50%;background:{{ s.statusDot }}"></span>{{ s.status }}</span></span>
+                <span style="text-align:right;font-size:12.5px;color:#2c271f">{{ s.eta }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CUSTOMERS ===== -->
+      <sc-if value="{{ isCustomers }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:18px;align-items:start">
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+              <div style="display:grid;grid-template-columns:1.4fr 1fr 0.7fr 0.9fr;padding:10px 18px;border-bottom:1px solid #e0d4be;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f">
+                <span>Customer</span><span>Contact</span><span>Albums</span><span style="text-align:right">Spent</span>
+              </div>
+              <sc-for list="{{ custRows }}" as="c" hint-placeholder-count="6">
+                <div onClick="{{ c.onClick }}" class="op-row" style="display:grid;grid-template-columns:1.4fr 1fr 0.7fr 0.9fr;padding:13px 18px;border-bottom:1px solid #f2ebdc;align-items:center;cursor:pointer;transition:background .15s ease;background:{{ c.rowBg }}">
+                  <span style="display:flex;align-items:center;gap:10px"><span style="width:30px;height:30px;border-radius:50%;background:#e3dcc9;color:#1e3a2f;display:flex;align-items:center;justify-content:center;font-size:12px;font-family:'Cormorant Garamond',serif">{{ c.initial }}</span><span><span style="font-size:13px;color:#2c271f;font-weight:500">{{ c.name }}</span><br><span style="font-size:11px;color:#a8966f">{{ c.city }}</span></span></span>
+                  <span style="font-size:11.5px;color:#8a7d68">{{ c.email }}</span>
+                  <span style="font-size:13px;color:#2c271f">{{ c.albums }}</span>
+                  <span style="text-align:right;font-family:'Cormorant Garamond',serif;font-size:17px;color:#1e3a2f">{{ c.spent }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <!-- profile -->
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:22px">
+              <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+                <span style="width:50px;height:50px;border-radius:50%;background:#1e3a2f;color:#ecd9ad;display:flex;align-items:center;justify-content:center;font-size:20px;font-family:'Cormorant Garamond',serif">{{ profile.initial }}</span>
+                <div><div style="font-family:'Cormorant Garamond',serif;font-size:23px;color:#1e3a2f;line-height:1.1">{{ profile.name }}</div><div style="font-size:12px;color:#8a7d68">{{ profile.email }} · {{ profile.phone }}</div></div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:18px">
+                <sc-for list="{{ profileStats }}" as="s" hint-placeholder-count="3">
+                  <div style="background:#fff;border:1px solid #ece2cf;padding:12px;text-align:center"><div style="font-family:'Cormorant Garamond',serif;font-size:24px;color:#1e3a2f">{{ s.value }}</div><div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#a8966f;margin-top:2px">{{ s.label }}</div></div>
+                </sc-for>
+              </div>
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#8a7d68;margin-bottom:10px">Recent activity</div>
+              <div style="display:flex;flex-direction:column;gap:0">
+                <sc-for list="{{ profileActivity }}" as="a" hint-placeholder-count="3">
+                  <div style="display:flex;gap:11px;padding:10px 0;border-bottom:1px solid #f4eddd"><span style="flex:none;font-size:14px;color:{{ a.color }};margin-top:1px"><i data-lucide="{{ a.icon }}"></i></span><div><div style="font-size:13px;color:#2c271f">{{ a.title }}</div><div style="font-size:11px;color:#a8966f">{{ a.date }}</div></div></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SUPPORT ===== -->
+      <sc-if value="{{ isSupport }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="display:flex;gap:8px;margin-bottom:14px">
+            <sc-for list="{{ ticketTabs }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.onClick }}" style="background:{{ t.bg }};border:1px solid {{ t.border }};color:{{ t.color }};padding:7px 14px;font-size:12px;font-weight:{{ t.weight }};cursor:pointer;border-radius:2px">{{ t.label }} · {{ t.count }}</button>
+            </sc-for>
+          </div>
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+            <sc-for list="{{ tickets }}" as="t" hint-placeholder-count="5">
+              <div class="op-row" style="display:flex;align-items:center;gap:16px;padding:15px 18px;border-bottom:1px solid #f2ebdc;cursor:pointer;transition:background .15s ease">
+                <span style="flex:none;width:34px;height:34px;border-radius:50%;background:{{ t.iconBg }};color:{{ t.iconColor }};display:flex;align-items:center;justify-content:center;font-size:15px"><i data-lucide="{{ t.icon }}"></i></span>
+                <div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:10px"><span style="font-size:13.5px;color:#2c271f;font-weight:500">{{ t.subject }}</span><span style="font-family:'Courier New',monospace;font-size:10.5px;color:#a8966f">{{ t.id }}</span></div><div style="font-size:11.5px;color:#8a7d68;margin-top:2px">{{ t.customer }} · {{ t.preview }}</div></div>
+                <span style="flex:none;font-size:11px;font-weight:600;color:{{ t.statusColor }};background:{{ t.statusBg }};padding:4px 10px;border-radius:999px">{{ t.status }}</span>
+                <span style="flex:none;font-size:11px;color:#a8966f;width:70px;text-align:right">{{ t.age }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CONTENT ===== -->
+      <sc-if value="{{ isContent }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <sc-for list="{{ contentTabs }}" as="t" hint-placeholder-count="5">
+              <button onClick="{{ t.onClick }}" style="background:{{ t.bg }};border:1px solid {{ t.border }};color:{{ t.color }};padding:7px 14px;font-size:12px;font-weight:{{ t.weight }};cursor:pointer;border-radius:2px">{{ t.label }}</button>
+            </sc-for>
+            <button style="margin-left:auto;background:#1e3a2f;color:#f5efe3;border:0;padding:8px 16px;font-size:12.5px;font-weight:500;cursor:pointer;border-radius:2px;display:inline-flex;align-items:center;gap:7px" style-hover="background:#2a4a3b"><span style="font-size:14px"><i data-lucide="plus"></i></span>New {{ contentSingular }}</button>
+          </div>
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+            <sc-for list="{{ contentRows }}" as="r" hint-placeholder-count="5">
+              <div class="op-row" style="display:flex;align-items:center;gap:16px;padding:14px 18px;border-bottom:1px solid #f2ebdc;cursor:pointer;transition:background .15s ease">
+                <div style="flex:1;min-width:0"><div style="font-size:14px;color:#2c271f;font-weight:500">{{ r.title }}</div><div style="font-size:11.5px;color:#8a7d68;margin-top:2px">{{ r.meta }}</div></div>
+                <span style="flex:none;font-size:11px;font-weight:600;color:{{ r.statusColor }};background:{{ r.statusBg }};padding:4px 10px;border-radius:999px">{{ r.status }}</span>
+                <div style="flex:none;display:flex;gap:5px"><button style="width:28px;height:28px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;color:#5d5343;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:13px"><i data-lucide="pencil"></i></button><button style="width:28px;height:28px;background:#fff;border:1px solid #d8ccb4;cursor:pointer;color:#5d5343;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:13px"><i data-lucide="archive"></i></button></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== TEMPLATES ===== -->
+      <sc-if value="{{ isTemplates }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <sc-for list="{{ templateTabs }}" as="t" hint-placeholder-count="4">
+              <button onClick="{{ t.onClick }}" style="background:{{ t.bg }};border:1px solid {{ t.border }};color:{{ t.color }};padding:7px 14px;font-size:12px;font-weight:{{ t.weight }};cursor:pointer;border-radius:2px">{{ t.label }}</button>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+            <sc-for list="{{ templateCards }}" as="c" hint-placeholder-count="8">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+                <div style="aspect-ratio:2/1;background:#fff;position:relative;border-bottom:1px solid #efe6d5">
+                  <div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#eadfca"></div>
+                  <sc-for list="{{ c.mini }}" as="m" hint-placeholder-count="2"><div style="{{ m }}"></div></sc-for>
+                </div>
+                <div style="padding:12px 14px">
+                  <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:13px;font-weight:500;color:#2c271f">{{ c.name }}</span><span style="width:8px;height:8px;border-radius:50%;background:{{ c.dot }}" title="{{ c.statusLabel }}"></span></div>
+                  <div style="font-size:11px;color:#8a7d68;margin:3px 0 10px">Used in {{ c.usage }} albums</div>
+                  <button onClick="{{ c.onToggle }}" style="width:100%;background:{{ c.btnBg }};border:1px solid {{ c.btnBorder }};color:{{ c.btnColor }};padding:6px;font-size:11.5px;font-weight:500;cursor:pointer;border-radius:2px">{{ c.btnLabel }}</button>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== COUPONS ===== -->
+      <sc-if value="{{ isCoupons }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+            <div style="display:grid;grid-template-columns:1fr 0.8fr 1.1fr 0.8fr 1fr 0.7fr;padding:10px 18px;border-bottom:1px solid #e0d4be;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f">
+              <span>Code</span><span>Type</span><span>Rules</span><span>Used</span><span>Revenue impact</span><span style="text-align:right">Status</span>
+            </div>
+            <sc-for list="{{ couponRows }}" as="c" hint-placeholder-count="5">
+              <div class="op-row" style="display:grid;grid-template-columns:1fr 0.8fr 1.1fr 0.8fr 1fr 0.7fr;padding:13px 18px;border-bottom:1px solid #f2ebdc;align-items:center;transition:background .15s ease">
+                <span style="font-family:'Courier New',monospace;font-size:13px;color:#1e3a2f;font-weight:600">{{ c.code }}</span>
+                <span style="font-size:12.5px;color:#5d5343">{{ c.type }}</span>
+                <span style="font-size:11.5px;color:#8a7d68">{{ c.rules }}</span>
+                <span style="font-size:12.5px;color:#2c271f">{{ c.used }}</span>
+                <span style="font-family:'Cormorant Garamond',serif;font-size:16px;color:{{ c.impactColor }}">{{ c.impact }}</span>
+                <span style="text-align:right"><span style="font-size:11px;font-weight:600;color:{{ c.statusColor }};background:{{ c.statusBg }};padding:4px 9px;border-radius:999px">{{ c.status }}</span></span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ANALYTICS ===== -->
+      <sc-if value="{{ isAnalytics }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="display:flex;gap:6px;margin-bottom:16px">
+            <sc-for list="{{ rangeTabs }}" as="r" hint-placeholder-count="4">
+              <button onClick="{{ r.onClick }}" style="background:{{ r.bg }};border:1px solid {{ r.border }};color:{{ r.color }};padding:6px 14px;font-size:12px;font-weight:{{ r.weight }};cursor:pointer;border-radius:2px">{{ r.label }}</button>
+            </sc-for>
+          </div>
+          <div class="op-kpi" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">
+            <sc-for list="{{ analyticsKpis }}" as="k" hint-placeholder-count="4">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:16px 18px">
+                <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8a7d68;margin-bottom:9px">{{ k.label }}</div>
+                <div style="font-family:'Cormorant Garamond',serif;font-size:30px;color:#1e3a2f;line-height:1">{{ k.value }}</div>
+                <div style="font-size:11px;color:{{ k.deltaColor }};margin-top:5px">{{ k.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:20px">
+            <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5d5343;margin-bottom:20px">Revenue · last 12 weeks</div>
+            <div style="display:flex;align-items:flex-end;gap:8px;height:200px">
+              <sc-for list="{{ revenueBars }}" as="b" hint-placeholder-count="12">
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;height:100%;justify-content:flex-end">
+                  <div style="width:100%;background:linear-gradient(180deg,#2a4a3b,#51735f);border-radius:2px 2px 0 0;transition:height .4s ease" data-h="{{ b.h }}" title="{{ b.value }}"></div>
+                  <span style="font-size:9px;color:#a8966f">{{ b.label }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SYSTEM ===== -->
+      <sc-if value="{{ isSystem }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div class="op-kpi" style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">
+            <sc-for list="{{ healthCards }}" as="h" hint-placeholder-count="4">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;border-left:3px solid {{ h.color }};padding:16px 18px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><span style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8a7d68">{{ h.label }}</span><span style="width:8px;height:8px;border-radius:50%;background:{{ h.color }}"></span></div>
+                <div style="font-family:'Cormorant Garamond',serif;font-size:26px;color:#1e3a2f;line-height:1">{{ h.value }}</div>
+                <div style="font-size:11px;color:#8a7d68;margin-top:4px">{{ h.detail }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+              <div style="padding:13px 16px;border-bottom:1px solid #efe6d5;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#5d5343">Workers</div>
+              <sc-for list="{{ workers }}" as="w" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f4eddd">
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ w.color }}"></span>
+                  <span style="flex:1;font-size:13px;color:#2c271f">{{ w.name }}</span>
+                  <span style="font-size:11.5px;color:#8a7d68">{{ w.detail }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+              <div style="padding:13px 16px;border-bottom:1px solid #efe6d5;font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#5d5343">Recent events</div>
+              <sc-for list="{{ logEvents }}" as="l" hint-placeholder-count="5">
+                <div style="display:flex;align-items:flex-start;gap:11px;padding:11px 16px;border-bottom:1px solid #f4eddd">
+                  <span style="flex:none;font-family:'Courier New',monospace;font-size:10px;color:#a8966f;margin-top:2px;width:42px">{{ l.time }}</span>
+                  <span style="flex:none;font-size:10px;font-weight:600;color:{{ l.levelColor }};width:48px">{{ l.level }}</span>
+                  <span style="flex:1;font-size:12px;color:#3c352b">{{ l.msg }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== USERS ===== -->
+      <sc-if value="{{ isUsers }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:1240px">
+          <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:18px;align-items:start">
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7">
+              <div style="display:grid;grid-template-columns:1.3fr 1fr 0.9fr;padding:10px 18px;border-bottom:1px solid #e0d4be;font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f"><span>User</span><span>Role</span><span style="text-align:right">Last active</span></div>
+              <sc-for list="{{ userRows }}" as="u" hint-placeholder-count="5">
+                <div class="op-row" style="display:grid;grid-template-columns:1.3fr 1fr 0.9fr;padding:13px 18px;border-bottom:1px solid #f2ebdc;align-items:center;transition:background .15s ease">
+                  <span style="display:flex;align-items:center;gap:10px"><span style="width:30px;height:30px;border-radius:50%;background:#e3dcc9;color:#1e3a2f;display:flex;align-items:center;justify-content:center;font-size:12px;font-family:'Cormorant Garamond',serif">{{ u.initial }}</span><span><span style="font-size:13px;color:#2c271f;font-weight:500">{{ u.name }}</span><br><span style="font-size:11px;color:#a8966f">{{ u.email }}</span></span></span>
+                  <span><span style="font-size:11.5px;font-weight:600;color:{{ u.roleColor }};background:{{ u.roleBg }};padding:4px 10px;border-radius:999px">{{ u.role }}</span></span>
+                  <span style="text-align:right;font-size:11.5px;color:#8a7d68">{{ u.active }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:20px">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#5d5343;margin-bottom:14px">Roles & permissions</div>
+              <sc-for list="{{ roleCards }}" as="r" hint-placeholder-count="4">
+                <div style="padding:13px 0;border-bottom:1px solid #f4eddd">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:#2c271f">{{ r.name }}</span><span style="font-size:11px;color:#a8966f">{{ r.count }} users</span></div>
+                  <div style="font-size:11.5px;color:#8a7d68;line-height:1.5">{{ r.perms }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SETTINGS ===== -->
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="animation:op-fade .4s ease both;max-width:880px">
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <sc-for list="{{ settingsCards }}" as="c" hint-placeholder-count="4">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:20px 22px">
+                <div style="display:flex;align-items:center;gap:11px;margin-bottom:16px"><span style="color:var(--gold,#a0813f);font-size:17px"><i data-lucide="{{ c.icon }}"></i></span><span style="font-size:13px;font-weight:600;color:#2c271f">{{ c.title }}</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 20px">
+                  <sc-for list="{{ c.fields }}" as="f" hint-placeholder-count="4">
+                    <div><div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#a8966f;margin-bottom:5px">{{ f.label }}</div><div style="font-size:13.5px;color:#2c271f;border-bottom:1px solid #ece2cf;padding-bottom:7px">{{ f.value }}</div></div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  state = {
+    view: 'dash',
+    orderTab: 'all',
+    sort: 'newest',
+    selected: [],
+    reviewId: 'MS-2026-04817',
+    reviewSpread: 0,
+    reviewToast: '',
+    custId: 'c1',
+    ticketTab: 'open',
+    contentTab: 'blogs',
+    templateTab: 'layout',
+    range: 'month',
+  };
+
+  IMG = (q, w, h) => 'url(https://images.unsplash.com/' + q + '?auto=format&fit=crop&w=' + w + '&q=70&h=' + h + ')';
+  PHOTOS = [
+    'photo-1506905925346-21bda4d32df4', 'photo-1464822759023-fed622ff2c3b', 'photo-1469474968028-56623f02e42e',
+    'photo-1470770841072-f978cf4d019e', 'photo-1454496522488-7a8e488e8606', 'photo-1501785888041-af3ef285b470',
+  ];
+
+  STATUS = {
+    review:   { label: 'Awaiting Review', color: '#7a6428', bg: 'rgba(160,129,63,0.14)', dot: '#a0813f' },
+    approved: { label: 'Approved', color: '#3f6b4d', bg: 'rgba(63,107,77,0.12)', dot: '#3f6b4d' },
+    pdf:      { label: 'PDF Generation', color: '#43607a', bg: 'rgba(67,96,122,0.12)', dot: '#43607a' },
+    printing: { label: 'Printing', color: '#43607a', bg: 'rgba(67,96,122,0.12)', dot: '#43607a' },
+    binding:  { label: 'Binding', color: '#43607a', bg: 'rgba(67,96,122,0.12)', dot: '#43607a' },
+    qc:       { label: 'Quality Check', color: '#7a6428', bg: 'rgba(160,129,63,0.14)', dot: '#a0813f' },
+    packaging:{ label: 'Packaging', color: '#43607a', bg: 'rgba(67,96,122,0.12)', dot: '#43607a' },
+    shipped:  { label: 'Shipped', color: '#3f6b4d', bg: 'rgba(63,107,77,0.12)', dot: '#3f6b4d' },
+    delivered:{ label: 'Delivered', color: '#3f6b4d', bg: 'rgba(63,107,77,0.12)', dot: '#3f6b4d' },
+    returned: { label: 'Returned', color: '#97402f', bg: 'rgba(151,64,47,0.1)', dot: '#97402f' },
+  };
+
+  ORDERS = [
+    { id: 'MS-2026-04817', date: '20 Jun, 09:14', album: 'A Week in the Western Ghats', customer: 'Ananya Rao', format: 'The Journey', pages: 100, status: 'review', total: '₹3,780' },
+    { id: 'MS-2026-04816', date: '20 Jun, 08:51', album: 'Coorg Coffee Trails', customer: 'Vikram Shenoy', format: 'The Weekend', pages: 50, status: 'review', total: '₹2,400' },
+    { id: 'MS-2026-04814', date: '19 Jun, 19:22', album: 'Hampi in Stone', customer: 'Meera Iyer', format: 'The Journey', pages: 100, status: 'approved', total: '₹4,200' },
+    { id: 'MS-2026-04810', date: '19 Jun, 16:03', album: 'Backwaters of Kerala', customer: 'Joseph Mathew', format: 'The Weekend', pages: 60, status: 'printing', total: '₹2,900' },
+    { id: 'MS-2026-04805', date: '19 Jun, 11:47', album: 'Rann of Kutch', customer: 'Diya Patel', format: 'The Odyssey', pages: 200, status: 'binding', total: '₹7,600' },
+    { id: 'MS-2026-04799', date: '18 Jun, 14:30', album: 'Ladakh, Above the Clouds', customer: 'Tenzin Norbu', format: 'The Odyssey', pages: 200, status: 'qc', total: '₹7,600' },
+    { id: 'MS-2026-04788', date: '18 Jun, 09:12', album: 'Goan Monsoon', customer: 'Sara Pinto', format: 'The Weekend', pages: 50, status: 'shipped', total: '₹2,400' },
+    { id: 'MS-2026-04771', date: '17 Jun, 10:05', album: 'Rajasthan in Gold', customer: 'Aarav Singh', format: 'The Journey', pages: 100, status: 'delivered', total: '₹4,200' },
+  ];
+
+  componentDidMount() { this.paint(); this.icons(0); }
+  componentDidUpdate() { this.paint(); this.icons(0); }
+  paint() { document.documentElement.style.setProperty('--gold', '#a0813f'); document.querySelectorAll('[data-w]').forEach((el) => { el.style.width = el.getAttribute('data-w'); }); document.querySelectorAll('[data-h]').forEach((el) => { el.style.height = el.getAttribute('data-h'); }); }
+  icons(n) { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); else if (n < 30) setTimeout(() => this.icons(n + 1), 120); }
+
+  go(view) { this.setState({ view, selected: [] }); const m = document.querySelector('main'); if (m) m.scrollTop = 0; }
+  toast(msg) { this.setState({ reviewToast: msg }); if (this._t) clearTimeout(this._t); this._t = setTimeout(() => this.setState({ reviewToast: '' }), 2800); }
+
+  renderVals() {
+    const st = this.state;
+    const S = (k) => this.STATUS[k];
+    const v = st.view;
+
+    // ---------- NAV ----------
+    const counts = {};
+    this.ORDERS.forEach((o) => { counts[o.status] = (counts[o.status] || 0) + 1; });
+    const navGroups = [
+      { label: 'Operations', items: [ { key: 'dash', label: 'Dashboard', icon: 'layout-dashboard' } ] },
+      { label: 'Fulfilment', items: [
+        { key: 'orders', label: 'Orders', icon: 'clipboard-list', badge: true, badgeNum: (counts.review || 0) },
+        { key: 'review', label: 'Album Review', icon: 'book-check', badge: true, badgeNum: (counts.review || 0) },
+        { key: 'production', label: 'Production', icon: 'factory' },
+        { key: 'shipping', label: 'Shipping', icon: 'truck' },
+      ] },
+      { label: 'Relationships', items: [
+        { key: 'customers', label: 'Customers', icon: 'users' },
+        { key: 'support', label: 'Support', icon: 'life-buoy', badge: true, badgeNum: 3 },
+      ] },
+      { label: 'Catalog', items: [
+        { key: 'content', label: 'Content', icon: 'file-text' },
+        { key: 'templates', label: 'Templates', icon: 'layout-template' },
+        { key: 'coupons', label: 'Coupons', icon: 'ticket-percent' },
+      ] },
+      { label: 'Business', items: [ { key: 'analytics', label: 'Analytics', icon: 'bar-chart-3' } ] },
+      { label: 'Platform', items: [
+        { key: 'system', label: 'System', icon: 'server' },
+        { key: 'users', label: 'Users & Roles', icon: 'shield' },
+        { key: 'settings', label: 'Settings', icon: 'settings' },
+      ] },
+    ].map((g) => ({ label: g.label, items: g.items.map((n) => {
+      const active = (v === n.key) || (n.key === 'review' && v === 'review') || (n.key === 'orders' && v === 'orders');
+      const isActive = v === n.key;
+      return {
+        label: n.label, icon: n.icon, badge: !!n.badge, badgeNum: n.badgeNum,
+        badgeBg: isActive ? '#ecd9ad' : '#a0813f', badgeColor: '#16271f',
+        bg: isActive ? 'rgba(245,239,227,0.08)' : 'transparent',
+        accent: isActive ? '#ecd9ad' : 'transparent',
+        color: isActive ? '#f5efe3' : '#a9bdb0', weight: isActive ? '600' : '400',
+        onClick: () => this.go(n.key),
+      };
+    }) }));
+
+    const titles = {
+      dash: ['Operations Dashboard', 'Friday, 20 June 2026'], orders: ['Orders', 'Fulfilment queue'],
+      review: ['Album Review', 'Pre-production approval'], production: ['Production Pipeline', 'Live floor status'],
+      shipping: ['Shipping', 'Dispatch & tracking'], customers: ['Customers', 'Directory & profiles'],
+      support: ['Support', 'Tickets & requests'], content: ['Content', 'CMS'],
+      templates: ['Templates', 'Builder catalog'], coupons: ['Coupons', 'Promotions'],
+      analytics: ['Analytics', 'Business metrics'], system: ['System', 'Health & monitoring'],
+      users: ['Users & Roles', 'Access control'], settings: ['Settings', 'Company configuration'],
+    };
+
+    // ---------- DASHBOARD ----------
+    const kpis = [
+      { label: 'New orders', value: '14', icon: 'inbox', accent: '#a0813f', delta: '+3 today', deltaColor: '#3f6b4d', deltaIcon: 'trending-up', onClick: () => this.go('orders'), cursor: 'pointer' },
+      { label: 'Awaiting review', value: String(counts.review || 0), icon: 'book-check', accent: '#97402f', delta: 'Oldest 4h ago', deltaColor: '#97402f', deltaIcon: 'clock', onClick: () => this.go('review'), cursor: 'pointer' },
+      { label: 'In production', value: '23', icon: 'factory', accent: '#43607a', delta: 'On schedule', deltaColor: '#3f6b4d', deltaIcon: 'check', onClick: () => this.go('production'), cursor: 'pointer' },
+      { label: 'In quality check', value: '6', icon: 'search-check', accent: '#a0813f', delta: '1 flagged', deltaColor: '#97402f', deltaIcon: 'alert-triangle', onClick: () => this.go('production'), cursor: 'pointer' },
+      { label: 'In transit', value: '11', icon: 'truck', accent: '#43607a', delta: '2 delayed', deltaColor: '#97402f', deltaIcon: 'alert-triangle', onClick: () => this.go('shipping'), cursor: 'pointer' },
+      { label: 'Support tickets', value: '3', icon: 'life-buoy', accent: '#97402f', delta: '1 urgent', deltaColor: '#97402f', deltaIcon: 'alert-triangle', onClick: () => this.go('support'), cursor: 'pointer' },
+      { label: 'Revenue today', value: '₹48.2k', icon: 'indian-rupee', accent: '#3f6b4d', delta: '+12% vs avg', deltaColor: '#3f6b4d', deltaIcon: 'trending-up', onClick: () => this.go('analytics'), cursor: 'pointer' },
+      { label: 'Revenue · June', value: '₹9.4L', icon: 'trending-up', accent: '#3f6b4d', delta: '78% to target', deltaColor: '#3f6b4d', deltaIcon: 'trending-up', onClick: () => this.go('analytics'), cursor: 'pointer' },
+    ];
+    const pipeSnapshot = [
+      { label: 'Awaiting review', count: counts.review || 0, sub: 'oldest 4h', icon: 'book-check', iconBg: 'rgba(160,129,63,0.14)', iconColor: '#a0813f', onClick: () => this.go('review') },
+      { label: 'PDF generation', count: 4, sub: '1 processing', icon: 'file-cog', iconBg: 'rgba(67,96,122,0.12)', iconColor: '#43607a', onClick: () => this.go('production') },
+      { label: 'Printing', count: 9, sub: 'press A & B', icon: 'printer', iconBg: 'rgba(67,96,122,0.12)', iconColor: '#43607a', onClick: () => this.go('production') },
+      { label: 'Binding', count: 8, sub: 'on schedule', icon: 'book', iconBg: 'rgba(67,96,122,0.12)', iconColor: '#43607a', onClick: () => this.go('production') },
+      { label: 'Quality check', count: 6, sub: '1 flagged', icon: 'search-check', iconBg: 'rgba(160,129,63,0.14)', iconColor: '#a0813f', onClick: () => this.go('production') },
+      { label: 'Packaging & dispatch', count: 5, sub: 'ready', icon: 'package', iconBg: 'rgba(63,107,77,0.12)', iconColor: '#3f6b4d', onClick: () => this.go('shipping') },
+    ];
+    const alerts = [
+      { icon: 'alert-triangle', color: '#97402f', title: 'MS-2026-04817 · 3 empty frames', detail: 'Flagged in pre-flight — needs review before approval' },
+      { icon: 'image-off', color: '#a0813f', title: 'MS-2026-04816 · 2 low-res photos', detail: 'Below 150 DPI at print size' },
+      { icon: 'truck', color: '#97402f', title: 'MS-2026-04788 · delivery delayed', detail: 'Courier exception — out for redelivery' },
+      { icon: 'server', color: '#a0813f', title: 'PDF worker queue at 68%', detail: 'Consider scaling a second worker' },
+    ];
+
+    // ---------- ORDERS ----------
+    const tabDefs = [
+      { k: 'all', label: 'All' }, { k: 'review', label: 'Awaiting Review' }, { k: 'approved', label: 'Approved' },
+      { k: 'printing', label: 'Production' }, { k: 'shipped', label: 'Shipped' }, { k: 'delivered', label: 'Delivered' },
+    ];
+    const inProd = ['pdf', 'printing', 'binding', 'qc', 'packaging'];
+    const matchTab = (o, k) => k === 'all' ? true : (k === 'printing' ? inProd.indexOf(o.status) >= 0 : o.status === k);
+    const orderTabs = tabDefs.map((t) => {
+      const c = this.ORDERS.filter((o) => matchTab(o, t.k)).length;
+      const sel = st.orderTab === t.k;
+      return { label: t.label, count: c, border: sel ? '#1e3a2f' : 'transparent', color: sel ? '#1e3a2f' : '#8a7d68', weight: sel ? '600' : '400',
+        countColor: sel ? '#1e3a2f' : '#a8966f', countBg: sel ? 'rgba(30,58,47,0.08)' : '#efe6d5', onClick: () => this.setState({ orderTab: t.k }) };
+    });
+    let filteredOrders = this.ORDERS.filter((o) => matchTab(o, st.orderTab));
+    if (st.sort === 'oldest') filteredOrders = filteredOrders.slice().reverse();
+    const selSet = new Set(st.selected);
+    const orderRows = filteredOrders.map((o) => {
+      const s = S(o.status); const checked = selSet.has(o.id);
+      return {
+        id: o.id, date: o.date, album: o.album, customer: o.customer, format: o.format, pages: o.pages, total: o.total,
+        status: s.label, statusColor: s.color, statusBg: s.bg, statusDot: s.dot,
+        checked, checkBorder: checked ? '#1e3a2f' : '#c2b393', checkBg: checked ? '#1e3a2f' : 'transparent',
+        rowBg: checked ? '#f6f2e8' : 'transparent',
+        actionLabel: o.status === 'review' ? 'Review' : 'Open',
+        onCheck: () => this.setState((ps) => ({ selected: ps.selected.indexOf(o.id) >= 0 ? ps.selected.filter((x) => x !== o.id) : ps.selected.concat([o.id]) })),
+        onOpen: () => this.setState({ view: 'review', reviewId: o.id, reviewSpread: 0 }),
+      };
+    });
+    const allChecked = filteredOrders.length > 0 && filteredOrders.every((o) => selSet.has(o.id));
+
+    // ---------- ALBUM REVIEW ----------
+    const TEMPL = [
+      [{ x: 8, y: 20, w: 84, h: 60 }],
+      [{ x: 5, y: 12, w: 41, h: 76 }, { x: 54, y: 12, w: 41, h: 76 }],
+      [{ x: 5, y: 8, w: 41, h: 40 }, { x: 54, y: 8, w: 41, h: 40 }, { x: 5, y: 52, w: 41, h: 40 }],
+    ];
+    const spreads = [
+      { layout: 0, photos: [0], flags: [] },
+      { layout: 1, photos: [1, 2], flags: [] },
+      { layout: 2, photos: [3, -1, 5], flags: [{ slot: 1, type: 'EMPTY' }, { slot: 2, type: 'LOW DPI' }] },
+      { layout: 1, photos: [4, 5], flags: [] },
+    ];
+    const curSpread = spreads[st.reviewSpread] || spreads[0];
+    const revSlots = TEMPL[curSpread.layout].map((r, i) => {
+      const pid = curSpread.photos[i];
+      const flag = (curSpread.flags || []).find((f) => f.slot === i);
+      const empty = pid === -1;
+      return {
+        box: 'position:absolute;left:' + r.x + '%;top:' + r.y + '%;width:' + r.w + '%;height:' + r.h + '%;overflow:hidden;',
+        filled: !empty, empty, img: empty ? 'none' : this.IMG(this.PHOTOS[pid % this.PHOTOS.length], 600, 400),
+        flagged: !!flag, flag: flag ? flag.type : '',
+      };
+    });
+    const revThumbs = spreads.map((sp, i) => ({
+      border: i === st.reviewSpread ? '#a0813f' : '#d8ccb4', warn: (sp.flags || []).length > 0,
+      onClick: () => this.setState({ reviewSpread: i }),
+    }));
+    const revOrder = this.ORDERS.find((o) => o.id === st.reviewId) || this.ORDERS[0];
+    const flaggedTotal = spreads.reduce((a, s) => a + (s.flags || []).length, 0);
+    const printScore = flaggedTotal > 0 ? 88 : 99;
+    const revChecks = [
+      { label: 'Empty frames', detail: '1 found on spread 3', icon: 'alert-triangle', color: '#97402f', tag: 'Fix', tagColor: '#97402f' },
+      { label: 'Image resolution', detail: '1 photo below 150 DPI', icon: 'alert-triangle', color: '#a0813f', tag: 'Warn', tagColor: '#7a6428' },
+      { label: 'Bleed & trim', detail: 'All pages within bleed', icon: 'check', color: '#3f6b4d', tag: 'Pass', tagColor: '#3f6b4d' },
+      { label: 'Margins & safe zone', detail: 'No text in trim zone', icon: 'check', color: '#3f6b4d', tag: 'Pass', tagColor: '#3f6b4d' },
+      { label: 'Cover & spine', detail: 'Title set · spine width OK', icon: 'check', color: '#3f6b4d', tag: 'Pass', tagColor: '#3f6b4d' },
+      { label: 'Colour profile', detail: 'CMYK-safe, sRGB embedded', icon: 'check', color: '#3f6b4d', tag: 'Pass', tagColor: '#3f6b4d' },
+    ];
+    const revInfo = [
+      { label: 'Customer', value: revOrder.customer }, { label: 'Order', value: revOrder.id },
+      { label: 'Format', value: revOrder.format + ' · ' + revOrder.pages + 'pp' }, { label: 'Total', value: revOrder.total },
+      { label: 'Placed', value: revOrder.date }, { label: 'Delivery', value: 'Standard · 7–9 days' },
+    ];
+    const scoreTag = printScore >= 98 ? 'Print ready' : 'Needs attention';
+    const scoreTagColor = printScore >= 98 ? '#16271f' : '#16271f';
+    const scoreTagBg = printScore >= 98 ? '#9fc6a8' : '#e0c074';
+
+    // ---------- PRODUCTION ----------
+    const staffNames = { R: 'Ravi M.', P: 'Priya S.', K: 'Karthik N.', L: 'Leela D.', S: 'Suresh B.' };
+    const prodColumns = [
+      { title: 'Printing', icon: 'printer', color: '#43607a', cards: [
+        { id: 'MS-04810', album: 'Backwaters of Kerala', spec: '60pp · matte', elapsed: '22m', staffInitial: 'P', staff: 'Priya S.' },
+        { id: 'MS-04812', album: 'Munnar Mornings', spec: '100pp · matte', elapsed: '8m', staffInitial: 'R', staff: 'Ravi M.' },
+      ] },
+      { title: 'Binding', icon: 'book', color: '#43607a', cards: [
+        { id: 'MS-04805', album: 'Rann of Kutch', spec: '200pp · linen', elapsed: '1h 4m', staffInitial: 'K', staff: 'Karthik N.' },
+      ] },
+      { title: 'Quality Check', icon: 'search-check', color: '#a0813f', cards: [
+        { id: 'MS-04799', album: 'Ladakh, Above the Clouds', spec: '200pp · linen', elapsed: '12m', staffInitial: 'L', staff: 'Leela D.' },
+      ] },
+      { title: 'Packaging', icon: 'package', color: '#3f6b4d', cards: [
+        { id: 'MS-04794', album: 'Andaman Blue', spec: '50pp · matte', elapsed: '5m', staffInitial: 'S', staff: 'Suresh B.' },
+      ] },
+      { title: 'Ready to ship', icon: 'truck', color: '#3f6b4d', cards: [
+        { id: 'MS-04788', album: 'Goan Monsoon', spec: '50pp · matte', elapsed: 'queued', staffInitial: 'S', staff: 'Suresh B.' },
+      ] },
+    ];
+
+    // ---------- SHIPPING ----------
+    const shipStatus = {
+      transit: { color: '#43607a', bg: 'rgba(67,96,122,0.12)', dot: '#43607a' },
+      delayed: { color: '#97402f', bg: 'rgba(151,64,47,0.1)', dot: '#97402f' },
+      delivered: { color: '#3f6b4d', bg: 'rgba(63,107,77,0.12)', dot: '#3f6b4d' },
+      dispatched: { color: '#7a6428', bg: 'rgba(160,129,63,0.14)', dot: '#a0813f' },
+    };
+    const shipData = [
+      { id: 'MS-04788', album: 'Goan Monsoon', dest: 'Sara Pinto · Margao', courier: 'Blue Dart', tracking: 'BD83920156', s: 'delayed', status: 'Delayed', eta: 'Jun 22' },
+      { id: 'MS-04771', album: 'Rajasthan in Gold', dest: 'Aarav Singh · Delhi', courier: 'Delhivery', tracking: 'DL77410023', s: 'delivered', status: 'Delivered', eta: 'Jun 18' },
+      { id: 'MS-04766', album: 'Valley of Flowers', dest: 'Nisha Rao · Pune', courier: 'Blue Dart', tracking: 'BD83918842', s: 'transit', status: 'In Transit', eta: 'Jun 21' },
+      { id: 'MS-04760', album: 'Coastal Karnataka', dest: 'Imran Khan · Mangalore', courier: 'DTDC', tracking: 'DT55092231', s: 'transit', status: 'In Transit', eta: 'Jun 21' },
+      { id: 'MS-04752', album: 'Sikkim Skies', dest: 'Ben Lepcha · Gangtok', courier: 'Delhivery', tracking: 'DL77410001', s: 'dispatched', status: 'Dispatched', eta: 'Jun 23' },
+    ];
+    const shipRows = shipData.map((s) => { const st2 = shipStatus[s.s]; return { ...s, statusColor: st2.color, statusBg: st2.bg, statusDot: st2.dot }; });
+
+    // ---------- CUSTOMERS ----------
+    const CUST = [
+      { id: 'c1', name: 'Ananya Rao', city: 'Mysuru', email: 'ananya.rao@gmail.com', phone: '+91 98455 01234', albums: 5, spent: '₹22.4k' },
+      { id: 'c2', name: 'Vikram Shenoy', city: 'Bengaluru', email: 'vikram.s@gmail.com', phone: '+91 99001 22334', albums: 2, spent: '₹6.6k' },
+      { id: 'c3', name: 'Meera Iyer', city: 'Chennai', email: 'meera.iyer@gmail.com', phone: '+91 90031 55621', albums: 3, spent: '₹12.1k' },
+      { id: 'c4', name: 'Joseph Mathew', city: 'Kochi', email: 'joseph.m@gmail.com', phone: '+91 94470 88123', albums: 1, spent: '₹2.9k' },
+      { id: 'c5', name: 'Diya Patel', city: 'Ahmedabad', email: 'diya.patel@gmail.com', phone: '+91 90991 44556', albums: 4, spent: '₹19.8k' },
+    ];
+    const custRows = CUST.map((c) => ({ ...c, initial: c.name[0], rowBg: c.id === st.custId ? '#f6f2e8' : 'transparent', onClick: () => this.setState({ custId: c.id }) }));
+    const prof = CUST.find((c) => c.id === st.custId) || CUST[0];
+    const profile = { initial: prof.name[0], name: prof.name, email: prof.email, phone: prof.phone };
+    const profileStats = [ { value: prof.albums, label: 'Albums' }, { value: prof.albums - 1, label: 'Orders' }, { value: prof.spent, label: 'Lifetime' } ];
+    const profileActivity = [
+      { icon: 'book-check', color: '#a0813f', title: 'Submitted “A Week in the Western Ghats” for review', date: '20 Jun 2026' },
+      { icon: 'package', color: '#3f6b4d', title: 'Order MS-2025-03992 delivered', date: '18 Feb 2026' },
+      { icon: 'message-square', color: '#43607a', title: 'Asked about gift wrapping', date: '04 Jan 2026' },
+    ];
+
+    // ---------- SUPPORT ----------
+    const ticketTabsDef = [ { k: 'open', label: 'Open', n: 3 }, { k: 'pending', label: 'Pending', n: 2 }, { k: 'resolved', label: 'Resolved', n: 41 } ];
+    const ticketTabs = ticketTabsDef.map((t) => ({ label: t.label, count: t.n, bg: st.ticketTab === t.k ? '#1e3a2f' : '#fff', color: st.ticketTab === t.k ? '#f5efe3' : '#5d5343', border: st.ticketTab === t.k ? '#1e3a2f' : '#d8ccb4', weight: st.ticketTab === t.k ? '600' : '400', onClick: () => this.setState({ ticketTab: t.k }) }));
+    const tStat = { urgent: { c: '#97402f', b: 'rgba(151,64,47,0.1)' }, normal: { c: '#7a6428', b: 'rgba(160,129,63,0.14)' }, waiting: { c: '#43607a', b: 'rgba(67,96,122,0.12)' } };
+    const ticketData = [
+      { id: 'TK-2291', subject: 'Photo on spread 6 looks blurry', customer: 'Vikram Shenoy', preview: 'Can this be fixed before printing?', icon: 'image-off', iconBg: 'rgba(160,129,63,0.14)', iconColor: '#a0813f', s: 'urgent', status: 'Urgent', age: '22m' },
+      { id: 'TK-2288', subject: 'Refund request — duplicate order', customer: 'Joseph Mathew', preview: 'I was charged twice for…', icon: 'indian-rupee', iconBg: 'rgba(151,64,47,0.1)', iconColor: '#97402f', s: 'urgent', status: 'Refund', age: '1h' },
+      { id: 'TK-2284', subject: 'Change delivery address', customer: 'Diya Patel', preview: 'Moved cities, new address is…', icon: 'map-pin', iconBg: 'rgba(67,96,122,0.12)', iconColor: '#43607a', s: 'normal', status: 'Open', age: '3h' },
+      { id: 'TK-2280', subject: 'Replacement — damaged cover', customer: 'Sara Pinto', preview: 'Corner arrived dented', icon: 'package-x', iconBg: 'rgba(160,129,63,0.14)', iconColor: '#a0813f', s: 'normal', status: 'Replace', age: '5h' },
+      { id: 'TK-2277', subject: 'Gift wrapping available?', customer: 'Meera Iyer', preview: 'For an anniversary gift', icon: 'gift', iconBg: 'rgba(67,96,122,0.12)', iconColor: '#43607a', s: 'waiting', status: 'Waiting', age: '1d' },
+    ];
+    const tickets = ticketData.map((t) => { const s = tStat[t.s]; return { ...t, statusColor: s.c, statusBg: s.b }; });
+
+    // ---------- CONTENT ----------
+    const cTabsDef = [ { k: 'blogs', label: 'Blogs', sing: 'post' }, { k: 'faq', label: 'FAQ', sing: 'question' }, { k: 'reviews', label: 'Reviews', sing: 'review' }, { k: 'homepage', label: 'Homepage', sing: 'block' }, { k: 'legacy', label: 'Legacy Books', sing: 'entry' } ];
+    const contentTabs = cTabsDef.map((t) => ({ label: t.label, bg: st.contentTab === t.k ? '#1e3a2f' : '#fff', color: st.contentTab === t.k ? '#f5efe3' : '#5d5343', border: st.contentTab === t.k ? '#1e3a2f' : '#d8ccb4', weight: st.contentTab === t.k ? '600' : '400', onClick: () => this.setState({ contentTab: t.k }) }));
+    const contentSingular = (cTabsDef.find((t) => t.k === st.contentTab) || {}).sing || 'item';
+    const pub = { color: '#3f6b4d', bg: 'rgba(63,107,77,0.12)' }, draft = { color: '#8a7d68', bg: '#efe6d5' };
+    const contentData = {
+      blogs: [
+        { title: 'Ten quiet corners of the Western Ghats', meta: 'By Ravi · 1,240 views · updated 2 days ago', s: 'pub' },
+        { title: 'How to photograph the monsoon', meta: 'By Leela · 880 views · updated 1 week ago', s: 'pub' },
+        { title: 'Designing your first travel album', meta: 'Draft · last edited yesterday', s: 'draft' },
+      ],
+      faq: [ { title: 'How long does printing take?', meta: 'Shown in checkout · 4,100 views', s: 'pub' }, { title: 'Can I reorder a delivered album?', meta: 'Shown in dashboard · 2,300 views', s: 'pub' }, { title: 'What paper do you use?', meta: 'Draft', s: 'draft' } ],
+      reviews: [ { title: '“It felt like holding the trip again.” — Aarav S.', meta: '★★★★★ · featured on homepage', s: 'pub' }, { title: '“The binding is beautiful.” — Nisha R.', meta: '★★★★★ · pending moderation', s: 'draft' } ],
+      homepage: [ { title: 'Hero — “Your travels, bound beautifully”', meta: 'Live · last edited 3 days ago', s: 'pub' }, { title: 'Featured albums carousel', meta: 'Live · 6 albums', s: 'pub' } ],
+      legacy: [ { title: 'The Malnad Heritage Collection', meta: 'Legacy book · published 2025', s: 'pub' }, { title: 'Coffee Country, 1920–2020', meta: 'Draft', s: 'draft' } ],
+    };
+    const contentRows = (contentData[st.contentTab] || []).map((r) => { const s = r.s === 'pub' ? pub : draft; return { title: r.title, meta: r.meta, status: r.s === 'pub' ? 'Published' : 'Draft', statusColor: s.color, statusBg: s.bg }; });
+
+    // ---------- TEMPLATES ----------
+    const tTabsDef = [ { k: 'layout', label: 'Layout Templates' }, { k: 'cover', label: 'Cover Templates' }, { k: 'theme', label: 'Themes' }, { k: 'preset', label: 'Story Presets' } ];
+    const templateTabs = tTabsDef.map((t) => ({ label: t.label, bg: st.templateTab === t.k ? '#1e3a2f' : '#fff', color: st.templateTab === t.k ? '#f5efe3' : '#5d5343', border: st.templateTab === t.k ? '#1e3a2f' : '#d8ccb4', weight: st.templateTab === t.k ? '600' : '400', onClick: () => this.setState({ templateTab: t.k }) }));
+    const mini = (rects, on) => rects.map((r) => 'position:absolute;left:' + r.x + '%;top:' + r.y + '%;width:' + r.w + '%;height:' + r.h + '%;background:' + (on ? '#9aab93' : '#d8ccb4') + ';');
+    const layoutSets = {
+      layout: [
+        { name: 'Solo', usage: 412, active: true, rects: [{ x: 30, y: 12, w: 40, h: 76 }] },
+        { name: 'Pair', usage: 689, active: true, rects: [{ x: 5, y: 14, w: 41, h: 72 }, { x: 54, y: 14, w: 41, h: 72 }] },
+        { name: 'Collage', usage: 521, active: true, rects: [{ x: 5, y: 8, w: 41, h: 40 }, { x: 54, y: 8, w: 41, h: 40 }, { x: 5, y: 52, w: 41, h: 40 }, { x: 54, y: 52, w: 41, h: 40 }] },
+        { name: 'Panoramic', usage: 233, active: true, rects: [{ x: 8, y: 24, w: 84, h: 52 }] },
+        { name: 'Story', usage: 318, active: true, rects: [{ x: 5, y: 10, w: 41, h: 80 }, { x: 54, y: 10, w: 41, h: 37 }, { x: 54, y: 53, w: 41, h: 37 }] },
+        { name: 'Full bleed', usage: 0, active: false, rects: [{ x: 0, y: 0, w: 100, h: 100 }] },
+      ],
+      cover: [
+        { name: 'Forest linen', usage: 540, active: true, rects: [{ x: 30, y: 30, w: 40, h: 40 }] },
+        { name: 'Night cloth', usage: 210, active: true, rects: [{ x: 30, y: 30, w: 40, h: 40 }] },
+        { name: 'Clay leather', usage: 188, active: true, rects: [{ x: 30, y: 30, w: 40, h: 40 }] },
+        { name: 'Sage cloth', usage: 96, active: false, rects: [{ x: 30, y: 30, w: 40, h: 40 }] },
+      ],
+      theme: [
+        { name: 'Classic', usage: 980, active: true, rects: [{ x: 10, y: 20, w: 80, h: 60 }] },
+        { name: 'Warm', usage: 412, active: true, rects: [{ x: 10, y: 20, w: 80, h: 60 }] },
+        { name: 'Ink', usage: 122, active: true, rects: [{ x: 10, y: 20, w: 80, h: 60 }] },
+      ],
+      preset: [
+        { name: 'Arrival → Home', usage: 760, active: true, rects: [{ x: 8, y: 30, w: 18, h: 40 }, { x: 32, y: 30, w: 18, h: 40 }, { x: 56, y: 30, w: 18, h: 40 }] },
+        { name: 'Day by day', usage: 340, active: true, rects: [{ x: 8, y: 30, w: 38, h: 40 }, { x: 54, y: 30, w: 38, h: 40 }] },
+        { name: 'By place', usage: 210, active: false, rects: [{ x: 8, y: 30, w: 84, h: 40 }] },
+      ],
+    };
+    const templateCards = (layoutSets[st.templateTab] || []).map((c) => ({
+      name: c.name, usage: c.usage.toLocaleString('en-IN'), mini: mini(c.rects, c.active),
+      dot: c.active ? '#3f6b4d' : '#b6a886', statusLabel: c.active ? 'Active' : 'Inactive',
+      btnLabel: c.active ? 'Deactivate' : 'Activate',
+      btnBg: c.active ? '#fff' : '#1e3a2f', btnColor: c.active ? '#97402f' : '#f5efe3', btnBorder: c.active ? 'rgba(151,64,47,0.4)' : '#1e3a2f',
+      onToggle: () => {},
+    }));
+
+    // ---------- COUPONS ----------
+    const cpStat = { active: { c: '#3f6b4d', b: 'rgba(63,107,77,0.12)' }, scheduled: { c: '#43607a', b: 'rgba(67,96,122,0.12)' }, expired: { c: '#8a7d68', b: '#efe6d5' } };
+    const couponData = [
+      { code: 'MALNAD10', type: '10% off', rules: 'Min ₹2,000 · no expiry', used: '1,204', impact: '–₹3.8L', s: 'active' },
+      { code: 'FIRSTALBUM', type: '₹500 off', rules: 'First order · one-time', used: '842', impact: '–₹4.2L', s: 'active' },
+      { code: 'MONSOON25', type: '25% off', rules: 'Min ₹4,000 · ends 30 Jun', used: '318', impact: '–₹6.1L', s: 'active' },
+      { code: 'DIWALI2025', type: '20% off', rules: 'Expired 15 Nov 2025', used: '2,910', impact: '–₹14.2L', s: 'expired' },
+      { code: 'NEWYEAR26', type: '₹750 off', rules: 'Starts 28 Dec · min ₹5,000', used: '0', impact: '—', s: 'scheduled' },
+    ];
+    const couponRows = couponData.map((c) => { const s = cpStat[c.s]; return { ...c, impactColor: c.s === 'expired' ? '#8a7d68' : '#97402f', status: c.s[0].toUpperCase() + c.s.slice(1), statusColor: s.c, statusBg: s.b }; });
+
+    // ---------- ANALYTICS ----------
+    const rangeDefs = [ { k: 'day', l: 'Day' }, { k: 'week', l: 'Week' }, { k: 'month', l: 'Month' }, { k: 'year', l: 'Year' } ];
+    const rangeTabs = rangeDefs.map((r) => ({ label: r.l, bg: st.range === r.k ? '#1e3a2f' : '#fff', color: st.range === r.k ? '#f5efe3' : '#5d5343', border: st.range === r.k ? '#1e3a2f' : '#d8ccb4', weight: st.range === r.k ? '600' : '400', onClick: () => this.setState({ range: r.k }) }));
+    const analyticsKpis = [
+      { label: 'Revenue', value: '₹9.4L', delta: '+18% MoM', deltaColor: '#3f6b4d' },
+      { label: 'Orders', value: '228', delta: '+12% MoM', deltaColor: '#3f6b4d' },
+      { label: 'Avg album value', value: '₹4,120', delta: '+4% MoM', deltaColor: '#3f6b4d' },
+      { label: 'Builder → order', value: '63%', delta: '–2% MoM', deltaColor: '#97402f' },
+    ];
+    const barVals = [42, 55, 48, 61, 58, 72, 69, 80, 76, 88, 84, 94];
+    const revenueBars = barVals.map((vv, i) => ({ h: vv + '%', value: '₹' + (vv * 1.1).toFixed(0) + 'k', label: 'W' + (i + 1) }));
+
+    // ---------- SYSTEM ----------
+    const healthCards = [
+      { label: 'Storage', value: '4.2 TB', detail: '68% of 6 TB · albums + PDFs', color: '#a0813f' },
+      { label: 'PDF workers', value: '3 / 4', detail: 'Queue 68% · 1 idle', color: '#a0813f' },
+      { label: 'Image processing', value: 'OK', detail: 'avg 1.2s / photo', color: '#3f6b4d' },
+      { label: 'Payments', value: 'OK', detail: 'webhooks 100% · 0 failed', color: '#3f6b4d' },
+    ];
+    const workers = [
+      { name: 'pdf-render-01', detail: 'busy · 2 jobs', color: '#3f6b4d' },
+      { name: 'pdf-render-02', detail: 'busy · 1 job', color: '#3f6b4d' },
+      { name: 'pdf-render-03', detail: 'idle', color: '#a0813f' },
+      { name: 'image-proc-01', detail: 'healthy', color: '#3f6b4d' },
+    ];
+    const logEvents = [
+      { time: '09:14', level: 'INFO', levelColor: '#43607a', msg: 'Order MS-2026-04817 submitted for review' },
+      { time: '09:02', level: 'WARN', levelColor: '#7a6428', msg: 'PDF queue depth above 60%' },
+      { time: '08:51', level: 'INFO', levelColor: '#43607a', msg: 'Payment captured · MS-2026-04816' },
+      { time: '08:30', level: 'ERROR', levelColor: '#97402f', msg: 'Courier webhook timeout · MS-2026-04788 (retried)' },
+      { time: '08:12', level: 'INFO', levelColor: '#43607a', msg: 'Print package generated · MS-2026-04810' },
+    ];
+
+    // ---------- USERS ----------
+    const roleColors = { 'Super Admin': { c: '#16271f', b: '#cdb87f' }, 'Production Admin': { c: '#43607a', b: 'rgba(67,96,122,0.14)' }, 'Support Admin': { c: '#7a6428', b: 'rgba(160,129,63,0.14)' }, 'Content Admin': { c: '#3f6b4d', b: 'rgba(63,107,77,0.12)' } };
+    const userData = [
+      { name: 'Ravi Menon', email: 'ravi@malnadstories.in', role: 'Production Admin', active: 'now' },
+      { name: 'Priya Suresh', email: 'priya@malnadstories.in', role: 'Production Admin', active: '8m ago' },
+      { name: 'Anil Kapoor', email: 'anil@malnadstories.in', role: 'Super Admin', active: '2h ago' },
+      { name: 'Leela Das', email: 'leela@malnadstories.in', role: 'Support Admin', active: '1h ago' },
+      { name: 'Kavya Nair', email: 'kavya@malnadstories.in', role: 'Content Admin', active: 'yesterday' },
+    ];
+    const userRows = userData.map((u) => { const r = roleColors[u.role]; return { ...u, initial: u.name[0], roleColor: r.c, roleBg: r.b }; });
+    const roleCards = [
+      { name: 'Super Admin', count: 1, perms: 'Full access · billing, users, system, all operations' },
+      { name: 'Production Admin', count: 2, perms: 'Orders, album review, production, shipping' },
+      { name: 'Support Admin', count: 1, perms: 'Customers, support tickets, refunds, replacements' },
+      { name: 'Content Admin', count: 1, perms: 'Content, templates, coupons, homepage' },
+    ];
+
+    // ---------- SETTINGS ----------
+    const settingsCards = [
+      { icon: 'building-2', title: 'Company', fields: [ { label: 'Legal name', value: 'Malnad Stories Pvt. Ltd.' }, { label: 'GSTIN', value: '29ABCDE1234F1Z5' }, { label: 'Support email', value: 'help@malnadstories.in' }, { label: 'Press location', value: 'Bengaluru, Karnataka' } ] },
+      { icon: 'truck', title: 'Shipping', fields: [ { label: 'Default courier', value: 'Blue Dart' }, { label: 'Free shipping above', value: '₹5,000' }, { label: 'Standard window', value: '7–9 days' }, { label: 'Express window', value: '2–3 days' } ] },
+      { icon: 'credit-card', title: 'Payments', fields: [ { label: 'Gateway', value: 'Razorpay' }, { label: 'Currency', value: 'INR (₹)' }, { label: 'UPI', value: 'Enabled' }, { label: 'Auto-capture', value: 'On' } ] },
+      { icon: 'bell', title: 'Notifications', fields: [ { label: 'Order alerts', value: 'Email + Slack' }, { label: 'Production alerts', value: 'Slack #floor' }, { label: 'Failure alerts', value: 'PagerDuty' }, { label: 'Daily summary', value: '08:00 IST' } ] },
+    ];
+
+    return {
+      navGroups,
+      viewTitle: (titles[v] || ['', ''])[0], viewSubtitle: (titles[v] || ['', ''])[1],
+      isDash: v === 'dash', isOrders: v === 'orders', isReview: v === 'review', isProduction: v === 'production',
+      isShipping: v === 'shipping', isCustomers: v === 'customers', isSupport: v === 'support', isContent: v === 'content',
+      isTemplates: v === 'templates', isCoupons: v === 'coupons', isAnalytics: v === 'analytics', isSystem: v === 'system',
+      isUsers: v === 'users', isSettings: v === 'settings',
+      goOrders: () => this.go('orders'), goReview: () => this.go('review'),
+
+      kpis, pipeSnapshot, alerts,
+
+      orderTabs, orderRows, orderCountLabel: filteredOrders.length + ' orders',
+      hasSelection: st.selected.length > 0, noSelection: st.selected.length === 0, selCount: st.selected.length,
+      bulkApprove: () => { this.setState({ selected: [] }); }, bulkExport: () => {}, clearSel: () => this.setState({ selected: [] }),
+      toggleSort: () => this.setState((s) => ({ sort: s.sort === 'newest' ? 'oldest' : 'newest' })), sortLabel: st.sort === 'newest' ? 'Newest first' : 'Oldest first',
+      toggleAll: () => this.setState((s) => ({ selected: allChecked ? [] : filteredOrders.map((o) => o.id) })),
+      allCheckBorder: allChecked ? '#1e3a2f' : '#c2b393', allCheckBg: allChecked ? '#1e3a2f' : 'transparent',
+
+      rev: { id: revOrder.id, spreadLabel: (st.reviewSpread + 1) + ' / ' + spreads.length },
+      revSlots, revThumbs, revChecks, revInfo, printScore, scoreTag, scoreTagColor, scoreTagBg,
+      revPrev: () => this.setState((s) => ({ reviewSpread: Math.max(0, s.reviewSpread - 1) })),
+      revNext: () => this.setState((s) => ({ reviewSpread: Math.min(spreads.length - 1, s.reviewSpread + 1) })),
+      approve: () => this.toast('Approved — moved to PDF generation.'), requestChanges: () => this.toast('Change request sent to the customer.'), reject: () => this.toast('Order rejected and customer notified.'),
+      reviewToast: st.reviewToast,
+
+      prodColumns, shipRows,
+      custRows, profile, profileStats, profileActivity,
+      ticketTabs, tickets,
+      contentTabs, contentSingular, contentRows,
+      templateTabs, templateCards,
+      couponRows,
+      rangeTabs, analyticsKpis, revenueBars,
+      healthCards, workers, logEvents,
+      userRows, roleCards,
+      settingsCards,
+    };
+  }
+}
+</script>
+</body>
+</html>

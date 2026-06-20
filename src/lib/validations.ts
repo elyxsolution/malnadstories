@@ -11,6 +11,14 @@ export const LoginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+// Optional free-text album metadata (0026). Empty strings normalise to undefined so a
+// blank field stores NULL rather than ''.
+const optionalText = (max: number, msg: string) =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+    z.string().max(max, msg).optional(),
+  );
+
 export const CreateAlbumSchema = z.object({
   title: z
     .string()
@@ -19,6 +27,10 @@ export const CreateAlbumSchema = z.object({
   productId: z.string().uuid('Please select an album size'),
   // Cover is chosen at creation (Phase F.1) — mandatory, must be an active template.
   coverTemplateId: z.string().uuid('Please choose a cover design'),
+  // Optional metadata (Phase 2A) — never gates creation.
+  destination: optionalText(120, 'Destination must be 120 characters or less'),
+  travelDates: optionalText(60, 'Travel dates must be 60 characters or less'),
+  description: optionalText(500, 'Description must be 500 characters or less'),
 });
 
 // Photo upload — presign + confirm. Mirrors the server-side limits in src/lib/r2.ts.
@@ -153,16 +165,28 @@ export const AddressSchema = z.object({
   isDefault: z.boolean().optional().default(false),
 });
 
+// Delivery tier (Phase 2B). The client sends only the tier KEY; the server resolves
+// the fee (lib/shipping). Defaults to 'standard' so older callers are unaffected.
+const ShippingMethodSchema = z
+  .enum(['standard', 'priority', 'express'])
+  .default('standard');
+
+// Coupon codes accepted at checkout. Now that admins can mint custom codes (Phase 2C)
+// the pattern is a general uppercase code (was MS-XXXXXXXX only) — still strictly
+// validated + uppercased; the real authority is validateCoupon against the DB.
+const CouponCodeSchema = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim().toUpperCase() : undefined),
+  z.string().regex(/^[A-Z0-9][A-Z0-9-]{2,19}$/, 'That coupon code is not valid.').optional(),
+);
+
 // Checkout inputs carry NO amount — the total is always computed server-side from
-// the album's product × copies − coupon. Only references + copies + a code cross.
+// the album's product × copies − coupon + shipping tier. Only references cross.
 export const CreateOrderSchema = z.object({
   albumId: z.string().uuid('Invalid album'),
   addressId: z.string().uuid('Please select a delivery address'),
   copies: z.number().int().min(1, 'At least 1 copy').max(10, 'Maximum 10 copies').default(1),
-  couponCode: z.preprocess(
-    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim().toUpperCase() : undefined),
-    z.string().regex(/^MS-[A-Z0-9]{8}$/, 'That coupon code is not valid.').optional(),
-  ),
+  shippingMethod: ShippingMethodSchema,
+  couponCode: CouponCodeSchema,
 });
 
 export const CancelOrderSchema = z.object({
@@ -173,16 +197,18 @@ export const CancelOrderSchema = z.object({
 export const PreviewCouponSchema = z.object({
   albumId: z.string().uuid('Invalid album'),
   copies: z.number().int().min(1).max(10),
+  shippingMethod: ShippingMethodSchema,
   code: z.preprocess(
     (v) => (typeof v === 'string' ? v.trim().toUpperCase() : v),
     z.string().min(1, 'Enter a coupon code').max(20),
   ),
 });
 
-// Server-side price for a copy count (no coupon) — advisory checkout preview.
+// Server-side price for a copy count + tier (no coupon) — advisory checkout preview.
 export const PreviewOrderSchema = z.object({
   albumId: z.string().uuid('Invalid album'),
   copies: z.number().int().min(1).max(10),
+  shippingMethod: ShippingMethodSchema,
 });
 
 // ── Admin ────────────────────────────────────────────────────────────────────
@@ -216,9 +242,18 @@ export const AddOrderNoteSchema = z.object({
   body: z.string().trim().min(1, 'Note cannot be empty').max(2000, 'Note too long'),
 });
 
-// Code is generated server-side — never accepted from the client.
+// Code: optionally admin-supplied (Phase 2C). When omitted, the action generates an
+// MS-XXXXXXXX code. When provided it is uppercased + format-checked here; DB uniqueness
+// (unique(upper(code))) is the real guard. Blank → undefined → auto-generate.
 export const CreateCouponSchema = z
   .object({
+    code: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim().toUpperCase() : undefined),
+      z
+        .string()
+        .regex(/^[A-Z0-9][A-Z0-9-]{2,19}$/, 'Code must be 3–20 chars: letters, numbers or dashes.')
+        .optional(),
+    ),
     description: z.string().trim().max(200).optional(),
     createdReason: z.string().trim().max(300).optional(),
     discountType: z.enum(['flat', 'percentage']),

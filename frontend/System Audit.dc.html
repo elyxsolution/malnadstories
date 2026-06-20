@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#f4eee2;height:100%}
+  svg.lucide{width:1em;height:1em;display:block;stroke-width:1.6px}
+  ::selection{background:#1e3a2f;color:#f5efe3}
+  @keyframes au-in{from{transform:translateY(8px)}to{transform:translateY(0)}}
+  .au-scroll::-webkit-scrollbar{width:10px}
+  .au-scroll::-webkit-scrollbar-thumb{background:#d8ccb4;border-radius:8px;border:3px solid #f4eee2}
+  .au-nav::-webkit-scrollbar{width:7px}
+  .au-nav::-webkit-scrollbar-thumb{background:#2f4d40;border-radius:8px}
+  .mono{font-family:'Courier New',monospace}
+  @media (max-width:900px){
+    .au-nav{width:58px !important}
+    .au-nav-text{display:none !important}
+    .au-pad{padding-left:24px !important;padding-right:24px !important}
+    .au-cols{grid-template-columns:1fr !important}
+    .au-lanes{overflow-x:auto !important}
+  }
+</style>
+</helmet>
+
+<div style="position:relative;height:100vh;display:flex;background:#f4eee2;font-family:'Work Sans',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden;font-size:14px;color:#2c271f">
+
+  <div style="position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:0.04;mix-blend-mode:multiply;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E&quot;)"></div>
+
+  <!-- CONTENTS RAIL -->
+  <nav class="au-nav au-scroll" style="flex:none;width:248px;background:#16271f;color:#a9bdb0;display:flex;flex-direction:column;overflow-y:auto;z-index:40">
+    <div style="padding:22px 20px 16px;position:sticky;top:0;background:#16271f">
+      <div style="font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:#5f7d6e;margin-bottom:7px">Phase 7</div>
+      <div class="au-nav-text" style="font-family:'Cormorant Garamond',serif;font-size:23px;color:#f5efe3;line-height:1.05">System Audit</div>
+      <div class="au-nav-text" style="font-size:11px;color:#5f7d6e;margin-top:5px">Malnad Stories · 20 Jun 2026</div>
+    </div>
+    <div style="padding:6px 12px 24px">
+      <sc-for list="{{ sections }}" as="s" hint-placeholder-count="8">
+        <button onClick="{{ s.onClick }}" style="width:100%;display:flex;align-items:center;gap:12px;background:{{ s.bg }};border:0;border-left:2px solid {{ s.accent }};color:{{ s.color }};padding:10px 12px;cursor:pointer;text-align:left;transition:all .15s ease" style-hover="background:rgba(245,239,227,0.05)">
+          <span style="flex:none;font-size:15px"><i data-lucide="{{ s.icon }}"></i></span>
+          <span class="au-nav-text" style="font-size:13px;font-weight:{{ s.weight }};flex:1">{{ s.label }}</span>
+          <sc-if value="{{ s.flag }}" hint-placeholder-val="{{ false }}"><span class="au-nav-text mono" style="font-size:10px;color:#16271f;background:{{ s.flagBg }};padding:1px 6px;border-radius:3px">{{ s.flagNum }}</span></sc-if>
+        </button>
+      </sc-for>
+    </div>
+    <div class="au-nav-text" style="margin-top:auto;padding:16px 20px;border-top:1px solid #243a30;font-size:11px;color:#5f7d6e;line-height:1.6">Audit of 6 shipped surfaces. No new screens — analysis only.</div>
+  </nav>
+
+  <!-- BODY -->
+  <main class="au-scroll" style="flex:1;overflow-y:auto;min-height:0;padding:34px 44px 80px;background:#f4eee2">
+    <div style="max-width:1080px;margin:0 auto;animation:au-in .4s ease both">
+
+      <!-- ===== VERDICT ===== -->
+      <sc-if value="{{ isVerdict }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:14px">The honest answer</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:50px;line-height:1.04;color:#1e3a2f;margin:0 0 8px">Can it run from first upload to delivered album?</h1>
+          <div style="display:inline-flex;align-items:center;gap:11px;background:#97402f;color:#f8efe6;padding:11px 20px;margin:18px 0 26px;border-radius:2px">
+            <span style="font-size:18px"><i data-lucide="circle-x"></i></span>
+            <span style="font-size:17px;font-weight:600">Not yet — as a connected product.</span>
+          </div>
+          <p style="font-size:17px;line-height:1.7;color:#3c352b;font-weight:300;max-width:68ch;margin:0 0 22px">As <strong style="font-weight:600">design</strong>, the system is complete and coherent: every surface from creation to fulfilment exists, on one visual language, with the customer readiness check and the admin print-score genuinely mirroring each other. As an <strong style="font-weight:600">operating product</strong>, it is six well-made but <strong style="font-weight:600">disconnected prototypes</strong>. Nothing shares data, the apps don't link to one another, and the order-status vocabulary doesn't reconcile across the three places it's shown. An album cannot actually travel from upload to delivery today because the rails between the stations were never laid.</p>
+
+          <div class="au-cols" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7;border-left:3px solid #3f6b4d;padding:20px 22px">
+              <div style="font-size:12px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#3f6b4d;margin-bottom:14px">What genuinely works</div>
+              <sc-for list="{{ works }}" as="w" hint-placeholder-count="5">
+                <div style="display:flex;gap:10px;padding:7px 0;font-size:13.5px;color:#3c352b;line-height:1.5"><span style="flex:none;color:#3f6b4d;font-size:14px;margin-top:2px"><i data-lucide="check"></i></span>{{ w }}</div>
+              </sc-for>
+            </div>
+            <div style="background:#fbf8f1;border:1px solid #e6dcc7;border-left:3px solid #97402f;padding:20px 22px">
+              <div style="font-size:12px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#97402f;margin-bottom:14px">What blocks operation</div>
+              <sc-for list="{{ blocks }}" as="b" hint-placeholder-count="5">
+                <div style="display:flex;gap:10px;padding:7px 0;font-size:13.5px;color:#3c352b;line-height:1.5"><span style="flex:none;color:#97402f;font-size:14px;margin-top:2px"><i data-lucide="x"></i></span>{{ b }}</div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:14px;margin-top:22px;flex-wrap:wrap">
+            <sc-for list="{{ scoreCards }}" as="s" hint-placeholder-count="4">
+              <div style="flex:1;min-width:150px;background:#1e3a2f;color:#f5efe3;padding:18px 20px">
+                <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#8aa395;margin-bottom:8px">{{ s.label }}</div>
+                <div style="display:flex;align-items:baseline;gap:7px"><span style="font-family:'Cormorant Garamond',serif;font-size:38px;color:{{ s.color }};line-height:1">{{ s.score }}</span><span style="font-size:14px;color:#5f7d6e">/ 10</span></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SYSTEM MAP ===== -->
+      <sc-if value="{{ isSystem }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">Map 1</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 6px">System Map</h1>
+          <p style="font-size:15px;color:#5d5343;font-weight:300;margin:0 0 26px;max-width:64ch">Six shipped surfaces. Solid arrows are handoffs the design implies; <span style="color:#97402f;font-weight:500">dashed red</span> arrows are handoffs that <strong>do not exist</strong> — no navigation, no data passed.</p>
+
+          <!-- customer band -->
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68;margin-bottom:10px">Customer surfaces</div>
+          <div class="au-lanes" style="display:flex;align-items:stretch;gap:0;margin-bottom:8px">
+            <sc-for list="{{ custApps }}" as="a" hint-placeholder-count="5">
+              <div style="flex:1;min-width:120px;display:flex;align-items:center">
+                <div style="flex:1;background:#fbf8f1;border:1px solid {{ a.border }};border-top:2px solid #1e3a2f;padding:13px 12px;text-align:center">
+                  <div style="font-size:13px;font-weight:600;color:#1e3a2f;line-height:1.2">{{ a.name }}</div>
+                  <div style="font-size:10px;color:#8a7d68;margin-top:3px">{{ a.file }}</div>
+                  <div style="font-size:10px;color:{{ a.stateColor }};margin-top:5px;font-weight:500">{{ a.state }}</div>
+                </div>
+                <sc-if value="{{ a.hasArrow }}" hint-placeholder-val="{{ true }}">
+                  <div style="flex:none;width:30px;text-align:center;color:{{ a.arrowColor }};font-size:16px" title="{{ a.arrowNote }}"><i data-lucide="{{ a.arrowIcon }}"></i></div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:11px;color:#97402f;margin-bottom:24px;display:flex;align-items:center;gap:7px"><span style="font-size:13px"><i data-lucide="alert-triangle"></i></span>Every inter-app arrow above is dashed: Builder→Checkout, Checkout→Dashboard, Dashboard→Builder are visual transitions or no-ops, not real links carrying an album.</div>
+
+          <!-- bridge to ops -->
+          <div style="display:flex;justify-content:center;margin:0 0 22px">
+            <div style="background:#fff;border:1px dashed #97402f;color:#97402f;padding:9px 16px;font-size:12px;display:flex;align-items:center;gap:9px"><span style="font-size:14px"><i data-lucide="unplug"></i></span>No backend / order object crosses from customer apps into Operations — the divide is unbridged</div>
+          </div>
+
+          <!-- ops band -->
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#8a7d68;margin-bottom:10px">Operations (single app, 14 views)</div>
+          <div style="background:#fbf8f1;border:1px solid #e6dcc7;border-top:2px solid #a0813f;padding:16px 18px">
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{ opsNodes }}" as="o" hint-placeholder-count="8">
+                <span style="font-size:12px;color:#3c352b;background:{{ o.bg }};border:1px solid {{ o.border }};padding:5px 11px;border-radius:2px">{{ o.name }}</span>
+              </sc-for>
+            </div>
+            <div style="font-size:11px;color:#8a7d68;margin-top:14px;line-height:1.6">Internally consistent and navigable. Its data is self-contained mock state — it never receives a real customer order, and its Template Management claims to "power the Builder" but the Builder's templates are hard-coded independently.</div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== STATE TRANSITIONS ===== -->
+      <sc-if value="{{ isState }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">Map 2</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 6px">State Transition Map</h1>
+          <p style="font-size:15px;color:#5d5343;font-weight:300;margin:0 0 26px;max-width:66ch">The order lifecycle is described <strong>three times in three vocabularies</strong> that never reconcile. A customer's "Ordered" silently spans seven internal states, and several admin states have no customer-visible equivalent at all.</p>
+
+          <div style="display:flex;flex-direction:column;gap:18px">
+            <sc-for list="{{ stateLanes }}" as="l" hint-placeholder-count="3">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:16px 18px">
+                <div style="display:flex;align-items:center;gap:9px;margin-bottom:13px"><span style="font-size:15px;color:{{ l.color }}"><i data-lucide="{{ l.icon }}"></i></span><span style="font-size:13px;font-weight:600;color:#2c271f">{{ l.title }}</span><span style="font-size:11px;color:#8a7d68">{{ l.source }}</span></div>
+                <div class="au-lanes" style="display:flex;align-items:center;flex-wrap:wrap;gap:0">
+                  <sc-for list="{{ l.states }}" as="s" hint-placeholder-count="6">
+                    <span class="mono" style="font-size:11.5px;color:{{ s.color }};background:{{ s.bg }};border:1px solid {{ s.border }};padding:5px 10px;border-radius:2px;white-space:nowrap">{{ s.label }}</span>
+                    <sc-if value="{{ s.arrow }}" hint-placeholder-val="{{ true }}"><span style="color:#cbbf9f;font-size:13px;margin:0 7px">→</span></sc-if>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="background:#fff;border:1px solid #e6c98f;border-left:3px solid #a0813f;padding:18px 20px;margin-top:20px">
+            <div style="font-size:12px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#7a6428;margin-bottom:12px">Reconciliation gaps</div>
+            <sc-for list="{{ stateGaps }}" as="g" hint-placeholder-count="4">
+              <div style="display:flex;gap:10px;padding:6px 0;font-size:13.5px;color:#3c352b;line-height:1.55"><span style="flex:none;color:#a0813f;font-size:14px;margin-top:2px"><i data-lucide="git-compare-arrows"></i></span>{{ g }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CUSTOMER JOURNEY ===== -->
+      <sc-if value="{{ isCustomer }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">Map 3</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 6px">Customer Journey Map</h1>
+          <p style="font-size:15px;color:#5d5343;font-weight:300;margin:0 0 26px;max-width:64ch">Step by step from first visit to a delivered album. <span style="color:#97402f;font-weight:500">Red</span> = dead-end or broken handoff; <span style="color:#7a6428;font-weight:500">amber</span> = simulated / no backend.</p>
+          <div style="display:flex;flex-direction:column;gap:0">
+            <sc-for list="{{ custSteps }}" as="s" hint-placeholder-count="8">
+              <div style="display:flex;gap:16px;align-items:flex-start">
+                <div style="flex:none;display:flex;flex-direction:column;align-items:center;align-self:stretch">
+                  <span style="flex:none;width:32px;height:32px;border-radius:50%;background:{{ s.dotBg }};color:{{ s.dotColor }};display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid {{ s.dotBorder }}"><i data-lucide="{{ s.icon }}"></i></span>
+                  <sc-if value="{{ s.line }}" hint-placeholder-val="{{ true }}"><span style="flex:1;width:2px;background:#e0d4be;min-height:18px"></span></sc-if>
+                </div>
+                <div style="flex:1;padding-bottom:18px">
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#1e3a2f">{{ s.title }}</span><span style="font-size:10px;font-weight:600;color:{{ s.tagColor }};background:{{ s.tagBg }};padding:2px 9px;border-radius:999px">{{ s.tag }}</span></div>
+                  <div style="font-size:13px;color:#5d5343;line-height:1.55;margin-top:4px;max-width:70ch">{{ s.note }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ADMIN JOURNEY ===== -->
+      <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">Map 4</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 6px">Admin Journey Map</h1>
+          <p style="font-size:15px;color:#5d5343;font-weight:300;margin:0 0 26px;max-width:64ch">An album's path through Operations. <span style="color:#97402f;font-weight:500">⚠ bottleneck</span> markers flag steps that don't scale or have no automation behind them.</p>
+          <div style="display:flex;flex-direction:column;gap:0">
+            <sc-for list="{{ adminSteps }}" as="s" hint-placeholder-count="7">
+              <div style="display:flex;gap:16px;align-items:flex-start">
+                <div style="flex:none;display:flex;flex-direction:column;align-items:center;align-self:stretch">
+                  <span style="flex:none;width:32px;height:32px;border-radius:50%;background:{{ s.dotBg }};color:{{ s.dotColor }};display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid {{ s.dotBorder }}"><i data-lucide="{{ s.icon }}"></i></span>
+                  <sc-if value="{{ s.line }}" hint-placeholder-val="{{ true }}"><span style="flex:1;width:2px;background:#e0d4be;min-height:18px"></span></sc-if>
+                </div>
+                <div style="flex:1;padding-bottom:18px">
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;color:#1e3a2f">{{ s.title }}</span><sc-if value="{{ s.bottleneck }}" hint-placeholder-val="{{ false }}"><span style="font-size:10px;font-weight:600;color:#97402f;background:rgba(151,64,47,0.1);padding:2px 9px;border-radius:999px">⚠ {{ s.bottleneck }}</span></sc-if></div>
+                  <div style="font-size:13px;color:#5d5343;line-height:1.55;margin-top:4px;max-width:70ch">{{ s.note }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ENTITY MAP ===== -->
+      <sc-if value="{{ isEntity }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">Map 5</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 6px">Entity Relationship Map</h1>
+          <p style="font-size:15px;color:#5d5343;font-weight:300;margin:0 0 26px;max-width:66ch">The domain model the screens imply. The headline problem: <strong>no entity has a single owner</strong> — the same Album exists as five disconnected mock copies, one per app.</p>
+          <div class="au-cols" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <sc-for list="{{ entities }}" as="e" hint-placeholder-count="8">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;padding:0">
+                <div style="padding:11px 16px;border-bottom:1px solid #efe6d5;display:flex;align-items:center;justify-content:space-between;background:#f3eee2"><span class="mono" style="font-size:13px;font-weight:600;color:#1e3a2f">{{ e.name }}</span><span style="font-size:10px;color:{{ e.ownerColor }}">{{ e.owner }}</span></div>
+                <div style="padding:12px 16px">
+                  <div style="font-size:12px;color:#8a7d68;line-height:1.6;margin-bottom:9px">{{ e.fields }}</div>
+                  <div style="font-size:11.5px;color:#5d5343;display:flex;align-items:center;gap:7px"><span style="font-size:12px;color:var(--gold,#a0813f)"><i data-lucide="link"></i></span>{{ e.rels }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#fff;border:1px solid #e6c98f;border-left:3px solid #a0813f;padding:18px 20px;margin-top:18px;font-size:13.5px;color:#3c352b;line-height:1.6"><strong style="color:#7a6428">Data ownership verdict:</strong> there is no persistence layer and no shared source of truth. Album, Order, Photo and Status are each re-declared independently in Creation, Builder, Checkout, Dashboard and Operations. Until one canonical store owns these, edits in one surface can never appear in another.</div>
+        </div>
+      </sc-if>
+
+      <!-- ===== FINDINGS ===== -->
+      <sc-if value="{{ isFindings }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">Findings</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 26px">Seven categories of risk</h1>
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <sc-for list="{{ findings }}" as="f" hint-placeholder-count="7">
+              <div style="background:#fbf8f1;border:1px solid #e6dcc7;border-left:3px solid {{ f.color }};padding:18px 20px">
+                <div style="display:flex;align-items:center;gap:11px;margin-bottom:11px"><span style="font-size:17px;color:{{ f.color }}"><i data-lucide="{{ f.icon }}"></i></span><span style="font-size:15px;font-weight:600;color:#1e3a2f">{{ f.title }}</span><span style="margin-left:auto;font-size:10px;font-weight:600;letter-spacing:0.06em;color:{{ f.sevColor }};background:{{ f.sevBg }};padding:3px 10px;border-radius:999px">{{ f.severity }}</span></div>
+                <sc-for list="{{ f.items }}" as="i" hint-placeholder-count="3">
+                  <div style="display:flex;gap:10px;padding:5px 0;font-size:13.5px;color:#3c352b;line-height:1.55"><span style="flex:none;color:#a8966f;font-size:12px;margin-top:4px"><i data-lucide="dot"></i></span>{{ i }}</div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== MISSING LINKS ===== -->
+      <sc-if value="{{ isMissing }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:var(--gold,#a0813f);margin-bottom:12px">The punch list</div>
+          <h1 style="font-family:'Cormorant Garamond',serif;font-weight:400;font-size:40px;color:#1e3a2f;margin:0 0 6px">Every missing link to go live</h1>
+          <p style="font-size:15px;color:#5d5343;font-weight:300;margin:0 0 24px;max-width:64ch">Ordered by what blocks "upload → delivered" first. None of these are design problems — they are the rails, the engine room, and three missing screens.</p>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ missing }}" as="m" hint-placeholder-count="10">
+              <div style="display:flex;align-items:flex-start;gap:14px;background:#fbf8f1;border:1px solid #e6dcc7;padding:14px 18px">
+                <span class="mono" style="flex:none;font-size:12px;font-weight:600;color:#fbf8f1;background:{{ m.pColor }};padding:3px 9px;border-radius:2px;margin-top:1px">{{ m.priority }}</span>
+                <div style="flex:1"><div style="font-size:14px;font-weight:500;color:#1e3a2f">{{ m.title }}</div><div style="font-size:12.5px;color:#8a7d68;line-height:1.5;margin-top:2px">{{ m.note }}</div></div>
+                <span style="flex:none;font-size:11px;color:#5d5343;background:#efe6d5;padding:4px 10px;border-radius:999px;white-space:nowrap">{{ m.kind }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+class Component extends DCLogic {
+  state = { view: 'verdict' };
+
+  componentDidMount() { this.paint(); this.icons(0); }
+  componentDidUpdate() { this.paint(); this.icons(0); }
+  paint() { document.documentElement.style.setProperty('--gold', '#a0813f'); }
+  icons(n) { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); else if (n < 30) setTimeout(() => this.icons(n + 1), 120); }
+  go(v) { this.setState({ view: v }); const m = document.querySelector('main'); if (m) m.scrollTop = 0; }
+
+  renderVals() {
+    const v = this.state.view;
+    const RED = '#97402f', AMBER = '#a0813f', GREEN = '#3f6b4d', BLUE = '#43607a';
+
+    const secDefs = [
+      { key: 'verdict', label: 'Verdict', icon: 'gavel' },
+      { key: 'system', label: 'System Map', icon: 'network', flag: true, flagNum: '7', flagBg: '#e0c074' },
+      { key: 'state', label: 'State Transitions', icon: 'git-branch', flag: true, flagNum: '3', flagBg: '#e0c074' },
+      { key: 'customer', label: 'Customer Journey', icon: 'user-round', flag: true, flagNum: '3', flagBg: '#d99a86' },
+      { key: 'admin', label: 'Admin Journey', icon: 'briefcase', flag: true, flagNum: '3', flagBg: '#d99a86' },
+      { key: 'entity', label: 'Entity Map', icon: 'database', flag: false },
+      { key: 'findings', label: 'Findings', icon: 'clipboard-check', flag: true, flagNum: '7', flagBg: '#d99a86' },
+      { key: 'missing', label: 'Missing Links', icon: 'list-checks', flag: true, flagNum: '12', flagBg: '#d99a86' },
+    ];
+    const sections = secDefs.map((s) => ({
+      label: s.label, icon: s.icon, flag: !!s.flag, flagNum: s.flagNum, flagBg: s.flagBg,
+      bg: v === s.key ? 'rgba(245,239,227,0.08)' : 'transparent', accent: v === s.key ? '#ecd9ad' : 'transparent',
+      color: v === s.key ? '#f5efe3' : '#a9bdb0', weight: v === s.key ? '600' : '400',
+      onClick: () => this.go(s.key),
+    }));
+
+    // VERDICT
+    const works = [
+      'One coherent visual language across all 6 surfaces — nothing looks like a different product.',
+      'Customer readiness check and admin print-score genuinely mirror the same three concerns (empty frames, low-res, cover).',
+      'The Album Builder is a real editing tool: undo/redo, crop, layouts, direct manipulation.',
+      'Crafted-object tracking language is consistent in tone wherever shipping appears.',
+      'Operations covers the full operational surface area — 14 views, nothing conceptually missing.',
+    ];
+    const blocks = [
+      'No backend or persistence — every app holds its own isolated mock state.',
+      'Apps don\u2019t link: Builder\u2192Checkout, Checkout\u2192Dashboard, Dashboard\u2192Builder are transitions or no-ops.',
+      'No customer order ever reaches Operations — the two halves never touch.',
+      'Three different order-status vocabularies that don\u2019t map to one another.',
+      'No rejection / changes-requested loop back to the customer; that journey dead-ends.',
+    ];
+    const scoreCards = [
+      { label: 'Design completeness', score: '9', color: '#ecd9ad' },
+      { label: 'Operational readiness', score: '3', color: '#e0a48f' },
+      { label: 'Data integrity', score: '2', color: '#e0a48f' },
+      { label: 'Journey continuity', score: '4', color: '#e0c074' },
+    ];
+
+    // SYSTEM MAP
+    const custApps = [
+      { name: 'Dashboard', file: 'Dashboard', state: 'Library home', hasArrow: true, arrowIcon: 'move-right', arrowColor: RED, arrowNote: 'no real link' },
+      { name: 'Album Creation', file: 'Album Creation', state: '6-step flow', hasArrow: true, arrowIcon: 'move-right', arrowColor: RED },
+      { name: 'Album Builder', file: 'Album Builder', state: 'editor', hasArrow: true, arrowIcon: 'move-right', arrowColor: RED },
+      { name: 'Checkout', file: 'Checkout', state: 'order + pay', hasArrow: true, arrowIcon: 'move-right', arrowColor: RED },
+      { name: 'Tracking', file: 'in Checkout', state: 'in-app only', hasArrow: false },
+    ].map((a) => ({ ...a, border: '#e6dcc7', stateColor: '#8a7d68', arrowColor: a.arrowColor || RED, arrowNote: a.arrowNote || 'no real link' }));
+    const opsNodes = ['Dashboard', 'Orders', 'Album Review', 'Production', 'Shipping', 'Customers', 'Support', 'Content', 'Templates', 'Coupons', 'Analytics', 'System', 'Users', 'Settings'].map((n) => ({ name: n, bg: '#f3eee2', border: '#e0d4be' }));
+
+    // STATE TRANSITIONS
+    const chip = (label, tone) => {
+      const m = { ok: ['#3f6b4d', 'rgba(63,107,77,0.1)', 'rgba(63,107,77,0.3)'], warn: ['#7a6428', 'rgba(160,129,63,0.12)', '#e0c074'], neutral: ['#5d5343', '#fff', '#e0d4be'], red: ['#97402f', 'rgba(151,64,47,0.08)', 'rgba(151,64,47,0.35)'] };
+      const c = m[tone] || m.neutral; return { label, color: c[0], bg: c[1], border: c[2], arrow: true };
+    };
+    const lastNoArrow = (arr) => { if (arr.length) arr[arr.length - 1].arrow = false; return arr; };
+    const stateLanes = [
+      { title: 'Customer — Dashboard library', source: 'Dashboard.dc.html', color: BLUE, icon: 'user-round',
+        states: lastNoArrow([chip('Draft', 'neutral'), chip('In Progress', 'warn'), chip('Ready to Order', 'ok'), chip('Ordered', 'warn'), chip('Delivered', 'ok')]) },
+      { title: 'Customer — Checkout tracking', source: 'Checkout.dc.html', color: AMBER, icon: 'truck',
+        states: lastNoArrow([chip('Confirmed', 'ok'), chip('Printing', 'neutral'), chip('Binding', 'neutral'), chip('Quality Check', 'warn'), chip('Shipped', 'ok'), chip('Delivered', 'ok')]) },
+      { title: 'Operations — order states', source: 'Operations.dc.html', color: GREEN, icon: 'factory',
+        states: lastNoArrow([chip('Awaiting Review', 'warn'), chip('Approved', 'ok'), chip('PDF Generation', 'neutral'), chip('Printing', 'neutral'), chip('Binding', 'neutral'), chip('Quality Check', 'warn'), chip('Packaging', 'neutral'), chip('Shipped', 'ok'), chip('Delivered', 'ok'), chip('Returned', 'red')]) },
+    ];
+    const stateGaps = [
+      'Customer "Ordered" is one state; Operations splits the same period into 7 (Awaiting Review → Packaging). The customer never sees where they actually are.',
+      'Operations has "Awaiting Review", "Approved", "PDF Generation", "Packaging" and "Returned" — none exist in the customer\u2019s vocabulary.',
+      'Checkout tracking starts at "Confirmed" and skips review/PDF entirely, implying production begins instantly — it doesn\u2019t.',
+      'There is no shared status enum, so the same order would need manual re-mapping between every surface.',
+    ];
+
+    // CUSTOMER JOURNEY
+    const js = (icon, title, tag, tone, note, line) => {
+      const m = { ok: ['#1e3a2f', '#ecd9ad', '#1e3a2f', GREEN, 'rgba(63,107,77,0.12)'], warn: ['#fff', AMBER, AMBER, '#7a6428', 'rgba(160,129,63,0.14)'], red: ['#fff', RED, RED, RED, 'rgba(151,64,47,0.1)'] };
+      const c = m[tone];
+      return { icon, title, tag, note, line: line !== false, dotBg: c[0], dotColor: c[1], dotBorder: c[2], tagColor: c[3], tagBg: c[4] };
+    };
+    const custSteps = [
+      js('log-in', 'Sign in / land on Dashboard', 'No auth', 'red', 'There is no login, account creation, or session. The Dashboard simply assumes "Ananya". A real first user has no way in.'),
+      js('plus', 'Start a new album', 'Dead-end', 'red', 'Dashboard "New album" and the shelf bookend are no-ops — they don\u2019t open Album Creation.'),
+      js('pen-line', 'Create: name, format, upload, organize, story', 'Simulated', 'warn', 'The 6-step flow works beautifully but uploads are faked and nothing is saved; closing the tab loses everything.'),
+      js('layout-template', 'Build the album', 'Not linked', 'red', 'Creation ends on a cinematic "entering the builder" veil that doesn\u2019t actually launch Album Builder.'),
+      js('eye', 'Preview & decide to order', 'Simulated', 'warn', 'Builder preview is solid, but "Order album" doesn\u2019t open Checkout — the most important handoff is missing.'),
+      js('shield-check', 'Checkout: readiness → pay', 'No backend', 'warn', 'Readiness check, payment, coupons all UI-only. "Resolve" actions are simulated; no gateway, no order is persisted.'),
+      js('git-pull-request-arrow', 'If admin rejects / requests changes', 'Missing', 'red', 'No customer-facing "changes requested" state or screen exists. If Operations rejects an album, the customer journey simply ends in silence.'),
+      js('package-check', 'Track until delivered', 'Fragmented', 'warn', 'Three tracking views exist (Checkout, Dashboard, Ops) with different stages; none is fed by real courier data.', false),
+    ];
+
+    // ADMIN JOURNEY
+    const as = (icon, title, note, bottleneck, line) => ({ icon, title, note, bottleneck: bottleneck || '', line: line !== false, dotBg: bottleneck ? '#fff' : '#1e3a2f', dotColor: bottleneck ? RED : '#ecd9ad', dotBorder: bottleneck ? RED : '#1e3a2f' });
+    const adminSteps = [
+      as('inbox', 'Order lands in queue', 'In design, orders appear in Operations as mock data — in reality nothing arrives because Checkout never sends one.', 'no intake'),
+      as('book-check', 'Manual album review & approve', 'Every album is reviewed by hand before production. One reviewer gating all orders is the first scaling wall.', 'manual gate'),
+      as('file-cog', 'PDF / print-package generation', 'A worker queue is shown at 68% with no auto-scaling — the print engine is the throughput ceiling.', 'queue 68%'),
+      as('printer', 'Printing → Binding → QC', 'Kanban with staff + timers is clear, but stage advances are manual clicks with no device/MIS integration.', 'manual moves'),
+      as('search-check', 'Quality check', 'Entirely manual, single-pass; no defect logging or rework loop captured.', 'manual QC'),
+      as('truck', 'Pack, label, dispatch, track', 'Courier, tracking number and exceptions are display-only — no carrier API to create labels or pull status.', 'no carrier API'),
+      as('life-buoy', 'Handle support / refund / replace', 'Tickets exist as a list; refund, replacement and re-print actions have no workflow or customer link behind them.', 'no actions', false),
+    ];
+
+    // ENTITY MAP
+    const entities = [
+      { name: 'Customer', owner: 'no store', ownerColor: RED, fields: 'name, email, phone, addresses, payment prefs', rels: 'has many Album, Order, Ticket' },
+      { name: 'Album', owner: '5 copies', ownerColor: RED, fields: 'title, destination, format, status, chapters[]', rels: 'has many Spread; belongs to Customer' },
+      { name: 'Spread / Slot', owner: 'Builder only', ownerColor: AMBER, fields: 'layout, slots[] (photo, crop, zoom, pos, filters)', rels: 'belongs to Album; references Photo' },
+      { name: 'Photo', owner: 'no store', ownerColor: RED, fields: 'src, chapter, DPI, favorite, used', rels: 'belongs to Customer; placed in Slot' },
+      { name: 'Order', owner: '3 copies', ownerColor: RED, fields: 'id, status, total, coupon, delivery, shipping', rels: 'belongs to Album + Customer; has Shipment' },
+      { name: 'Shipment', owner: 'Ops only', ownerColor: AMBER, fields: 'courier, tracking#, status, ETA, exceptions', rels: 'belongs to Order' },
+      { name: 'Template', owner: 'duplicated', ownerColor: RED, fields: 'type, layout rects, active, usage', rels: 'should power Builder (it doesn\u2019t)' },
+      { name: 'AdminUser / Role', owner: 'Ops only', ownerColor: AMBER, fields: 'name, role, permissions, last active', rels: '4 roles defined, none enforced' },
+    ];
+
+    // FINDINGS
+    const findings = [
+      { icon: 'copy', title: '1 · Duplicate systems', color: RED, severity: 'High', sevColor: '#fff', sevBg: RED, items: [
+        'Tracking is built three times (Checkout, Dashboard, Operations) with three stage sets.',
+        'Readiness validation lives twice — customer Checkout and admin Album Review — as separate implementations of the same checks.',
+        'Template definitions exist in both Operations (Template Management) and hard-coded in the Builder.',
+      ] },
+      { icon: 'shuffle', title: '2 · Inconsistent states', color: RED, severity: 'High', sevColor: '#fff', sevBg: RED, items: [
+        'Three non-reconciling order-status vocabularies (see State Transition Map).',
+        'Customer "Ordered" hides 7 internal states; several admin states have no customer equivalent.',
+        'No shared status enum or single lifecycle definition.',
+      ] },
+      { icon: 'route-off', title: '3 · Missing workflows', color: RED, severity: 'High', sevColor: '#fff', sevBg: RED, items: [
+        'Rejection / changes-requested → customer notified → re-edit → resubmit loop does not exist.',
+        'Refund, replacement and re-print have ticket entries but no actual workflow.',
+        'No PDF-generation handoff visible to the customer between order and production.',
+      ] },
+      { icon: 'shield-off', title: '4 · Missing permissions', color: AMBER, severity: 'Medium', sevColor: '#7a6428', sevBg: 'rgba(160,129,63,0.14)', items: [
+        'No customer authentication, accounts, or sessions anywhere.',
+        'Operations defines 4 roles but enforces none — every view is open.',
+        'No audit log of who approved, edited, or refunded.',
+      ] },
+      { icon: 'unplug', title: '5 · Missing integrations', color: RED, severity: 'High', sevColor: '#fff', sevBg: RED, items: [
+        'No payment gateway, courier/tracking API, email/SMS, or address validation.',
+        'No image upload/storage backend — uploads are simulated.',
+        'No PDF/print-render service behind the print package.',
+      ] },
+      { icon: 'door-closed', title: '6 · Dead-end journeys', color: RED, severity: 'High', sevColor: '#fff', sevBg: RED, items: [
+        'Creation\u2019s "enter builder" veil, Builder\u2019s "Order album", and Dashboard\u2019s "New album" all dead-end.',
+        'A rejected album leaves the customer with no next step.',
+        'Account edit, Ops search and filters are non-functional stubs.',
+      ] },
+      { icon: 'gauge', title: '7 · Operational bottlenecks', color: AMBER, severity: 'Medium', sevColor: '#7a6428', sevBg: 'rgba(160,129,63,0.14)', items: [
+        'Manual per-album review gates all production — first wall at scale.',
+        'PDF worker queue already at 68% with no auto-scaling.',
+        'Quality check and stage advances are fully manual with no MIS integration.',
+      ] },
+    ];
+
+    // MISSING LINKS
+    const ml = (priority, pColor, title, note, kind) => ({ priority, pColor, title, note, kind });
+    const missing = [
+      ml('P0', RED, 'Persistence layer + canonical data store', 'One owner for Album, Photo, Order, Status. Without it nothing else connects.', 'Backend'),
+      ml('P0', RED, 'Customer authentication & accounts', 'Login, sessions, ownership of albums and orders.', 'Backend'),
+      ml('P0', RED, 'Image upload & storage service', 'Real uploads, originals + render derivatives, DPI capture.', 'Integration'),
+      ml('P0', RED, 'Builder ↔ Checkout ↔ Dashboard navigation', 'Wire the three customer handoffs that currently dead-end.', 'Wiring'),
+      ml('P1', '#b06a30', 'Unified order-status model', 'One lifecycle enum, mapped to friendly customer labels and full admin states.', 'Architecture'),
+      ml('P1', '#b06a30', 'Order intake: Checkout → Operations', 'A real order object crossing from customer to ops on payment.', 'Wiring'),
+      ml('P1', '#b06a30', 'Payment gateway integration', 'Razorpay/UPI capture, webhooks, refunds.', 'Integration'),
+      ml('P1', '#b06a30', 'PDF / print-render service', 'Generate the print package the Ops pipeline consumes.', 'Integration'),
+      ml('P1', '#b06a30', 'Rejection / changes-requested loop', 'New customer-facing state + screen + notification back into the Builder.', 'Screen'),
+      ml('P2', AMBER, 'Courier / tracking API', 'Label creation and live status feeding all three tracking views.', 'Integration'),
+      ml('P2', AMBER, 'Role enforcement + audit log', 'Make the 4 Ops roles real; record who did what.', 'Backend'),
+      ml('P2', AMBER, 'Template service powering the Builder', 'Builder pulls layouts/themes from Ops Template Management.', 'Integration'),
+    ];
+
+    return {
+      sections,
+      isVerdict: v === 'verdict', isSystem: v === 'system', isState: v === 'state', isCustomer: v === 'customer',
+      isAdmin: v === 'admin', isEntity: v === 'entity', isFindings: v === 'findings', isMissing: v === 'missing',
+      works, blocks, scoreCards,
+      custApps, opsNodes,
+      stateLanes, stateGaps,
+      custSteps, adminSteps,
+      entities,
+      findings, missing,
+    };
+  }
+}
+</script>
+</body>
+</html>
