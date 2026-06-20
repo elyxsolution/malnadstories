@@ -14,11 +14,16 @@ import type { Photo } from './_uploader';
 export default function Tray({
   photos,
   placedIds,
+  pickedId = null,
+  onPick,
   onEdit,
   onDeleted,
 }: {
   photos: Photo[];
   placedIds: Set<string>;
+  /** Tap-to-place: the photo currently "picked up" from the tray (ring), or null. */
+  pickedId?: string | null;
+  onPick?: (id: string) => void;
   onEdit: (photo: Photo) => void;
   onDeleted: (id: string) => void;
 }) {
@@ -58,6 +63,7 @@ export default function Tray({
       {photos.map((photo, i) => {
         const ready = photo.status === 'ready';
         const placed = placedIds.has(photo.id);
+        const picked = pickedId === photo.id;
         return (
           <div
             key={photo.id}
@@ -67,8 +73,13 @@ export default function Tray({
               e.dataTransfer.setData('text/photo-id', photo.id);
               e.dataTransfer.effectAllowed = 'copy';
             }}
+            onClick={() => ready && !placed && onPick?.(photo.id)}
             style={{ animationDelay: `${Math.min(i * 22, 260)}ms` }}
-            className={`group relative aspect-square animate-scale-in overflow-hidden rounded-xl bg-muted shadow-xs ring-1 ring-border/80 transition-all duration-200 ease-glide ${
+            className={`group relative aspect-square animate-scale-in overflow-hidden rounded-xl bg-muted shadow-xs ring-1 transition-all duration-200 ease-glide ${
+              picked
+                ? 'ring-2 ring-gold shadow-card'
+                : 'ring-border/80'
+            } ${
               ready
                 ? 'cursor-grab hover:-translate-y-1 hover:shadow-card hover:ring-2 hover:ring-primary/50 active:scale-[0.97] active:cursor-grabbing'
                 : ''
@@ -106,7 +117,10 @@ export default function Tray({
               {ready && (
                 <button
                   type="button"
-                  onClick={() => onEdit(photo)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(photo);
+                  }}
                   aria-label={`Edit ${photo.filename}`}
                   className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
                 >
@@ -115,7 +129,10 @@ export default function Tray({
               )}
               <button
                 type="button"
-                onClick={() => handleDelete(photo.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(photo.id);
+                }}
                 disabled={deleting === photo.id}
                 aria-label={`Delete ${photo.filename}`}
                 className="rounded-lg bg-background/90 p-1.5 text-destructive shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"

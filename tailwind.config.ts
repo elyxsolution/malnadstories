@@ -10,11 +10,11 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        // Editorial display serif + humanist UI sans — scoped to the builder via
-        // CSS variables set on its wrapper (see albums/[id]/build/page.tsx). Outside
-        // the builder these vars are undefined and the fallbacks apply.
-        display: ['var(--font-display)', 'Fraunces', 'Georgia', 'serif'],
-        ui: ['var(--font-ui)', 'Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+        // Claude Design "Foundations" typefaces, applied globally via the brand font
+        // vars set on <body> (src/app/layout.tsx). Cormorant Garamond = display serif;
+        // Work Sans = UI sans. Fallbacks match if the vars are ever absent.
+        display: ['var(--font-display)', 'Cormorant Garamond', 'Georgia', 'serif'],
+        ui: ['var(--font-ui)', 'Work Sans', 'system-ui', 'sans-serif'],
       },
       colors: {
         background: 'hsl(var(--background) / <alpha-value>)',
@@ -55,14 +55,25 @@ const config: Config = {
           DEFAULT: 'hsl(var(--warning) / <alpha-value>)',
           foreground: 'hsl(var(--warning-foreground) / <alpha-value>)',
         },
+        // Accent gold — the Foundations "whisper" reserved for the rarest highlights.
+        gold: 'hsl(var(--gold) / <alpha-value>)',
+        info: 'hsl(var(--info) / <alpha-value>)',
         border: 'hsl(var(--border) / <alpha-value>)',
         input: 'hsl(var(--input) / <alpha-value>)',
         ring: 'hsl(var(--ring) / <alpha-value>)',
       },
+      // Editorial 2px corner system (Foundations). Crisp by default; pills/avatars keep
+      // `rounded-full`. Remapping xl/2xl/3xl too so existing cards/modals sharpen globally.
       borderRadius: {
-        lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        none: '0px',
+        sm: '2px',
+        DEFAULT: '2px',
+        md: '2px',
+        lg: '3px',
+        xl: '3px',
+        '2xl': '4px',
+        '3xl': '6px',
+        full: '9999px',
       },
       // Soft, warm-tinted elevation (green-black shadow). No harsh/loud shadows.
       boxShadow: {
@@ -93,6 +104,15 @@ const config: Config = {
         },
         shimmer: {
           '100%': { transform: 'translateX(100%)' },
+        },
+        'book-close': {
+          '0%': { transform: 'perspective(1400px) rotateY(-32deg)', opacity: '0' },
+          '60%': { opacity: '1' },
+          '100%': { transform: 'perspective(1400px) rotateY(0deg)', opacity: '1' },
+        },
+        'draw-line': {
+          from: { width: '0' },
+          to: { width: 'var(--dw, 240px)' },
         },
       },
       animation: {

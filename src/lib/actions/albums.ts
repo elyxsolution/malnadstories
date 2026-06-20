@@ -11,18 +11,70 @@ import { hasActiveOrder } from '@/lib/orders/album-lock';
 
 export type AlbumActionState = { error: string } | null;
 export type DeleteResult = { ok: true } | { ok: false; error: string };
+export type CreateAlbumDraftResult = { ok: true; id: string } | { ok: false; error: string };
+
+type ParsedAlbum = ReturnType<typeof CreateAlbumSchema.parse>;
+type SupabaseServerClient = ReturnType<typeof createClient>;
+
+/**
+ * Shared album-insert core — validates the chosen product + cover (both via RLS) and
+ * inserts the album for the verified user. Used by BOTH the form action (createAlbum,
+ * which redirects) and the wizard (createAlbumDraft, which returns the id). No new
+ * behaviour: same validation, same column-scoped insert, status still server-default.
+ */
+async function insertAlbumForUser(
+  supabase: SupabaseServerClient,
+  userId: string,
+  data: ParsedAlbum,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  // RLS policy "public_read_active_products" already filters inactive products.
+  const { data: product } = await supabase
+    .from('products')
+    .select('pages')
+    .eq('id', data.productId)
+    .maybeSingle();
+  if (!product) return { ok: false, error: 'Invalid size selected. Please try again.' };
+
+  // Cover is mandatory at creation and must be an ACTIVE template (RLS exposes only
+  // active rows to authenticated). Never trust the client's id without this check.
+  const { data: cover } = await supabase
+    .from('cover_templates')
+    .select('id')
+    .eq('id', data.coverTemplateId)
+    .eq('active', true)
+    .maybeSingle();
+  if (!cover) return { ok: false, error: 'That cover design is unavailable. Please choose another.' };
+
+  // user_id from the verified JWT; status omitted → DB 'draft' default (0021).
+  const { data: album, error: insertError } = await supabase
+    .from('albums')
+    .insert({
+      user_id: userId,
+      title: data.title,
+      size: (product as { pages: number }).pages,
+      cover_template_id: data.coverTemplateId,
+      destination: data.destination ?? null,
+      travel_dates: data.travelDates ?? null,
+      description: data.description ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (insertError || !album) {
+    console.error('Album insert error:', insertError);
+    return { ok: false, error: 'Could not create album. Please try again.' };
+  }
+  return { ok: true, id: (album as { id: string }).id };
+}
 
 export async function createAlbum(
   _prevState: AlbumActionState,
   formData: FormData,
 ): Promise<AlbumActionState> {
-  // Supabase server client carries the user's JWT → auth.uid() resolves in Postgres.
-  // RLS enforces: albums INSERT check (user_id = auth.uid()), products SELECT (is_active = true).
   const supabase = createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
   if (!user) redirect('/login');
 
   const parsed = CreateAlbumSchema.safeParse({
@@ -33,62 +85,30 @@ export async function createAlbum(
     travelDates: formData.get('travelDates'),
     description: formData.get('description'),
   });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0].message };
-  }
+  const res = await insertAlbumForUser(supabase, user.id, parsed.data);
+  if (!res.ok) return { error: res.error };
+  redirect(`/albums/${res.id}/build`);
+}
 
-  // RLS policy "public_read_active_products" already filters inactive products.
-  // If productId is tampered or the product is inactive, this returns null.
-  const { data: product } = await supabase
-    .from('products')
-    .select('pages')
-    .eq('id', parsed.data.productId)
-    .maybeSingle();
+/**
+ * Wizard variant of createAlbum (Design Completion Phase 1). Same validated insert as
+ * the form action, but RETURNS the new album id instead of redirecting — the creation
+ * wizard needs the album to exist (so it can upload into it) while staying on the page.
+ * Reuses the existing createAlbum flow via the shared core; additive only.
+ */
+export async function createAlbumDraft(input: unknown): Promise<CreateAlbumDraftResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
 
-  if (!product) {
-    return { error: 'Invalid size selected. Please try again.' };
-  }
+  const parsed = CreateAlbumSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
 
-  // Cover is mandatory at creation and must be an ACTIVE template (RLS exposes only
-  // active rows to authenticated). Never trust the client's id without this check.
-  const { data: cover } = await supabase
-    .from('cover_templates')
-    .select('id')
-    .eq('id', parsed.data.coverTemplateId)
-    .eq('active', true)
-    .maybeSingle();
-  if (!cover) {
-    return { error: 'That cover design is unavailable. Please choose another.' };
-  }
-
-  // user_id is always taken from the verified JWT session, never from form input.
-  // The RLS INSERT check (user_id = auth.uid()) enforces this at the DB level too.
-  // NOTE (0021): `status` is intentionally NOT set here — it defaults to 'draft' in the
-  // DB, and the column-scoped INSERT grant deliberately excludes `status` so a client
-  // can never insert an album already 'submitted'. The only writer of 'submitted' is
-  // submitAlbum (service role, after validation).
-  const { data: album, error: insertError } = await supabase
-    .from('albums')
-    .insert({
-      user_id: user.id,
-      title: parsed.data.title,
-      size: (product as { pages: number }).pages,
-      cover_template_id: parsed.data.coverTemplateId,
-      // Optional metadata (0026) — null when blank.
-      destination: parsed.data.destination ?? null,
-      travel_dates: parsed.data.travelDates ?? null,
-      description: parsed.data.description ?? null,
-    })
-    .select('id')
-    .single();
-
-  if (insertError || !album) {
-    console.error('Album insert error:', insertError);
-    return { error: 'Could not create album. Please try again.' };
-  }
-
-  redirect(`/albums/${album.id}/build`);
+  return insertAlbumForUser(supabase, user.id, parsed.data);
 }
 
 /**

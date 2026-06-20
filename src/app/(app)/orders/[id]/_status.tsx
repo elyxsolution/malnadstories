@@ -3,11 +3,34 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { XCircle, Loader2, LayoutDashboard, Image as ImageIcon, Check } from 'lucide-react';
+import {
+  XCircle,
+  Loader2,
+  LayoutDashboard,
+  Image as ImageIcon,
+  Check,
+  CheckCircle2,
+  Package,
+  Printer,
+  Box,
+  Truck,
+  Home,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cancelOrder } from '@/lib/actions/orders';
 import { SealMedallion, LUX_PRIMARY } from '@/components/brand';
 import { fulfillmentProgress, isFulfilmentActive, orderStatusView } from '@/lib/orders/status';
+
+// Crafted-object icon per fulfilment stage. Keyed by the EXISTING status.ts step values
+// (no invented statuses) — purely presentational.
+const STAGE_ICON: Record<string, typeof Check> = {
+  paid: CheckCircle2,
+  processing: Package,
+  printing: Printer,
+  packed: Box,
+  shipped: Truck,
+  delivered: Home,
+};
 
 type Status = 'pending' | 'paid' | 'failed' | 'cancelled' | string;
 
@@ -124,10 +147,11 @@ export default function OrderStatus({
                   >
                     {step.state === 'done' ? (
                       <Check className="h-4 w-4" />
-                    ) : step.state === 'current' ? (
-                      <span className="h-2.5 w-2.5 rounded-full bg-primary" />
                     ) : (
-                      <span className="h-2 w-2 rounded-full bg-border" />
+                      (() => {
+                        const Icon = STAGE_ICON[step.status] ?? Package;
+                        return <Icon className="h-4 w-4" />;
+                      })()
                     )}
                   </span>
                   <div className="pt-0.5">

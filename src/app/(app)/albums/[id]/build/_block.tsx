@@ -37,6 +37,9 @@ export default function BlockCard({
   onPatchOverlays,
   onRemove,
   onMove,
+  pickActive = false,
+  onTapPlaceBase,
+  showGuides = false,
 }: {
   block: Block;
   index: number;
@@ -54,6 +57,11 @@ export default function BlockCard({
   onPatchOverlays: (overlays: Overlay[]) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
+  /** Tap-to-place: when a tray photo is "picked up", clicking an empty base slot places it. */
+  pickActive?: boolean;
+  onTapPlaceBase?: (slot: BaseSlot) => void;
+  /** Show the margin / safe-zone guides overlay (client-only, presentation). */
+  showGuides?: boolean;
 }) {
   const [picking, setPicking] = useState<Picking>(null);
   const baseRef = useRef<HTMLDivElement>(null);
@@ -171,6 +179,8 @@ export default function BlockCard({
           <BaseSlotView
             photo={leftPhoto}
             label="Click or drop the image (spans both pages)"
+            pickActive={pickActive}
+            onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('image') : undefined}
             onPick={() => setPicking({ kind: 'base', slot: 'image' })}
             onDrop={(id) => onAssignBase('image', id)}
             onClear={() => onClearBase('image')}
@@ -182,6 +192,8 @@ export default function BlockCard({
               <BaseSlotView
                 photo={leftPhoto}
                 label="Left page"
+                pickActive={pickActive}
+                onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('left') : undefined}
                 onPick={() => setPicking({ kind: 'base', slot: 'left' })}
                 onDrop={(id) => onAssignBase('left', id)}
                 onClear={() => onClearBase('left')}
@@ -192,6 +204,8 @@ export default function BlockCard({
               <BaseSlotView
                 photo={rightPhoto}
                 label="Right page"
+                pickActive={pickActive}
+                onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('right') : undefined}
                 onPick={() => setPicking({ kind: 'base', slot: 'right' })}
                 onDrop={(id) => onAssignBase('right', id)}
                 onClear={() => onClearBase('right')}
@@ -199,6 +213,14 @@ export default function BlockCard({
               />
             </div>
           </>
+        )}
+
+        {/* Margin / safe-zone guides (client-only overlay; never persisted/printed). */}
+        {showGuides && (
+          <div className="pointer-events-none absolute inset-0 z-[8]">
+            <div className="absolute left-[3%] top-[5%] h-[90%] w-[44%] border border-dashed border-[#97402f]/55" />
+            <div className="absolute right-[3%] top-[5%] h-[90%] w-[44%] border border-dashed border-[#97402f]/55" />
+          </div>
         )}
 
         {/* Signature bound spine — a fold groove carrying a faint running stitch. */}
@@ -293,6 +315,8 @@ export default function BlockCard({
 function BaseSlotView({
   photo,
   label,
+  pickActive = false,
+  onTapPlace,
   onPick,
   onDrop,
   onClear,
@@ -300,15 +324,20 @@ function BaseSlotView({
 }: {
   photo?: Photo;
   label: string;
+  pickActive?: boolean;
+  onTapPlace?: () => void;
   onPick: () => void;
   onDrop: (photoId: string) => void;
   onClear: () => void;
   onCrop?: () => void;
 }) {
   const [over, setOver] = useState(false);
+  // Tap-to-place: with a photo "picked up", clicking an EMPTY slot drops it here;
+  // otherwise the click opens the existing picker.
+  const tapToPlace = pickActive && !photo && !!onTapPlace;
   return (
     <div
-      onClick={onPick}
+      onClick={tapToPlace ? onTapPlace : onPick}
       onDragOver={(e) => {
         e.preventDefault();
         if (!over) setOver(true);
@@ -321,7 +350,7 @@ function BaseSlotView({
         if (id) onDrop(id);
       }}
       className={`group/base absolute inset-0 cursor-pointer transition-all duration-200 ${
-        over ? 'ring-2 ring-inset ring-primary' : ''
+        over ? 'ring-2 ring-inset ring-primary' : tapToPlace ? 'ring-2 ring-inset ring-gold/70' : ''
       }`}
     >
       {photo ? (
@@ -378,7 +407,7 @@ function BaseSlotView({
               over ? 'text-primary' : 'text-muted-foreground group-hover/base:text-foreground'
             }`}
           >
-            {over ? 'Drop to place' : label}
+            {over ? 'Drop to place' : tapToPlace ? 'Tap to place here' : label}
           </span>
         </div>
       )}

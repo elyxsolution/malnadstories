@@ -1,17 +1,57 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Save, Send, Loader2, CheckCircle2, LayoutGrid, Eye, ShoppingCart, BookImage, X } from 'lucide-react';
+import {
+  Plus,
+  Save,
+  Send,
+  Loader2,
+  CheckCircle2,
+  LayoutGrid,
+  Eye,
+  ShoppingCart,
+  BookImage,
+  X,
+  Undo2,
+  Redo2,
+  Keyboard,
+  Frame,
+  Rows3,
+  Square,
+  ChevronLeft,
+  ChevronRight,
+  Hand,
+  Layers,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
+  Wand2,
+} from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
+import TrayToolbar, { type TrayFilter } from './_tray-toolbar';
 import BlockCard, { type BaseSlot } from './_block';
+import Navigator from './_navigator';
+import ShortcutsOverlay from './_shortcuts';
+import Assistant, { type AssistKind } from './_assistant';
+import Proposal from './_proposal';
 import Preview from './_preview';
 import PhotoEditor from './_photo-editor';
 import QuickCrop from './_quick-crop';
+import { useHistoryState } from './_history';
+import {
+  autoLayout,
+  regenerate,
+  fillEmptyFrames,
+  orderByDate,
+  summarizePlan,
+  type EnginePhoto,
+} from '@/lib/builder/auto-layout';
 import {
   LAYOUT_TEMPLATES,
   DEFAULT_OVERLAY_GEOM,
+  TEMPLATE_LABEL,
   photoCap,
   pagesConsumed,
   canAdd,
@@ -55,13 +95,36 @@ export default function Builder({
   initialCoverId: string | null;
 }) {
   const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
-  const [blocks, setBlocks] = useState<Block[]>(initialBlocks);
+  // History-backed layout state (client-only undo/redo). `blocks` is the present value;
+  // every change still persists through the existing saveLayout — no new persistence.
+  const blocksHist = useHistoryState<Block[]>(initialBlocks);
+  const blocks = blocksHist.value;
   const [status, setStatus] = useState(initialStatus);
   const [view, setView] = useState<'edit' | 'preview'>('edit');
+  const [editLayout, setEditLayout] = useState<'focus' | 'all'>('focus');
+  const [current, setCurrent] = useState(0); // focused spread index
   const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
   const [quickCrop, setQuickCrop] = useState<{ photo: Photo; aspect: number; gutter: boolean } | null>(null);
   const [coverId, setCoverId] = useState<string | null>(initialCoverId);
   const [coverPicker, setCoverPicker] = useState(false);
+
+  // P0/P1 interaction state (all client-only).
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [traySearch, setTraySearch] = useState('');
+  const [trayFilter, setTrayFilter] = useState<TrayFilter>('all');
+  const [showGuides, setShowGuides] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [removingUnused, setRemovingUnused] = useState(false);
+
+  // Layout assistant (deterministic; propose → preview → apply).
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [proposal, setProposal] = useState<{
+    kind: AssistKind;
+    strategy: number;
+    blocks: Block[];
+    title: string;
+    summary: ReturnType<typeof summarizePlan>;
+  } | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -121,13 +184,23 @@ export default function Builder({
         const res = await fetch(`/api/photos?albumId=${albumId}`);
         if (!res.ok) return;
         const body = (await res.json()) as {
-          photos: { id: string; status: Photo['status']; url: string; thumbUrl: string; takenAt: string | null }[];
+          photos: {
+            id: string;
+            status: Photo['status'];
+            url: string;
+            thumbUrl: string;
+            takenAt: string | null;
+            width?: number | null;
+            height?: number | null;
+          }[];
         };
         if (!active) return;
         setPhotos((prev) =>
           prev.map((p) => {
             const u = body.photos.find((x) => x.id === p.id);
-            return u ? { ...p, status: u.status, url: u.url, thumbUrl: u.thumbUrl, takenAt: u.takenAt } : p;
+            return u
+              ? { ...p, status: u.status, url: u.url, thumbUrl: u.thumbUrl, takenAt: u.takenAt, width: u.width ?? null, height: u.height ?? null }
+              : p;
           }),
         );
       } catch {
@@ -145,11 +218,84 @@ export default function Builder({
   const remaining = size - consumed;
   const complete = isAlbumComplete(blocks, size) && !!coverId;
 
-  // ── dirty-aware block mutation ────────────────────────────────────────────────
+  // Focused-spread index, clamped to the current block count.
+  const cur = Math.min(current, Math.max(0, blocks.length - 1));
+
+  // Tray search + filter (client-only). `readyUnplaced` powers "Remove unused".
+  const readyUnplaced = photos.filter((p) => p.status === 'ready' && !placed.has(p.id));
+  const trayQuery = traySearch.trim().toLowerCase();
+  const visiblePhotos = photos.filter((p) => {
+    if (trayQuery && !p.filename.toLowerCase().includes(trayQuery)) return false;
+    if (trayFilter === 'unplaced') return p.status === 'ready' && !placed.has(p.id);
+    if (trayFilter === 'placed') return placed.has(p.id);
+    if (trayFilter === 'processing') return p.status === 'pending';
+    return true;
+  });
+
+  // ── Layout assistant (deterministic engine; propose only) ─────────────────────
+  const toEngine = (p: Photo): EnginePhoto => ({ id: p.id, width: p.width ?? null, height: p.height ?? null, takenAt: p.takenAt });
+  const enginePhotos = photos.filter((p) => p.status === 'ready').map(toEngine);
+  const availableEngine = availablePhotos.map(toEngine);
+
+  const generate = (kind: AssistKind, strategy = 0) => {
+    let proposed: Block[];
+    let title: string;
+    switch (kind) {
+      case 'build':
+        proposed = autoLayout(enginePhotos, size, strategy);
+        title = 'Build my album';
+        break;
+      case 'suggest':
+        proposed = regenerate(enginePhotos, size, strategy);
+        title = 'Suggested structure';
+        break;
+      case 'fill':
+        proposed = fillEmptyFrames(blocks, availableEngine);
+        title = 'Fill empty frames';
+        break;
+      case 'date':
+        proposed = orderByDate(blocks, enginePhotos);
+        title = 'Organize by date';
+        break;
+    }
+    setProposal({ kind, strategy, blocks: proposed, title, summary: summarizePlan(proposed, enginePhotos.length) });
+    setAssistantOpen(false);
+  };
+
+  const acceptProposal = () => {
+    if (!proposal) return;
+    const applied = proposal.blocks;
+    mutateBlocks(() => applied);
+    setProposal(null);
+    setCurrent(0);
+    setMessage({ kind: 'ok', text: 'Layout applied — review it, then Save.' });
+  };
+
+  // ── dirty-aware block mutation (history-recorded) ─────────────────────────────
   const mutateBlocks = (updater: (prev: Block[]) => Block[]) => {
-    setBlocks(updater);
+    blocksHist.set(updater);
     setDirty(true);
   };
+
+  const onUndo = useCallback(() => {
+    blocksHist.undo();
+    setDirty(true);
+  }, [blocksHist]);
+  const onRedo = useCallback(() => {
+    blocksHist.redo();
+    setDirty(true);
+  }, [blocksHist]);
+
+  // Reorder spreads (navigator drag). Reordering never changes which photo sits in
+  // which slot, so the placed-once rule is preserved.
+  const reorderBlocks = (from: number, to: number) =>
+    mutateBlocks((prev) => {
+      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+      const next = [...prev];
+      const [m] = next.splice(from, 1);
+      next.splice(to, 0, m);
+      return next;
+    });
 
   // ── photos ──────────────────────────────────────────────────────────────────
   const onUploaded = (photo: Photo) => {
@@ -168,6 +314,24 @@ export default function Builder({
   const onPhotoDeleted = (id: string) => {
     mutateBlocks((prev) => stripPhoto(prev, id));
     setPhotos((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // "Remove unused": delete every ready + unplaced photo via the EXISTING
+  // DELETE /api/photos/:id (the same endpoint the tray uses). No new endpoint/persistence.
+  const removeUnused = async () => {
+    const targets = photos.filter((p) => p.status === 'ready' && !placed.has(p.id));
+    if (targets.length === 0) return;
+    if (!confirm(`Remove ${targets.length} unused photo${targets.length === 1 ? '' : 's'} from the album?`)) return;
+    setRemovingUnused(true);
+    for (const t of targets) {
+      try {
+        const res = await fetch(`/api/photos/${t.id}`, { method: 'DELETE' });
+        if (res.ok) onPhotoDeleted(t.id);
+      } catch {
+        /* skip; user can retry */
+      }
+    }
+    setRemovingUnused(false);
   };
 
   const onPhotoSaved = (photoId: string, edit: EditConfig) => {
@@ -269,15 +433,18 @@ export default function Builder({
   };
 
   // ── persist ─────────────────────────────────────────────────────────────────
-  const serialize = () =>
-    blocks.map((b) => ({
-      template: b.template,
-      photoIds: b.photoIds.filter(Boolean),
-      caption: b.caption,
-      overlays: b.overlays,
-    }));
+  const serialize = useCallback(
+    () =>
+      blocks.map((b) => ({
+        template: b.template,
+        photoIds: b.photoIds.filter(Boolean),
+        caption: b.caption,
+        overlays: b.overlays,
+      })),
+    [blocks],
+  );
 
-  const save = async (): Promise<boolean> => {
+  const save = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     setMessage(null);
     const res = await saveLayout({ albumId, blocks: serialize() });
@@ -289,7 +456,7 @@ export default function Builder({
     }
     setMessage({ kind: 'err', text: res.error });
     return false;
-  };
+  }, [albumId, serialize]);
 
   const submit = async () => {
     setSubmitting(true);
@@ -312,6 +479,75 @@ export default function Builder({
   };
 
   const pct = Math.min(100, size ? (consumed / size) * 100 : 0);
+
+  // One BlockCard, reused by both the focus (one spread) and all-spreads layouts.
+  const renderBlockCard = (block: Block, i: number) => (
+    <BlockCard
+      block={block}
+      index={i}
+      blocks={blocks}
+      photoMap={photoMap}
+      availablePhotos={availablePhotos}
+      isFirst={i === 0}
+      isLast={i === blocks.length - 1}
+      onPatch={(patch) => patchBlock(block.key, patch)}
+      onAssignBase={(slot, photoId) => assignBaseSlot(block.key, slot, photoId)}
+      onClearBase={(slot) => clearBaseSlot(block.key, slot)}
+      onQuickCrop={openQuickCrop}
+      onAddOverlay={(photoId) => addOverlay(block.key, photoId)}
+      onReplaceOverlay={(index, photoId) => replaceOverlay(block.key, index, photoId)}
+      onPatchOverlays={(overlays) => patchOverlays(block.key, overlays)}
+      onRemove={() => removeBlock(block.key)}
+      onMove={(dir) => moveBlock(block.key, dir)}
+      pickActive={!!pickedId}
+      onTapPlaceBase={(slot) => {
+        if (!pickedId) return;
+        assignBaseSlot(block.key, slot, pickedId);
+        setPickedId(null);
+      }}
+      showGuides={showGuides}
+    />
+  );
+
+  // ── Keyboard shortcuts (client-only) ──────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || !!el?.isContentEditable;
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) onRedo();
+        else onUndo();
+        return;
+      }
+      if (mod && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        if (dirty) void save();
+        return;
+      }
+      if (typing) return;
+      if (e.key === '?') {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+      } else if (e.key === 'g' || e.key === 'G') {
+        setShowGuides((v) => !v);
+      } else if (e.key === 'Escape') {
+        setShortcutsOpen(false);
+        setEditingPhoto(null);
+        setQuickCrop(null);
+        setCoverPicker(false);
+        setPickedId(null);
+      } else if (view === 'edit' && editLayout === 'focus' && e.key === 'ArrowLeft') {
+        setCurrent((c) => Math.max(0, c - 1));
+      } else if (view === 'edit' && editLayout === 'focus' && e.key === 'ArrowRight') {
+        setCurrent((c) => Math.min(blocks.length - 1, c + 1));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onUndo, onRedo, save, dirty, view, editLayout, blocks.length]);
 
   return (
     <div className="space-y-5">
@@ -344,7 +580,34 @@ export default function Builder({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* History + canvas tools */}
+          <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
+            <Button variant="ghost" size="icon-sm" onClick={onUndo} disabled={!blocksHist.canUndo} aria-label="Undo" title="Undo (⌘Z)">
+              <Undo2 />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={onRedo} disabled={!blocksHist.canRedo} aria-label="Redo" title="Redo (⌘⇧Z)">
+              <Redo2 />
+            </Button>
+            <span className="mx-0.5 my-1 w-px bg-border" />
+            <Button
+              variant={showGuides ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              onClick={() => setShowGuides((v) => !v)}
+              aria-label="Toggle guides"
+              title="Margins & safe zone (G)"
+            >
+              <Frame />
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Shortcuts (?)">
+              <Keyboard />
+            </Button>
+          </div>
+
+          <Button variant="outline" size="sm" onClick={() => setAssistantOpen(true)} title="Layout assistant">
+            <Wand2 /> Assistant
+          </Button>
+
           <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
             <Button variant={view === 'edit' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('edit')}>
               <LayoutGrid /> Edit
@@ -353,6 +616,18 @@ export default function Builder({
               <Eye /> Preview
             </Button>
           </div>
+
+          {view === 'edit' && (
+            <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
+              <Button variant={editLayout === 'focus' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => setEditLayout('focus')} aria-label="One spread at a time" title="One spread at a time">
+                <Square />
+              </Button>
+              <Button variant={editLayout === 'all' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => setEditLayout('all')} aria-label="All spreads" title="All spreads">
+                <Rows3 />
+              </Button>
+            </div>
+          )}
+
           <Button variant="outline" size="sm" onClick={save} disabled={saving || submitting || !dirty}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
           </Button>
@@ -472,7 +747,32 @@ export default function Builder({
               <div className="seam mt-4" />
             </div>
             <div className="p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-              <Tray photos={photos} placedIds={placed} onEdit={setEditingPhoto} onDeleted={onPhotoDeleted} />
+              <TrayToolbar
+                search={traySearch}
+                onSearch={setTraySearch}
+                filter={trayFilter}
+                onFilter={setTrayFilter}
+                removableCount={readyUnplaced.length}
+                removing={removingUnused}
+                onRemoveUnused={removeUnused}
+              />
+              {pickedId && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl border border-gold/40 bg-gold/[0.08] px-3 py-2 text-xs text-foreground">
+                  <Hand className="h-3.5 w-3.5 shrink-0 text-gold" />
+                  <span className="flex-1">Photo picked up — tap an empty frame to place it.</span>
+                  <button type="button" onClick={() => setPickedId(null)} className="font-medium text-muted-foreground hover:text-foreground">
+                    Cancel
+                  </button>
+                </div>
+              )}
+              <Tray
+                photos={visiblePhotos}
+                placedIds={placed}
+                pickedId={pickedId}
+                onPick={(id) => setPickedId((c) => (c === id ? null : id))}
+                onEdit={setEditingPhoto}
+                onDeleted={onPhotoDeleted}
+              />
             </div>
           </aside>
 
@@ -510,34 +810,80 @@ export default function Builder({
                   <p className="mt-4 font-display text-xl font-semibold tracking-tight text-white">Start your story</p>
                   <p className="mx-auto mt-1.5 max-w-sm text-sm text-white/55">
                     Add a <span className="font-medium text-white/80">Single Page</span> (two photos) or a{' '}
-                    <span className="font-medium text-white/80">Double Page</span> (one image across both) to begin.
+                    <span className="font-medium text-white/80">Double Page</span> (one image across both) — or let me
+                    arrange your photos for you.
                   </p>
+                  <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+                    <Button size="sm" onClick={() => generate('build', 0)} disabled={enginePhotos.length === 0} className={LUX_PRIMARY}>
+                      <Wand2 /> Build it for me
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => addBlock('single-pair')}>
+                      <Plus /> Start manually
+                    </Button>
+                  </div>
+                </div>
+              ) : editLayout === 'focus' ? (
+                <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs text-white/55">
+                        Spread {cur + 1} / {blocks.length}
+                      </span>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setCurrent((c) => Math.max(0, Math.min(c, blocks.length - 1) - 1))}
+                          disabled={cur <= 0}
+                          aria-label="Previous spread"
+                          className="grid h-8 w-8 place-items-center rounded-lg builder-glass text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCurrent((c) => Math.min(blocks.length - 1, Math.min(c, blocks.length - 1) + 1))}
+                          disabled={cur >= blocks.length - 1}
+                          aria-label="Next spread"
+                          className="grid h-8 w-8 place-items-center rounded-lg builder-glass text-white/80 transition-colors hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <div key={blocks[cur].key} className="animate-rise">
+                      {renderBlockCard(blocks[cur], cur)}
+                    </div>
+                  </div>
+                  <SpreadInspector
+                    block={blocks[cur]}
+                    index={cur}
+                    total={blocks.length}
+                    showGuides={showGuides}
+                    onToggleGuides={() => setShowGuides((v) => !v)}
+                    onMove={(dir) => moveBlock(blocks[cur].key, dir)}
+                    onRemove={() => removeBlock(blocks[cur].key)}
+                  />
                 </div>
               ) : (
                 <div className="grid gap-7">
                   {blocks.map((block, i) => (
                     <div key={block.key} className="animate-rise" style={{ animationDelay: `${Math.min(i * 55, 330)}ms` }}>
-                      <BlockCard
-                        block={block}
-                        index={i}
-                        blocks={blocks}
-                        photoMap={photoMap}
-                        availablePhotos={availablePhotos}
-                        isFirst={i === 0}
-                        isLast={i === blocks.length - 1}
-                        onPatch={(patch) => patchBlock(block.key, patch)}
-                        onAssignBase={(slot, photoId) => assignBaseSlot(block.key, slot, photoId)}
-                        onClearBase={(slot) => clearBaseSlot(block.key, slot)}
-                        onQuickCrop={openQuickCrop}
-                        onAddOverlay={(photoId) => addOverlay(block.key, photoId)}
-                        onReplaceOverlay={(index, photoId) => replaceOverlay(block.key, index, photoId)}
-                        onPatchOverlays={(overlays) => patchOverlays(block.key, overlays)}
-                        onRemove={() => removeBlock(block.key)}
-                        onMove={(dir) => moveBlock(block.key, dir)}
-                      />
+                      {renderBlockCard(block, i)}
                     </div>
                   ))}
                 </div>
+              )}
+
+              {blocks.length > 0 && (
+                <Navigator
+                  blocks={blocks}
+                  photoMap={photoMap}
+                  current={cur}
+                  onJump={(i) => setCurrent(i)}
+                  onReorder={reorderBlocks}
+                  onPrev={() => setCurrent((c) => Math.max(0, Math.min(c, blocks.length - 1) - 1))}
+                  onNext={() => setCurrent((c) => Math.min(blocks.length - 1, Math.min(c, blocks.length - 1) + 1))}
+                />
               )}
             </div>
           </main>
@@ -572,6 +918,32 @@ export default function Builder({
 
       {coverPicker && (
         <CoverPicker covers={covers} selectedId={coverId} onPick={chooseCover} onClose={() => setCoverPicker(false)} />
+      )}
+
+      {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+
+      {assistantOpen && (
+        <Assistant
+          onAction={(kind) => generate(kind, 0)}
+          onClose={() => setAssistantOpen(false)}
+          photoCount={enginePhotos.length}
+          availableCount={availableEngine.length}
+          hasLayout={blocks.length > 0}
+        />
+      )}
+
+      {proposal && (
+        <Proposal
+          title={proposal.title}
+          blocks={proposal.blocks}
+          photoMap={photoMap}
+          cover={selectedCover}
+          summary={proposal.summary}
+          canRegenerate={proposal.kind === 'build' || proposal.kind === 'suggest'}
+          onAccept={acceptProposal}
+          onRegenerate={() => generate(proposal.kind, proposal.strategy + 1)}
+          onCancel={() => setProposal(null)}
+        />
       )}
 
       {workerModal}
@@ -639,5 +1011,88 @@ function CoverPicker({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Persistent right contextual panel (focus mode). Shows the current spread's context +
+ * the spread-level actions that already exist (move/delete) and the guides toggle.
+ * Photo editing stays on the page (hover controls + the editor/quick-crop modals), so
+ * no save behaviour changes.
+ */
+function SpreadInspector({
+  block,
+  index,
+  total,
+  showGuides,
+  onToggleGuides,
+  onMove,
+  onRemove,
+}: {
+  block: Block;
+  index: number;
+  total: number;
+  showGuides: boolean;
+  onToggleGuides: () => void;
+  onMove: (dir: -1 | 1) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <aside className="builder-glass flex h-fit flex-col gap-4 rounded-2xl p-4 text-white">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/45">Spread</p>
+        <p className="mt-1 font-display text-2xl font-semibold tracking-tight">
+          {index + 1} <span className="text-base text-white/40">/ {total}</span>
+        </p>
+        <p className="mt-1 text-sm text-white/70">{TEMPLATE_LABEL[block.template]}</p>
+        <p className="mt-0.5 flex items-center gap-1.5 text-xs text-white/45">
+          <Layers className="h-3.5 w-3.5" /> {block.overlays.length} overlay{block.overlays.length === 1 ? '' : 's'}
+        </p>
+      </div>
+
+      <div className="h-px bg-white/10" />
+
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/5 py-2 text-xs font-medium text-white/85 transition-colors hover:bg-white/10 disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ArrowUp className="h-3.5 w-3.5" /> Move up
+          </button>
+          <button
+            type="button"
+            onClick={() => onMove(1)}
+            disabled={index >= total - 1}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/5 py-2 text-xs font-medium text-white/85 transition-colors hover:bg-white/10 disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ArrowDown className="h-3.5 w-3.5" /> Move down
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onToggleGuides}
+          className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium transition-colors ${
+            showGuides ? 'bg-[#ecd9ad] text-[#1e3a2f]' : 'bg-white/5 text-white/85 hover:bg-white/10'
+          }`}
+        >
+          <Frame className="h-3.5 w-3.5" /> {showGuides ? 'Hide guides' : 'Show guides'}
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="flex items-center justify-center gap-1.5 rounded-lg bg-red-500/15 py-2 text-xs font-medium text-red-200 transition-colors hover:bg-red-500/25"
+        >
+          <Trash2 className="h-3.5 w-3.5" /> Delete spread
+        </button>
+      </div>
+
+      <p className="text-[11px] leading-relaxed text-white/45">
+        Pick a photo from the tray and tap an empty frame to place it, or use the on-page controls to add overlays and
+        adjust crops.
+      </p>
+    </aside>
   );
 }

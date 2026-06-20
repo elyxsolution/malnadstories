@@ -14,6 +14,10 @@ export type Photo = {
   edit: EditConfig | null;
   status: PhotoStatus;
   takenAt: string | null;
+  // Sanitized image dimensions (worker-populated). Read-only; used for the auto-layout
+  // engine's orientation classification. Null until the photo is processed.
+  width?: number | null;
+  height?: number | null;
 };
 
 type Upload = {

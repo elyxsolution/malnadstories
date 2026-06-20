@@ -1,6 +1,4 @@
 import { notFound, redirect } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { computeOrderAmount } from '@/lib/pricing';
@@ -8,9 +6,13 @@ import { DEFAULT_SHIPPING_METHOD, isShippingMethod, type ShippingMethod } from '
 import { isPaidStatus } from '@/lib/orders/status';
 import { presignGet } from '@/lib/r2';
 import { listActiveCoverOptions } from '@/lib/covers';
-import { brandFontVars } from '@/lib/fonts';
+import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
 import Checkout from './_checkout';
+import { type ReadinessItem } from './_readiness';
 import { type Address } from './_address-picker';
+
+// Longest-edge px below which a placed photo may print soft (advisory only).
+const LOWRES_MIN_EDGE = 1000;
 
 export default async function CheckoutPage({ params }: { params: { albumId: string } }) {
   const supabase = createClient();
@@ -62,11 +64,11 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // Server-side price from the album's product (RLS allows active-product SELECT).
   const { data: products } = await supabase
     .from('products')
-    .select('base_price')
+    .select('base_price, name')
     .eq('pages', album.size)
     .eq('is_active', true)
     .limit(1);
-  const product = ((products ?? []) as { base_price: string }[])[0];
+  const product = ((products ?? []) as { base_price: string; name: string }[])[0];
   if (!product) {
     return (
       <div className="mx-auto max-w-md p-8 text-sm text-destructive">
@@ -119,6 +121,86 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     .order('created_at', { ascending: false });
   const addresses = (addressRows ?? []) as Address[];
 
+  // ── Advisory readiness check (Design Completion Phase 1) ──────────────────────
+  // Reuses existing data only (album_pages + photos.width/height + cover/title). It is
+  // ADVISORY: it never gates payment — submitAlbum already enforces completeness, so for
+  // a properly submitted album these mostly read green; the low-res note adds substance.
+  const [{ data: pageRows }, { data: photoRows }] = await Promise.all([
+    supabase.from('album_pages').select('layout_template, photo_ids, layout_config').eq('album_id', album.id),
+    supabase.from('photos').select('id, width, height, status').eq('album_id', album.id),
+  ]);
+  const pages = (pageRows ?? []) as {
+    layout_template: LayoutTemplate | null;
+    photo_ids: string[] | null;
+    layout_config: { overlays?: { photoId: string }[] } | null;
+  }[];
+  const photos = (photoRows ?? []) as { id: string; width: number | null; height: number | null; status: string }[];
+
+  let consumed = 0;
+  let emptyFrames = 0;
+  const placedIds = new Set<string>();
+  for (const p of pages) {
+    if (!p.layout_template) continue;
+    consumed += PAGE_COST[p.layout_template];
+    const filled = (p.photo_ids ?? []).filter(Boolean);
+    filled.forEach((id) => placedIds.add(id));
+    (p.layout_config?.overlays ?? []).forEach((o) => placedIds.add(o.photoId));
+    emptyFrames += Math.max(0, requiredBaseCount(p.layout_template) - filled.length);
+  }
+  const lowResCount = photos.filter(
+    (ph) =>
+      ph.status === 'ready' &&
+      placedIds.has(ph.id) &&
+      ph.width != null &&
+      ph.height != null &&
+      Math.max(ph.width, ph.height) < LOWRES_MIN_EDGE,
+  ).length;
+
+  const readiness: ReadinessItem[] = [
+    {
+      ok: consumed === album.size,
+      title: 'Album structure complete',
+      detail:
+        consumed === album.size
+          ? `All ${album.size} pages are laid out.`
+          : `${consumed} of ${album.size} pages laid out.`,
+    },
+    {
+      ok: emptyFrames === 0,
+      title: emptyFrames === 0 ? 'No empty frames' : `${emptyFrames} empty frame${emptyFrames === 1 ? '' : 's'}`,
+      detail:
+        emptyFrames === 0
+          ? 'Every frame has a photo.'
+          : 'Empty frames print as blank paper — add photos in the builder.',
+    },
+    {
+      ok: !!album.cover_template_id,
+      title: album.cover_template_id ? 'Cover design chosen' : 'No cover design',
+      detail: album.cover_template_id
+        ? 'Your selected cover will be printed on page one.'
+        : 'Choose a cover design in the builder.',
+    },
+    {
+      ok: !!album.title.trim(),
+      title: album.title.trim() ? 'Cover title set' : 'Cover title missing',
+      detail: album.title.trim()
+        ? `“${album.title}” will be printed on the cover.`
+        : 'Give your album a title in the builder.',
+    },
+    {
+      ok: lowResCount === 0,
+      title:
+        lowResCount === 0
+          ? 'Image resolution looks good'
+          : `${lowResCount} low-resolution photo${lowResCount === 1 ? '' : 's'}`,
+      detail:
+        lowResCount === 0
+          ? 'Placed photos are large enough to print crisply.'
+          : 'These sit below our recommended print resolution and may look soft. You can still print them as-is.',
+      advisory: true,
+    },
+  ];
+
   // Cover thumbnail for the album-summary preview (what the customer is buying).
   // Mirrors the builder page: resolve from the active covers, with a service-role
   // fallback for a now-inactive cover. Display only — never gates anything.
@@ -145,41 +227,27 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     }
   }
 
-  return (
-    <div className={`${brandFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-10">
-        <Link
-          href={`/albums/${album.id}/build`}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to album
-        </Link>
-        <h1 className="mt-3 font-display text-[2.1rem] font-semibold leading-none tracking-[-0.01em]">Review &amp; pay</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          A few details away from turning <span className="font-medium text-foreground">{album.title}</span> into a printed keepsake.
-        </p>
-        {(album.destination || album.travel_dates) && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {[album.destination, album.travel_dates].filter(Boolean).join(' · ')}
-          </p>
-        )}
+  const albumSub = [album.destination, album.travel_dates].filter(Boolean).join(' · ') || null;
 
-        <div className="mt-8">
-          <Checkout
-            albumId={album.id}
-            albumTitle={album.title}
-            albumSize={album.size}
-            coverUrl={coverUrl}
-            coverName={coverName}
-            amount={amount}
-            addresses={addresses}
-            pendingOrderId={pending?.id ?? null}
-            initialCopies={initialCopies}
-            initialCouponCode={initialCouponCode}
-            initialShippingMethod={initialShippingMethod}
-          />
-        </div>
-      </div>
+  return (
+    <div className="brand-surface">
+      <Checkout
+        albumId={album.id}
+        albumTitle={album.title}
+        albumSub={albumSub}
+        albumSize={album.size}
+        photoCount={placedIds.size}
+        formatName={product.name}
+        coverUrl={coverUrl}
+        coverName={coverName}
+        amount={amount}
+        addresses={addresses}
+        pendingOrderId={pending?.id ?? null}
+        initialCopies={initialCopies}
+        initialCouponCode={initialCouponCode}
+        initialShippingMethod={initialShippingMethod}
+        readiness={readiness}
+      />
     </div>
   );
 }

@@ -159,7 +159,7 @@ function EditableCard({ album }: { album: AlbumCardData }) {
 
   return (
     <div className="group relative">
-      <Link href={`/albums/${album.id}/build`} className="block">
+      <Link href={`/albums/${album.id}`} className="block">
         <div className="flex h-full items-start gap-4 rounded-2xl border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-elevated">
           <Spine title={album.title} />
           <div className="min-w-0 flex-1">

@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin'] });
+import { brandFontVars } from '@/lib/fonts';
+import Grain from '@/components/grain';
 
 export const metadata: Metadata = {
   title: 'Malnad Stories',
@@ -14,7 +13,13 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      {/* Editorial typography (Cormorant Garamond + Work Sans) applied globally via the
+          brand font vars; Work Sans (`font-ui`) is the base UI face. The paper-grain
+          overlay sits above content (pointer-events: none) for the handcrafted feel. */}
+      <body className={`${brandFontVars} font-ui`}>
+        {children}
+        <Grain />
+      </body>
     </html>
   );
 }

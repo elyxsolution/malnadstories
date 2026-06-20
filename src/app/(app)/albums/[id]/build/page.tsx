@@ -20,6 +20,8 @@ type PhotoRow = {
   sanitized_key: string | null;
   thumb_key: string | null;
   taken_at: string | null;
+  width: number | null;
+  height: number | null;
 };
 type PageRow = {
   page_number: number;
@@ -54,7 +56,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   // 'pending'/'rejected' photos have no usable URL yet.
   const { data: photoData } = await supabase
     .from('photos')
-    .select('id, original_filename, edit_config, status, sanitized_key, thumb_key, taken_at')
+    .select('id, original_filename, edit_config, status, sanitized_key, thumb_key, taken_at, width, height')
     .eq('album_id', album.id)
     .order('taken_at', { ascending: true, nullsFirst: false })
     .order('uploaded_at', { ascending: true });
@@ -69,6 +71,8 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       edit: r.edit_config,
       status: r.status,
       takenAt: r.taken_at,
+      width: r.width,
+      height: r.height,
     })),
   );
   const photoIdSet = new Set(photos.map((p) => p.id));

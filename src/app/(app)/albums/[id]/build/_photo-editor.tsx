@@ -1,8 +1,18 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { RotateCw, FlipHorizontal, FlipVertical, Loader2, X, SlidersHorizontal } from 'lucide-react';
+import { RotateCw, FlipHorizontal, FlipVertical, Loader2, X, SlidersHorizontal, Maximize, Minimize } from 'lucide-react';
 import { FULL_CROP, type EditConfig, type Rect } from '@/lib/builder/model';
+
+// Aspect-ratio presets for the crop rect. `null` = free. The ratio is the desired
+// PIXEL aspect of the crop region; it's mapped into the normalized rect below.
+const ASPECTS: { key: string; label: string; r: number | null }[] = [
+  { key: 'free', label: 'Free', r: null },
+  { key: '1:1', label: '1:1', r: 1 },
+  { key: '4:3', label: '4:3', r: 4 / 3 },
+  { key: '3:2', label: '3:2', r: 3 / 2 },
+  { key: '16:9', label: '16:9', r: 16 / 9 },
+];
 import { savePhotoEdit } from '@/lib/actions/builder';
 import PhotoFrame from './_photo-frame';
 import { Button } from '@/components/ui/button';
@@ -45,6 +55,7 @@ export default function PhotoEditor({
 }) {
   const [edit, setEdit] = useState<EditConfig>(initial ?? {});
   const [nat, setNat] = useState({ w: 0, h: 0 });
+  const [aspectKey, setAspectKey] = useState<string>('free');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +89,30 @@ export default function PhotoEditor({
   const oh = quarter ? nat.w : nat.h;
   const orientedAspect = ow > 0 && oh > 0 ? ow / oh : 1;
 
+  // Constrain the crop rect to a target PIXEL aspect ratio (presets + Fill/Fit), centered
+  // on the current crop. Writes ONLY the existing `crop` field — no new persistence.
+  const setCropAspect = (r: number | null, key: string) => {
+    setAspectKey(key);
+    if (r === null || ow <= 0 || oh <= 0) return;
+    const k = (r * oh) / ow; // normalized width:height
+    let w = 1;
+    let h = w / k;
+    if (h > 1) {
+      h = 1;
+      w = k;
+    }
+    const cx = crop.x + crop.w / 2;
+    const cy = crop.y + crop.h / 2;
+    set({ crop: { x: clamp(cx - w / 2, 0, 1 - w), y: clamp(cy - h / 2, 0, 1 - h), w, h } });
+  };
+  // Fill = the whole image fills the frame (cover; edges may crop). Fit = crop matches the
+  // frame aspect so the chosen region shows with nothing further cropped by the frame.
+  const fillFrame = () => {
+    setAspectKey('free');
+    set({ crop: FULL_CROP });
+  };
+  const fitFrame = () => setCropAspect(frameAspect, 'fit');
+
   // Size the crop canvas so it matches the oriented aspect EXACTLY within the area.
   const canvas = (() => {
     if (wrap.w <= 0 || wrap.h <= 0) return { w: 0, h: 0 };
@@ -109,6 +144,7 @@ export default function PhotoEditor({
   const startDrag = (mode: 'move' | Handle) => (e: React.PointerEvent) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (mode !== 'move') setAspectKey('free'); // manual corner resize → free crop
     drag.current = { mode, x: e.clientX, y: e.clientY, rect: crop };
   };
   const onMove = (e: React.PointerEvent) => {
@@ -146,9 +182,13 @@ export default function PhotoEditor({
 
   const rotate90 = () => {
     const next = (((edit.rotate ?? 0) + 90) % 360) as 0 | 90 | 180 | 270;
+    setAspectKey('free');
     set({ rotate: next, crop: FULL_CROP }); // orientation changed → reset the crop frame
   };
-  const reset = () => setEdit({});
+  const reset = () => {
+    setAspectKey('free');
+    setEdit({});
+  };
 
   const apply = async () => {
     setSaving(true);
@@ -265,6 +305,37 @@ export default function PhotoEditor({
               <Button variant={edit.flipV ? 'secondary' : 'outline'} size="icon-sm" onClick={() => set({ flipV: !edit.flipV })} aria-label="Flip vertical">
                 <FlipVertical />
               </Button>
+            </div>
+
+            {/* Fill / Fit — both map to the existing crop field (no new persistence). */}
+            <div className="flex gap-2">
+              <Button variant={aspectKey === 'free' ? 'secondary' : 'outline'} size="sm" className="flex-1" onClick={fillFrame}>
+                <Maximize /> Fill
+              </Button>
+              <Button variant={aspectKey === 'fit' ? 'secondary' : 'outline'} size="sm" className="flex-1" onClick={fitFrame}>
+                <Minimize /> Fit
+              </Button>
+            </div>
+
+            {/* Aspect-ratio crop presets. */}
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-foreground/80">Aspect</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ASPECTS.map((a) => (
+                  <button
+                    key={a.key}
+                    type="button"
+                    onClick={() => setCropAspect(a.r, a.key)}
+                    className={`rounded-[2px] border px-2 py-1 text-[11px] font-medium transition-colors ${
+                      aspectKey === a.key
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <Slider label="Straighten" value={edit.tilt ?? 0} min={-15} max={15} step={0.5} suffix="°" onChange={(v) => set({ tilt: v })} />

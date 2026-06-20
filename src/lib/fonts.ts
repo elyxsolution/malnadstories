@@ -1,16 +1,27 @@
-import { Fraunces, Plus_Jakarta_Sans } from 'next/font/google';
+import { Cormorant_Garamond, Work_Sans } from 'next/font/google';
 
 /**
- * Malnad Stories editorial typography, shared across the premium customer
- * surfaces (Builder + the purchase journey). Fraunces = display/emotional voice
- * (titles, album names, prices, counters); Plus Jakarta Sans = the UI voice.
- *
- * Exposed as CSS variables applied on each surface's wrapper, so the rest of the
- * app (Inter, set on <body>) is untouched. Created once here to avoid duplicate
- * next/font instances.
+ * Malnad Stories editorial typography — the Claude Design "Foundations" typefaces.
+ * Cormorant Garamond = the display/emotional voice (titles, album names, prices,
+ * counters); Work Sans = the UI voice. Exposed as the SAME CSS variables the app
+ * already consumes (`--font-display` / `--font-ui` → tailwind `font-display`/`font-ui`),
+ * so swapping the families here re-skins every surface globally without touching call
+ * sites. Created once to avoid duplicate next/font instances.
  */
-export const fraunces = Fraunces({ subsets: ['latin'], display: 'swap', variable: '--font-display' });
-export const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], display: 'swap', variable: '--font-ui' });
+export const fraunces = Cormorant_Garamond({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  style: ['normal', 'italic'],
+  display: 'swap',
+  variable: '--font-display',
+});
 
-/** Convenience: the class set that turns on builder/brand typography on a wrapper. */
+export const jakarta = Work_Sans({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600'],
+  display: 'swap',
+  variable: '--font-ui',
+});
+
+/** Convenience: the class set that turns on the editorial typography on a wrapper. */
 export const brandFontVars = `${fraunces.variable} ${jakarta.variable}`;

@@ -27,7 +27,7 @@ export async function GET(request: Request) {
 
   const { data } = await supabase
     .from('photos')
-    .select('id, status, sanitized_key, thumb_key, taken_at')
+    .select('id, status, sanitized_key, thumb_key, taken_at, width, height')
     .eq('album_id', parsed.data)
     .order('taken_at', { ascending: true, nullsFirst: false })
     .order('uploaded_at', { ascending: true });
@@ -38,6 +38,8 @@ export async function GET(request: Request) {
     sanitized_key: string | null;
     thumb_key: string | null;
     taken_at: string | null;
+    width: number | null;
+    height: number | null;
   };
 
   const photos = await Promise.all(
@@ -45,6 +47,8 @@ export async function GET(request: Request) {
       id: r.id,
       status: r.status,
       takenAt: r.taken_at,
+      width: r.width,
+      height: r.height,
       url: r.status === 'ready' && r.sanitized_key ? await presignGet(r.sanitized_key) : '',
       thumbUrl: r.status === 'ready' && r.thumb_key ? await presignGet(r.thumb_key) : '',
     })),
