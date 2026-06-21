@@ -458,6 +458,30 @@ export const adminRoles = pgTable('admin_roles', {
   assignedAt: timestamp('assigned_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ── Monitoring & Alerting (0035) ──────────────────────────────────────────────
+
+// Per-service health snapshots (append-only history) + append-only alerts. Admin-only;
+// written only by the monitoring engine (service role). Read-only over existing tables.
+export const healthChecks = pgTable('health_checks', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  service: text('service').notNull(),
+  status: text('status').notNull(),
+  message: text('message'),
+  checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const systemAlerts = pgTable('system_alerts', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  severity: text('severity').notNull(),
+  source: text('source').notNull(),
+  title: text('title').notNull(),
+  message: text('message'),
+  dedupeKey: text('dedupe_key').notNull(),
+  resolved: boolean('resolved').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+});
+
 // Append-only audit trail (0016). Written only by SECURITY DEFINER functions;
 // admins read only. Order-related events embed {order_id, album_id, customer_id}.
 export const auditLog = pgTable('audit_log', {

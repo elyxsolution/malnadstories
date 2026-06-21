@@ -22,6 +22,7 @@ import {
   Settings,
   FileText,
   Newspaper,
+  Activity,
 } from 'lucide-react';
 
 type Item = { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
@@ -66,6 +67,7 @@ const GROUPS: { label: string; items: Item[] }[] = [
   {
     label: 'Platform',
     items: [
+      { href: '/admin/monitoring', label: 'Monitoring', icon: Activity },
       { href: '/admin/system', label: 'System', icon: Server },
       { href: '/admin/users', label: 'Users & Roles', icon: Shield },
       { href: '/admin/settings', label: 'Settings', icon: Settings },

@@ -4,6 +4,9 @@ import { AlertTriangle, ImageOff, FileWarning, Clock } from 'lucide-react';
 import { db } from '@/db';
 import { orders, coupons, couponRedemptions, albums, profiles, photos, albumPdfs } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
+import { roleHasCapability } from '@/lib/auth/capabilities';
+import { collectHealth } from '@/lib/monitoring/collectors';
+import { serviceLabel, healthChip, worstHealth, type HealthStatus } from '@/lib/monitoring/model';
 import { adminUserEmails } from '@/lib/admin/users';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
 import { adminStatusLabel } from '@/lib/orders/status';
@@ -13,7 +16,13 @@ const AWAITING = ['paid', 'processing', 'printing', 'packed'];
 const QUEUE_STATES = ['paid', 'processing', 'printing', 'packed', 'shipped', 'delivered'] as const;
 
 export default async function AdminDashboard() {
-  await requireAdmin();
+  const ctx = await requireAdmin();
+
+  // Compact system-health strip — only for roles with monitoring:view (content sees nothing
+  // new; no extra queries run for them). Read-only; the full view lives at /admin/monitoring.
+  const showHealth = roleHasCapability(ctx.role, 'monitoring:view');
+  const health = showHealth ? await collectHealth() : [];
+  const healthOverall = worstHealth(health.map((h) => h.status as HealthStatus));
 
   const now = new Date();
 
@@ -115,6 +124,32 @@ export default async function AdminDashboard() {
           );
         })}
       </div>
+
+      {showHealth && (
+        <Link
+          href="/admin/monitoring"
+          className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-card px-4 py-3 transition-colors hover:bg-muted/30"
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            System health
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${healthChip(healthOverall)}`}>
+              {healthOverall}
+            </span>
+          </span>
+          <span className="flex flex-wrap gap-1.5">
+            {health.map((h) => (
+              <span
+                key={h.service}
+                title={`${serviceLabel(h.service)}: ${h.message}`}
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${healthChip(h.status)}`}
+              >
+                {serviceLabel(h.service)}
+              </span>
+            ))}
+          </span>
+          <span className="ml-auto text-xs text-primary">Open monitoring →</span>
+        </Link>
+      )}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         {/* Live queue */}

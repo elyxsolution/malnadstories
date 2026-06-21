@@ -34,6 +34,7 @@ export const CAPABILITIES = [
   'coupon:manage',
   'analytics:view',
   'system:view',
+  'monitoring:view', 'monitoring:manage',
   'role:manage',
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
@@ -45,6 +46,7 @@ const PRODUCTION: Capability[] = [
   'shipping:view', 'shipping:create', 'shipping:update', 'shipping:cancel',
   'review:view', 'review:update',
   'analytics:view',
+  'monitoring:view',
 ];
 const SUPPORT: Capability[] = [
   'support:view', 'support:reply', 'support:manage',
@@ -52,6 +54,7 @@ const SUPPORT: Capability[] = [
   'reprint:view', 'reprint:update',
   'customer:view',
   'order:view',
+  'monitoring:view',
 ];
 const CONTENT: Capability[] = [
   'cms:edit', 'cms:publish', 'cms:archive',
@@ -95,6 +98,7 @@ const ROUTE_CAPABILITY: { prefix: string; capability: Capability }[] = [
   { prefix: '/admin/cms', capability: 'cms:edit' },
   { prefix: '/admin/templates', capability: 'template:edit' },
   { prefix: '/admin/analytics', capability: 'analytics:view' },
+  { prefix: '/admin/monitoring', capability: 'monitoring:view' },
   { prefix: '/admin/system', capability: 'system:view' },
   { prefix: '/admin/users', capability: 'role:manage' },
   { prefix: '/admin/settings', capability: 'system:view' },

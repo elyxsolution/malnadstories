@@ -134,13 +134,19 @@ export function fulfillmentProgress(status: string): FulfillmentStep[] {
   const idx = FULFILLMENT_STEPS.indexOf(status as PurchasedStatus);
   // An unknown/pre-paid status (e.g. 'pending') sits before the first step.
   const current = idx < 0 ? -1 : idx;
+  // 'delivered' is the LAST step AND a terminal state: the journey is complete, so the step
+  // the order sits on is 'done', not 'current'. Only a non-terminal current step is in
+  // progress. (Generic check so any future terminal final step behaves correctly.)
+  const atTerminal = current === FULFILLMENT_STEPS.length - 1;
   return FULFILLMENT_STEPS.map((s, i) => {
     const view = ORDER_STATUS_VIEW[s];
+    const state: FulfillmentStep['state'] =
+      i < current || (i === current && atTerminal) ? 'done' : i === current ? 'current' : 'upcoming';
     return {
       status: s,
       label: view.label,
       message: view.message,
-      state: i < current ? 'done' : i === current ? 'current' : 'upcoming',
+      state,
     };
   });
 }

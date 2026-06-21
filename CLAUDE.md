@@ -110,6 +110,7 @@ drizzle/
   0032_layout_templates.sql           layout_templates (admin-owned PRESET catalog: geometry = {base: single-pair|double-spread, overlays: Rect[]}). ACTIVE-read model (authenticated SELECT active only; admins write via service role + restrictive deny). Applying a preset emits an ordinary Block[] — no renderer/saveLayout/schema change. Audit via log_audit
   0033_shipments.sql                  shipments (one/order) + shipment_events (append-only). SUPPLEMENTAL courier layer — independent of orders.status (never writes it). Child-of-order RLS (customers read own; admins write via service role + restrictive deny). Courier abstraction (Mock today). Audit via log_audit
   0034_admin_roles.sql                admin_roles (one fixed back-office role per admin: super_admin/production/support/content). RBAC scoping ON TOP of the existing profiles.role='admin' gate (does NOT grant admin access). Service-role writes only + restrictive deny. Absent row → treated as super_admin (migration safety). Audit role.assigned/changed + access.denied
+  0035_monitoring.sql                 health_checks (append-only per-service snapshots) + system_alerts (append-only; resolving marks; partial unique (dedupe_key) where not resolved = anti-fatigue). Admin-only RLS + service-role writes. Read-only collectors over existing tables; audit health.check/alert.created/alert.resolved
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
@@ -343,6 +344,7 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 26. `drizzle/0032_layout_templates.sql` — Template catalog (Phase 9E); **run SQL FIRST** (admin UI + builder read this table)
 27. `drizzle/0033_shipments.sql` — Courier shipments + events (Phase 9F); **run SQL FIRST** (admin order page + customer order page read these tables)
 28. `drizzle/0034_admin_roles.sql` — Multi-role RBAC (Phase 9G); **run SQL FIRST** (the access layer reads `admin_roles`). No backfill — existing admins default to super_admin.
+29. `drizzle/0035_monitoring.sql` — Monitoring & alerting (Phase 10A); **run SQL FIRST** (the monitoring page reads these tables)
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
 > rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
@@ -980,6 +982,32 @@ Replaces the binary admin/non-admin model with **fixed-role, capability-driven**
   default applies **only after** the admin gate, so it can never promote a non-admin; service-role
   actions still validate capability first. **Migration**: run `0034`, then deploy — existing
   admins keep full access (super_admin default), scope teams by assigning roles later.
+
+## Monitoring & Alerting (Phase 10A) — built
+
+Operations visibility + early warning (`0035_monitoring.sql`), additive and **read-only over
+existing tables** (it formalizes the cheap `count()`-aggregate pattern the dashboard already
+used). Two tables: `health_checks` (append-only per-service snapshots) + `system_alerts`
+(append-only; resolving **marks**, never overwrites/deletes).
+- **Collectors** (`src/lib/monitoring/collectors.ts`): one cheap `count()`/`select 1` per service
+  over existing status columns — database, uploads (stuck `pending`), photo_processing
+  (`rejected` + backlog), pdf_generation (`failed` + stuck `generating`), payments
+  (`orders.status='failed'` + **orders stuck `pending`** = missed webhook), email
+  (`email_log.status='failed'`), shipping (`shipment_status='failed'`), support (open backlog).
+  **No joins, no scans, no polling.** Thresholds live in ONE place: `THRESHOLDS` in
+  `src/lib/monitoring/model.ts`.
+- **Engine** (`src/lib/monitoring/engine.ts`): `persistIfStale()` runs only when an admin opens
+  the page AND the last snapshot is **> 5 min** old (throttle — no write storms, no cron). It
+  inserts snapshots and **reconciles alerts**: opens one alert per breached `dedupe_key`
+  (partial unique index = **no alert fatigue**) and **auto-resolves** cleared conditions. All
+  service-role, best-effort, never throws.
+- **RBAC** (`monitoring:view` / `monitoring:manage`, added to `capabilities.ts`): super_admin
+  (both), production + support (view), **content = no access** (route-guarded + nav-filtered by
+  Phase 9G). UI at `/admin/monitoring` (System Health Panel + Live Alerts Feed; Run-checks/Resolve
+  for `monitoring:manage`); the main dashboard shows a compact health strip **only** for
+  `monitoring:view` roles. Actions in `src/lib/actions/admin/monitoring.ts`.
+- **Audit**: `health.check` (per run), `alert.created`, `alert.resolved` via `log_audit`. No
+  customer/anon access; no writes to any existing table.
 
 ## What's NOT built yet (do not add until asked)
 
