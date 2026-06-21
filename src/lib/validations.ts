@@ -278,6 +278,281 @@ export const SetCouponActiveSchema = z.object({
   active: z.boolean(),
 });
 
+// ── Support Center (0028) ─────────────────────────────────────────────────────
+// Mirrors the DB CHECK enums (lib/support/model). Customer-facing inputs only allow
+// the calmer category/priority subset; admin status changes are a separate schema.
+
+const SUPPORT_CATEGORY_VALUES = [
+  'order', 'payment', 'upload', 'album', 'delivery', 'refund', 'technical', 'other',
+] as const;
+
+// A customer opens a ticket. customer_id is taken from the JWT (never input); status
+// is forced to 'open' server-side. Linked album/order are optional + ownership is
+// re-checked in the action AND by the RLS WITH CHECK policy.
+export const CreateTicketSchema = z.object({
+  subject: z.string().trim().min(3, 'Add a short subject').max(140, 'Subject is too long'),
+  description: z.string().trim().min(10, 'Tell us a little more (at least 10 characters)').max(4000, 'Message is too long'),
+  category: z.enum(SUPPORT_CATEGORY_VALUES).default('other'),
+  priority: z.enum(['low', 'medium', 'high']).default('medium'),
+  albumId: z.string().uuid().optional(),
+  orderId: z.string().uuid().optional(),
+});
+
+export const TicketReplySchema = z.object({
+  ticketId: z.string().uuid('Invalid ticket'),
+  body: z.string().trim().min(1, 'Write a reply').max(4000, 'Message is too long'),
+});
+
+export const AdminTicketReplySchema = z.object({
+  ticketId: z.string().uuid('Invalid ticket'),
+  body: z.string().trim().min(1, 'Write a reply').max(4000, 'Message is too long'),
+  internal: z.boolean().optional().default(false),
+});
+
+export const AdminTicketStatusSchema = z.object({
+  ticketId: z.string().uuid('Invalid ticket'),
+  status: z.enum(['open', 'in_progress', 'waiting_for_customer', 'resolved', 'closed']),
+});
+
+export const AdminTicketAssignSchema = z.object({
+  ticketId: z.string().uuid('Invalid ticket'),
+  // true = assign to the acting admin (resolved server-side from requireAdmin);
+  // false = unassign. The client never supplies a user id.
+  assign: z.boolean(),
+});
+
+export type CreateTicketInput = z.infer<typeof CreateTicketSchema>;
+export type TicketReplyInput = z.infer<typeof TicketReplySchema>;
+
+// ── Refund & Reprint requests (0029) ──────────────────────────────────────────
+// Mirrors the DB CHECK enums (lib/resolutions/model). customer_id, status,
+// admin_notes and resolved_* are NEVER input — they are server/DB controlled.
+
+const REFUND_REASON_VALUES = [
+  'damaged_product', 'wrong_product', 'late_delivery', 'quality_issue', 'duplicate_order', 'other',
+] as const;
+const REPRINT_ISSUE_VALUES = [
+  'damaged_delivery', 'print_quality', 'wrong_album', 'missing_pages', 'binding_issue', 'other',
+] as const;
+const REQUEST_STATUS_VALUES = ['pending', 'under_review', 'approved', 'rejected', 'completed'] as const;
+
+export const CreateRefundSchema = z.object({
+  orderId: z.string().uuid('Select an order'),
+  reason: z.enum(REFUND_REASON_VALUES),
+  description: z.string().trim().min(10, 'Tell us a little more (at least 10 characters)').max(4000, 'Message is too long'),
+  supportTicketId: z.string().uuid().optional(),
+});
+
+export const CreateReprintSchema = z.object({
+  orderId: z.string().uuid('Select an order'),
+  issueType: z.enum(REPRINT_ISSUE_VALUES),
+  description: z.string().trim().min(10, 'Tell us a little more (at least 10 characters)').max(4000, 'Message is too long'),
+  supportTicketId: z.string().uuid().optional(),
+});
+
+// Admin decision. status drives the RPC's forward-only state machine; note is optional
+// and stored on the request + audited.
+export const AdminRequestStatusSchema = z.object({
+  requestId: z.string().uuid('Invalid request'),
+  status: z.enum(REQUEST_STATUS_VALUES),
+  note: z.string().trim().max(2000, 'Note too long').optional(),
+});
+
+export const AdminRequestNoteSchema = z.object({
+  requestId: z.string().uuid('Invalid request'),
+  note: z.string().trim().min(1, 'Note cannot be empty').max(2000, 'Note too long'),
+});
+
+export type CreateRefundInput = z.infer<typeof CreateRefundSchema>;
+export type CreateReprintInput = z.infer<typeof CreateReprintSchema>;
+
+// ── Album Review & Request-Changes (0030) ─────────────────────────────────────
+// Mirrors the DB CHECK enums (lib/reviews/model). status/customer_id/reviewed_* are
+// NEVER input — they are server/DB controlled. The admin decision surface is only
+// approve / request-changes / reject; 'changes_requested' REQUIRES the notes (they are
+// the requested changes shown to the customer).
+
+export const AdminReviewDecisionSchema = z
+  .object({
+    reviewId: z.string().uuid('Invalid review'),
+    status: z.enum(['approved', 'changes_requested', 'rejected']),
+    notes: z.string().trim().max(2000, 'Note too long').optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (d.status === 'changes_requested' && (!d.notes || d.notes.length < 10)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['notes'],
+        message: 'Describe the changes to request (at least 10 characters).',
+      });
+    }
+  });
+
+export const AdminReviewNoteSchema = z.object({
+  reviewId: z.string().uuid('Invalid review'),
+  note: z.string().trim().min(1, 'Note cannot be empty').max(2000, 'Note too long'),
+});
+
+// Customer "I'm opening the builder to work on this revision" signal. albumId only.
+export const OpenRevisionSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+});
+
+export type AdminReviewDecisionInput = z.infer<typeof AdminReviewDecisionSchema>;
+export type AdminReviewNoteInput = z.infer<typeof AdminReviewNoteSchema>;
+
+// ── CMS & Content Management (0031) ───────────────────────────────────────────
+// Mirrors the DB CHECK enums (lib/cms/model). status/published_at/created_by/updated_by
+// are NEVER set from these inputs — they are server/DB controlled. metadata holds the
+// per-type extras (kept permissive here; per-type specifics are lightly checked).
+
+const CONTENT_TYPE_VALUES = [
+  'blog', 'faq', 'testimonial', 'legacy_story', 'homepage_section', 'announcement',
+] as const;
+const CONTENT_STATUS_VALUES = ['draft', 'published', 'archived'] as const;
+
+// metadata: a flat record of strings / numbers / booleans (per-type keys defined in the
+// model config). Bounded to keep payloads sane.
+const CmsMetadataSchema = z
+  .record(z.string().max(40), z.union([z.string().max(2000), z.number(), z.boolean()]))
+  .optional()
+  .default({});
+
+export const CmsSaveSchema = z
+  .object({
+    id: z.string().uuid().optional(), // present = update; absent = create
+    type: z.enum(CONTENT_TYPE_VALUES),
+    title: z.string().trim().min(1, 'Title is required').max(200, 'Title is too long'),
+    // Optional explicit slug; when omitted the server derives one from the title.
+    slug: z
+      .preprocess(
+        (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+        z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/, 'Slug must be lowercase letters, numbers and dashes.').optional(),
+      ),
+    excerpt: z.string().trim().max(500, 'Excerpt is too long').optional(),
+    content: z.string().max(20000, 'Content is too long').optional(),
+    coverImage: z
+      .preprocess(
+        (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+        z.string().url('Cover image must be a valid URL').max(1000).optional(),
+      ),
+    metadata: CmsMetadataSchema,
+  })
+  .superRefine((d, ctx) => {
+    // Testimonial rating, when present, must be an integer 1–5.
+    if (d.type === 'testimonial') {
+      const r = d.metadata?.rating;
+      if (r !== undefined && (typeof r !== 'number' || !Number.isInteger(r) || r < 1 || r > 5)) {
+        ctx.addIssue({ code: 'custom', path: ['metadata', 'rating'], message: 'Rating must be a whole number from 1 to 5.' });
+      }
+    }
+  });
+
+export const CmsStatusSchema = z.object({
+  id: z.string().uuid('Invalid content'),
+  status: z.enum(CONTENT_STATUS_VALUES),
+});
+
+export const CmsBulkStatusSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Select at least one item').max(100, 'Too many items'),
+  status: z.enum(CONTENT_STATUS_VALUES),
+});
+
+export const CmsDuplicateSchema = z.object({
+  id: z.string().uuid('Invalid content'),
+});
+
+export type CmsSaveInput = z.infer<typeof CmsSaveSchema>;
+export type CmsStatusInput = z.infer<typeof CmsStatusSchema>;
+
+// ── Template Management (0032) ────────────────────────────────────────────────
+// Mirrors the DB CHECK enums (lib/templates/model). geometry is shape-checked here AND
+// re-validated by validateGeometry() in the action + activation gate. status/slug/actor are
+// server/DB controlled (status defaults to 'inactive' on create).
+
+const TEMPLATE_CATEGORY_VALUES = ['solo', 'pair', 'collage', 'panoramic', 'story'] as const;
+const TEMPLATE_STATUS_VALUES = ['active', 'inactive', 'archived'] as const;
+
+const GeometryRectSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  w: z.number().gt(0).max(1),
+  h: z.number().gt(0).max(1),
+});
+
+// base ∈ the existing renderer primitives; overlays are numeric rects (≤ 50). Deeper bounds
+// (x+w≤1, finiteness) are enforced by validateGeometry() — re-run server-side before write.
+const TemplateGeometrySchema = z.object({
+  base: z.enum(['single-pair', 'double-spread']),
+  overlays: z.array(GeometryRectSchema).max(50).default([]),
+});
+
+export const TemplateSaveSchema = z.object({
+  id: z.string().uuid().optional(), // present = update; absent = create
+  name: z.string().trim().min(1, 'Name is required').max(120, 'Name is too long'),
+  slug: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+    z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/, 'Slug must be lowercase letters, numbers and dashes.').optional(),
+  ),
+  description: z.string().trim().max(500, 'Description is too long').optional(),
+  category: z.enum(TEMPLATE_CATEGORY_VALUES),
+  geometry: TemplateGeometrySchema,
+  previewImage: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+    z.string().url('Preview image must be a valid URL').max(1000).optional(),
+  ),
+});
+
+export const TemplateStatusSchema = z.object({
+  id: z.string().uuid('Invalid template'),
+  status: z.enum(TEMPLATE_STATUS_VALUES),
+});
+
+export const TemplateDuplicateSchema = z.object({
+  id: z.string().uuid('Invalid template'),
+});
+
+export type TemplateSaveInput = z.infer<typeof TemplateSaveSchema>;
+export type TemplateStatusInput = z.infer<typeof TemplateStatusSchema>;
+
+// ── Courier & Shipping (0033) ─────────────────────────────────────────────────
+// Mirrors the DB CHECK enums (lib/shipping/model). shipment_status/external_reference are
+// server/DB/provider controlled — never client input beyond the bounded fields below.
+
+const COURIER_VALUES = ['shiprocket', 'delhivery', 'bluedart', 'dtdc', 'other'] as const;
+const SHIPMENT_STATUS_VALUES = [
+  'created', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'failed',
+] as const;
+
+const TrackingNumberSchema = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+  z.string().min(3, 'Tracking number too short').max(64, 'Tracking number too long').optional(),
+);
+
+export const ShipmentCreateSchema = z.object({
+  orderId: z.string().uuid('Invalid order'),
+  courier: z.enum(COURIER_VALUES),
+  trackingNumber: TrackingNumberSchema,
+});
+
+export const ShipmentUpdateSchema = z.object({
+  shipmentId: z.string().uuid('Invalid shipment'),
+  courier: z.enum(COURIER_VALUES).optional(),
+  trackingNumber: TrackingNumberSchema,
+});
+
+export const ShipmentStatusSchema = z.object({
+  shipmentId: z.string().uuid('Invalid shipment'),
+  status: z.enum(SHIPMENT_STATUS_VALUES),
+});
+
+export const ShipmentIdSchema = z.object({
+  shipmentId: z.string().uuid('Invalid shipment'),
+});
+
+export type ShipmentCreateInput = z.infer<typeof ShipmentCreateSchema>;
+export type ShipmentStatusInput = z.infer<typeof ShipmentStatusSchema>;
+
 export type AddressInput = z.infer<typeof AddressSchema>;
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
 export type CancelOrderInput = z.infer<typeof CancelOrderSchema>;

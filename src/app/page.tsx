@@ -51,6 +51,21 @@ export default function HomePage() {
           </p>
         </div>
       </div>
+
+      {/* Footer — public content surfaces */}
+      <footer className="px-6 py-8 sm:px-10">
+        <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+          <Link href="/stories" className="transition-colors hover:text-foreground">
+            Stories
+          </Link>
+          <Link href="/testimonials" className="transition-colors hover:text-foreground">
+            Testimonials
+          </Link>
+          <Link href="/faq" className="transition-colors hover:text-foreground">
+            FAQ
+          </Link>
+        </div>
+      </footer>
     </main>
   );
 }

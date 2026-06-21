@@ -5,6 +5,7 @@ import { createServiceClient } from '@/lib/supabase/service';
 import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema } from '@/lib/validations';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { sendReviewStatusEmail, sendReviewAdminSubmittedEmail } from '@/lib/email/review-events';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -215,6 +216,22 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
     console.error('submitAlbum error:', error);
     return { ok: false, error: 'Could not submit album.' };
   }
+
+  // Phase 9C — enter / re-enter the parallel ADVISORY review workflow. This is purely
+  // additive: it creates or resets the album_reviews row to 'pending_review' (and resets
+  // any active revision to 'resubmitted'), and notifies. It NEVER gates checkout and
+  // never touches orders/payments/PDF/fulfilment. Best-effort: a failure here must not
+  // break the (already successful) submit. Covers both first submit and resubmit.
+  try {
+    await admin.rpc('submit_album_for_review', { p_album_id: albumId, p_customer_id: user.id });
+    await Promise.all([
+      sendReviewAdminSubmittedEmail(albumId),
+      sendReviewStatusEmail(albumId, 'pending_review'),
+    ]);
+  } catch (e) {
+    console.error('[review] submit hook — continuing', String(e));
+  }
+
   return { ok: true };
 }
 

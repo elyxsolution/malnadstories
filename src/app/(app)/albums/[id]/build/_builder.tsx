@@ -27,6 +27,8 @@ import {
   ArrowDown,
   Trash2,
   Wand2,
+  MessageSquareWarning,
+  LayoutTemplate as LayoutTemplateIcon,
 } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
@@ -36,6 +38,9 @@ import Navigator from './_navigator';
 import ShortcutsOverlay from './_shortcuts';
 import Assistant, { type AssistKind } from './_assistant';
 import Proposal from './_proposal';
+import LayoutPanel from './_layout-panel';
+import { type ActiveTemplate } from '@/lib/templates/catalog';
+import { type TemplateGeometry } from '@/lib/templates/model';
 import Preview from './_preview';
 import PhotoEditor from './_photo-editor';
 import QuickCrop from './_quick-crop';
@@ -57,6 +62,7 @@ import {
   canAdd,
   isAlbumComplete,
   placedPhotoIds,
+  requiredBaseCount,
   type Block,
   type LayoutTemplate,
   type Overlay,
@@ -67,6 +73,7 @@ import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { useWorkerGate } from '@/components/worker/use-worker-gate';
 import { LUX_PRIMARY, CompletionSeal, Sprig } from '@/components/brand';
+import { reviewStatusLabel, reviewStatusChip } from '@/lib/reviews/model';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 // "Add" button labels keyed to the user's vocabulary.
@@ -84,6 +91,8 @@ export default function Builder({
   initialBlocks,
   covers,
   initialCoverId,
+  initialReview,
+  layoutTemplates = [],
 }: {
   albumId: string;
   title: string;
@@ -93,6 +102,8 @@ export default function Builder({
   initialBlocks: Block[];
   covers: CoverOption[];
   initialCoverId: string | null;
+  initialReview: { status: string; requestedChanges: string | null } | null;
+  layoutTemplates?: ActiveTemplate[];
 }) {
   const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
   // History-backed layout state (client-only undo/redo). `blocks` is the present value;
@@ -100,6 +111,9 @@ export default function Builder({
   const blocksHist = useHistoryState<Block[]>(initialBlocks);
   const blocks = blocksHist.value;
   const [status, setStatus] = useState(initialStatus);
+  // Phase 9C — advisory album review (parallel to checkout; never gates editing). After a
+  // (re)submit the album re-enters 'pending_review'; we reflect that optimistically.
+  const [review, setReview] = useState(initialReview);
   const [view, setView] = useState<'edit' | 'preview'>('edit');
   const [editLayout, setEditLayout] = useState<'focus' | 'all'>('focus');
   const [current, setCurrent] = useState(0); // focused spread index
@@ -118,6 +132,8 @@ export default function Builder({
 
   // Layout assistant (deterministic; propose → preview → apply).
   const [assistantOpen, setAssistantOpen] = useState(false);
+  // Layout templates panel (Phase 9E) — applies a curated preset to the focused spread.
+  const [layoutPanelOpen, setLayoutPanelOpen] = useState(false);
   const [proposal, setProposal] = useState<{
     kind: AssistKind;
     strategy: number;
@@ -237,16 +253,23 @@ export default function Builder({
   const enginePhotos = photos.filter((p) => p.status === 'ready').map(toEngine);
   const availableEngine = availablePhotos.map(toEngine);
 
+  // Active layout presets as engine choices (overlay-slot geometry the auto-layout MAY use).
+  // Empty → the engine behaves exactly as before. Pure mapping; no renderer coupling.
+  const templateChoices = useMemo(
+    () => layoutTemplates.map((t) => ({ base: t.geometry.base, overlays: t.geometry.overlays })),
+    [layoutTemplates],
+  );
+
   const generate = (kind: AssistKind, strategy = 0) => {
     let proposed: Block[];
     let title: string;
     switch (kind) {
       case 'build':
-        proposed = autoLayout(enginePhotos, size, strategy);
+        proposed = autoLayout(enginePhotos, size, strategy, templateChoices);
         title = 'Build my album';
         break;
       case 'suggest':
-        proposed = regenerate(enginePhotos, size, strategy);
+        proposed = regenerate(enginePhotos, size, strategy, templateChoices);
         title = 'Suggested structure';
         break;
       case 'fill':
@@ -355,6 +378,39 @@ export default function Builder({
     mutateBlocks((prev) => prev.map((b) => (b.key === key ? { ...b, ...patch } : b)));
 
   const removeBlock = (key: string) => mutateBlocks((prev) => prev.filter((b) => b.key !== key));
+
+  /**
+   * Apply a layout PRESET to one block (Phase 9E). Produces an ordinary Block — sets the
+   * base primitive, keeps base photos that still fit, and fills the preset's overlay slots
+   * from (existing overlay photos → photos dropped from base → available tray photos).
+   * Photos that don't fit simply return to the tray (unplaced) — never deleted, never lost.
+   * Persists through the existing Save; no new save path, no renderer change.
+   */
+  const applyTemplateToBlock = (key: string, geometry: TemplateGeometry) => {
+    const block = blocks.find((b) => b.key === key);
+    if (!block) return;
+    const base = geometry.base;
+    const need = requiredBaseCount(base);
+    const baseFilled = block.photoIds.filter(Boolean);
+    const keptBase = baseFilled.slice(0, need);
+    const droppedBase = baseFilled.slice(need);
+
+    // Ordered, de-duplicated pool of photos available to fill the preset's overlay slots.
+    const seen = new Set<string>(keptBase);
+    const pool = [
+      ...block.overlays.map((o) => o.photoId),
+      ...droppedBase,
+      ...availablePhotos.map((p) => p.id),
+    ].filter((id) => id && !seen.has(id) && (seen.add(id), true));
+
+    const newOverlays: Overlay[] = geometry.overlays
+      .slice(0, pool.length)
+      .map((slot, i) => ({ photoId: pool[i], x: slot.x, y: slot.y, w: slot.w, h: slot.h }));
+
+    patchBlock(key, { template: base, photoIds: keptBase, overlays: newOverlays });
+    setLayoutPanelOpen(false);
+    setMessage({ kind: 'ok', text: 'Layout applied to this spread — review it, then Save.' });
+  };
 
   const moveBlock = (key: string, dir: -1 | 1) =>
     mutateBlocks((prev) => {
@@ -468,11 +524,19 @@ export default function Builder({
       return;
     }
     setDirty(false);
+    const wasChanges = review?.status === 'changes_requested';
     const res = await submitAlbum(albumId);
     setSubmitting(false);
     if (res.ok) {
       setStatus('submitted');
-      setMessage({ kind: 'ok', text: 'Album submitted! You can still edit it until you place an order.' });
+      // The album (re)enters review as pending; clear any prior requested-changes banner.
+      setReview({ status: 'pending_review', requestedChanges: null });
+      setMessage({
+        kind: 'ok',
+        text: wasChanges
+          ? 'Resubmitted for review. We’ll take another look and get back to you.'
+          : 'Album submitted for review! You can still edit it until you place an order.',
+      });
     } else {
       setMessage({ kind: 'err', text: res.error });
     }
@@ -539,6 +603,7 @@ export default function Builder({
         setQuickCrop(null);
         setCoverPicker(false);
         setPickedId(null);
+        setLayoutPanelOpen(false);
       } else if (view === 'edit' && editLayout === 'focus' && e.key === 'ArrowLeft') {
         setCurrent((c) => Math.max(0, c - 1));
       } else if (view === 'edit' && editLayout === 'focus' && e.key === 'ArrowRight') {
@@ -566,6 +631,11 @@ export default function Builder({
             {status === 'submitted' && (
               <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success ring-1 ring-success/20">
                 <CheckCircle2 className="h-3.5 w-3.5" /> Submitted
+              </span>
+            )}
+            {review && (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${reviewStatusChip(review.status)}`}>
+                {reviewStatusLabel(review.status)}
               </span>
             )}
             {dirty ? (
@@ -608,6 +678,12 @@ export default function Builder({
             <Wand2 /> Assistant
           </Button>
 
+          {layoutTemplates.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setLayoutPanelOpen(true)} title="Apply a layout to this spread">
+              <LayoutTemplateIcon /> Layouts
+            </Button>
+          )}
+
           <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
             <Button variant={view === 'edit' ? 'secondary' : 'ghost'} size="sm" onClick={() => setView('edit')}>
               <LayoutGrid /> Edit
@@ -632,7 +708,8 @@ export default function Builder({
             {saving ? <Loader2 className="animate-spin" /> : <Save />} Save
           </Button>
           <Button size="sm" onClick={submit} disabled={!complete || saving || submitting} className={LUX_PRIMARY}>
-            {submitting ? <Loader2 className="animate-spin" /> : <Send />} Submit
+            {submitting ? <Loader2 className="animate-spin" /> : <Send />}{' '}
+            {review?.status === 'changes_requested' ? 'Resubmit for Review' : 'Submit'}
           </Button>
 
           {status === 'submitted' && (
@@ -642,6 +719,32 @@ export default function Builder({
           )}
         </div>
       </div>
+
+      {/* ── Review: requested changes banner (advisory; never blocks editing) ── */}
+      {review?.status === 'changes_requested' && (
+        <div className="flex flex-col gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 sm:flex-row sm:items-start sm:gap-3">
+          <MessageSquareWarning className="h-5 w-5 flex-none text-amber-600" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-foreground">Our team requested a few changes</p>
+            {review.requestedChanges ? (
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                {review.requestedChanges}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-muted-foreground">
+                See the details in your{' '}
+                <Link href="/reviews" className="font-medium text-primary hover:underline">
+                  review center
+                </Link>
+                .
+              </p>
+            )}
+            <p className="mt-2 text-xs text-muted-foreground">
+              Make the edits, then use <span className="font-medium text-foreground">Resubmit for Review</span> above.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Album progress: page budget meter + cover chip ──────────────────── */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border bg-card/90 p-4 shadow-panel backdrop-blur-sm">
@@ -929,6 +1032,18 @@ export default function Builder({
           photoCount={enginePhotos.length}
           availableCount={availableEngine.length}
           hasLayout={blocks.length > 0}
+        />
+      )}
+
+      {layoutPanelOpen && (
+        <LayoutPanel
+          templates={layoutTemplates}
+          hasTarget={blocks.length > 0}
+          onApply={(geometry) => {
+            const target = blocks[current] ?? blocks[0];
+            if (target) applyTemplateToBlock(target.key, geometry);
+          }}
+          onClose={() => setLayoutPanelOpen(false)}
         />
       )}
 

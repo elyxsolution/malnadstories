@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/service';
-import { requireAdmin } from '@/lib/auth/require-admin';
+import { requireCapability } from '@/lib/auth/require-admin';
 import { UpdateOrderStatusSchema, SetTrackingSchema, AddOrderNoteSchema } from '@/lib/validations';
 import { sendOrderStatusEmail } from '@/lib/email/events';
 
@@ -26,7 +26,7 @@ const RESULT_ERRORS: Record<string, string> = {
 export async function updateOrderStatus(input: unknown): Promise<AdminActionResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('order:update');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
@@ -66,7 +66,7 @@ export async function updateOrderStatus(input: unknown): Promise<AdminActionResu
 export async function setTracking(input: unknown): Promise<AdminActionResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('order:update');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
@@ -96,7 +96,7 @@ export async function setTracking(input: unknown): Promise<AdminActionResult> {
 export async function addOrderNote(input: unknown): Promise<AdminActionResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('order:note');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }

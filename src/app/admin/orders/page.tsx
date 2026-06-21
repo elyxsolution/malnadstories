@@ -4,9 +4,8 @@ import { db } from '@/db';
 import { orders, albums, profiles, coupons } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmails } from '@/lib/admin/users';
-import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
-import { adminStatusLabel } from '@/lib/orders/status';
 import OrdersFilters from './_filters';
+import OrdersTable, { type OrderRow } from './_orders-table';
 
 const PAGE_SIZE = 25;
 const VALID_STATUS = new Set([
@@ -71,6 +70,24 @@ export default async function AdminOrdersPage({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const emails = await adminUserEmails(rows.map((r) => r.userId));
 
+  // Global per-status counts for the filter tabs (independent of the current filter).
+  const statusRows = await db.select({ status: orders.status, c: count() }).from(orders).groupBy(orders.status);
+  const counts: Record<string, number> = {};
+  for (const s of statusRows) counts[s.status] = s.c;
+
+  // Serializable rows for the client table (multi-select / bulk advance / CSV export).
+  const tableRows: OrderRow[] = rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    total: String(r.total),
+    copies: r.copies,
+    placedAt: new Date(r.placedAt as unknown as string).toISOString(),
+    customerName: r.customerName,
+    email: emails.get(r.userId) ?? '',
+    albumTitle: r.albumTitle,
+    couponCode: r.couponCode,
+  }));
+
   const pageHref = (p: number) => {
     const sp = new URLSearchParams();
     if (q) sp.set('q', q);
@@ -88,7 +105,7 @@ export default async function AdminOrdersPage({
       </div>
 
       <div className="mb-4">
-        <OrdersFilters q={q} status={status} />
+        <OrdersFilters q={q} status={status} counts={counts} />
       </div>
 
       {rows.length === 0 ? (
@@ -96,47 +113,7 @@ export default async function AdminOrdersPage({
           No orders match these filters.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Order</th>
-                <th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Album</th>
-                <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-center">Copies</th>
-                <th className="px-3 py-2">Coupon</th>
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
-                    <Link href={`/admin/orders/${r.id}`} className="font-mono text-primary hover:underline">
-                      #{shortId(r.id)}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div>{r.customerName ?? '—'}</div>
-                    <div className="text-xs text-muted-foreground">{emails.get(r.userId) ?? ''}</div>
-                  </td>
-                  <td className="px-3 py-2">{r.albumTitle ?? '—'}</td>
-                  <td className="px-3 py-2 text-right">{inr(r.total)}</td>
-                  <td className="px-3 py-2 text-center">{r.copies}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{r.couponCode ?? '—'}</td>
-                  <td className="px-3 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
-                      {adminStatusLabel(r.status)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt as unknown as string)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <OrdersTable rows={tableRows} />
       )}
 
       {totalPages > 1 && (

@@ -1,7 +1,7 @@
 'use server';
 
 import { z } from 'zod';
-import { requireAdmin } from '@/lib/auth/require-admin';
+import { requireCapability } from '@/lib/auth/require-admin';
 import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
 
 export type AdminPdfResult = { ok: true } | { ok: false; error: string };
@@ -17,7 +17,7 @@ const AlbumId = z.string().uuid();
  */
 export async function adminGenerateAlbumPdf(input: unknown): Promise<AdminPdfResult> {
   try {
-    await requireAdmin();
+    await requireCapability('album:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }

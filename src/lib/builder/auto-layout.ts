@@ -14,10 +14,19 @@ import {
   type Block,
   type LayoutTemplate,
   type Overlay,
+  type Rect,
   PAGE_COST,
   requiredBaseCount,
   placedPhotoIds,
 } from './model';
+
+/**
+ * A renderer-safe layout preset the engine MAY draw overlay-slot geometry from (Phase 9E).
+ * Structurally identical to a layout_templates row's geometry, declared locally so the
+ * builder layer never depends on the templates module. Optional everywhere — when no
+ * templates are supplied the engine behaves byte-for-byte as before (fixed OVERLAY_SLOTS).
+ */
+export type TemplateChoice = { base: LayoutTemplate; overlays: Rect[] };
 
 /** Minimal photo shape the engine needs (a projection of the real photos row). */
 export type EnginePhoto = {
@@ -65,7 +74,6 @@ const OVERLAY_SLOTS: { x: number; y: number; w: number; h: number }[] = [
   { x: 0.06, y: 0.67, w: 0.2, h: 0.26 },
   { x: 0.74, y: 0.67, w: 0.2, h: 0.26 },
 ];
-const OVERLAY_CAP_PER_SPREAD = 4;
 
 function mk(i: number, template: LayoutTemplate, photoIds: string[], overlays: Overlay[]): Block {
   // Deterministic key (no randomness) — keys are client identity only, never persisted.
@@ -81,7 +89,12 @@ function mk(i: number, template: LayoutTemplate, photoIds: string[], overlays: O
  * Extra photos beyond the base slots become overlays (≤4/spread). Each photo is used at
  * most once; if photos run short, empty single-pair blocks pad to size (a valid draft).
  */
-export function autoLayout(photos: EnginePhoto[], size: number, strategyIndex = 0): Block[] {
+export function autoLayout(
+  photos: EnginePhoto[],
+  size: number,
+  strategyIndex = 0,
+  templates: TemplateChoice[] = [],
+): Block[] {
   const sorted = sortPhotos(photos);
   const blocksNeeded = Math.max(0, Math.floor(size / 2));
   const mode = ((strategyIndex % 3) + 3) % 3;
@@ -112,25 +125,55 @@ export function autoLayout(photos: EnginePhoto[], size: number, strategyIndex = 
   // Pad to the exact leaf budget so consumed === size (empty slots = a valid draft).
   while (blocks.length < blocksNeeded) blocks.push(mk(blocks.length, 'single-pair', [], []));
 
-  // Leftover photos → overlays, round-robin across spreads, capped at 4 each.
+  // Per-spread overlay slot geometry. With no templates this returns the fixed
+  // OVERLAY_SLOTS for every spread (identical to the original behavior). With active
+  // templates, each spread deterministically adopts a matching template's overlay slots,
+  // so auto-layout "chooses from active templates" without any randomness.
+  const slotsFor = makeSlotsFor(blocks, templates, strategyIndex);
+
+  // Leftover photos → overlays, round-robin across spreads, capped at each spread's slot count.
   const leftovers = sorted.filter((p) => !used.has(p.id));
-  distributeOverlays(blocks, leftovers, used);
+  distributeOverlays(blocks, leftovers, used, slotsFor);
 
   return blocks;
 }
 
-function distributeOverlays(blocks: Block[], leftovers: EnginePhoto[], used: Set<string>): void {
+/** Choose, per spread index, the overlay slot rects to use (template-driven or default). */
+function makeSlotsFor(
+  blocks: Block[],
+  templates: TemplateChoice[],
+  strategyIndex: number,
+): (index: number) => { x: number; y: number; w: number; h: number }[] {
+  if (templates.length === 0) return () => OVERLAY_SLOTS;
+  return (index: number) => {
+    const base = blocks[index]?.template;
+    // Prefer templates whose base matches this spread; fall back to any template.
+    const matches = templates.filter((t) => t.base === base);
+    const pool = matches.length ? matches : templates;
+    const chosen = pool[(index + strategyIndex) % pool.length];
+    return chosen.overlays.length ? chosen.overlays : OVERLAY_SLOTS;
+  };
+}
+
+function distributeOverlays(
+  blocks: Block[],
+  leftovers: EnginePhoto[],
+  used: Set<string>,
+  slotsFor: (index: number) => { x: number; y: number; w: number; h: number }[],
+): void {
   if (blocks.length === 0) return;
   let bi = 0;
   for (const p of leftovers) {
     let tries = 0;
-    while (blocks[bi % blocks.length].overlays.length >= OVERLAY_CAP_PER_SPREAD && tries < blocks.length) {
+    while (blocks[bi % blocks.length].overlays.length >= slotsFor(bi % blocks.length).length && tries < blocks.length) {
       bi += 1;
       tries += 1;
     }
     if (tries >= blocks.length) break; // every spread is full
-    const block = blocks[bi % blocks.length];
-    const slot = OVERLAY_SLOTS[block.overlays.length % OVERLAY_SLOTS.length];
+    const idx = bi % blocks.length;
+    const block = blocks[idx];
+    const slots = slotsFor(idx);
+    const slot = slots[block.overlays.length % slots.length];
     block.overlays.push({ photoId: p.id, ...slot });
     used.add(p.id);
     bi += 1;
@@ -173,8 +216,13 @@ export function orderByDate(blocks: Block[], photos: EnginePhoto[]): Block[] {
 }
 
 /** "Suggest another structure" — a deterministic alternate full layout. */
-export function regenerate(photos: EnginePhoto[], size: number, strategyIndex: number): Block[] {
-  return autoLayout(photos, size, strategyIndex);
+export function regenerate(
+  photos: EnginePhoto[],
+  size: number,
+  strategyIndex: number,
+  templates: TemplateChoice[] = [],
+): Block[] {
+  return autoLayout(photos, size, strategyIndex, templates);
 }
 
 /** Derived, read-only summary of a generated layout (for the proposal card). Not a data model. */

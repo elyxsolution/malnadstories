@@ -1,11 +1,20 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { profiles, orders, albums, couponRedemptions, coupons } from '@/db/schema';
+import { profiles, orders, albums, couponRedemptions, coupons, auditLog } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmail } from '@/lib/admin/users';
 import { inr, shortId, fmtDate, fmtDateTime, statusChip } from '@/lib/admin/format';
+
+const ACTIVITY_LABEL: Record<string, string> = {
+  'order.created': 'Order placed',
+  'order.paid': 'Payment confirmed',
+  'order.status_changed': 'Order status changed',
+  'order.tracking_set': 'Tracking added',
+  'order.note_added': 'Internal note added',
+  'coupon.created': 'Coupon created',
+};
 
 export default async function AdminCustomerDetail({ params }: { params: { id: string } }) {
   await requireAdmin();
@@ -13,7 +22,7 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
   const [profile] = await db.select().from(profiles).where(eq(profiles.id, params.id)).limit(1);
   if (!profile) notFound();
 
-  const [email, orderRows, albumRows, redemptions] = await Promise.all([
+  const [email, orderRows, albumRows, redemptions, activity] = await Promise.all([
     adminUserEmail(profile.id),
     db
       .select({
@@ -45,6 +54,19 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
       .leftJoin(coupons, eq(couponRedemptions.couponId, coupons.id))
       .where(eq(couponRedemptions.userId, params.id))
       .orderBy(desc(couponRedemptions.redeemedAt)),
+    // Activity timeline — audit_log rows whose metadata embeds this customer_id.
+    db
+      .select({
+        action: auditLog.action,
+        entityType: auditLog.entityType,
+        entityId: auditLog.entityId,
+        metadata: auditLog.metadata,
+        createdAt: auditLog.createdAt,
+      })
+      .from(auditLog)
+      .where(sql`${auditLog.metadata}->>'customer_id' = ${params.id}`)
+      .orderBy(desc(auditLog.createdAt))
+      .limit(30),
   ]);
 
   return (
@@ -135,6 +157,36 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
               </span>
             </li>
           ))}
+        </ul>
+      )}
+
+      <h2 className="mt-6 mb-2 text-sm font-semibold">Activity ({activity.length})</h2>
+      {activity.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No recorded activity yet.</p>
+      ) : (
+        <ul className="space-y-0">
+          {activity.map((a, i) => {
+            const meta = (a.metadata ?? {}) as Record<string, unknown>;
+            const detail =
+              a.action === 'order.status_changed' && meta.from && meta.to ? `${meta.from} → ${meta.to}` : a.entityType;
+            return (
+              <li key={i} className="flex items-start gap-3 border-b py-2.5 last:border-0">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm">
+                    {ACTIVITY_LABEL[a.action] ?? a.action}
+                    {a.entityType === 'order' && (
+                      <Link href={`/admin/orders/${a.entityId}`} className="ml-1.5 font-mono text-xs text-primary hover:underline">
+                        #{shortId(a.entityId)}
+                      </Link>
+                    )}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{detail}</p>
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">{fmtDateTime(a.createdAt as unknown as string)}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

@@ -103,6 +103,13 @@ drizzle/
   0021_album_status_hardening.sql     column-scoped albums grants: status is server-only (submitAlbum→service role); INSERT(user_id,title,size,cover_template_id)/UPDATE(title,cover_template_id,updated_at); CHECK narrowed to (draft,submitted)
   0022_email_log.sql                  email delivery audit + idempotency (claim 'sending' → 'sent'/'failed'); service-write, admin-read. (0020/0021 still pending backlog)
   0025_album_pdf_recovery.sql         album_pdfs.requested_at + attempts — backend PDF stuck-job recovery (timeout + retry cap)
+  0028_support_center.sql             support_tickets + support_messages (customer-owned RLS); SECURITY DEFINER triggers (ticket-created/message audit + auto-transition) + admin RPCs (admin_set_support_status / admin_assign_support_ticket); admin-read, audited via log_audit
+  0029_refund_reprint.sql             refund_requests + reprint_requests (customer-owned RLS; column-scoped grants hide admin_notes/resolved_by; partial unique index = one active per order); SECURITY DEFINER created-triggers + admin status/note RPCs. RECORDS DECISIONS ONLY — no Razorpay/payment/order-status side effects
+  0030_album_review.sql               album_reviews (one per album) + revision_requests (customer-owned RLS; NO client writes — all transitions via SECURITY DEFINER RPCs: submit_album_for_review / mark_revision_in_progress / admin_set_album_review / admin_add_review_note); column grant hides reviewed_by; partial unique = one active revision per review. ADVISORY review layer — never gates checkout; no payment/PDF/order-status side effects
+  0031_cms.sql                        content_pages (admin-owned CMS: blog/faq/testimonial/legacy_story/homepage_section/announcement + metadata jsonb). PUBLIC-READ model (anon/authenticated SELECT published only; admins write via service role + restrictive deny). No bespoke RPCs — audit via log_audit, like cover_templates
+  0032_layout_templates.sql           layout_templates (admin-owned PRESET catalog: geometry = {base: single-pair|double-spread, overlays: Rect[]}). ACTIVE-read model (authenticated SELECT active only; admins write via service role + restrictive deny). Applying a preset emits an ordinary Block[] — no renderer/saveLayout/schema change. Audit via log_audit
+  0033_shipments.sql                  shipments (one/order) + shipment_events (append-only). SUPPLEMENTAL courier layer — independent of orders.status (never writes it). Child-of-order RLS (customers read own; admins write via service role + restrictive deny). Courier abstraction (Mock today). Audit via log_audit
+  0034_admin_roles.sql                admin_roles (one fixed back-office role per admin: super_admin/production/support/content). RBAC scoping ON TOP of the existing profiles.role='admin' gate (does NOT grant admin access). Service-role writes only + restrictive deny. Absent row → treated as super_admin (migration safety). Audit role.assigned/changed + access.denied
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
@@ -329,6 +336,13 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 19b. `drizzle/0021_album_status_hardening.sql` — column-scoped albums grants + status server-only (deploy code first)
 20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 are pending backlog, run when built)
 21. `drizzle/0025_album_pdf_recovery.sql` — album_pdfs.requested_at + attempts (backend PDF recovery)
+22. `drizzle/0028_support_center.sql` — Support Center (tickets + messages); **run SQL FIRST** (new code reads these tables/RPCs)
+23. `drizzle/0029_refund_reprint.sql` — Refund & Reprint requests; **run SQL FIRST** (new code reads these tables/RPCs)
+24. `drizzle/0030_album_review.sql` — Album Review & Request-Changes (Phase 9C); **run SQL FIRST** (new code reads these tables/RPCs)
+25. `drizzle/0031_cms.sql` — CMS content_pages (Phase 9D); **run SQL FIRST** (admin UI + public pages read this table)
+26. `drizzle/0032_layout_templates.sql` — Template catalog (Phase 9E); **run SQL FIRST** (admin UI + builder read this table)
+27. `drizzle/0033_shipments.sql` — Courier shipments + events (Phase 9F); **run SQL FIRST** (admin order page + customer order page read these tables)
+28. `drizzle/0034_admin_roles.sql` — Multi-role RBAC (Phase 9G); **run SQL FIRST** (the access layer reads `admin_roles`). No backfill — existing admins default to super_admin.
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
 > rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
@@ -730,9 +744,248 @@ components (Header/Footer/Button/Section/OrderSummary) + per-event templates.
   > **Note:** the reset *email body* is Supabase's auth template (brand it in the
   > Supabase dashboard, or move to an auth email hook → our Resend layer later).
 
+## Support Center (Phase 9A) — built
+
+Customer ↔ admin support tickets, additive and reusing the existing security model
+end to end (`0028_support_center.sql`). Two tables: `support_tickets` (customer-owned)
+and `support_messages` (conversation timeline; `is_internal` notes are admin-only).
+Linked `album_id`/`order_id` are nullable + `ON DELETE SET NULL` — no new ownership
+coupling into payments/uploads.
+- **Customer side** = authenticated client + RLS (`customer_id = auth.uid()`), exactly
+  like albums/addresses. `createTicket`/`replyToTicket` (`src/lib/actions/support.ts`);
+  the INSERT policies re-verify linked-album/order ownership + force `sender_type`/
+  `is_internal`. Pages: `/support` (list, search/filter), `/support/new` (linkable
+  album/order), `/support/[id]` (thread + reply). A non-owner/guessed id → `notFound()`
+  (no enumeration). Customers never see internal notes (RLS + explicit filter).
+- **Admin side** = `requireAdmin()` + service-role RPCs, like the orders console.
+  `adminReplyTicket` (service insert; the message trigger audits + auto-transitions),
+  `setTicketStatus` / `assignTicket` → `admin_set_support_status` / `admin_assign_support_ticket`
+  (`src/lib/actions/admin/support.ts`). The assignee is resolved server-side from
+  `requireAdmin()` — never client-supplied. Pages: `/admin/support` (queue + filters),
+  `/admin/support/[id]` (customer + related order/album + full thread incl. internal +
+  audit + reply/status/assign). Nav under **Relationships**.
+- **Audit** via `log_audit()` (0016): ticket-created (trigger, actor=customer),
+  every message (trigger: `support.replied`/`support.note_added`, actor=sender),
+  status/assignment changes (RPCs, actor=admin). `entity_type='support_ticket'`.
+- **Triggers** (SECURITY DEFINER) bump `updated_at` and apply light auto-transitions:
+  a customer reply reopens a waiting/resolved ticket; the first public admin reply on an
+  `open` ticket → `in_progress`. Tickets are never mutated through the client (RESTRICTIVE
+  deny on UPDATE/DELETE) — only via the definer triggers + admin RPCs.
+- **Notifications** reuse the existing email layer (`support-events.tsx` → shared
+  `SupportNotificationEmail`): ticket created (customer + ADMIN_EMAIL), admin reply,
+  resolved. Best-effort + skip-safe (same `sendTransactionalEmail` guarantees).
+
+## Refund & Reprint Management (Phase 9B) — built
+
+Customer-raised refund / reprint **requests** that admins review and decide
+(`0029_refund_reprint.sql`). **Records decisions only** — it never calls Razorpay,
+never touches payments/webhooks, and never changes `orders.status`. Financial/print
+execution stays manual. Two parallel tables (`refund_requests`, `reprint_requests`),
+both customer-owned, both reusing the Support Center security model.
+- **Customer side** = authenticated client + RLS. `createRefundRequest` /
+  `createReprintRequest` (`src/lib/actions/resolutions.ts`). **Column-scoped grants**:
+  customer may INSERT only `(order_id, support_ticket_id, reason|issue_type, description)`
+  — `status` defaults `'pending'`, and `admin_notes`/`resolved_by` are server-only and
+  **excluded from the customer SELECT grant** (PostgREST can't read them). The INSERT
+  `WITH CHECK` re-verifies order ownership + **eligibility** (refund ⇒ paid-family,
+  reprint ⇒ `delivered`) + linked-ticket ownership. **One active request per order** is a
+  partial unique index (`status in pending/under_review/approved`) backed by a server
+  pre-check. Pages under `/support`: `requests` (hub), `refunds|reprints/new`,
+  `refunds|reprints/[id]` (read-only status; a guessed/foreign id → `notFound()`).
+- **Admin side** = `requireAdmin()` + service-role RPCs. `setRefundStatus`/`setReprintStatus`
+  (forward-only state machine `pending→under_review→approved→completed`, + `rejected`;
+  enforced in `admin_set_*_status`) and `addRefundNote`/`addReprintNote`
+  (`src/lib/actions/admin/resolutions.ts`). Queues `/admin/refunds` + `/admin/reprints`
+  (shared `_resolutions/queue.tsx`: status/date filters, customer lookup), detail
+  `/admin/{refunds,reprints}/[id]` (shared `_resolutions/detail.tsx`: customer, order,
+  linked ticket, message, admin notes, audit + decision controls). Nav under
+  **Relationships**. `admin_notes` is the latest working note; full history lives in audit.
+- **Audit** via `log_audit()`: created (trigger, actor=customer), status_changed +
+  note_added (RPCs, actor=admin). `entity_type='refund_request'|'reprint_request'`.
+  `resolved_at`/`resolved_by` set on a decision (approved/rejected/completed).
+- **Notifications** reuse the email layer (`resolution-events.tsx` → shared
+  `SupportNotificationEmail`): submitted (customer + ADMIN_EMAIL), approved, rejected,
+  completed. Best-effort + skip-safe (`under_review` is intentionally silent).
+
+## Album Review & Request-Changes (Phase 9C) — built
+
+A **parallel, ADVISORY** review of a submitted album BEFORE checkout
+(`0030_album_review.sql`). When a customer submits, the album enters **Pending review**;
+an admin can **Approve / Request changes / Reject**; on "request changes" the customer
+gets the notes, re-opens the builder, edits, and **resubmits** — looping until approved.
+**It never gates checkout and never touches orders/payments/Razorpay/uploads/PDF/
+fulfilment/`albums.status`** — the only album write is still the pre-existing
+`submitAlbum` flip. Two tables: `album_reviews` (one per album) + `revision_requests`
+(the change-request timeline). Reuses the Support/Refund security model.
+- **Workflow entry**: `submitAlbum` (`src/lib/actions/builder.ts`) — after its existing
+  `status='submitted'` flip — best-effort calls the `submit_album_for_review` RPC (covers
+  first submit AND resubmit: a `changes_requested` album is already `submitted`, so the
+  builder's Submit, relabelled **"Resubmit for Review"**, resets the review). A failure
+  there never breaks submit.
+- **Customer side** = authenticated client + RLS (`customer_id = auth.uid()`); **no client
+  writes** (every transition is a SECURITY DEFINER RPC). Review Center at `/reviews`
+  (top-level nav) lists reviews; `/reviews/[id]` shows status, the reviewer's note, the
+  active revision's **requested changes**, and full history. When changes are requested,
+  **Open builder** fires `markRevisionInProgress` (`src/lib/actions/reviews.ts`, advisory:
+  `open`→`in_progress`) then navigates to the builder, which shows a requested-changes
+  banner. A guessed/foreign id → `notFound()`.
+- **Admin side** = `requireAdmin()` + service-role RPCs. `setAlbumReviewStatus` /
+  `addAlbumReviewNote` (`src/lib/actions/admin/reviews.ts`) → `admin_set_album_review`
+  (forward-only `pending_review→approved|changes_requested|rejected`; `changes_requested`
+  **requires** the note = the requested changes + opens a revision; `approved` completes the
+  active revision) / `admin_add_review_note`. Queue `/admin/reviews` + detail
+  `/admin/reviews/[id]` (Drizzle): customer, album, **existing `getAlbumReadiness`** panel
+  (no readiness logic duplicated), revision history, linked tickets/refunds/reprints, audit,
+  decision controls. Nav under **Catalog** (after Albums).
+- **Audit** via `log_audit()`: `review.created`/`review.resubmitted` (customer),
+  `review.status_changed`/`review.note_added` (admin), `revision.opened`/`.in_progress`/
+  `.resubmitted`/`.completed`. `entity_type='album_review'|'revision_request'`.
+- **Notifications** reuse the email layer (`review-events.tsx` → `SupportNotificationEmail`):
+  customer → received / changes_requested (incl. the requested changes) / approved /
+  rejected; admin → submitted/resubmitted. Best-effort + skip-safe.
+
+## CMS & Content Management (Phase 9D) — built
+
+An **additive, admin-owned** content subsystem (`0031_cms.sql`): one polymorphic
+`content_pages` table (types `blog`/`faq`/`testimonial`/`legacy_story`/`homepage_section`/
+`announcement`; statuses `draft`/`published`/`archived`) with per-type extras in a
+`metadata` jsonb. **Public-read model** (unlike the customer-owned 9A–9C tables): anon +
+authenticated may SELECT only **published** rows; all writes are service-role + restrictive
+deny. Touches nothing in payments/uploads/PDF/builder/orders/review-refund-reprint.
+Deliberately simple — markdown/plain-text storage, **no** rich-text editor / media manager /
+versioning.
+- **Write pattern** mirrors `cover_templates`, not the user-owned RPC tables: actions in
+  `src/lib/actions/admin/cms.ts` (`saveContent`/`setContentStatus`/`bulkSetContentStatus`/
+  `duplicateContent`) are gated, write via the **service role**, and record audit via
+  `svc.rpc('log_audit', …)` (`entity_type='content_page'`). No bespoke SQL RPCs. **Archive is
+  the soft-delete** (no hard delete; history immutable).
+- **RBAC seam (Phase 9G-ready):** every mutation goes through `requireCmsCapability(cap)`
+  (`src/lib/cms/access.ts`) — today delegates to `requireAdmin()`, but the `cms:edit`/
+  `cms:publish`/`cms:archive` capability is already threaded so RBAC can differentiate later.
+  **Never call `requireAdmin()` directly from a CMS action.**
+- **Admin UI** under **Content** nav: `/admin/cms` (dashboard — status/type counts + recent),
+  `/admin/cms/content` (Drizzle list: search/type/status filters + bulk publish/archive via
+  `_list.tsx`), `/admin/cms/content/{new,[id]}` → `_editor.tsx` (type-aware fields from
+  `TYPE_CONFIG` in `src/lib/cms/model.ts`; Save draft / Publish / Move-to-draft / Archive /
+  Restore / Duplicate).
+- **Public pages** (outside `(app)`, anon-readable, not middleware-guarded): `/faq`,
+  `/testimonials`, `/stories`. All read through `listPublished(type)`
+  (`src/lib/cms/public.ts`) which filters `status='published'` explicitly (defense in depth on
+  top of RLS) so drafts/archived **never leak**. `homepage_section`/`blog`/`announcement` are
+  manage-only for now (no public render yet). Landing page footer links the three pages.
+- **Audit-only** (Phase 10): `cms.created`/`updated`/`published`/`unpublished`/`archived`/
+  `duplicated`. **No emails, no customer notifications.**
+
+## Template Management Platform (Phase 9E) — built
+
+An **additive, admin-owned catalog of curated layout PRESETS** (`0032_layout_templates.sql`).
+The builder has only two renderer primitives (`single-pair`, `double-spread`) + generic
+overlay rects, all flowing through one `Block[]`; a template's `geometry` is
+`{ base: 'single-pair'|'double-spread', overlays: Rect[] }`, so **applying a template
+produces an ordinary `Block`** — nothing new ever reaches the renderer, `saveLayout`, the
+`BlockSchema` enum, or the `album_pages` CHECK. PDF parity, saveLayout compatibility, and
+no-photo-loss therefore hold **by construction**. Cover management (the spec's Phase 6)
+**already exists** at `/admin/covers` and is reused (linked from the templates area) — no
+cover changes.
+- **Geometry safety**: `validateGeometry()` (`src/lib/templates/model.ts`) is the single
+  source of truth (base ∈ existing primitives; overlays = bounded numeric rects inside
+  [0,1]; **no HTML/CSS/arbitrary keys**). It runs at the Zod boundary, in the save action,
+  AND as the **activation gate** — a template can only become `active` (selectable) if its
+  geometry validates. `listActiveTemplates()` (`catalog.ts`) re-validates on read (defense in
+  depth), so a malformed/inactive template can never reach the builder.
+- **Write pattern** mirrors covers: `src/lib/actions/admin/templates.ts`
+  (`saveTemplate`/`setTemplateStatus`/`duplicateTemplate`) is gated by
+  **`requireTemplateCapability(cap)`** (`access.ts`, the RBAC seam — `template:edit`/
+  `:publish`/`:archive`, delegates to `requireAdmin()` today), writes via service role, audits
+  via `log_audit` (`entity_type='layout_template'`). New templates start `inactive`; **archive
+  is the soft-delete**.
+- **Admin UI** under **Catalog → Layouts**: `/admin/templates` (Drizzle list + geometry
+  preview + Activate/Deactivate/Archive/Duplicate), `/admin/templates/{new,[id]}` →
+  `_editor.tsx` (name/description/category/base + numeric overlay-slot editor + **live
+  `_preview.tsx`** matching the builder canvas; activation blocked unless geometry valid).
+- **Builder integration** (additive; **no saveLayout change**): the build page loads
+  `listActiveTemplates()` → `Builder`; a **Layouts** toolbar button opens `_layout-panel.tsx`
+  which applies a preset to the focused spread via `applyTemplateToBlock` (existing
+  `patchBlock`): sets the base, keeps base photos that fit, fills the preset's overlay slots
+  from existing-overlay → dropped-base → tray photos; **anything that doesn't fit returns to
+  the tray — never deleted**. Persists through the existing Save.
+- **Auto-layout integration** (`src/lib/builder/auto-layout.ts`): `autoLayout`/`regenerate`
+  gained an **optional** `templates` param; when active templates exist the engine
+  deterministically draws each spread's overlay-slot geometry from a matching template, and
+  **when none exist the output is byte-for-byte identical to before**. Still
+  orientation/photo-count/page-count driven; no AI/ML/APIs; output stays `Block[]`.
+- **Audit-only**: `template.created`/`updated`/`activated`/`deactivated`/`archived`/
+  `duplicated`. No emails. `_photo-frame`/`_preview`/`_print-album`/`saveLayout`/`BlockSchema`/
+  `album_pages`/checkout/uploads/orders are **untouched**.
+
+## Courier & Shipping Integration (Phase 9F) — built
+
+An **additive, SUPPLEMENTAL** shipment layer (`0033_shipments.sql`): `shipments` (one per
+order) + append-only `shipment_events`. **`shipment_status` is independent of `orders.status`**
+— no shipment action ever writes `orders`/`payments`/webhooks, and the fulfilment lifecycle
+(`admin_update_order_status`), `setTracking` (the `orders.tracking_number/carrier` columns),
+checkout, payment, and the customer `orders.status` timeline (`_status.tsx`) are **untouched**.
+Admins still advance the order via the existing Fulfilment control; this adds structured
+courier metadata, an event log, and a courier-abstraction seam.
+- **Security** mirrors `payments` (child-of-order ownership): customers SELECT only shipments/
+  events for orders they own (RLS `EXISTS … orders o where o.id=order_id and o.user_id=auth.uid()`
+  + `is_admin()`); writes are service-role only + restrictive deny. **No tracking-number lookup
+  route** exists — a customer reaches a shipment only via an owned order (no enumeration); the
+  `tracking_number`/`external_reference` indexes are for a future service-role webhook only.
+- **Courier abstraction** (`src/lib/shipping/courier/`): a `CourierProvider` interface
+  (`createShipment`/`getTracking`/`cancelShipment`) + a deterministic, network-free
+  `MockCourierProvider`; `getCourierProvider(courier)` is the registry (returns the mock for
+  all couriers today — Shiprocket/Delhivery/BlueDart/DTDC are a one-file swap later).
+- **Actions** (`src/lib/actions/admin/shipments.ts`, gated by **`requireShippingCapability(cap)`**
+  — the RBAC seam — service-role writes + `log_audit` `entity_type='shipment'`): `createShipment`,
+  `updateShipment` (assign courier / add tracking), `setShipmentStatus` (bounded state machine;
+  "Mark dispatched" = `picked_up`), `cancelShipment` (→ `failed`), `syncTracking` (provider
+  refresh — the seam a real courier webhook replaces). Audit: `shipment.created`/`updated`/
+  `dispatched`/`delivered`/`failed`. **No emails.**
+- **UI**: admin order detail gets a `_shipment.tsx` panel (create/manage + event history) under
+  Fulfilment; the shipping dashboard adds a read-only Shipment-status column; the customer order
+  page renders a read-only **Shipment card** (courier/tracking/progress) BELOW the unchanged
+  `orders.status` timeline, only when a shipment exists.
+- **Future webhook**: `/api/webhooks/courier` is NOT built, but `external_reference` + the
+  append-only `shipment_events` + `syncTracking` are the ready seam (a webhook would append
+  events via the service role keyed on `external_reference`).
+
+## Multi-Role RBAC (Phase 9G) — built
+
+Replaces the binary admin/non-admin model with **fixed-role, capability-driven** authorization
+(`0034_admin_roles.sql`), additively and with no customer/payment/upload/PDF/lifecycle impact.
+**Capabilities are the enforcement unit**, never role string checks.
+- **Roles** (`src/lib/auth/capabilities.ts`, fixed — no custom roles, no editor):
+  `super_admin` (everything), `production` (orders/albums/shipping/reviews + analytics),
+  `support` (support/refunds/reprints/customers + order:view), `content` (cms/templates/covers).
+  `Capability` is a `domain:action` union; `ROLE_CAPABILITIES` maps role→bundle;
+  `roleHasCapability` is the predicate (super_admin = wildcard).
+- **Access layer** (`src/lib/auth/require-admin.ts`): `getAdminContext()` (cached) does
+  getUser → **profiles.role='admin' gate (unchanged; locked by 0019)** → resolves the
+  back-office role from `admin_roles` (**absent → super_admin**, the migration-safe default).
+  `requireCapability(cap)` checks the role, **audits `access.denied`**, and throws
+  `NotAuthorizedError` on denial. `requireAdmin()` remains as the base gate (any admin).
+- **Enforcement is layered**: (1) the admin **layout** route-guards every `/admin/**` before
+  render via `routeCapability(pathname)` (path from a middleware-set `x-pathname` header) →
+  redirects denied roles to `/admin/denied`; (2) **every admin action** independently calls
+  `requireCapability` (the authoritative boundary — the three seams `requireCms/Template/Shipping
+  Capability` now delegate here, and orders/covers/coupons/support/resolutions/reviews/pdf +
+  the admin PDF API route were migrated off bare `requireAdmin()`); (3) the **nav** filters to a
+  server-computed allow-list (`navHrefsForRole`) — UI hiding is never the security boundary.
+- **Role management**: `/admin/users` (super_admin only — `role:manage`) assigns one of the four
+  roles via `assignRole` (`src/lib/actions/admin/roles.ts`): service-role upsert, **forbids
+  self-edits + non-admin targets**, audits `role.assigned`/`role.changed`.
+- **Security invariants**: roles resolved server-side only (never from form/cookie/client);
+  `admin_roles` is service-role-write-only + restrictive RLS deny; the absent-row→super_admin
+  default applies **only after** the admin gate, so it can never promote a non-admin; service-role
+  actions still validate capability first. **Migration**: run `0034`, then deploy — existing
+  admins keep full access (super_admin default), scope teams by assigning roles later.
+
 ## What's NOT built yet (do not add until asked)
 
-- Refunds / post-paid cancellation (admin lifecycle is forward-only)
+- Refund/reprint **execution** (the request workflow is built — Phase 9B — but actually
+  issuing a Razorpay refund or kicking off a reprint order stays MANUAL by design) /
+  post-paid cancellation (admin order lifecycle is forward-only)
 - Welcome / album-submitted emails (optional; not built — low priority)
 - Auto-retry worker for `failed` emails (today: logged + idempotent; manual/cron resend)
 - Pre-press PDF tuning (exact bleed/DPI/ICC for the print partner)

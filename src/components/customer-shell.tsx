@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Library, Package, User, Plus } from 'lucide-react';
+import { Library, Package, User, Plus, LifeBuoy, ClipboardCheck } from 'lucide-react';
 import { Sprig } from '@/components/brand';
 
 /**
@@ -14,6 +14,8 @@ import { Sprig } from '@/components/brand';
 const NAV = [
   { href: '/dashboard', label: 'Your stories', icon: Library, match: (p: string) => p === '/dashboard' || p.startsWith('/albums') },
   { href: '/orders', label: 'Orders', icon: Package, match: (p: string) => p.startsWith('/orders') },
+  { href: '/reviews', label: 'Reviews', icon: ClipboardCheck, match: (p: string) => p.startsWith('/reviews') },
+  { href: '/support', label: 'Support', icon: LifeBuoy, match: (p: string) => p.startsWith('/support') },
   { href: '/account', label: 'Account', icon: User, match: (p: string) => p.startsWith('/account') },
 ];
 

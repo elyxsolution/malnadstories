@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { shippingLabel } from '@/lib/shipping';
 import { brandFontVars } from '@/lib/fonts';
 import OrderStatus from './_status';
+import ShipmentCard, { type CustomerShipment } from './_shipment-card';
 
 const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
@@ -47,6 +48,21 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
     | { full_name: string; line1: string; city: string; state: string; pincode: string }
     | null;
 
+  // Supplemental courier shipment (Phase 9F). RLS scopes this to the owner via the parent
+  // order; absent → the card simply doesn't render. The orders.status timeline is unchanged.
+  const { data: shipmentRow } = await supabase
+    .from('shipments')
+    .select('courier, tracking_number, shipment_status')
+    .eq('order_id', order.id)
+    .maybeSingle();
+  const shipment = shipmentRow
+    ? ({
+        courier: (shipmentRow as { courier: string }).courier,
+        trackingNumber: (shipmentRow as { tracking_number: string | null }).tracking_number,
+        shipmentStatus: (shipmentRow as { shipment_status: string }).shipment_status,
+      } satisfies CustomerShipment)
+    : null;
+
   const total = Number(order.total_amount);
   const subtotal = Number(order.subtotal_amount);
   const shipping = Number(order.shipping_amount);
@@ -70,6 +86,7 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
 
         <div className="mt-5">
           <OrderStatus orderId={order.id} albumId={order.album_id} initialStatus={order.status} />
+          {shipment && <ShipmentCard shipment={shipment} />}
         </div>
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2">

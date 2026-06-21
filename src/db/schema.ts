@@ -241,6 +241,223 @@ export const emailLog = pgTable('email_log', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ── Support Center (0028) ─────────────────────────────────────────────────────
+
+// Customer ↔ admin support tickets. Customer-owned (RLS customer_id = auth.uid());
+// admins read all + mutate via SECURITY DEFINER RPCs. Linked album/order are
+// nullable + ON DELETE SET NULL (no ownership coupling into payments/uploads).
+export const supportTickets = pgTable('support_tickets', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  customerId: uuid('customer_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  albumId: uuid('album_id').references(() => albums.id, { onDelete: 'set null' }),
+  orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+  category: text('category').notNull().default('other'),
+  priority: text('priority').notNull().default('medium'),
+  status: text('status').notNull().default('open'),
+  subject: text('subject').notNull(),
+  description: text('description').notNull(),
+  assignedTo: uuid('assigned_to').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+});
+
+// Ticket conversation timeline. Internal notes (is_internal) are admin-only (RLS).
+// Inserts fire a trigger that bumps the parent ticket + writes the audit row.
+export const supportMessages = pgTable('support_messages', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  ticketId: uuid('ticket_id')
+    .notNull()
+    .references(() => supportTickets.id, { onDelete: 'cascade' }),
+  senderType: text('sender_type').notNull(), // 'customer' | 'admin'
+  senderId: uuid('sender_id').references(() => profiles.id, { onDelete: 'set null' }),
+  body: text('body').notNull(),
+  isInternal: boolean('is_internal').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Refund & Reprint Management (0029) ────────────────────────────────────────
+
+// Customer-raised refund requests. RECORDS DECISIONS ONLY — never triggers a Razorpay
+// refund or touches orders/payments. Customer-owned (RLS); admins decide via RPCs.
+// admin_notes / resolved_by are server-only (hidden from authenticated by column grants).
+export const refundRequests = pgTable('refund_requests', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  customerId: uuid('customer_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  supportTicketId: uuid('support_ticket_id').references(() => supportTickets.id, { onDelete: 'set null' }),
+  reason: text('reason').notNull(),
+  description: text('description').notNull(),
+  status: text('status').notNull().default('pending'),
+  adminNotes: text('admin_notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: uuid('resolved_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// Customer-raised reprint requests (a fresh print of a delivered album). Same model
+// as refunds; never touches the PDF / print pipeline automatically — admins decide.
+export const reprintRequests = pgTable('reprint_requests', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  customerId: uuid('customer_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  supportTicketId: uuid('support_ticket_id').references(() => supportTickets.id, { onDelete: 'set null' }),
+  issueType: text('issue_type').notNull(),
+  description: text('description').notNull(),
+  status: text('status').notNull().default('pending'),
+  adminNotes: text('admin_notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: uuid('resolved_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// ── Album Review & Request-Changes (0030) ────────────────────────────────────
+
+// Parallel, advisory review of a submitted album BEFORE checkout. One row per album
+// (unique album_id). Customer-owned (RLS customer_id = auth.uid()); admins decide via
+// SECURITY DEFINER RPCs. review_notes is the customer-visible decision message;
+// reviewed_by is internal (hidden from authenticated by column-scoped grant). NEVER
+// touches orders/payments/PDF/fulfilment — records the review decision only.
+export const albumReviews = pgTable('album_reviews', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  albumId: uuid('album_id')
+    .notNull()
+    .references(() => albums.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('pending_review'),
+  reviewNotes: text('review_notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  reviewedBy: uuid('reviewed_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// One row per "request changes" loop. requested_changes is customer-visible. The
+// lifecycle (open → in_progress → resubmitted → completed) is driven by the definer
+// RPCs; a partial unique index allows only one active revision per review.
+export const revisionRequests = pgTable('revision_requests', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  albumReviewId: uuid('album_review_id')
+    .notNull()
+    .references(() => albumReviews.id, { onDelete: 'cascade' }),
+  albumId: uuid('album_id')
+    .notNull()
+    .references(() => albums.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  requestedChanges: text('requested_changes').notNull(),
+  status: text('status').notNull().default('open'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+});
+
+// ── CMS & Content Management (0031) ───────────────────────────────────────────
+
+// Admin-owned content (FAQs, testimonials, legacy stories, homepage sections, blog,
+// announcements). One polymorphic table; per-type extras live in `metadata`. Public-read
+// model (anon/authenticated SELECT published rows; admins write via service role). Never
+// coupled to customer albums/orders — pure marketing/help content.
+export const contentPages = pgTable('content_pages', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  type: text('type').notNull(),
+  status: text('status').notNull().default('draft'),
+  title: text('title').notNull(),
+  slug: text('slug').notNull(),
+  excerpt: text('excerpt'),
+  content: text('content'),
+  coverImage: text('cover_image'),
+  metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// ── Template Management (0032) ────────────────────────────────────────────────
+
+// Admin-owned catalog of curated layout PRESETS. `geometry` maps onto the existing two
+// renderer primitives ({ base: 'single-pair'|'double-spread', overlays: Rect[] }); applying
+// one produces an ordinary Block[]. Active-read model (authenticated SELECT active rows;
+// admins write via service role). Never reaches the renderer/saveLayout beyond the existing
+// Block shape — PDF parity by construction.
+export const layoutTemplates = pgTable('layout_templates', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  description: text('description'),
+  category: text('category').notNull(),
+  status: text('status').notNull().default('inactive'),
+  geometry: jsonb('geometry').notNull(),
+  previewImage: text('preview_image'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// ── Courier & Shipping (0033) ─────────────────────────────────────────────────
+
+// Supplemental shipment layer — INDEPENDENT of orders.status (never writes it). Structured
+// courier metadata + a courier-abstraction seam. Child-of-order ownership RLS (customers read
+// shipments for their own orders; admins write via service role). One shipment per order.
+export const shipments = pgTable('shipments', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  courier: text('courier').notNull(),
+  trackingNumber: text('tracking_number'),
+  shipmentStatus: text('shipment_status').notNull().default('created'),
+  labelUrl: text('label_url'),
+  externalReference: text('external_reference'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// Append-only shipment timeline (courier events). Service-role insert only.
+export const shipmentEvents = pgTable('shipment_events', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  shipmentId: uuid('shipment_id')
+    .notNull()
+    .references(() => shipments.id, { onDelete: 'cascade' }),
+  eventType: text('event_type').notNull(),
+  description: text('description'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Multi-Role RBAC (0034) ────────────────────────────────────────────────────
+
+// Maps an existing admin (profiles.role='admin') to ONE fixed back-office role. Absent row
+// → treated as super_admin in the app (migration safety). Service-role writes only.
+export const adminRoles = pgTable('admin_roles', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(),
+  assignedBy: uuid('assigned_by').references(() => profiles.id, { onDelete: 'set null' }),
+  assignedAt: timestamp('assigned_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only audit trail (0016). Written only by SECURITY DEFINER functions;
 // admins read only. Order-related events embed {order_id, album_id, customer_id}.
 export const auditLog = pgTable('audit_log', {

@@ -2,47 +2,121 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Package, Ticket, Users, Image as ImageIcon, BookImage } from 'lucide-react';
+import {
+  LayoutDashboard,
+  ClipboardList,
+  Factory,
+  Truck,
+  Users,
+  LifeBuoy,
+  BadgeIndianRupee,
+  RotateCcw,
+  Image as ImageIcon,
+  ClipboardCheck,
+  LayoutTemplate,
+  BookImage,
+  Ticket,
+  BarChart3,
+  Server,
+  Shield,
+  Settings,
+  FileText,
+  Newspaper,
+} from 'lucide-react';
 
-const ITEMS = [
-  { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { href: '/admin/orders', label: 'Orders', icon: Package, exact: false },
-  { href: '/admin/coupons', label: 'Coupons', icon: Ticket, exact: false },
-  { href: '/admin/customers', label: 'Customers', icon: Users, exact: false },
-  { href: '/admin/albums', label: 'Albums', icon: ImageIcon, exact: false },
-  { href: '/admin/covers', label: 'Covers', icon: BookImage, exact: false },
+type Item = { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
+
+const GROUPS: { label: string; items: Item[] }[] = [
+  { label: 'Operations', items: [{ href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true }] },
+  {
+    label: 'Fulfilment',
+    items: [
+      { href: '/admin/orders', label: 'Orders', icon: ClipboardList },
+      { href: '/admin/production', label: 'Production', icon: Factory },
+      { href: '/admin/shipping', label: 'Shipping', icon: Truck },
+    ],
+  },
+  {
+    label: 'Relationships',
+    items: [
+      { href: '/admin/customers', label: 'Customers', icon: Users },
+      { href: '/admin/support', label: 'Support', icon: LifeBuoy },
+      { href: '/admin/refunds', label: 'Refunds', icon: BadgeIndianRupee },
+      { href: '/admin/reprints', label: 'Reprints', icon: RotateCcw },
+    ],
+  },
+  {
+    label: 'Catalog',
+    items: [
+      { href: '/admin/albums', label: 'Albums', icon: ImageIcon },
+      { href: '/admin/reviews', label: 'Album Reviews', icon: ClipboardCheck },
+      { href: '/admin/templates', label: 'Layouts', icon: LayoutTemplate },
+      { href: '/admin/covers', label: 'Covers', icon: BookImage },
+      { href: '/admin/coupons', label: 'Coupons', icon: Ticket },
+    ],
+  },
+  {
+    label: 'Content',
+    items: [
+      { href: '/admin/cms', label: 'CMS', icon: FileText, exact: true },
+      { href: '/admin/cms/content', label: 'Content', icon: Newspaper },
+    ],
+  },
+  { label: 'Business', items: [{ href: '/admin/analytics', label: 'Analytics', icon: BarChart3 }] },
+  {
+    label: 'Platform',
+    items: [
+      { href: '/admin/system', label: 'System', icon: Server },
+      { href: '/admin/users', label: 'Users & Roles', icon: Shield },
+      { href: '/admin/settings', label: 'Settings', icon: Settings },
+    ],
+  },
 ];
 
-export default function AdminNav() {
+/**
+ * Operations command rail (Claude Design) — dark forest-green grouped left nav. Presentation
+ * only; every destination is an existing requireAdmin-gated route. Prefetch disabled so the
+ * always-present rail doesn't fan out RSC requests that race the refresh token.
+ */
+export default function AdminNav({ allowed }: { allowed: string[] }) {
   const pathname = usePathname();
+  // Filter to the server-computed allow-list (RBAC). Drop groups with no visible items.
+  const allow = new Set(allowed);
+  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => allow.has(it.href)) })).filter(
+    (g) => g.items.length > 0,
+  );
   return (
-    <nav className="flex items-center gap-1 overflow-x-auto border-b bg-card px-4">
-      <span className="mr-2 hidden shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:inline">
-        Operations
-      </span>
-      {ITEMS.map((it) => {
-        const active = it.exact ? pathname === it.href : pathname.startsWith(it.href);
-        const Icon = it.icon;
-        return (
-          <Link
-            key={it.href}
-            href={it.href}
-            // Prefetch disabled on the always-present admin nav: by default Next would
-            // prefetch all 5 admin routes whenever this bar is in view, firing 5
-            // concurrent RSC requests that each hit middleware getUser() + requireAdmin()
-            // and race to refresh/rotate the same refresh token (→ refresh_token_not_found
-            // + serialized auth stalls). Navigation is on click instead.
-            prefetch={false}
-            className={`flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors ${
-              active
-                ? 'border-primary font-medium text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Icon className="h-4 w-4" /> {it.label}
-          </Link>
-        );
-      })}
+    <nav className="sticky top-14 z-20 h-[calc(100vh-3.5rem)] w-[60px] flex-none overflow-y-auto bg-[#16271f] py-4 text-[#a9bdb0] sm:w-[218px]">
+      <div className="px-3 sm:px-4">
+        <p className="hidden text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5f7d6e] sm:block">Command Center</p>
+      </div>
+      {groups.map((g) => (
+        <div key={g.label} className="mt-4">
+          <p className="hidden px-4 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5f7d6e] sm:block">{g.label}</p>
+          <div className="flex flex-col gap-0.5 px-2">
+            {g.items.map((it) => {
+              const active = it.exact ? pathname === it.href : pathname.startsWith(it.href);
+              const Icon = it.icon;
+              return (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  prefetch={false}
+                  title={it.label}
+                  className={`flex items-center gap-3 rounded-[2px] border-l-2 px-2.5 py-2 text-[13px] transition-colors ${
+                    active
+                      ? 'border-[#ecd9ad] bg-white/[0.06] font-medium text-[#f5efe3]'
+                      : 'border-transparent text-[#a9bdb0] hover:bg-white/[0.04] hover:text-[#f5efe3]'
+                  }`}
+                >
+                  <Icon className="h-[18px] w-[18px] flex-none" />
+                  <span className="hidden sm:inline">{it.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   );
 }

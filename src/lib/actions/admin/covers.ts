@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'crypto';
 import { revalidatePath } from 'next/cache';
-import { requireAdmin } from '@/lib/auth/require-admin';
+import { requireCapability } from '@/lib/auth/require-admin';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignPut, deleteObject, ALLOWED_CONTENT_TYPES } from '@/lib/r2';
 import { enqueueCoverThumbnail } from '@/lib/queue';
@@ -28,7 +28,7 @@ export async function presignCoverUpload(
   input: unknown,
 ): Promise<{ ok: true; uploadUrl: string; key: string } | { ok: false; error: string }> {
   try {
-    await requireAdmin();
+    await requireCapability('cover:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
@@ -51,7 +51,7 @@ export async function presignCoverUpload(
 export async function createCover(input: unknown): Promise<CoverActionResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('cover:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
@@ -99,7 +99,7 @@ export async function createCover(input: unknown): Promise<CoverActionResult> {
 export async function setCoverActive(input: unknown): Promise<CoverActionResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('cover:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
@@ -153,7 +153,7 @@ export type DeleteCoverResult =
 export async function deleteCover(input: unknown): Promise<DeleteCoverResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('cover:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }

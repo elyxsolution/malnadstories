@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createServiceClient } from '@/lib/supabase/service';
-import { requireAdmin, NotAdminError } from '@/lib/auth/require-admin';
+import { requireCapability, NotAdminError } from '@/lib/auth/require-admin';
 import { presignGet } from '@/lib/r2';
 
 /**
  * GET /api/admin/albums/:id/pdf — admin preview-PDF download link.
  *
- * Unlike the customer route (RLS-scoped to the owner), this is admin-only: requireAdmin()
- * gates it, then the album_pdfs row is read with the service role (admin sees any
- * album's PDF). Returns a short-lived signed URL when a generated file exists.
+ * Unlike the customer route (RLS-scoped to the owner), this is admin-only. It lives OUTSIDE
+ * the admin layout, so it enforces RBAC itself: requireCapability('album:view') (production /
+ * super_admin), then the album_pdfs row is read with the service role. Returns a short-lived
+ * signed URL when a generated file exists.
  */
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   try {
-    await requireAdmin();
+    await requireCapability('album:view');
   } catch (e) {
     const status = e instanceof NotAdminError && e.message === 'Not signed in' ? 401 : 403;
     return NextResponse.json({ error: 'Forbidden' }, { status });

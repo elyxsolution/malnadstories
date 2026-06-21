@@ -9,6 +9,7 @@ import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import { type Photo } from './_uploader';
 import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
 import { listActiveCoverOptions } from '@/lib/covers';
+import { listActiveTemplates } from '@/lib/templates/catalog';
 import { brandFontVars } from '@/lib/fonts';
 
 type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null };
@@ -104,6 +105,10 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   const covers = await listActiveCoverOptions();
   let selectedCover = covers.find((c) => c.id === album.cover_template_id) ?? null;
 
+  // Active layout-template catalog (Phase 9E). Advisory presets the builder + auto-layout
+  // can apply; only ACTIVE + geometry-valid templates are returned. Never gates anything.
+  const layoutTemplates = await listActiveTemplates();
+
   // The album may reference a now-INACTIVE (soft-deleted) cover. It still renders in the
   // PDF (the print route resolves by id regardless of active), so resolve it for the
   // preview too — even though it won't appear in the active "Change cover" grid. RLS
@@ -135,6 +140,34 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     | 'generating'
     | 'ready'
     | 'failed';
+
+  // Phase 9C — current album review (advisory). album_reviews is service-only (ownership
+  // already proven by the RLS-scoped album load above). The latest active revision's
+  // requested-changes drives the builder banner. Never gates editing/checkout.
+  let initialReview: { status: string; requestedChanges: string | null } | null = null;
+  {
+    const { data: reviewRow } = await admin
+      .from('album_reviews')
+      .select('id, status')
+      .eq('album_id', album.id)
+      .maybeSingle();
+    const rv = reviewRow as { id: string; status: string } | null;
+    if (rv) {
+      let requestedChanges: string | null = null;
+      if (rv.status === 'changes_requested') {
+        const { data: rev } = await admin
+          .from('revision_requests')
+          .select('requested_changes')
+          .eq('album_review_id', rv.id)
+          .in('status', ['open', 'in_progress', 'resubmitted'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        requestedChanges = (rev as { requested_changes: string } | null)?.requested_changes ?? null;
+      }
+      initialReview = { status: rv.status, requestedChanges };
+    }
+  }
 
   if (paidOrder) {
     return (
@@ -170,6 +203,8 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialBlocks={initialBlocks}
         covers={covers}
         initialCoverId={album.cover_template_id}
+        initialReview={initialReview}
+        layoutTemplates={layoutTemplates}
       />
       </div>
     </div>

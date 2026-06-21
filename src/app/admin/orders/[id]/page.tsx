@@ -2,12 +2,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, count, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { orders, albums, coupons, addresses, payments, orderNotes, auditLog, profiles, emailLog } from '@/db/schema';
+import { orders, albums, coupons, addresses, payments, orderNotes, auditLog, profiles, emailLog, shipments, shipmentEvents } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmail, adminUserEmails } from '@/lib/admin/users';
 import { inr, shortId, fmtDateTime, statusChip } from '@/lib/admin/format';
 import { adminStatusLabel } from '@/lib/orders/status';
 import Fulfillment from './_fulfillment';
+import ShipmentPanel, { type ShipmentView } from './_shipment';
 import AdminPdfDownload from '../../_pdf-download';
 
 const AUDIT_LABEL: Record<string, string> = {
@@ -106,6 +107,36 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     ...audits.map((a) => a.actorId).filter(Boolean),
   ] as string[];
   const actorEmails = await adminUserEmails(actorIds);
+
+  // Supplemental shipment (one per order) + its append-only events (Phase 9F).
+  const [shipmentRow] = await db.select().from(shipments).where(eq(shipments.orderId, row.id)).limit(1);
+  const shipmentEventRows = shipmentRow
+    ? await db
+        .select({
+          id: shipmentEvents.id,
+          eventType: shipmentEvents.eventType,
+          description: shipmentEvents.description,
+          occurredAt: shipmentEvents.occurredAt,
+        })
+        .from(shipmentEvents)
+        .where(eq(shipmentEvents.shipmentId, shipmentRow.id))
+        .orderBy(desc(shipmentEvents.occurredAt))
+    : [];
+  const shipmentView: ShipmentView = shipmentRow
+    ? {
+        id: shipmentRow.id,
+        courier: shipmentRow.courier,
+        trackingNumber: shipmentRow.trackingNumber,
+        shipmentStatus: shipmentRow.shipmentStatus,
+        externalReference: shipmentRow.externalReference,
+        events: shipmentEventRows.map((e) => ({
+          id: e.id,
+          eventType: e.eventType,
+          description: e.description,
+          occurredAt: e.occurredAt as unknown as string,
+        })),
+      }
+    : null;
 
   const fullAddress = row.addrName
     ? `${row.addrName}, ${row.addrLine1}, ${row.addrCity}, ${row.addrState} — ${row.addrPincode}`
@@ -255,6 +286,9 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
             trackingNumber={row.trackingNumber}
             carrier={row.carrier}
           />
+
+          <h2 className="pt-2 text-sm font-semibold">Courier shipment</h2>
+          <ShipmentPanel orderId={row.id} shipment={shipmentView} />
         </div>
       </div>
     </div>

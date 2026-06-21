@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sum } from 'drizzle-orm';
 import { db } from '@/db';
-import { coupons, profiles } from '@/db/schema';
+import { coupons, couponRedemptions, profiles } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmails } from '@/lib/admin/users';
 import { inr, fmtDate } from '@/lib/admin/format';
@@ -59,6 +59,13 @@ export default async function AdminCouponsPage() {
 
   const emails = await adminUserEmails(rows.map((r) => r.createdBy).filter(Boolean) as string[]);
 
+  // Revenue impact: total discount actually redeemed per coupon (consumed on payment).
+  const impactRows = await db
+    .select({ couponId: couponRedemptions.couponId, total: sum(couponRedemptions.amountDiscounted) })
+    .from(couponRedemptions)
+    .groupBy(couponRedemptions.couponId);
+  const impact = new Map(impactRows.map((r) => [r.couponId, Number(r.total ?? 0)]));
+
   return (
     <div className="mx-auto max-w-6xl p-6">
       <div className="mb-4 flex items-center justify-between">
@@ -80,6 +87,7 @@ export default async function AdminCouponsPage() {
                 <th className="px-3 py-2">Type</th>
                 <th className="px-3 py-2 text-right">Value</th>
                 <th className="px-3 py-2 text-center">Uses</th>
+                <th className="px-3 py-2 text-right">Revenue impact</th>
                 <th className="px-3 py-2">Expires</th>
                 <th className="px-3 py-2">Created by</th>
                 <th className="px-3 py-2">Reason</th>
@@ -108,6 +116,9 @@ export default async function AdminCouponsPage() {
                     <td className="px-3 py-2 text-center">
                       {r.currentUses}
                       {r.maxUses != null ? ` / ${r.maxUses}` : ''}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                      {(impact.get(r.id) ?? 0) > 0 ? `− ${inr(impact.get(r.id) ?? 0)}` : '—'}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.expiresAt as unknown as string)}</td>
                     <td className="px-3 py-2 text-xs">

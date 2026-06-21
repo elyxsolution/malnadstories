@@ -16,7 +16,7 @@ const STATUSES = [
   'failed',
 ];
 
-export default function OrdersFilters({ q, status }: { q: string; status: string }) {
+export default function OrdersFilters({ q, status, counts }: { q: string; status: string; counts?: Record<string, number> }) {
   const router = useRouter();
   const params = useSearchParams();
 
@@ -51,10 +51,11 @@ export default function OrdersFilters({ q, status }: { q: string; status: string
         onChange={(e) => apply({ status: e.target.value })}
         className="h-8 rounded-lg border bg-background px-2 text-sm"
       >
-        <option value="">All statuses</option>
+        <option value="">All statuses{counts ? ` (${Object.values(counts).reduce((a, b) => a + b, 0)})` : ''}</option>
         {STATUSES.map((s) => (
           <option key={s} value={s}>
             {s}
+            {counts ? ` (${counts[s] ?? 0})` : ''}
           </option>
         ))}
       </select>

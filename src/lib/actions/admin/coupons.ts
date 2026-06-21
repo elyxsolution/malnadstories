@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/service';
-import { requireAdmin } from '@/lib/auth/require-admin';
+import { requireCapability } from '@/lib/auth/require-admin';
 import { CreateCouponSchema, SetCouponActiveSchema } from '@/lib/validations';
 import { generateCouponCode } from '@/lib/coupons';
 
@@ -22,7 +22,7 @@ export type AdminActionResult = { ok: true } | { ok: false; error: string };
 export async function createCoupon(input: unknown): Promise<CreateCouponResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('coupon:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
@@ -90,7 +90,7 @@ export async function createCoupon(input: unknown): Promise<CreateCouponResult> 
 export async function setCouponActive(input: unknown): Promise<AdminActionResult> {
   let actor: { userId: string };
   try {
-    actor = await requireAdmin();
+    actor = await requireCapability('coupon:manage');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
