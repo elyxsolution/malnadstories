@@ -73,9 +73,17 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-2">
         {status === 'generating' ? (
-          <Button variant="outline" size="sm" disabled>
-            <Loader2 className="animate-spin" /> Generating PDF…
-          </Button>
+          <>
+            <Button variant="outline" size="sm" disabled>
+              <Loader2 className="animate-spin" /> Generating PDF…
+            </Button>
+            {/* Manual escape from a permanently-stuck 'generating' row (e.g. the worker
+                died before the recovery sweep ran). Force-restarts via the same gated
+                action; the worker sweep is the automatic backstop. */}
+            <Button variant="ghost" size="sm" onClick={generate} disabled={busy} title="Restart if this has been generating too long">
+              {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />} Restart
+            </Button>
+          </>
         ) : status === 'ready' ? (
           <>
             <Button variant="outline" size="sm" onClick={download} disabled={downloading}>

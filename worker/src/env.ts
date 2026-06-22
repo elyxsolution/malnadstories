@@ -22,8 +22,14 @@ const EnvSchema = z.object({
   // Port the health/availability HTTP server binds to. Render injects PORT for Web
   // Services; locally it defaults so `GET /health` is reachable for the app's probe.
   PORT: z.coerce.number().int().positive().default(8080),
-  // Base URL the worker's headless Chromium uses to reach the print route.
-  APP_URL: z.string().url().default('http://localhost:3000'),
+  // Base URL the worker's headless Chromium uses to reach the print route. Trailing
+  // slashes are stripped so a value like `https://app.example.com/` can't produce a
+  // double-slash URL (`…//albums/…`) that 404s the print route and fails every PDF.
+  APP_URL: z
+    .string()
+    .url()
+    .default('http://localhost:3000')
+    .transform((v) => v.replace(/\/+$/, '')),
   KEEP_RAW_ORIGINAL: z
     .string()
     .optional()

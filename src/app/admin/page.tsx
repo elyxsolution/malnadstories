@@ -21,7 +21,16 @@ export default async function AdminDashboard() {
   // Compact system-health strip — only for roles with monitoring:view (content sees nothing
   // new; no extra queries run for them). Read-only; the full view lives at /admin/monitoring.
   const showHealth = roleHasCapability(ctx.role, 'monitoring:view');
-  const health = showHealth ? await collectHealth() : [];
+  // Best-effort: a collector failure must NEVER blank the whole dashboard — degrade the
+  // health strip to empty instead of throwing the page render.
+  let health: Awaited<ReturnType<typeof collectHealth>> = [];
+  if (showHealth) {
+    try {
+      health = await collectHealth();
+    } catch (e) {
+      console.error('[admin] dashboard health strip failed — degrading', String(e));
+    }
+  }
   const healthOverall = worstHealth(health.map((h) => h.status as HealthStatus));
 
   const now = new Date();
