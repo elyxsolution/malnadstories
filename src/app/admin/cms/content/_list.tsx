@@ -7,6 +7,8 @@ import { Loader2, CheckCircle2, Archive } from 'lucide-react';
 import { bulkSetContentStatus } from '@/lib/actions/admin/cms';
 import { typeLabel, statusLabel, statusChip } from '@/lib/cms/model';
 import { fmtDateTime, shortId } from '@/lib/admin/format';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 
 export type ContentRow = {
   id: string;
@@ -54,9 +56,11 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-        No content matches these filters.
-      </div>
+      <EmptyState
+        title="No matching content"
+        description="No content pages match these filters. Clear them, or create a new page to get started."
+        action={{ label: 'New content', href: '/admin/cms/content/new' }}
+      />
     );
   }
 
@@ -122,9 +126,7 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
                 </td>
                 <td className="px-3 py-2">{typeLabel(r.type)}</td>
                 <td className="px-3 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
-                    {statusLabel(r.status)}
-                  </span>
+                  <StatusBadge className={statusChip(r.status)} label={statusLabel(r.status)} />
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt)}</td>
               </tr>

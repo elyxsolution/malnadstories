@@ -9,6 +9,9 @@
 # worker (separate package with its own deps)
 worker/node_modules
 worker/.env
+# Puppeteer's Chrome binary — downloaded at build (postinstall) into the project-pinned
+# cache dir (.puppeteerrc.cjs); never commit the ~150 MB binary.
+worker/.cache
 
 # testing
 /coverage

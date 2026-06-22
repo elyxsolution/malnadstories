@@ -3,6 +3,8 @@ import { ArrowLeft, ArrowRight, RotateCcw, BadgeIndianRupee } from 'lucide-react
 import { createClient } from '@/lib/supabase/server';
 import CustomerShell from '@/components/customer-shell';
 import { Button } from '@/components/ui/button';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 import { statusLabel, statusChip, refundReasonLabel, reprintIssueLabel } from '@/lib/resolutions/model';
 
 type RefundRow = { id: string; order_id: string; reason: string; status: string; created_at: string };
@@ -64,7 +66,8 @@ export default async function RequestsHubPage() {
 
           <RequestSection
             title="Refunds"
-            empty="No refund requests yet."
+            emptyTitle="No refund requests yet"
+            emptyDesc="If something’s wrong with a paid order, request a refund above and track its outcome here."
             rows={refunds.map((r) => ({
               id: r.id,
               href: `/support/refunds/${r.id}`,
@@ -76,7 +79,8 @@ export default async function RequestsHubPage() {
           />
           <RequestSection
             title="Reprints"
-            empty="No reprint requests yet."
+            emptyTitle="No reprint requests yet"
+            emptyDesc="Received a delivered album with an issue? Request a reprint above and track it here."
             rows={reprints.map((r) => ({
               id: r.id,
               href: `/support/reprints/${r.id}`,
@@ -94,20 +98,20 @@ export default async function RequestsHubPage() {
 
 function RequestSection({
   title,
-  empty,
+  emptyTitle,
+  emptyDesc,
   rows,
 }: {
   title: string;
-  empty: string;
+  emptyTitle: string;
+  emptyDesc: string;
   rows: { id: string; href: string; detail: string; orderId: string; status: string; createdAt: string }[];
 }) {
   return (
     <section className="mt-11">
       <h2 className="font-display text-2xl font-medium tracking-tight text-primary">{title}</h2>
       {rows.length === 0 ? (
-        <p className="mt-3 border border-dashed bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
-          {empty}
-        </p>
+        <EmptyState className="mt-3" title={emptyTitle} description={emptyDesc} />
       ) : (
         <ul className="mt-4 divide-y divide-border border-y border-border">
           {rows.map((r) => (
@@ -115,9 +119,7 @@ function RequestSection({
               <Link href={r.href} className="group flex items-center gap-4 py-4 transition-colors hover:bg-card/60">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusChip(r.status)}`}>
-                      {statusLabel(r.status)}
-                    </span>
+                    <StatusBadge className={statusChip(r.status)} label={statusLabel(r.status)} />
                     <span className="text-[12px] text-muted-foreground">Order #{r.orderId.slice(0, 8)}</span>
                   </div>
                   <p className="mt-1.5 truncate font-display text-lg leading-tight text-primary">{r.detail}</p>

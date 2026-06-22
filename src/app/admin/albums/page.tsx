@@ -5,6 +5,8 @@ import { albums, profiles, orders } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmails } from '@/lib/admin/users';
 import { shortId, fmtDate, statusChip } from '@/lib/admin/format';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 
 export default async function AdminAlbumsPage() {
   await requireAdmin();
@@ -44,9 +46,10 @@ export default async function AdminAlbumsPage() {
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          No albums yet.
-        </div>
+        <EmptyState
+          title="No albums yet"
+          description="Albums appear here as customers create them. There's nothing to show yet."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -79,9 +82,8 @@ export default async function AdminAlbumsPage() {
                       {ord ? (
                         <Link href={`/admin/orders/${ord.id}`} className="inline-flex items-center gap-2 hover:underline">
                           <span className="font-mono text-primary">#{shortId(ord.id)}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(ord.status)}`}>
-                            {ord.status}
-                          </span>
+                          <StatusBadge className={statusChip(ord.status)} label={ord.status} />
+
                         </Link>
                       ) : (
                         <span className="text-muted-foreground">—</span>

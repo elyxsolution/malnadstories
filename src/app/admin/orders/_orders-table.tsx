@@ -7,6 +7,7 @@ import { Loader2, ArrowRight, Download, Check } from 'lucide-react';
 import { updateOrderStatus } from '@/lib/actions/admin/orders';
 import { adminStatusLabel } from '@/lib/orders/status';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
+import StatusBadge from '@/components/ui/status-badge';
 
 export type OrderRow = {
   id: string;
@@ -170,7 +171,7 @@ export default function OrdersTable({ rows }: { rows: OrderRow[] }) {
                 <td className="px-3 py-2 text-center">{r.copies}</td>
                 <td className="px-3 py-2 font-mono text-xs">{r.couponCode ?? '—'}</td>
                 <td className="px-3 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>{adminStatusLabel(r.status)}</span>
+                  <StatusBadge className={statusChip(r.status)} label={adminStatusLabel(r.status)} />
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt)}</td>
               </tr>

@@ -6,6 +6,8 @@ import { requireAdmin } from '@/lib/auth/require-admin';
 import { shortId, fmtDate, statusChip } from '@/lib/admin/format';
 import { adminStatusLabel } from '@/lib/orders/status';
 import { shipmentStatusLabel, shipmentStatusChip } from '@/lib/shipping/model';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 
 const DISPATCH_STATES = ['packed', 'shipped', 'delivered'];
 
@@ -49,9 +51,10 @@ export default async function AdminShippingPage() {
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          Nothing in dispatch right now.
-        </div>
+        <EmptyState
+          title="Nothing in dispatch"
+          description="Orders appear here once they reach packed, shipped, or delivered. Advance an order from its detail page to begin dispatch."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -84,15 +87,11 @@ export default async function AdminShippingPage() {
                   <td className="px-3 py-2">{r.carrier ?? '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs text-amber-700">{r.trackingNumber ?? '—'}</td>
                   <td className="px-3 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
-                      {adminStatusLabel(r.status)}
-                    </span>
+                    <StatusBadge className={statusChip(r.status)} label={adminStatusLabel(r.status)} />
                   </td>
                   <td className="px-3 py-2">
                     {r.shipmentStatus ? (
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${shipmentStatusChip(r.shipmentStatus)}`}>
-                        {shipmentStatusLabel(r.shipmentStatus)}
-                      </span>
+                      <StatusBadge className={shipmentStatusChip(r.shipmentStatus)} label={shipmentStatusLabel(r.shipmentStatus)} />
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
                     )}

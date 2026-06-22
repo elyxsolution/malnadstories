@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, Clock, XCircle, MessageSquareWarning, Eye } from 'lucide-react';
+import { CheckCircle2, Clock, XCircle, MessageSquareWarning, Eye } from 'lucide-react';
+import BackLink from '@/components/ui/back-link';
 import { createClient } from '@/lib/supabase/server';
 import CustomerShell from '@/components/customer-shell';
 import {
@@ -68,12 +69,7 @@ export default async function ReviewDetailPage({ params }: { params: { id: strin
     <CustomerShell email={user?.email ?? ''}>
       <div className="px-5 py-9 sm:px-8 lg:py-12">
         <div className="mx-auto max-w-2xl">
-          <Link
-            href="/reviews"
-            className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Album reviews
-          </Link>
+          <BackLink href="/reviews" label="Album reviews" />
 
           <div className="mt-4 flex flex-wrap items-center gap-2.5">
             <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${reviewStatusChip(review.status)}`}>

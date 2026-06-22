@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { ArrowRight, ClipboardCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import CustomerShell from '@/components/customer-shell';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 import { reviewStatusLabel, reviewStatusChip } from '@/lib/reviews/model';
 
 type ReviewRow = { id: string; album_id: string; status: string; updated_at: string };
@@ -48,18 +50,13 @@ export default async function ReviewCenterPage() {
           </p>
 
           {reviews.length === 0 ? (
-            <div className="mt-10 flex flex-col items-center gap-3 border border-dashed bg-card/40 px-6 py-16 text-center">
-              <ClipboardCheck className="h-7 w-7 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">
-                No albums in review yet. Submit an album from your dashboard to get started.
-              </p>
-              <Link
-                href="/dashboard"
-                className="mt-1 inline-flex items-center gap-1.5 text-[13px] font-medium text-primary hover:underline"
-              >
-                Go to your stories <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
+            <EmptyState
+              className="mt-10"
+              icon={ClipboardCheck}
+              title="No albums in review yet"
+              description="When you submit an album, our team checks it for print-readiness. Submit one from your dashboard to get started."
+              action={{ label: 'Go to your stories', href: '/dashboard' }}
+            />
           ) : (
             <ul className="mt-8 divide-y divide-border border-y border-border">
               {reviews.map((r) => (
@@ -70,9 +67,7 @@ export default async function ReviewCenterPage() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${reviewStatusChip(r.status)}`}>
-                          {reviewStatusLabel(r.status)}
-                        </span>
+                        <StatusBadge className={reviewStatusChip(r.status)} label={reviewStatusLabel(r.status)} />
                       </div>
                       <p className="mt-1.5 truncate font-display text-lg leading-tight text-primary">
                         {titles.get(r.album_id) ?? 'Your album'}

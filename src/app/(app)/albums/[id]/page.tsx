@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, PenLine, Eye, ShoppingCart, ReceiptText, MapPin, Calendar } from 'lucide-react';
+import { PenLine, Eye, ShoppingCart, ReceiptText, MapPin, Calendar } from 'lucide-react';
+import BackLink from '@/components/ui/back-link';
 import { createClient } from '@/lib/supabase/server';
 import { listActiveCoverOptions } from '@/lib/covers';
 import { getPaidOrder } from '@/lib/orders/album-lock';
@@ -63,12 +64,7 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
     <CustomerShell email={user?.email ?? ''}>
       <div className="mx-auto max-w-4xl px-5 py-9 sm:px-8">
         <div className="animate-rise">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Your stories
-          </Link>
+          <BackLink href="/dashboard" label="Your stories" />
 
           <div className="mt-5 grid gap-8 sm:grid-cols-[260px_1fr]">
             {/* Book + actions */}

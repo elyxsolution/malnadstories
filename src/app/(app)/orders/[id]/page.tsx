@@ -1,9 +1,8 @@
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { createClient } from '@/lib/supabase/server';
 import { shippingLabel } from '@/lib/shipping';
 import { brandFontVars } from '@/lib/fonts';
+import BackLink from '@/components/ui/back-link';
 import OrderStatus from './_status';
 import ShipmentCard, { type CustomerShipment } from './_shipment-card';
 
@@ -77,12 +76,7 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
   return (
     <div className={`${brandFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
       <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 lg:py-10">
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
-        </Link>
+        <BackLink href="/orders" label="Orders" />
 
         <div className="mt-5">
           <OrderStatus orderId={order.id} albumId={order.album_id} initialStatus={order.status} />

@@ -4,6 +4,8 @@ import { db } from '@/db';
 import { albumReviews, albums, profiles } from '@/db/schema';
 import { adminUserEmails } from '@/lib/admin/users';
 import { fmtDateTime, shortId } from '@/lib/admin/format';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 import { REVIEW_STATUSES, reviewStatusLabel, reviewStatusChip, isReviewStatus } from '@/lib/reviews/model';
 
 const PAGE_SIZE = 25;
@@ -150,9 +152,10 @@ export default async function ReviewQueue({
       </form>
 
       {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-          No reviews match these filters.
-        </div>
+        <EmptyState
+          title="No matching reviews"
+          description="No album reviews match these filters. Clear them to see every review in the queue."
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -187,9 +190,7 @@ export default async function ReviewQueue({
                       <div className="text-xs text-muted-foreground">{emails.get(r.customerId) ?? ''}</div>
                     </td>
                     <td className="px-3 py-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${reviewStatusChip(r.status)}`}>
-                        {reviewStatusLabel(r.status)}
-                      </span>
+                      <StatusBadge className={reviewStatusChip(r.status)} label={reviewStatusLabel(r.status)} />
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
                   </tr>

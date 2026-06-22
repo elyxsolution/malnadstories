@@ -1,15 +1,29 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, count, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { orders, albums, coupons, addresses, payments, orderNotes, auditLog, profiles, emailLog, shipments, shipmentEvents } from '@/db/schema';
+import {
+  orders,
+  albums,
+  coupons,
+  addresses,
+  payments,
+  orderNotes,
+  auditLog,
+  profiles,
+  emailLog,
+  shipments,
+  shipmentEvents,
+  albumReviews,
+  refundRequests,
+  reprintRequests,
+  supportTickets,
+} from '@/db/schema';
+import { createServiceClient } from '@/lib/supabase/service';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmail, adminUserEmails } from '@/lib/admin/users';
-import { inr, shortId, fmtDateTime, statusChip } from '@/lib/admin/format';
-import { adminStatusLabel } from '@/lib/orders/status';
-import Fulfillment from './_fulfillment';
-import ShipmentPanel, { type ShipmentView } from './_shipment';
-import AdminPdfDownload from '../../_pdf-download';
+import { inr } from '@/lib/admin/format';
+import OrderConsole, { type ConsoleAudit, type ConsoleNote } from './_console';
+import { type ShipmentView } from './_operations';
 
 const AUDIT_LABEL: Record<string, string> = {
   'order.status_changed': 'Status changed',
@@ -39,8 +53,6 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       couponCode: coupons.code,
       trackingNumber: orders.trackingNumber,
       carrier: orders.carrier,
-      shippedAt: orders.shippedAt,
-      deliveredAt: orders.deliveredAt,
       placedAt: orders.placedAt,
       addrName: addresses.fullName,
       addrLine1: addresses.line1,
@@ -88,36 +100,22 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
       .orderBy(desc(auditLog.createdAt))
       .limit(25),
     db
-      .select({
-        id: emailLog.id,
-        eventType: emailLog.eventType,
-        recipient: emailLog.recipient,
-        status: emailLog.status,
-        createdAt: emailLog.createdAt,
-      })
+      .select({ id: emailLog.id, eventType: emailLog.eventType, recipient: emailLog.recipient, status: emailLog.status, createdAt: emailLog.createdAt })
       .from(emailLog)
       .where(eq(emailLog.orderId, row.id))
       .orderBy(desc(emailLog.createdAt))
       .limit(15),
   ]);
 
-  // Resolve actor + author names for the notes/audit panels.
-  const actorIds = [
-    ...notes.map((n) => n.authorId).filter(Boolean),
-    ...audits.map((a) => a.actorId).filter(Boolean),
-  ] as string[];
+  // Actor/author names for the notes + audit panels.
+  const actorIds = [...notes.map((n) => n.authorId).filter(Boolean), ...audits.map((a) => a.actorId).filter(Boolean)] as string[];
   const actorEmails = await adminUserEmails(actorIds);
 
   // Supplemental shipment (one per order) + its append-only events (Phase 9F).
   const [shipmentRow] = await db.select().from(shipments).where(eq(shipments.orderId, row.id)).limit(1);
   const shipmentEventRows = shipmentRow
     ? await db
-        .select({
-          id: shipmentEvents.id,
-          eventType: shipmentEvents.eventType,
-          description: shipmentEvents.description,
-          occurredAt: shipmentEvents.occurredAt,
-        })
+        .select({ id: shipmentEvents.id, eventType: shipmentEvents.eventType, description: shipmentEvents.description, occurredAt: shipmentEvents.occurredAt })
         .from(shipmentEvents)
         .where(eq(shipmentEvents.shipmentId, shipmentRow.id))
         .orderBy(desc(shipmentEvents.occurredAt))
@@ -129,186 +127,78 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         trackingNumber: shipmentRow.trackingNumber,
         shipmentStatus: shipmentRow.shipmentStatus,
         externalReference: shipmentRow.externalReference,
-        events: shipmentEventRows.map((e) => ({
-          id: e.id,
-          eventType: e.eventType,
-          description: e.description,
-          occurredAt: e.occurredAt as unknown as string,
-        })),
+        events: shipmentEventRows.map((e) => ({ id: e.id, eventType: e.eventType, description: e.description, occurredAt: e.occurredAt as unknown as string })),
       }
     : null;
+
+  // Related records (read-only contextual links — shown only when they exist).
+  const [reviewRow, refundRow, reprintRow, supportRow] = await Promise.all([
+    db.select({ id: albumReviews.id, status: albumReviews.status }).from(albumReviews).where(eq(albumReviews.albumId, row.albumId)).limit(1),
+    db.select({ id: refundRequests.id, status: refundRequests.status }).from(refundRequests).where(eq(refundRequests.orderId, row.id)).orderBy(desc(refundRequests.createdAt)).limit(1),
+    db.select({ id: reprintRequests.id, status: reprintRequests.status }).from(reprintRequests).where(eq(reprintRequests.orderId, row.id)).orderBy(desc(reprintRequests.createdAt)).limit(1),
+    db.select({ id: supportTickets.id, status: supportTickets.status }).from(supportTickets).where(eq(supportTickets.orderId, row.id)).orderBy(desc(supportTickets.updatedAt)).limit(1),
+  ]);
+
+  // PDF status (album_pdfs is service-only; ownership already proven by the admin gate).
+  const svc = createServiceClient();
+  const { data: pdfRow } = await svc.from('album_pdfs').select('status').eq('album_id', row.albumId).maybeSingle();
+  const pdfStatus = ((pdfRow as { status: string } | null)?.status ?? 'idle');
 
   const fullAddress = row.addrName
     ? `${row.addrName}, ${row.addrLine1}, ${row.addrCity}, ${row.addrState} — ${row.addrPincode}`
     : '—';
 
+  // Precompute display strings server-side so the client console stays presentation-only.
+  const notesView: ConsoleNote[] = notes.map((n) => ({
+    id: n.id,
+    body: n.body,
+    author: (n.authorId && actorEmails.get(n.authorId)) || 'admin',
+    createdAt: n.createdAt as unknown as string,
+  }));
+  const auditsView: ConsoleAudit[] = audits.map((a) => {
+    const meta = (a.metadata ?? {}) as Record<string, unknown>;
+    const who = a.actorType === 'system' ? 'System' : (a.actorId && actorEmails.get(a.actorId)) || 'admin';
+    let detail = '';
+    if (a.action === 'order.status_changed') detail = `${meta.from} → ${meta.to}`;
+    else if (a.action === 'order.shipping_set') detail = `${meta.carrier} · ${meta.tracking_number}`;
+    else if (a.action === 'coupon.redeemed') detail = `${meta.code} (−${inr(String(meta.amount_discounted))})`;
+    return { id: a.id, label: AUDIT_LABEL[a.action] ?? a.action, detail, who, createdAt: a.createdAt as unknown as string };
+  });
+
   return (
-    <div className="mx-auto max-w-5xl p-6">
-      <p className="text-sm text-muted-foreground">
-        <Link href="/admin/orders" className="hover:underline">
-          Orders
-        </Link>
-        {' / '}#{shortId(row.id)}
-      </p>
-      <div className="mt-1 flex flex-wrap items-center gap-3">
-        <h1 className="font-mono text-xl font-bold">#{shortId(row.id)}</h1>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(row.status)}`}>
-          {adminStatusLabel(row.status)}
-        </span>
-        <span className="text-sm text-muted-foreground">Placed {fmtDateTime(row.placedAt as unknown as string)}</span>
-      </div>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        {/* Left column: customer, album, payment */}
-        <div className="space-y-6 lg:col-span-2">
-          <Section title="Customer">
-            <Row label="Name" value={row.customerName ?? '—'} />
-            <Row label="Email" value={email || '—'} />
-            <Row label="Phone" value={row.customerPhone ?? '—'} />
-            <Row label="Delivery address" value={fullAddress} />
-            <Row
-              label="Order history"
-              value={
-                <Link href={`/admin/customers/${row.userId}`} className="text-primary hover:underline">
-                  {orderCount} order{orderCount === 1 ? '' : 's'}
-                </Link>
-              }
-            />
-          </Section>
-
-          <Section title="Album">
-            <Row label="Title" value={row.albumTitle ?? '—'} />
-            <Row label="Album status" value={row.albumStatus ?? '—'} />
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Link
-                href={`/admin/albums/${row.albumId}`}
-                className="rounded-lg border px-3 py-1.5 text-sm hover:bg-muted"
-              >
-                View album
-              </Link>
-              <AdminPdfDownload albumId={row.albumId} />
-            </div>
-          </Section>
-
-          <Section title="Payment">
-            <Row label="Subtotal" value={inr(row.subtotal)} />
-            <Row label="Shipping" value={inr(row.shipping)} />
-            <Row label="Discount" value={Number(row.discount) > 0 ? `− ${inr(row.discount)}` : inr(0)} />
-            <Row label="Coupon" value={row.couponCode ?? '—'} />
-            <div className="mt-1 flex justify-between border-t pt-2 text-sm font-semibold">
-              <span>Total</span>
-              <span>{inr(row.total)}</span>
-            </div>
-            <Row label="Payment method" value={payment?.method ?? '—'} />
-            <Row label="Payment date" value={fmtDateTime(payment?.capturedAt as unknown as string)} />
-          </Section>
-
-          <Section title={`Internal notes (${notes.length})`}>
-            {notes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No notes yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {notes.map((n) => (
-                  <li key={n.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
-                    <p className="whitespace-pre-wrap">{n.body}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {(n.authorId && actorEmails.get(n.authorId)) || 'admin'} ·{' '}
-                      {fmtDateTime(n.createdAt as unknown as string)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          <Section title="Audit trail">
-            {audits.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No audit events yet.</p>
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {audits.map((a) => {
-                  const meta = (a.metadata ?? {}) as Record<string, unknown>;
-                  const who = a.actorType === 'system' ? 'System' : (a.actorId && actorEmails.get(a.actorId)) || 'admin';
-                  let detail = '';
-                  if (a.action === 'order.status_changed') detail = `${meta.from} → ${meta.to}`;
-                  else if (a.action === 'order.shipping_set') detail = `${meta.carrier} · ${meta.tracking_number}`;
-                  else if (a.action === 'coupon.redeemed') detail = `${meta.code} (−${inr(String(meta.amount_discounted))})`;
-                  return (
-                    <li key={a.id} className="flex flex-wrap items-baseline gap-x-2 border-b pb-1 last:border-0">
-                      <span className="font-medium">{AUDIT_LABEL[a.action] ?? a.action}</span>
-                      {detail && <span className="text-muted-foreground">{detail}</span>}
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {who} · {fmtDateTime(a.createdAt as unknown as string)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Section>
-
-          <Section title={`Email activity (${emails.length})`}>
-            {emails.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No emails sent for this order.</p>
-            ) : (
-              <ul className="space-y-1 text-sm">
-                {emails.map((m) => (
-                  <li key={m.id} className="flex flex-wrap items-baseline gap-x-2 border-b pb-1 last:border-0">
-                    <span className="font-medium">{m.eventType}</span>
-                    <span className="text-muted-foreground">{m.recipient}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        m.status === 'sent'
-                          ? 'bg-green-500/10 text-green-600'
-                          : m.status === 'failed'
-                            ? 'bg-destructive/10 text-destructive'
-                            : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {m.status}
-                    </span>
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {fmtDateTime(m.createdAt as unknown as string)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-        </div>
-
-        {/* Right column: fulfillment controls */}
-        <div className="space-y-3">
-          <h2 className="text-sm font-semibold">Fulfilment</h2>
-          <Fulfillment
-            orderId={row.id}
-            status={row.status}
-            trackingNumber={row.trackingNumber}
-            carrier={row.carrier}
-          />
-
-          <h2 className="pt-2 text-sm font-semibold">Courier shipment</h2>
-          <ShipmentPanel orderId={row.id} shipment={shipmentView} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border bg-card p-4">
-      <h2 className="mb-3 text-sm font-semibold">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex justify-between gap-4 py-0.5 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right">{value}</span>
-    </div>
+    <OrderConsole
+      order={{
+        id: row.id,
+        status: row.status,
+        placedAt: row.placedAt as unknown as string,
+        userId: row.userId,
+        albumId: row.albumId,
+        albumTitle: row.albumTitle,
+        albumStatus: row.albumStatus,
+        tracking: row.trackingNumber,
+        carrier: row.carrier,
+      }}
+      customer={{ name: row.customerName, email, phone: row.customerPhone, address: fullAddress, orderCount }}
+      payment={{
+        subtotal: row.subtotal,
+        shipping: row.shipping,
+        discount: row.discount,
+        total: row.total,
+        couponCode: row.couponCode,
+        method: payment?.method ?? null,
+        capturedAt: (payment?.capturedAt as unknown as string) ?? null,
+      }}
+      pdfStatus={pdfStatus}
+      shipment={shipmentView}
+      notes={notesView}
+      audits={auditsView}
+      emails={emails.map((m) => ({ id: m.id, eventType: m.eventType, recipient: m.recipient, status: m.status, createdAt: m.createdAt as unknown as string }))}
+      related={{
+        review: reviewRow[0] ?? null,
+        refund: refundRow[0] ?? null,
+        reprint: reprintRow[0] ?? null,
+        support: supportRow[0] ?? null,
+      }}
+    />
   );
 }

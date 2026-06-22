@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Search, Plus, LifeBuoy, SearchX, ArrowRight, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import StatusBadge from '@/components/ui/status-badge';
 import {
   categoryLabel,
   statusLabel,
@@ -152,16 +153,12 @@ export default function Tickets({ tickets }: { tickets: CustomerTicket[] }) {
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusChip(t.status)}`}>
-                            {statusLabel(t.status)}
-                          </span>
+                          <StatusBadge className={statusChip(t.status)} label={statusLabel(t.status)} />
                           <span className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                             {categoryLabel(t.category)}
                           </span>
                           {t.priority === 'high' && (
-                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${priorityChip(t.priority)}`}>
-                              {priorityLabel(t.priority)}
-                            </span>
+                            <StatusBadge className={priorityChip(t.priority)} label={priorityLabel(t.priority)} />
                           )}
                         </div>
                         <p className="mt-1.5 truncate font-display text-lg leading-tight text-primary">{t.subject}</p>

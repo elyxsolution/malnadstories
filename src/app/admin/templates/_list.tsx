@@ -7,6 +7,8 @@ import { Loader2, CheckCircle2, PauseCircle, Archive, Copy } from 'lucide-react'
 import { setTemplateStatus, duplicateTemplate } from '@/lib/actions/admin/templates';
 import { categoryLabel, statusLabel, statusChip, type TemplateGeometry } from '@/lib/templates/model';
 import { fmtDateTime, shortId } from '@/lib/admin/format';
+import EmptyState from '@/components/ui/empty-state';
+import StatusBadge from '@/components/ui/status-badge';
 import TemplatePreview from './_preview';
 
 export type TemplateRow = {
@@ -40,9 +42,11 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground">
-        No templates match these filters.
-      </div>
+      <EmptyState
+        title="No matching templates"
+        description="No layout templates match these filters. Clear them, or create a new template to get started."
+        action={{ label: 'New template', href: '/admin/templates/new' }}
+      />
     );
   }
 
@@ -64,9 +68,8 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                   {categoryLabel(r.category)} · #{shortId(r.id)}
                 </p>
               </div>
-              <span className={`flex-none rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
-                {statusLabel(r.status)}
-              </span>
+              <StatusBadge className={`flex-none ${statusChip(r.status)}`} label={statusLabel(r.status)} />
+
             </div>
 
             <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
