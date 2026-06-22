@@ -558,6 +558,10 @@ export default function Builder({
       onAssignBase={(slot, photoId) => assignBaseSlot(block.key, slot, photoId)}
       onClearBase={(slot) => clearBaseSlot(block.key, slot)}
       onQuickCrop={openQuickCrop}
+      onEditPhoto={(photoId) => {
+        const p = photoMap.get(photoId);
+        if (p) setEditingPhoto(p);
+      }}
       onAddOverlay={(photoId) => addOverlay(block.key, photoId)}
       onReplaceOverlay={(index, photoId) => replaceOverlay(block.key, index, photoId)}
       onPatchOverlays={(overlays) => patchOverlays(block.key, overlays)}
@@ -835,11 +839,16 @@ export default function Builder({
               <div className="mb-3 flex items-center gap-2">
                 <Sprig className="h-4 w-4 text-primary" />
                 <h2 className="font-display text-[15px] font-semibold tracking-tight">Photo Library</h2>
-                {photos.length > 0 && (
-                  <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-[11px] font-semibold tabular-nums text-secondary-foreground">
-                    {photos.length}
-                  </span>
-                )}
+                <span
+                  className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+                    photos.length >= photoCap(size)
+                      ? 'bg-warning/15 text-warning ring-1 ring-warning/25'
+                      : 'bg-secondary text-secondary-foreground'
+                  }`}
+                  title={`${photos.length} of ${photoCap(size)} photos used`}
+                >
+                  {photos.length} / {photoCap(size)}
+                </span>
               </div>
               <Uploader
                 albumId={albumId}

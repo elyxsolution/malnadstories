@@ -19,12 +19,15 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
   const [downloading, setDownloading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [failReason, setFailReason] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/albums/${albumId}/pdf`, { cache: 'no-store' });
       if (!res.ok) return;
-      const body = (await res.json()) as { status: PdfStatus };
+      const body = (await res.json()) as { status: PdfStatus; error?: string | null };
       setStatus(body.status);
+      setFailReason(body.status === 'failed' ? body.error ?? null : null);
     } catch {
       /* transient */
     }
@@ -53,7 +56,9 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
     setDownloading(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/admin/albums/${albumId}/pdf`);
+      // no-store: the just-generated 'ready' status + signed URL must never be served from
+      // a stale cached poll response (that read as "not available" even when ready).
+      const res = await fetch(`/api/admin/albums/${albumId}/pdf`, { cache: 'no-store' });
       const body = (await res.json()) as { status: PdfStatus; url: string | null };
       if (body.status === 'ready' && body.url) window.location.href = body.url;
       else setErr('No preview PDF available for this album yet.');
@@ -89,7 +94,11 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
             {busy ? <Loader2 className="animate-spin" /> : <FileText />} Generate PDF
           </Button>
         )}
-        {status === 'failed' && <span className="text-xs text-destructive">Last generation failed.</span>}
+        {status === 'failed' && (
+          <span className="text-xs text-destructive">
+            Last generation failed{failReason ? `: ${failReason}` : '.'}
+          </span>
+        )}
       </div>
       {err && <p className="text-xs text-destructive">{err}</p>}
     </div>

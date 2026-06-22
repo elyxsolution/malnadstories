@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ArrowUp, ArrowDown, Trash2, ImagePlus, X, Layers, Replace, Crop } from 'lucide-react';
+import { ArrowUp, ArrowDown, Trash2, ImagePlus, X, Layers, Replace, Crop, SlidersHorizontal } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
 import type { Photo } from './_uploader';
 import { PAGE_COST, TEMPLATE_LABEL, physicalStart, type Block, type Overlay } from '@/lib/builder/model';
@@ -32,6 +32,7 @@ export default function BlockCard({
   onAssignBase,
   onClearBase,
   onQuickCrop,
+  onEditPhoto,
   onAddOverlay,
   onReplaceOverlay,
   onPatchOverlays,
@@ -52,6 +53,8 @@ export default function BlockCard({
   onAssignBase: (slot: BaseSlot, photoId: string) => void;
   onClearBase: (slot: BaseSlot) => void;
   onQuickCrop: (photoId: string, frameAspect: number, showGutter: boolean) => void;
+  /** Open the FULL photo editor (crop/rotate/brightness/flip) for a placed photo. */
+  onEditPhoto: (photoId: string) => void;
   onAddOverlay: (photoId: string) => void;
   onReplaceOverlay: (index: number, photoId: string) => void;
   onPatchOverlays: (overlays: Overlay[]) => void;
@@ -185,6 +188,7 @@ export default function BlockCard({
             onDrop={(id) => onAssignBase('image', id)}
             onClear={() => onClearBase('image')}
             onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], 3 / 2, true) : undefined}
+            onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
           />
         ) : (
           <>
@@ -198,6 +202,7 @@ export default function BlockCard({
                 onDrop={(id) => onAssignBase('left', id)}
                 onClear={() => onClearBase('left')}
                 onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], 3 / 4, false) : undefined}
+                onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
               />
             </div>
             <div className="absolute left-1/2 top-0 h-full w-1/2">
@@ -210,6 +215,7 @@ export default function BlockCard({
                 onDrop={(id) => onAssignBase('right', id)}
                 onClear={() => onClearBase('right')}
                 onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], 3 / 4, false) : undefined}
+                onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
               />
             </div>
           </>
@@ -270,6 +276,21 @@ export default function BlockCard({
               >
                 <Replace className="h-3 w-3" />
               </button>
+              {photo && (
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditPhoto(o.photoId);
+                  }}
+                  aria-label="Edit overlay photo"
+                  title="Edit photo (crop, rotate, brightness, flip)"
+                  className="absolute right-1 top-8 z-10 rounded-md bg-background/80 p-1 opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition-opacity duration-150 hover:bg-background group-hover/ov:opacity-100"
+                >
+                  <SlidersHorizontal className="h-3 w-3" />
+                </button>
+              )}
               <div
                 onPointerDown={startOverlay(i, 'resize')}
                 onPointerMove={moveOverlay}
@@ -321,6 +342,7 @@ function BaseSlotView({
   onDrop,
   onClear,
   onCrop,
+  onEdit,
 }: {
   photo?: Photo;
   label: string;
@@ -330,6 +352,7 @@ function BaseSlotView({
   onDrop: (photoId: string) => void;
   onClear: () => void;
   onCrop?: () => void;
+  onEdit?: () => void;
 }) {
   const [over, setOver] = useState(false);
   // Tap-to-place: with a photo "picked up", clicking an EMPTY slot drops it here;
@@ -360,6 +383,20 @@ function BaseSlotView({
           <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/30 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
           {over && <div className="pointer-events-none absolute inset-0 z-[6] bg-primary/20 ring-2 ring-inset ring-primary" />}
           <div className="absolute right-1.5 top-1.5 z-[7] flex gap-1 opacity-0 transition-all duration-200 group-hover/base:opacity-100">
+            {onEdit && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+                aria-label="Edit photo"
+                title="Edit photo (crop, rotate, brightness, flip)"
+                className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+              </button>
+            )}
             {onCrop && (
               <button
                 type="button"

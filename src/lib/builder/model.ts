@@ -44,8 +44,10 @@ export const FRONT_MATTER_PAGES = COVER_PAGES + BLANK_PAGES; // 3
  * Max photos uploadable per album, keyed by album size (pages). With generic
  * overlays a page can use more than one photo, so the cap is higher than the page
  * count. Falls back to ~2× for any size not in the table.
+ *
+ * Caps are aligned to page count (Phase: Product Polish): 24→72, 36→102, 48→128.
  */
-export const PHOTO_CAP: Record<number, number> = { 24: 50, 36: 75, 48: 100 };
+export const PHOTO_CAP: Record<number, number> = { 24: 72, 36: 102, 48: 128 };
 
 export function photoCap(size: number): number {
   return PHOTO_CAP[size] ?? size * 2;

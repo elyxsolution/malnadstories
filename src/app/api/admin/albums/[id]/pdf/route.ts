@@ -26,11 +26,13 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   const svc = createServiceClient();
   const { data } = await svc
     .from('album_pdfs')
-    .select('status, r2_key, generated_at')
+    .select('status, r2_key, generated_at, error')
     .eq('album_id', params.id)
     .maybeSingle();
 
-  const row = (data ?? null) as { status: string; r2_key: string | null; generated_at: string | null } | null;
+  const row = (data ?? null) as
+    | { status: string; r2_key: string | null; generated_at: string | null; error: string | null }
+    | null;
   if (!row) return NextResponse.json({ status: 'idle', url: null });
 
   const url =
@@ -38,5 +40,8 @@ export async function GET(_request: Request, { params }: { params: { id: string 
       ? await presignGet(row.r2_key, 120, { downloadFilename: 'album-preview.pdf' })
       : null;
 
-  return NextResponse.json({ status: row.status, generatedAt: row.generated_at, url });
+  // Surface the worker-stored failure reason to the admin UI (admin-only — never sent to
+  // customers). This is what makes an `APP_URL`/print-route/render failure diagnosable
+  // instead of a generic dead-end.
+  return NextResponse.json({ status: row.status, generatedAt: row.generated_at, url, error: row.error });
 }

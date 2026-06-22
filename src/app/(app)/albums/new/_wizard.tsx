@@ -10,7 +10,6 @@ import {
   Calendar,
   Loader2,
   Image as ImageIcon,
-  Sparkles,
   CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,35 +20,54 @@ import { Wand2 } from 'lucide-react';
 import { createAlbumDraft } from '@/lib/actions/albums';
 import { saveLayout } from '@/lib/actions/builder';
 import { photoCap, type Block } from '@/lib/builder/model';
-import { autoLayout, summarizePlan, serializeBlocks, type EnginePhoto } from '@/lib/builder/auto-layout';
+import { autoLayout, summarizePlan, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
 import Book from '@/components/book';
 import Uploader, { type Photo } from '../[id]/build/_uploader';
 import Proposal from '../[id]/build/_proposal';
 import type { CoverOption } from '@/lib/covers';
 
-type Grouping = 'date' | 'place' | 'segment';
-const GROUP_TABS: { key: Grouping; label: string }[] = [
-  { key: 'date', label: 'By date' },
-  { key: 'place', label: 'By place' },
-  { key: 'segment', label: 'By chapter' },
-];
-
 type Product = { id: string; name: string; pages: number; basePrice: string };
 
-const STEPS = ['Begin', 'Format', 'Memories', 'Moments', 'Story', 'Review'] as const;
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+const STEPS = ['Begin', 'Format', 'Memories', 'Review'] as const;
+const ROMAN = ['I', 'II', 'III', 'IV'];
+const LAST_STEP = STEPS.length - 1; // 3 (Review)
 
 const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 const PHOTOS_PER_PAGE = 2; // rough estimate for "≈ pages"
 
+// ── Album period (Task: date UX) ────────────────────────────────────────────
+// Native date inputs give YYYY-MM-DD. We compose a single human-readable string and
+// store it in the EXISTING albums.travel_dates text column (no schema change). One date
+// → that date; both → a range. Backward-compatible: old free-text values still display.
+function formatDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function composePeriod(from: string, to: string): string {
+  if (from && to) return `${formatDate(from)} – ${formatDate(to)}`;
+  if (from) return formatDate(from);
+  if (to) return formatDate(to);
+  return '';
+}
+
 /**
- * Album Creation wizard (Design Completion Phase 1) — the prototype's 6-step narrative
- * on top of the EXISTING backend. Begin/Format collect the album; the draft is created
- * via createAlbumDraft (the createAlbum flow, returning an id) on entering Memories so
- * the existing Uploader can upload into it; Moments/Story are advisory, deterministic
- * (grouped by EXIF date — no AI service); Review opens the existing builder.
+ * Album Creation wizard — a four-step narrative on top of the EXISTING backend:
+ *   Begin → Format → Memories (upload) → Review.
+ * Begin/Format collect the album; the draft is created via createAlbumDraft on entering
+ * Memories so the existing Uploader can upload into it; Review opens the existing builder
+ * (optionally after a deterministic "Build it for me" auto-layout). No AI.
  */
-export default function CreateWizard({ products, covers }: { products: Product[]; covers: CoverOption[] }) {
+export default function CreateWizard({
+  products,
+  covers,
+  templates = [],
+}: {
+  products: Product[];
+  covers: CoverOption[];
+  /** Active layout presets — feed the deterministic auto-layout for varied "Build it for me". */
+  templates?: TemplateChoice[];
+}) {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [maxStep, setMaxStep] = useState(0);
@@ -57,7 +75,8 @@ export default function CreateWizard({ products, covers }: { products: Product[]
   // Begin + Format
   const [title, setTitle] = useState('');
   const [destination, setDestination] = useState('');
-  const [travelDates, setTravelDates] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [description, setDescription] = useState('');
   const [productId, setProductId] = useState(products[0]?.id ?? '');
   const [coverId, setCoverId] = useState<string | null>(null);
@@ -67,10 +86,6 @@ export default function CreateWizard({ products, covers }: { products: Product[]
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
-
-  // Story (advisory, not persisted — there is no chapters entity)
-  const [chapters, setChapters] = useState<string[]>(['Arrival', 'Exploration', 'Highlights', 'Final Memories']);
-  const [grouping, setGrouping] = useState<Grouping>('date');
   const [entering, setEntering] = useState(false); // cinematic builder-entry veil
 
   // "Build it for me" proposal (deterministic engine; preview before any persistence).
@@ -79,6 +94,10 @@ export default function CreateWizard({ products, covers }: { products: Product[]
 
   const product = products.find((p) => p.id === productId);
   const cap = product ? photoCap(product.pages) : 100;
+
+  // From <= To validation (both optional; only an explicit inverted range is an error).
+  const dateError = !!fromDate && !!toDate && fromDate > toDate;
+  const travelPeriod = composePeriod(fromDate, toDate);
 
   // ── Poll for processing photos (reuses GET /api/photos) ──────────────────────
   const onUploaded = useCallback((p: Photo) => setPhotos((prev) => [...prev, p]), []);
@@ -134,7 +153,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
   }, [albumId, photos]);
 
   const go = (s: number) => {
-    if (s < 0 || s > 5) return;
+    if (s < 0 || s > LAST_STEP) return;
     setStep(s);
     setMaxStep((m) => Math.max(m, s));
     if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
@@ -150,7 +169,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
       productId,
       coverTemplateId: coverId,
       destination,
-      travelDates,
+      travelDates: travelPeriod,
       description,
     });
     setCreating(false);
@@ -169,7 +188,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
       go(2);
       return;
     }
-    if (step === 5) {
+    if (step === LAST_STEP) {
       // Cinematic builder-entry veil, then hand off to the existing builder.
       if (!albumId) return;
       setEntering(true);
@@ -180,7 +199,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
   };
 
   const canContinue = (() => {
-    if (step === 0) return title.trim().length > 0;
+    if (step === 0) return title.trim().length > 0 && !dateError;
     if (step === 1) return !!productId && !!coverId;
     return true;
   })();
@@ -191,14 +210,15 @@ export default function CreateWizard({ products, covers }: { products: Product[]
   const locked = !!albumId; // Begin/Format are fixed once the album is created
 
   // "Build it for me" — deterministic engine → preview → Confirm persists via the
-  // existing saveLayout, then the cinematic veil launches the existing builder.
+  // existing saveLayout, then the cinematic veil launches the existing builder. Active
+  // templates (when present) give the layout varied, geometry-driven overlay slots.
   const enginePhotos: EnginePhoto[] = ready.map((p) => ({ id: p.id, width: p.width ?? null, height: p.height ?? null, takenAt: p.takenAt }));
   const photoMap = new Map(photos.map((p) => [p.id, p]));
   const selectedCover = covers.find((c) => c.id === coverId) ?? null;
 
   const buildForMe = (strategy = 0) => {
     if (!product) return;
-    const blocks = autoLayout(enginePhotos, product.pages, strategy);
+    const blocks = autoLayout(enginePhotos, product.pages, strategy, templates);
     setProposal({ blocks, strategy, summary: summarizePlan(blocks, enginePhotos.length) });
   };
   const acceptWiz = async () => {
@@ -216,7 +236,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
     setTimeout(() => router.push(`/albums/${albumId}/build`), 1700);
   };
 
-  const continueLabel = ['Continue', 'Continue', 'Organize my photos', 'Looks right', 'Use this structure', 'Open the builder'][step];
+  const continueLabel = ['Continue', 'Continue', 'Review', 'Open the builder'][step];
 
   return (
     <div className="brand-surface flex min-h-[calc(100vh-3.5rem)] flex-col">
@@ -285,14 +305,37 @@ export default function CreateWizard({ products, covers }: { products: Product[]
                   className="h-auto border-0 border-b border-input bg-transparent px-0 py-2 font-display text-2xl font-medium shadow-none focus-visible:border-primary focus-visible:ring-0"
                 />
               </Field>
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field label="Destination · optional" icon={<MapPin className="h-4 w-4 text-primary/70" />}>
-                  <Input value={destination} onChange={(e) => setDestination(e.target.value)} disabled={locked} placeholder="Where to?" maxLength={120} />
-                </Field>
-                <Field label="Travel dates · optional" icon={<Calendar className="h-4 w-4 text-primary/70" />}>
-                  <Input value={travelDates} onChange={(e) => setTravelDates(e.target.value)} disabled={locked} placeholder="When?" maxLength={60} />
-                </Field>
-              </div>
+              <Field label="Destination · optional" icon={<MapPin className="h-4 w-4 text-primary/70" />}>
+                <Input value={destination} onChange={(e) => setDestination(e.target.value)} disabled={locked} placeholder="Where to?" maxLength={120} />
+              </Field>
+              {/* Album Period — native date pickers (both optional; From ≤ To). */}
+              <Field label="Album period · optional" icon={<Calendar className="h-4 w-4 text-primary/70" />}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="fromDate" className="text-xs font-normal text-muted-foreground">From</Label>
+                    <Input
+                      id="fromDate"
+                      type="date"
+                      value={fromDate}
+                      max={toDate || undefined}
+                      onChange={(e) => setFromDate(e.target.value)}
+                      disabled={locked}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="toDate" className="text-xs font-normal text-muted-foreground">To</Label>
+                    <Input
+                      id="toDate"
+                      type="date"
+                      value={toDate}
+                      min={fromDate || undefined}
+                      onChange={(e) => setToDate(e.target.value)}
+                      disabled={locked}
+                    />
+                  </div>
+                </div>
+                {dateError && <p className="text-xs text-destructive">The “From” date must be on or before the “To” date.</p>}
+              </Field>
               <Field label="A few words · optional">
                 <textarea
                   value={description}
@@ -405,8 +448,11 @@ export default function CreateWizard({ products, covers }: { products: Product[]
                 </div>
                 {photos.length > 0 && (
                   <div className="text-right">
-                    <div className="font-display text-3xl font-semibold tabular-nums">{photos.length}</div>
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">photos · ≈ {estPages} pages</div>
+                    <div className="font-display text-3xl font-semibold tabular-nums">
+                      {photos.length}
+                      <span className="text-base text-muted-foreground/60"> / {cap}</span>
+                    </div>
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">photos used · ≈ {estPages} pages</div>
                   </div>
                 )}
               </div>
@@ -420,7 +466,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> All {photos.length} added
+                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> All {photos.length} added · {cap - photos.length} left
                       </>
                     )}
                   </div>
@@ -443,112 +489,11 @@ export default function CreateWizard({ products, covers }: { products: Product[]
             </div>
           )}
 
-          {/* STEP 3 — MOMENTS (deterministic grouping; no AI) */}
+          {/* STEP 3 — REVIEW */}
           {step === 3 && (
             <div className="space-y-6">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <Eyebrow chapter="IV" label="Moments" />
-                  <h1 className="mt-3 font-display text-[2.2rem] font-semibold leading-none tracking-tight">
-                    Your trip, in moments.
-                  </h1>
-                </div>
-                <div className="flex border border-input bg-card">
-                  {GROUP_TABS.map((g, i) => (
-                    <button
-                      key={g.key}
-                      type="button"
-                      onClick={() => setGrouping(g.key)}
-                      className={`px-4 py-2.5 text-[13px] transition-colors ${i > 0 ? 'border-l border-border' : ''} ${
-                        grouping === g.key ? 'bg-primary font-semibold text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      {g.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
-                We’ve gathered your {ready.length} ready photo{ready.length === 1 ? '' : 's'} into moments. Group them
-                whichever way the trip felt — you’ll arrange them freely in the builder.
-              </p>
-              <MomentGrid photos={ready} grouping={grouping} />
-            </div>
-          )}
-
-          {/* STEP 4 — STORY (advisory, not persisted) */}
-          {step === 4 && (
-            <div className="space-y-6">
               <div className="text-center">
-                <Eyebrow chapter="V" label="Story" center />
-                <h1 className="mt-3 font-display text-[2.2rem] font-semibold leading-none tracking-tight">
-                  A shape for your story.
-                </h1>
-                <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-                  A suggested structure to start from — rename these chapters, or keep them. The final arrangement is
-                  yours in the builder.
-                </p>
-              </div>
-              {/* Vertical timeline */}
-              <div className="relative">
-                <span aria-hidden className="absolute bottom-6 left-[23px] top-6 w-px bg-border" />
-                <div className="flex flex-col gap-4">
-                  {chapters.map((c, i) => {
-                    const per = Math.ceil(Math.max(1, ready.length) / chapters.length);
-                    const strip = ready.slice(i * per, i * per + 3);
-                    const rest = Math.max(0, ready.slice(i * per, (i + 1) * per).length - 3);
-                    return (
-                      <div key={i} className="relative flex items-start gap-5">
-                        <span className="z-10 grid h-12 w-12 shrink-0 place-items-center rounded-full bg-primary font-display text-xl text-primary-foreground shadow-[0_0_0_6px_hsl(var(--background))]">
-                          {String(i + 1).padStart(2, '0')}
-                        </span>
-                        <div className="flex-1 border border-border bg-card p-5">
-                          <Input
-                            value={c}
-                            onChange={(e) => setChapters((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))}
-                            className="border-0 bg-transparent px-0 font-display text-2xl font-medium text-primary shadow-none focus-visible:ring-0"
-                          />
-                          <div className="mt-3 flex gap-1.5">
-                            {strip.map((p) => (
-                              <span key={p.id} className="h-10 w-14 overflow-hidden rounded-[2px] bg-muted">
-                                {p.thumbUrl && (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={p.thumbUrl} alt="" className="h-full w-full object-cover" />
-                                )}
-                              </span>
-                            ))}
-                            {rest > 0 && (
-                              <span className="grid h-10 w-14 place-items-center rounded-[2px] bg-secondary font-mono text-[11px] text-muted-foreground">
-                                +{rest}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="flex justify-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setChapters((prev) => [...prev].reverse())}
-                >
-                  <Sparkles /> Suggest a different structure
-                </Button>
-              </div>
-              <p className="flex items-center justify-center gap-2 text-center font-display text-sm italic text-muted-foreground">
-                <Sparkles className="h-4 w-4 not-italic text-gold" /> A suggestion — the final say is always yours.
-              </p>
-            </div>
-          )}
-
-          {/* STEP 5 — REVIEW */}
-          {step === 5 && (
-            <div className="space-y-6">
-              <div className="text-center">
-                <Eyebrow chapter="VI" label="Review" center />
+                <Eyebrow chapter="IV" label="Review" center />
                 <h1 className="mt-3 font-display text-[2.4rem] font-semibold leading-none tracking-tight">
                   Ready to begin building.
                 </h1>
@@ -564,9 +509,9 @@ export default function CreateWizard({ products, covers }: { products: Product[]
                         <MapPin className="h-4 w-4 text-primary/70" /> {destination}
                       </p>
                     )}
-                    {travelDates && (
+                    {travelPeriod && (
                       <p className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-primary/70" /> {travelDates}
+                        <Calendar className="h-4 w-4 text-primary/70" /> {travelPeriod}
                       </p>
                     )}
                   </div>
@@ -596,7 +541,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
                     <p className="font-display text-[17px] font-semibold tracking-tight">Build it for me</p>
                     <p className="text-[13px] text-muted-foreground">
                       I’ll arrange your {ready.length} photo{ready.length === 1 ? '' : 's'} into a full album — you preview
-                      it before anything is saved.
+                      it before anything is saved. Or open the builder to choose layouts yourself.
                     </p>
                   </div>
                 </div>
@@ -621,18 +566,18 @@ export default function CreateWizard({ products, covers }: { products: Product[]
           )}
         </div>
         <div className="hidden text-xs text-muted-foreground sm:block">
-          {step === 2 && photos.length > 0 ? `${photos.length} photos · ≈ ${estPages} pages` : ''}
+          {step === 2 && photos.length > 0 ? `${photos.length} of ${cap} photos · ≈ ${estPages} pages` : ''}
         </div>
         <div className="flex min-w-[120px] justify-end">
           <Button onClick={next} disabled={!canContinue || creating} className={LUX_PRIMARY}>
             {creating ? <Loader2 className="animate-spin" /> : null}
             {continueLabel}
-            {!creating && (step === 5 ? <ImageIcon /> : <ArrowRight />)}
+            {!creating && (step === LAST_STEP ? <ImageIcon /> : <ArrowRight />)}
           </Button>
         </div>
       </footer>
 
-      {/* CINEMATIC BUILDER-ENTRY VEIL */}
+      {/* "Build it for me" PREVIEW */}
       {proposal && (
         <Proposal
           title="Your generated album"
@@ -649,6 +594,7 @@ export default function CreateWizard({ products, covers }: { products: Product[]
         />
       )}
 
+      {/* CINEMATIC BUILDER-ENTRY VEIL */}
       {entering && (
         <div className="animate-fade-in fixed inset-0 z-[120] flex flex-col items-center justify-center bg-[#122019] text-center">
           <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#b89a5c]">Opening your album</p>
@@ -690,67 +636,6 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     <div className="flex items-baseline justify-between">
       <span className="text-sm text-primary-foreground/70">{label}</span>
       <span className="font-display text-2xl font-semibold tabular-nums">{value}</span>
-    </div>
-  );
-}
-
-function MomentGrid({ photos, grouping }: { photos: Photo[]; grouping: Grouping }) {
-  // All deterministic — no AI. "date" groups by EXIF capture date; "place"/"segment"
-  // split the chronological run into even buckets (no place data exists, so this is a
-  // visual suggestion the customer refines in the builder).
-  const ordered = [...photos].sort((a, b) => (a.takenAt ?? '').localeCompare(b.takenAt ?? ''));
-  let entries: [string, Photo[]][] = [];
-
-  if (grouping === 'date') {
-    const groups = new Map<string, Photo[]>();
-    for (const p of ordered) {
-      const key = p.takenAt
-        ? new Date(p.takenAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-        : 'Undated';
-      const arr = groups.get(key) ?? [];
-      arr.push(p);
-      groups.set(key, arr);
-    }
-    entries = Array.from(groups.entries());
-  } else {
-    const buckets = Math.min(grouping === 'segment' ? 4 : 5, Math.max(1, ordered.length));
-    const per = Math.ceil(ordered.length / buckets);
-    const noun = grouping === 'segment' ? 'Chapter' : 'Place';
-    for (let i = 0; i < buckets; i++) {
-      const slice = ordered.slice(i * per, (i + 1) * per);
-      if (slice.length) entries.push([`${noun} ${i + 1}`, slice]);
-    }
-  }
-
-  if (photos.length === 0) {
-    return (
-      <p className="rounded-xl border border-dashed bg-card/50 p-6 text-sm text-muted-foreground">
-        No processed photos yet — add some in the previous step and they’ll group here by day.
-      </p>
-    );
-  }
-
-  return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {entries.map(([day, ph], i) => (
-        <div key={day} className="overflow-hidden rounded-2xl border bg-card">
-          <div className="grid grid-cols-3 gap-0.5 bg-muted">
-            {ph.slice(0, 3).map((p) => (
-              <div key={p.id} className="relative aspect-square bg-muted">
-                {p.thumbUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.thumbUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="p-4">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-primary/70">Moment {i + 1}</p>
-            <p className="mt-1 font-display text-lg font-semibold tracking-tight">{day}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{ph.length} photo{ph.length === 1 ? '' : 's'}</p>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
