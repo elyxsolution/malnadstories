@@ -37,6 +37,7 @@ export const CAPABILITIES = [
   'monitoring:view', 'monitoring:manage',
   'observability:view', 'observability:manage',
   'security:view', 'security:manage',
+  'storage:view', 'storage:manage',
   'role:manage',
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
@@ -51,6 +52,7 @@ const PRODUCTION: Capability[] = [
   'monitoring:view',
   'observability:view',
   'security:view',
+  'storage:view', 'storage:manage',
 ];
 const SUPPORT: Capability[] = [
   'support:view', 'support:reply', 'support:manage',
@@ -107,6 +109,7 @@ const ROUTE_CAPABILITY: { prefix: string; capability: Capability }[] = [
   { prefix: '/admin/monitoring', capability: 'monitoring:view' },
   { prefix: '/admin/errors', capability: 'observability:view' },
   { prefix: '/admin/security', capability: 'security:view' },
+  { prefix: '/admin/storage', capability: 'storage:view' },
   { prefix: '/admin/system', capability: 'system:view' },
   { prefix: '/admin/users', capability: 'role:manage' },
   { prefix: '/admin/settings', capability: 'system:view' },
