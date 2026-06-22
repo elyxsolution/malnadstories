@@ -1,6 +1,5 @@
 import 'server-only';
 import { headers } from 'next/headers';
-import { randomUUID } from 'crypto';
 
 /**
  * Request correlation id (Phase 10B). The middleware mints `x-request-id` and forwards it on the
@@ -16,5 +15,8 @@ export function getRequestId(): string {
   } catch {
     // not in a request scope (e.g. a background task) — fall through to a generated id
   }
-  return randomUUID();
+  // Web Crypto global (no Node 'crypto' import) so this file resolves in EVERY runtime —
+  // Node, Edge, and the bundles that transitively pull it in (e.g. instrumentation's edge
+  // build). Same value as before: a v4 UUID fallback when outside a request scope.
+  return crypto.randomUUID();
 }
