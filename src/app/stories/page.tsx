@@ -5,6 +5,9 @@ import { listPublished } from '@/lib/cms/public';
 
 export const metadata = { title: 'Stories — Malnad Stories' };
 
+// Phase 10D: ISR/CDN backstop; admin CMS busts the `cms-public` tag on change.
+export const revalidate = 300;
+
 /**
  * Public legacy-stories showcase. Only PUBLISHED legacy_story rows (RLS + listPublished),
  * featured first. Pure CMS content — NOT linked to any real customer album.

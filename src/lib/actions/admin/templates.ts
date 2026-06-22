@@ -1,8 +1,9 @@
 'use server';
 
 import { randomUUID } from 'crypto';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/service';
+import { CACHE_TAGS } from '@/lib/cache';
 import { requireTemplateCapability } from '@/lib/templates/access';
 import { validateGeometry } from '@/lib/templates/model';
 import { slugify } from '@/lib/cms/model';
@@ -83,6 +84,7 @@ export async function saveTemplate(input: unknown): Promise<TemplateActionResult
     await audit(svc, actor.userId, 'template.updated', d.id, { name: d.name, category: d.category });
     revalidatePath('/admin/templates');
     revalidatePath(`/admin/templates/${d.id}`);
+    revalidateTag(CACHE_TAGS.templatesActive); // editing an active template changes the catalog
     return { ok: true, id: d.id };
   }
 
@@ -147,6 +149,7 @@ export async function setTemplateStatus(input: unknown): Promise<TemplateSimpleR
 
   revalidatePath('/admin/templates');
   revalidatePath(`/admin/templates/${id}`);
+  revalidateTag(CACHE_TAGS.templatesActive); // activate/deactivate/archive → refresh the builder catalog
   return { ok: true };
 }
 

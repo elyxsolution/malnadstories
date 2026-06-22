@@ -3,13 +3,15 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { nameSchema } from '@/lib/auth/policy';
 
 export type UpdateProfileResult = { ok: true } | { ok: false; error: string };
 
 // Only the two fields the column-scoped grant (0019) lets `authenticated` write —
-// role/id/created_at remain server-only. Empty phone clears it.
+// role/id/created_at remain server-only. Empty phone clears it. Name uses the shared
+// identity policy (lib/auth/policy) so signup/profile/callback stay consistent.
 const UpdateProfileSchema = z.object({
-  name: z.string().trim().min(1, 'Name is required').max(80, 'Name is too long'),
+  name: nameSchema,
   phone: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null),
     z

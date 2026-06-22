@@ -146,11 +146,18 @@ function EditableCard({ album }: { album: AlbumCardData }) {
   const onConfirm = async () => {
     setDeleting(true);
     setError(null);
-    const res = await deleteAlbum(album.id);
-    if (res.ok) {
-      router.refresh(); // re-render the server grid without this album
-    } else {
+    try {
+      const res = await deleteAlbum(album.id);
+      if (res.ok) {
+        router.refresh(); // re-render the server grid without this album (keeps spinner during nav)
+        return;
+      }
       setError(res.error);
+      setDeleting(false);
+    } catch {
+      // Belt-and-suspenders: if the action ever rejects (or is interrupted), surface a
+      // retryable error and release the spinner so the dialog can never hang forever.
+      setError('Could not delete the album. Please try again.');
       setDeleting(false);
     }
   };

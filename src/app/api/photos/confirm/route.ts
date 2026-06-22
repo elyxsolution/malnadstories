@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { ConfirmUploadSchema } from '@/lib/validations';
 import { enqueueImageHardening } from '@/lib/queue';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { checkLimit, sanitizeFilename } from '@/lib/security/guard';
 
 /**
  * POST /api/photos/confirm
@@ -21,6 +22,19 @@ export async function POST(request: Request) {
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Per-user throttle (Phase 10C, G1). Burst-friendly; caps creation of many 'pending'
+  // photo rows. Mirrors the presign limit.
+  const rl = await checkLimit(`confirm:${user.id}`, 120, 60_000, {
+    surface: 'upload_confirm',
+    actor: { userId: user.id },
+  });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Too many uploads. Please slow down and try again shortly.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    );
   }
 
   let body: unknown;
@@ -64,13 +78,15 @@ export async function POST(request: Request) {
   }
 
   // Insert via the authenticated client: RLS "user_id = auth.uid()" enforces the row.
+  // originalFilename is sanitized (G2 — strip control chars, collapse whitespace, cap
+  // length) before storage for log/display hygiene.
   const { data: photo, error } = await supabase
     .from('photos')
     .insert({
       user_id: user.id,
       album_id: albumId,
       r2_key: key,
-      original_filename: originalFilename,
+      original_filename: sanitizeFilename(originalFilename),
     })
     .select('id')
     .single();

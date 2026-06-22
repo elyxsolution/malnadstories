@@ -18,6 +18,7 @@ import { sweepPdfs } from './jobs/pdf-recovery.js';
 import { startHealthServer } from './health-server.js';
 import { supabase } from './supabase.js';
 import { env } from './env.js';
+import { captureException, recordTiming, jobRequestId, PERF } from './lib/observability.js';
 
 const SEND_OPTS = { retryLimit: 3, retryDelay: 30, retryBackoff: true } as const;
 
@@ -63,7 +64,25 @@ async function main(): Promise<void> {
     { pollingIntervalSeconds: 2 },
     async (jobs) => {
       for (const job of jobs) {
-        await processPhoto(job.data);
+        const rid = jobRequestId(IMAGE_HARDENING_QUEUE);
+        const t0 = Date.now();
+        try {
+          await processPhoto(job.data);
+          await recordTiming('image-hardening', 'process', Date.now() - t0, PERF.slowUploadMs, {
+            requestId: rid,
+            metadata: { photoId: job.data.photoId },
+          });
+        } catch (e) {
+          // Capture then RETHROW so pg-boss retry behavior is unchanged.
+          await captureException(e, {
+            source: 'image-hardening',
+            category: 'upload',
+            severity: 'error',
+            requestId: rid,
+            metadata: { photoId: job.data.photoId },
+          });
+          throw e;
+        }
       }
     },
   );
@@ -74,7 +93,24 @@ async function main(): Promise<void> {
     { pollingIntervalSeconds: 2, batchSize: 1 },
     async (jobs) => {
       for (const job of jobs) {
-        await generateAlbumPdf(job.data);
+        const rid = jobRequestId(ALBUM_PDF_QUEUE);
+        const t0 = Date.now();
+        try {
+          await generateAlbumPdf(job.data);
+          await recordTiming('album-pdf', 'render', Date.now() - t0, PERF.slowPdfMs, {
+            requestId: rid,
+            metadata: { albumId: job.data.albumId },
+          });
+        } catch (e) {
+          await captureException(e, {
+            source: 'album-pdf',
+            category: 'pdf',
+            severity: 'error',
+            requestId: rid,
+            metadata: { albumId: job.data.albumId },
+          });
+          throw e;
+        }
       }
     },
   );
@@ -84,7 +120,17 @@ async function main(): Promise<void> {
     { pollingIntervalSeconds: 2 },
     async (jobs) => {
       for (const job of jobs) {
-        await cleanupR2(job.data);
+        try {
+          await cleanupR2(job.data);
+        } catch (e) {
+          await captureException(e, {
+            source: 'r2-cleanup',
+            category: 'system',
+            severity: 'error',
+            requestId: jobRequestId(R2_CLEANUP_QUEUE),
+          });
+          throw e;
+        }
       }
     },
   );
@@ -94,7 +140,17 @@ async function main(): Promise<void> {
     { pollingIntervalSeconds: 2 },
     async (jobs) => {
       for (const job of jobs) {
-        await generateCoverThumbnail(job.data);
+        try {
+          await generateCoverThumbnail(job.data);
+        } catch (e) {
+          await captureException(e, {
+            source: 'cover-thumbnail',
+            category: 'upload',
+            severity: 'error',
+            requestId: jobRequestId(COVER_THUMBNAIL_QUEUE),
+          });
+          throw e;
+        }
       }
     },
   );
@@ -116,9 +172,22 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // Last-resort capture for stray async failures (log-and-continue; crash semantics unchanged).
+  process.on('unhandledRejection', (reason) => {
+    console.error('[worker] unhandledRejection:', reason);
+    void captureException(reason, {
+      source: 'worker',
+      category: 'system',
+      severity: 'critical',
+      metadata: { kind: 'unhandledRejection' },
+    });
+  });
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error('[worker] fatal:', e);
+  // Best-effort capture before exit (await so it has a chance to land).
+  await captureException(e, { source: 'worker', category: 'system', severity: 'critical', metadata: { kind: 'fatal-boot' } }).catch(() => {});
   process.exit(1);
 });

@@ -9,6 +9,7 @@ import {
   ACTIVE_REQUEST_STATUSES,
 } from '@/lib/resolutions/model';
 import { sendResolutionStatusEmail, sendResolutionAdminNewEmail } from '@/lib/email/resolution-events';
+import { checkLimit } from '@/lib/security/guard';
 
 export type ResolutionActionResult = { ok: true; id: string } | { ok: false; error: string };
 
@@ -28,6 +29,14 @@ export async function createRefundRequest(input: unknown): Promise<ResolutionAct
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: 'Not signed in' };
+
+  // Anti-spam throttle (Phase 10C): per-user. The one-active-request-per-order index is
+  // the real backstop; this caps churn across orders.
+  const limit = await checkLimit(`refund:${user.id}`, 5, 60 * 60_000, {
+    surface: 'create_refund',
+    actor: { userId: user.id },
+  });
+  if (!limit.ok) return { ok: false, error: 'You are submitting requests too quickly. Please wait a while.' };
 
   const parsed = CreateRefundSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -96,6 +105,13 @@ export async function createReprintRequest(input: unknown): Promise<ResolutionAc
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: 'Not signed in' };
+
+  // Anti-spam throttle (Phase 10C): per-user (see createRefundRequest).
+  const limit = await checkLimit(`reprint:${user.id}`, 5, 60 * 60_000, {
+    surface: 'create_reprint',
+    actor: { userId: user.id },
+  });
+  if (!limit.ok) return { ok: false, error: 'You are submitting requests too quickly. Please wait a while.' };
 
   const parsed = CreateReprintSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };

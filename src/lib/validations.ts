@@ -1,9 +1,12 @@
 import { z } from 'zod';
+import { nameSchema, passwordSchema } from '@/lib/auth/policy';
 
 export const SignupSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
+  // Password (8–25) + display-name (2–60, normalised) policy lives in one place
+  // (lib/auth/policy) so signup / reset / profile / auth-callback can't drift.
+  name: nameSchema,
   email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: passwordSchema,
 });
 
 export const LoginSchema = z.object({

@@ -5,6 +5,9 @@ import { createServiceClient } from '@/lib/supabase/service';
 import { verifyPaymentSignature, fetchRazorpayPayment } from '@/lib/razorpay';
 import { sendOrderConfirmationEmail } from '@/lib/email/events';
 import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
+import { captureException, captureMessage } from '@/lib/observability/capture';
+import { getRequestId } from '@/lib/observability/request-id';
+import { checkLimit } from '@/lib/security/guard';
 
 export const runtime = 'nodejs';
 
@@ -37,6 +40,19 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // Per-user throttle (Phase 10C). Generous — the real settle path is the webhook; this
+  // is a reconciliation backstop. Caps signature-probing against the verify endpoint.
+  const rl = await checkLimit(`verify:${user.id}`, 20, 60_000, {
+    surface: 'payments_verify',
+    actor: { userId: user.id },
+  });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please wait a moment.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -60,6 +76,14 @@ export async function POST(request: Request) {
   const orderAlbumId = (order as { id: string; album_id: string }).album_id;
 
   if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
+    void captureMessage('Payment callback signature verification failed', {
+      source: 'payments-verify',
+      category: 'payment',
+      severity: 'warning',
+      requestId: getRequestId(),
+      userId: user.id,
+      metadata: { orderId: order.id },
+    });
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
@@ -90,6 +114,14 @@ export async function POST(request: Request) {
       console.error('[payments/verify] reconcile rpc error', {
         orderId: order.id,
         error: error.message,
+      });
+      void captureException(error, {
+        source: 'payments-verify',
+        category: 'payment',
+        severity: 'error',
+        requestId: getRequestId(),
+        userId: user.id,
+        metadata: { orderId: order.id, stage: 'reconcile' },
       });
     } else if (result === 'processed') {
       // First transition to paid via this path → fire the idempotent confirmation email

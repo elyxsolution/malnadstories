@@ -16,6 +16,19 @@ export type CreateAlbumDraftResult = { ok: true; id: string } | { ok: false; err
 type ParsedAlbum = ReturnType<typeof CreateAlbumSchema.parse>;
 type SupabaseServerClient = ReturnType<typeof createClient>;
 
+// Bound how long the cleanup enqueue may take. pg-boss `boss.send` over the DIRECT_URL
+// session pooler has no client-side timeout, so a dropped/stalled connection (Supabase
+// closes idle direct connections; cold singleton; pooler hiccup) could hang the delete
+// request forever. On timeout we fail fast with a retryable error (rows left intact, no
+// R2 orphans) instead of stranding the caller. Mirrors withTimeout in email/send-email.
+const ENQUEUE_TIMEOUT_MS = 5000;
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('enqueue timed out')), ms)),
+  ]);
+}
+
 /**
  * Shared album-insert core — validates the chosen product + cover (both via RLS) and
  * inserts the album for the verified user. Used by BOTH the form action (createAlbum,
@@ -174,9 +187,9 @@ export async function deleteAlbum(albumId: unknown): Promise<DeleteResult> {
   // keys we'd no longer be able to derive.
   if (keys.length > 0) {
     try {
-      await enqueueR2Cleanup(keys);
+      await withTimeout(enqueueR2Cleanup(keys), ENQUEUE_TIMEOUT_MS);
     } catch (e) {
-      console.error('enqueue r2-cleanup failed:', e);
+      console.error('enqueue r2-cleanup failed/timed out:', e);
       return { ok: false, error: 'Could not start cleanup. Please try again.' };
     }
   }

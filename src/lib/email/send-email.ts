@@ -4,6 +4,7 @@ import { render } from '@react-email/render';
 import { createServiceClient } from '@/lib/supabase/service';
 import { provider } from './resend';
 import { isEmailEnabled } from './config';
+import { captureException } from '@/lib/observability/capture';
 
 export type SendResult = { ok: boolean; skipped?: boolean; messageId?: string; error?: string };
 
@@ -83,6 +84,14 @@ export async function sendTransactionalEmail(args: SendArgs): Promise<SendResult
     } catch (e) {
       const msg = e instanceof Error ? e.message.slice(0, 300) : 'send failed';
       console.error('[email] send failed', { event, to, error: msg });
+      // Capture (email): the recipient is intentionally omitted — the sanitizer masks PII anyway,
+      // but we don't pass it at all. orderId (uuid) is safe correlation.
+      void captureException(e, {
+        source: 'email',
+        category: 'email',
+        severity: 'error',
+        metadata: { event, orderId, stage: 'send' },
+      });
       // Mark 'failed' (releases the idempotency slot so a retry can re-claim).
       if (logId) {
         await svc.from('email_log').update({ status: 'failed', error: msg }).eq('id', logId);

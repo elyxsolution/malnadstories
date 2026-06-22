@@ -3,6 +3,7 @@ import { supabase } from '../supabase.js';
 import { getObjectBuffer, putObject, deleteObject } from '../r2.js';
 import { hardenImage, InvalidImageError } from '../lib/image.js';
 import { env } from '../env.js';
+import { captureMessage } from '../lib/observability.js';
 
 const JobSchema = z.object({ photoId: z.string().uuid() });
 
@@ -23,6 +24,14 @@ function derivedKeys(rawKey: string) {
 async function reject(photoId: string, reason: string) {
   console.warn(`[worker] rejecting photo ${photoId}: ${reason}`);
   await supabase.from('photos').update({ status: 'rejected' }).eq('id', photoId);
+  // Visibility (warning): a permanent rejection (spoofed/undecodable/too large). Deduped by
+  // normalized reason so a recurring bad-upload pattern is one row, not thousands.
+  await captureMessage(`Photo rejected during hardening: ${reason}`, {
+    source: 'image-hardening',
+    category: 'upload',
+    severity: 'warning',
+    metadata: { photoId, reason },
+  });
 }
 
 /**

@@ -111,12 +111,15 @@ drizzle/
   0033_shipments.sql                  shipments (one/order) + shipment_events (append-only). SUPPLEMENTAL courier layer — independent of orders.status (never writes it). Child-of-order RLS (customers read own; admins write via service role + restrictive deny). Courier abstraction (Mock today). Audit via log_audit
   0034_admin_roles.sql                admin_roles (one fixed back-office role per admin: super_admin/production/support/content). RBAC scoping ON TOP of the existing profiles.role='admin' gate (does NOT grant admin access). Service-role writes only + restrictive deny. Absent row → treated as super_admin (migration safety). Audit role.assigned/changed + access.denied
   0035_monitoring.sql                 health_checks (append-only per-service snapshots) + system_alerts (append-only; resolving marks; partial unique (dedupe_key) where not resolved = anti-fatigue). Admin-only RLS + service-role writes. Read-only collectors over existing tables; audit health.check/alert.created/alert.resolved
+  0036_error_events.sql               error_events (append-only captured failures/exceptions/slow ops; deduped by fingerprint via partial unique (fingerprint) where not resolved → occurrences++). Admin-only RLS + service-role writes (no delete). record_error_event() SECURITY DEFINER RPC = single capture entrypoint (app + worker): dedupe-upsert + audit error.created + open a critical system_alert (reuses 0035). Phase 10B
+  0037_perf_indexes.sql               PURELY ADDITIVE performance indexes (Phase 10D) — no schema/RLS/grant change: albums(user_id,updated_at), orders(user_id,placed_at), orders(album_id,status), addresses(user_id), payments(order_id). Targets the hottest RLS/lookup predicates the base tables (0001) never indexed
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
   src/jobs/album-pdf.ts       Puppeteer → print route → page.pdf → upload PDF to R2
   src/jobs/r2-cleanup.ts      delete a batch of R2 keys (album deletion; idempotent)
   src/lib/image.ts            sharp + file-type + exifr + heic-convert helpers
+  src/lib/observability.ts    Phase 10B worker capture mirror (sanitize + record_error_event RPC + job timing)
   src/{env,queue,r2,supabase}.ts   env, pg-boss conn, R2 client, service-role client
   tsconfig.json               @builder/* -> ../src/lib/builder/* (PDF reuses model.ts)
 ```
@@ -345,6 +348,8 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 27. `drizzle/0033_shipments.sql` — Courier shipments + events (Phase 9F); **run SQL FIRST** (admin order page + customer order page read these tables)
 28. `drizzle/0034_admin_roles.sql` — Multi-role RBAC (Phase 9G); **run SQL FIRST** (the access layer reads `admin_roles`). No backfill — existing admins default to super_admin.
 29. `drizzle/0035_monitoring.sql` — Monitoring & alerting (Phase 10A); **run SQL FIRST** (the monitoring page reads these tables)
+30. `drizzle/0036_error_events.sql` — Error tracking & observability (Phase 10B); **run SQL FIRST** (the capture layer + Error Center read/write this table + the `record_error_event` RPC)
+31. `drizzle/0037_perf_indexes.sql` — Performance indexes (Phase 10D); purely additive (no schema/RLS/grant change) — safe to run any time, code works with or without it (queries just get faster)
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
 > rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
@@ -1008,6 +1013,144 @@ used). Two tables: `health_checks` (append-only per-service snapshots) + `system
   `monitoring:view` roles. Actions in `src/lib/actions/admin/monitoring.ts`.
 - **Audit**: `health.check` (per run), `alert.created`, `alert.resolved` via `log_audit`. No
   customer/anon access; no writes to any existing table.
+
+## Error Tracking & Observability (Phase 10B) — built
+
+Where 10A gives **aggregate** health (counts), 10B captures the **individual failures** behind
+them — a persisted, deduped, queryable store of exceptions/failures/slow ops across app + worker
+(`0036_error_events.sql`). **Additive + behavior-preserving**: capture is always best-effort and
+NEVER throws, sits alongside existing `console.*`, and changes no existing flow (checkout/builder/
+orders/payments/uploads/PDF/reviews/refunds/reprints/CMS/shipping/RBAC/monitoring 10A).
+- **Capture is push, not pull.** The single DB entrypoint `record_error_event()` (SECURITY DEFINER,
+  service-role-only) does an atomic **fingerprint dedupe-upsert** (one open row per condition,
+  `occurrences++` — a hot loop is one growing row, not N), writes `error.created` audit, and for a
+  **new critical** opens a `system_alert` keyed `error:<fingerprint>` (reuses 10A's partial-unique
+  index → no alert storms; shows in the existing Monitoring feed).
+- **The observability layer** lives in `src/lib/observability/`: `model.ts` (severity/category
+  vocab, chips, `PERF_THRESHOLDS`, `fingerprint()`), `sanitize.ts` (**THE security boundary** —
+  deny-list keys + JWT/long-hex/card/email/phone scrubbers + length/depth caps; applied to every
+  persisted field), `request-id.ts` (`getRequestId()` reads the middleware-minted `x-request-id`,
+  available across the whole server request scope — no signature threading), `capture.ts`
+  (`captureException`/`captureMessage`/`withCapture`, never throws), `log.ts`
+  (`logInfo/Warning/Error/Critical` + `recordTiming`). The worker has a self-contained mirror at
+  `worker/src/lib/observability.ts` (same RPC + same sanitize contract).
+- **Request correlation**: `src/middleware.ts` mints/forwards `x-request-id` (honors an upstream
+  one; echoes on the response). Worker jobs get a `job:<queue>:<id>` correlation id.
+- **Exception capture** (chokepoints, additive — capture **alongside** existing logs, never
+  changing control flow): `src/instrumentation.ts` (process `unhandledRejection`/`uncaughtException`,
+  needs `experimental.instrumentationHook` in `next.config.mjs`); `src/app/global-error.tsx` →
+  rate-limited sanitized `src/app/api/observability/report/route.ts` (client crash sink);
+  the Razorpay webhook (sig-fail/rpc-error/amount-mismatch), `payments/verify`, `pdf/generate.ts`,
+  `email/send-email.ts`; and the worker job handlers (capture then **rethrow** so pg-boss retry is
+  unchanged) + permanent photo rejections.
+- **Performance observability**: `recordTiming(source,label,ms,threshold)` records a deduped
+  `warning` **only** when over threshold (fast path does nothing; never blocks). Wired into the
+  worker album-pdf + image-hardening jobs.
+- **Admin Error Center** `/admin/errors` (list `_filters.tsx` + detail `[id]` + `_resolve.tsx`):
+  read-only, severity/category/resolved/search filters, occurrence + last-seen + request-id.
+  **Read-only payloads** (no editing); the only mutation is Resolve (`resolveError` in
+  `src/lib/actions/admin/observability.ts`) which also resolves the linked alert + audits
+  `error.resolved`.
+- **RBAC** (`observability:view` / `observability:manage` in `capabilities.ts`): super_admin
+  (both), production + support (view), **content = none** (route-guarded `/admin/errors` + nav).
+- **Security/PII**: stores `user_id` (uuid) only — never email/phone/address/name; raw bodies,
+  headers, cookies, and `Authorization` are NEVER captured; all fields sanitized + capped; the
+  table is admin-read / no-client-write / **no-delete** (append-only); the RPC is service-role-only.
+
+## Security Hardening & Abuse Protection (Phase 10C) — built
+
+Additive + behavior-preserving hardening on top of 10A/10B: explicit password/identity
+policy, rate limits on public write surfaces, a security audit trail + admin surface, a
+nonce CSP staged as Report-Only, and the root-cause fix for the dashboard "delete album →
+infinite loading" bug. **Nothing in builder/checkout/orders/payments/uploads/reviews/
+refunds/reprints/CMS/templates/shipping/monitoring/observability changed behavior.**
+- **Password + identity policy (single source)** `src/lib/auth/policy.ts` (PURE — no
+  `server-only`, reused client + server): `PASSWORD_MIN/MAX = 8/25` + `passwordSchema`/
+  `validatePassword`; `NAME_MIN/MAX = 2/60` + `normalizeName` (strip control chars by
+  code point, collapse whitespace) + `nameSchema`/`validateName` (letters/marks + space
+  `' - .` only). Wired into `SignupSchema` (`validations.ts`), signup + reset-password
+  pages (policy + max-length UI), `updateProfile` (`actions/profile.ts`), and — closing
+  the server gap — `auth/callback/route.ts` normalizes+validates `user_metadata.name`
+  before the profile upsert. Display names are intentionally non-unique (email is the
+  identity, enforced by Supabase Auth).
+- **Rate limiting (centralized)** `src/lib/security/guard.ts` — `clientIp()` +
+  `checkLimit(key, limit, windowMs, ctx)` over the existing `lib/rate-limit.ts` (one code
+  path; audits `security.rate_limit` on block). Applied: `signIn` (per-IP + per-account
+  email-hash, ~10/5min), `requestPasswordReset` (per-IP ~5/15min, still neutral response),
+  `createTicket`/`replyToTicket`, `createRefundRequest`/`createReprintRequest`, upload
+  `presign`/`confirm` (per-user ~120/min, burst-friendly), `payments/verify` (~20/min).
+  `confirm` also sanitizes `originalFilename` via `sanitizeFilename` (G2). Signup stays
+  client-direct to Supabase (provider-limited). Same per-process caveat as rate-limit.ts.
+- **Security audit trail** `src/lib/security/audit.ts` — `logSecurity(action, metadata,
+  actor?)` writes to the existing append-only `audit_log` via `log_audit` (0016),
+  `entity_type='security'`, best-effort/never-throws (nil-uuid subject for pre-auth IP
+  events). Admin read-only surface `/admin/security` (`page.tsx` + `_filters.tsx`, Drizzle)
+  shows the `security.*` + `access.denied` slice; gated `security:view`. No mutations.
+- **CSP (nonce, Report-Only first)** The enforced host-based CSP in `next.config.mjs` is
+  UNCHANGED (no checkout-breakage). `src/middleware.ts` mints a per-request nonce (btoa —
+  edge runtime), sets it as a REQUEST `content-security-policy` header (so Next nonces its
+  own inline scripts) and emits `Content-Security-Policy-Report-Only` mirroring the policy
+  but with `'nonce-<n>'` instead of script `'unsafe-inline'`, plus `Reporting-Endpoints`.
+  Violations POST to `src/app/api/security/csp-report/route.ts` (rate-limited; recorded via
+  the 10B capture layer, `source:'csp'`, deduped — visible in the Error Center). No
+  `strict-dynamic`; `style-src 'unsafe-inline'` retained. This is the staged path to an
+  enforced nonce CSP. `next.config.mjs` also adds `X-DNS-Prefetch-Control: off`.
+- **Delete-album hang fix** `deleteAlbum` (`actions/albums.ts`) now bounds the
+  `enqueueR2Cleanup` call with a 5s `withTimeout` (pg-boss `boss.send` over the DIRECT_URL
+  pooler had no client timeout) → fails fast with a retryable error (rows intact, no R2
+  orphans) instead of hanging forever; `dashboard/_album-card.tsx` adds a try/catch so the
+  confirm dialog can never spin permanently.
+- **RBAC** new `security:view` / `security:manage` (`capabilities.ts`): super_admin (both),
+  production + support (view), **content = none** (route-guarded `/admin/security` + nav,
+  ShieldAlert icon, Platform group).
+- **Audit (Phase 9 RLS re-check):** 0028/0030/0031/0032/0033/0034 re-verified (RLS enabled
+  + restrictive write-deny + ownership) — all sound, **no corrective 0037 needed**.
+
+## Performance, Caching, CDN & Scale Readiness (Phase 10D) — built
+
+Additive + behavior-preserving performance pass — **no redesign** of any feature; identical
+outputs, just faster reads + lower query cost + better cache/CDN usage. No payment-flow,
+security, or architecture change.
+- **DB indexes** (`0037_perf_indexes.sql`, purely additive): the base tables (0001) never
+  indexed their hottest predicates. Added `albums(user_id, updated_at desc)` +
+  `orders(user_id, placed_at desc)` (dashboard lists, RLS `user_id=auth.uid()`),
+  `orders(album_id, status)` (the order-commit locks `hasPaidOrder`/`hasActiveOrder`/
+  `getPaidOrder` + build page + presign/confirm/delete — very hot), `addresses(user_id)`
+  (account/checkout/orders), `payments(order_id)` (FK + RLS subquery). `if not exists` →
+  idempotent; code works with or without it (queries just get faster).
+- **Centralized caching** `src/lib/cache.ts` defines tags + TTLs in ONE place. Only GLOBAL,
+  public, non-user data is cached (never per-user → no cross-user/stale-auth leakage):
+  - `listPublished` (CMS public /faq /testimonials /stories) — `unstable_cache`, tag
+    `cms-public`, 300s. Switched to the SERVICE client inside the cache (no cookies →
+    cacheable) but STILL filters `status='published'`, so the result is identical
+    (published-only). Busted by `revalidateTag('cms-public')` in `admin/cms.ts`
+    (save-of-published / publish / unpublish / archive / bulk).
+  - `listActiveTemplates` (builder catalog) — `unstable_cache`, tag `templates-active`,
+    300s; geometry re-validation runs inside the cache. Busted by
+    `revalidateTag('templates-active')` in `admin/templates.ts` (edit-active / activate /
+    deactivate / archive). TTL is only a backstop; tag bust is the primary refresh.
+- **CDN / ISR**: `/faq`, `/testimonials`, `/stories` now `export const revalidate = 300` —
+  combined with the cookie-free cached read they become CDN/ISR-cacheable; admin publishes
+  bust them via the tag. Static `_next/static` immutability + security headers stay in
+  `next.config.mjs` (10C); storage architecture (R2 presigned, private) unchanged.
+- **Observability (Phase 8)**: new `PERF_THRESHOLDS.slowQueryMs = 800`. `recordTiming`
+  (10B) wired into the dashboard read + the two cached read MISS paths — a slow read becomes
+  a deduped `warning` in the Error Center, never blocks the request.
+- **Builder review (Phase 6)**: already memoization-aware (useMemo/useCallback/useState
+  throughout `_builder.tsx`); NOT touched (UX-identical requirement + regression risk). No
+  blind changes — recommend profiling-driven tuning only.
+- **Admin review (Phase 7)**: all queues already paginate (PAGE_SIZE 25–50: orders/support/
+  shipping/customers/coupons directly; refunds/reprints via `_resolutions/queue.tsx`; reviews
+  via `_queue.tsx`; errors via its pager). No large-table render risk; no change needed.
+- **Image review (Phase 4)**: public CMS images use `next/image` (`fill` + `sizes` + lazy,
+  `unoptimized` to avoid remote-domain config); dashboard uses a CSS spine (no `<img>`);
+  R2-private assets stay plain presigned (next/image can't cache short-lived signed URLs).
+  Sound — no change.
+- **Scale (Phase 9)**: Supabase + R2 + Vercel + Render worker. Small/medium: comfortable
+  (indexes + caching remove the main read costs). High scale bottlenecks to watch (documented,
+  not migrated): the **in-process** rate-limit + pg-boss enqueue (per-instance — move to a
+  shared store before multi-instance), single Render worker (scale horizontally for PDF/image
+  throughput), and Supabase connection-pool limits under heavy concurrency.
 
 ## What's NOT built yet (do not add until asked)
 

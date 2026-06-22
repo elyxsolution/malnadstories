@@ -2,9 +2,11 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { createHash } from 'crypto';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { LoginSchema } from '@/lib/validations';
+import { checkLimit, clientIp } from '@/lib/security/guard';
 
 const REMEMBER_MAX_AGE = 400 * 24 * 60 * 60; // ~400 days (browser cap)
 const cookieDefaults = {
@@ -26,6 +28,20 @@ export async function signIn(
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message };
+  }
+
+  // Brute-force throttle (Phase 10C): per-IP AND per-account (email hashed so no raw
+  // address lands in the in-memory key / audit). Supabase Auth has its own limits; this
+  // adds an app-layer backstop + an audit trail. Generous so real users are unaffected.
+  const ip = clientIp();
+  const emailHash = createHash('sha256').update(parsed.data.email.toLowerCase()).digest('hex').slice(0, 16);
+  const ipLimit = await checkLimit(`login:${ip}`, 10, 5 * 60_000, { surface: 'login', metadata: { ip } });
+  const acctLimit = await checkLimit(`login:acct:${emailHash}`, 10, 5 * 60_000, {
+    surface: 'login',
+    metadata: { ip, emailHash },
+  });
+  if (!ipLimit.ok || !acctLimit.ok) {
+    return { error: 'Too many attempts. Please wait a few minutes and try again.' };
   }
 
   // Checkbox is checked by default; absent value means the user unchecked it.
@@ -76,6 +92,13 @@ export async function signOut() {
  * exchanges the code) → /reset-password.
  */
 export async function requestPasswordReset(formData: FormData): Promise<{ sent: true }> {
+  // Per-IP throttle (Phase 10C). Always returns the neutral {sent:true} regardless —
+  // even when throttled — so the response can never reveal account existence OR that a
+  // limit was hit. The block is still audited for visibility.
+  const ip = clientIp();
+  const limit = await checkLimit(`pwreset:${ip}`, 5, 15 * 60_000, { surface: 'forgot_password', metadata: { ip } });
+  if (!limit.ok) return { sent: true };
+
   const parsed = z.string().email().safeParse(String(formData.get('email') ?? '').trim());
   if (parsed.success) {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? '';

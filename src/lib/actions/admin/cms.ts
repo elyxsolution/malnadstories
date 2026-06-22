@@ -1,8 +1,9 @@
 'use server';
 
 import { randomUUID } from 'crypto';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/service';
+import { CACHE_TAGS } from '@/lib/cache';
 import { requireCmsCapability } from '@/lib/cms/access';
 import { CmsSaveSchema, CmsStatusSchema, CmsBulkStatusSchema, CmsDuplicateSchema } from '@/lib/validations';
 import { slugify } from '@/lib/cms/model';
@@ -79,6 +80,7 @@ export async function saveContent(input: unknown): Promise<CmsActionResult> {
     await audit(svc, actor.userId, 'cms.updated', d.id, { type: d.type, title: d.title });
     revalidatePath('/admin/cms/content');
     revalidatePath(`/admin/cms/content/${d.id}`);
+    revalidateTag(CACHE_TAGS.cmsPublic); // editing a published page changes the public pages
     return { ok: true, id: d.id };
   }
 
@@ -104,6 +106,7 @@ export async function saveContent(input: unknown): Promise<CmsActionResult> {
     return { ok: false, error: 'Could not create the content.' };
   }
   await audit(svc, actor.userId, 'cms.created', id, { type: d.type, title: d.title });
+  // (create makes a DRAFT — no public impact, so no cms-public bust needed)
   revalidatePath('/admin/cms/content');
   revalidatePath('/admin/cms');
   return { ok: true, id };
@@ -131,6 +134,7 @@ export async function setContentStatus(input: unknown): Promise<CmsSimpleResult>
   revalidatePath('/admin/cms/content');
   revalidatePath(`/admin/cms/content/${id}`);
   revalidatePath('/admin/cms');
+  revalidateTag(CACHE_TAGS.cmsPublic); // publish/unpublish/archive → refresh the public pages
   return { ok: true };
 }
 
@@ -176,6 +180,7 @@ export async function bulkSetContentStatus(input: unknown): Promise<CmsSimpleRes
 
   revalidatePath('/admin/cms/content');
   revalidatePath('/admin/cms');
+  revalidateTag(CACHE_TAGS.cmsPublic); // bulk publish/archive → refresh the public pages
   return { ok: true };
 }
 

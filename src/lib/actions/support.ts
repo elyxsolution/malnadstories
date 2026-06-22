@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { CreateTicketSchema, TicketReplySchema } from '@/lib/validations';
 import { sendSupportTicketCreatedEmail, sendSupportAdminNewTicketEmail } from '@/lib/email/support-events';
+import { checkLimit } from '@/lib/security/guard';
 
 export type SupportActionResult = { ok: true; id: string } | { ok: false; error: string };
 export type ReplyActionResult = { ok: true } | { ok: false; error: string };
@@ -22,6 +23,13 @@ export async function createTicket(input: unknown): Promise<SupportActionResult>
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: 'Not signed in' };
+
+  // Anti-spam throttle (Phase 10C): per-user, generous.
+  const limit = await checkLimit(`ticket:${user.id}`, 5, 10 * 60_000, {
+    surface: 'create_ticket',
+    actor: { userId: user.id },
+  });
+  if (!limit.ok) return { ok: false, error: 'You are creating requests too quickly. Please wait a moment.' };
 
   const parsed = CreateTicketSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -84,6 +92,14 @@ export async function replyToTicket(input: unknown): Promise<ReplyActionResult> 
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: 'Not signed in' };
+
+  // Anti-spam throttle (Phase 10C): per-user, higher than ticket creation (replies are
+  // a normal conversational action).
+  const limit = await checkLimit(`ticket-reply:${user.id}`, 20, 10 * 60_000, {
+    surface: 'reply_ticket',
+    actor: { userId: user.id },
+  });
+  if (!limit.ok) return { ok: false, error: 'You are sending replies too quickly. Please wait a moment.' };
 
   const parsed = TicketReplySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };

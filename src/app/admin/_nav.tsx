@@ -19,10 +19,12 @@ import {
   BarChart3,
   Server,
   Shield,
+  ShieldAlert,
   Settings,
   FileText,
   Newspaper,
   Activity,
+  Bug,
 } from 'lucide-react';
 
 type Item = { href: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
@@ -68,6 +70,8 @@ const GROUPS: { label: string; items: Item[] }[] = [
     label: 'Platform',
     items: [
       { href: '/admin/monitoring', label: 'Monitoring', icon: Activity },
+      { href: '/admin/errors', label: 'Errors', icon: Bug },
+      { href: '/admin/security', label: 'Security', icon: ShieldAlert },
       { href: '/admin/system', label: 'System', icon: Server },
       { href: '/admin/users', label: 'Users & Roles', icon: Shield },
       { href: '/admin/settings', label: 'Settings', icon: Settings },

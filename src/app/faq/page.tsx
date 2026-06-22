@@ -3,6 +3,10 @@ import { listPublished } from '@/lib/cms/public';
 
 export const metadata = { title: 'FAQ — Malnad Stories' };
 
+// Phase 10D: ISR/CDN backstop. Content is published via the admin CMS, which busts the
+// `cms-public` cache tag on change (instant refresh); this TTL is the worst-case staleness.
+export const revalidate = 300;
+
 /** Public FAQ page. RLS + listPublished return only PUBLISHED faq rows. Grouped by category. */
 export default async function FaqPage() {
   const faqs = await listPublished('faq');

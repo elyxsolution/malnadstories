@@ -494,3 +494,28 @@ export const auditLog = pgTable('audit_log', {
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── Error Tracking & Observability (0036) ─────────────────────────────────────
+
+// Append-only store of captured failures/exceptions/slow ops across app + worker. Written
+// ONLY via the record_error_event() RPC (service role); admins read only (RBAC observability:*).
+// Deduped by fingerprint (one open row per condition, occurrences++). Reuses system_alerts (0035)
+// for critical-error alerting.
+export const errorEvents = pgTable('error_events', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  severity: text('severity').notNull(), // 'info' | 'warning' | 'error' | 'critical'
+  source: text('source').notNull(),
+  category: text('category').notNull(), // api|payment|upload|pdf|email|auth|support|shipping|system
+  message: text('message').notNull(),
+  stack: text('stack'),
+  requestId: text('request_id'),
+  userId: uuid('user_id').references(() => profiles.id),
+  metadata: jsonb('metadata'),
+  fingerprint: text('fingerprint').notNull(),
+  resolved: boolean('resolved').notNull().default(false),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  resolvedBy: uuid('resolved_by').references(() => profiles.id),
+  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  occurrences: integer('occurrences').notNull().default(1),
+});

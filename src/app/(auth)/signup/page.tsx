@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { MailCheck } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { SignupSchema } from '@/lib/validations';
+import { NAME_MAX, PASSWORD_MAX, PASSWORD_MIN } from '@/lib/auth/policy';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -79,7 +80,15 @@ export default function SignupPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Full name</Label>
-            <Input id="name" type="text" autoComplete="name" value={fields.name} onChange={update('name')} required />
+            <Input
+              id="name"
+              type="text"
+              autoComplete="name"
+              maxLength={NAME_MAX}
+              value={fields.name}
+              onChange={update('name')}
+              required
+            />
           </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -91,11 +100,15 @@ export default function SignupPage() {
               id="password"
               type="password"
               autoComplete="new-password"
+              minLength={PASSWORD_MIN}
+              maxLength={PASSWORD_MAX}
               value={fields.password}
               onChange={update('password')}
               required
             />
-            <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
+            <p className="text-xs text-muted-foreground">
+              Between {PASSWORD_MIN} and {PASSWORD_MAX} characters
+            </p>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={loading}>

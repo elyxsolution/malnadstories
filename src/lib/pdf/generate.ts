@@ -4,6 +4,8 @@ import { randomBytes, createHash } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 import { enqueueAlbumPdf } from '@/lib/queue';
 import { checkWorker, probeWorker } from '@/lib/worker/health';
+import { captureException } from '@/lib/observability/capture';
+import { getRequestId } from '@/lib/observability/request-id';
 import {
   LAYOUT_TEMPLATES,
   validateAlbumForPdf,
@@ -147,6 +149,13 @@ export async function startAlbumPdfGeneration(
   );
   if (upsertErr) {
     console.error('[pdf] start upsert error', { albumId, error: upsertErr.message });
+    void captureException(upsertErr, {
+      source: 'album-pdf',
+      category: 'pdf',
+      severity: 'error',
+      requestId: getRequestId(),
+      metadata: { albumId, stage: 'start-upsert' },
+    });
     return { ok: false, error: 'Could not start PDF generation.' };
   }
 
@@ -161,6 +170,13 @@ export async function startAlbumPdfGeneration(
     });
   } catch (e) {
     console.error('[pdf] enqueue failed', { albumId, error: String(e) });
+    void captureException(e, {
+      source: 'album-pdf',
+      category: 'pdf',
+      severity: 'error',
+      requestId: getRequestId(),
+      metadata: { albumId, stage: 'enqueue' },
+    });
     await svc.from('album_pdfs').update({ status: 'failed', error: 'Could not enqueue job' }).eq('album_id', albumId);
     return { ok: false, error: 'Could not start PDF generation.' };
   }

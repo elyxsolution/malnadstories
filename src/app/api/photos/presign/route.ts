@@ -6,6 +6,7 @@ import { presignPut, ALLOWED_CONTENT_TYPES, type AllowedContentType } from '@/li
 import { photoCap } from '@/lib/builder/model';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
 import { workerConfigOk } from '@/lib/worker/health';
+import { checkLimit } from '@/lib/security/guard';
 
 /**
  * POST /api/photos/presign
@@ -23,6 +24,20 @@ export async function POST(request: Request) {
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Per-user mint throttle (Phase 10C). Burst-friendly so genuine bulk uploads are
+  // unaffected; caps a client minting unbounded presigned URLs. (photoCap already
+  // bounds usable rows; this caps churn/abuse.)
+  const rl = await checkLimit(`presign:${user.id}`, 120, 60_000, {
+    surface: 'upload_presign',
+    actor: { userId: user.id },
+  });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'Too many upload requests. Please slow down and try again shortly.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    );
   }
 
   // Fail-closed in production: every uploaded photo MUST be hardened by the worker

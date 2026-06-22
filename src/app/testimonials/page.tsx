@@ -4,6 +4,9 @@ import { listPublished } from '@/lib/cms/public';
 
 export const metadata = { title: 'Testimonials — Malnad Stories' };
 
+// Phase 10D: ISR/CDN backstop; admin CMS busts the `cms-public` tag on change.
+export const revalidate = 300;
+
 /** Public testimonials page. Only PUBLISHED testimonial rows (RLS + listPublished). */
 export default async function TestimonialsPage() {
   const items = await listPublished('testimonial');

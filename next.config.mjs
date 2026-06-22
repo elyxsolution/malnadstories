@@ -14,6 +14,8 @@ const scriptSrc = [
   .join(' ');
 
 const nextConfig = {
+  // Phase 10B: enables src/instrumentation.ts (process-level exception capture). Next 14.2.
+  experimental: { instrumentationHook: true },
   async headers() {
     return [
       {
@@ -23,6 +25,8 @@ const nextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // Phase 10C: don't leak navigation intent via speculative DNS prefetch.
+          { key: 'X-DNS-Prefetch-Control', value: 'off' },
           {
             key: 'Content-Security-Policy',
             value: [

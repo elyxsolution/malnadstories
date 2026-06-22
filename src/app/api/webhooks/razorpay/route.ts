@@ -4,6 +4,8 @@ import { verifyWebhookSignature } from '@/lib/razorpay';
 import { rateLimit, sweepRateLimits } from '@/lib/rate-limit';
 import { sendOrderConfirmationEmail } from '@/lib/email/events';
 import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
+import { captureException, captureMessage } from '@/lib/observability/capture';
+import { getRequestId } from '@/lib/observability/request-id';
 
 // Node runtime: we need the raw request body + Node crypto for HMAC.
 export const runtime = 'nodejs';
@@ -42,6 +44,14 @@ export async function POST(request: Request) {
       eventId: request.headers.get('x-razorpay-event-id'),
       hasSignature: !!signature,
       bodyBytes: raw.length,
+    });
+    // Capture (auth/warning): forged webhook or secret mismatch. NEVER capture the raw body/signature.
+    void captureMessage('Razorpay webhook signature verification failed', {
+      source: 'razorpay-webhook',
+      category: 'auth',
+      severity: 'warning',
+      requestId: getRequestId(),
+      metadata: { eventId: request.headers.get('x-razorpay-event-id'), hasSignature: !!signature, bodyBytes: raw.length },
     });
     return NextResponse.json({ error: 'invalid signature' }, { status: 400 });
   }
@@ -95,6 +105,13 @@ export async function POST(request: Request) {
 
   if (error) {
     console.error('[razorpay-webhook] rpc error', { eventId, event, error: error.message });
+    void captureException(error, {
+      source: 'razorpay-webhook',
+      category: 'payment',
+      severity: 'critical',
+      requestId: getRequestId(),
+      metadata: { eventId, event, stage: 'process_razorpay_event' },
+    });
     return NextResponse.json({ error: 'processing failed' }, { status: 503 });
   }
 
@@ -115,6 +132,13 @@ export async function POST(request: Request) {
       paymentId,
       amountPaise,
       currency,
+    });
+    void captureMessage('Razorpay amount/currency mismatch — order NOT fulfilled', {
+      source: 'razorpay-webhook',
+      category: 'payment',
+      severity: 'critical',
+      requestId: getRequestId(),
+      metadata: { eventId, event, razorpayOrderId, paymentId, amountPaise, currency },
     });
     // Ack so Razorpay stops retrying a payload we will never fulfil; ops follows up.
     return NextResponse.json({ ok: false, result }, { status: 200 });

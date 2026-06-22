@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { PASSWORD_MAX, PASSWORD_MIN, validatePassword } from '@/lib/auth/policy';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -29,8 +30,9 @@ export default function ResetPasswordPage() {
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const password = String(new FormData(e.currentTarget).get('password') ?? '');
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    const check = validatePassword(password);
+    if (!check.ok) {
+      setError(check.error);
       return;
     }
     setPhase('saving');
@@ -75,7 +77,18 @@ export default function ResetPasswordPage() {
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
-              <Input id="password" name="password" type="password" autoComplete="new-password" minLength={8} required />
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                minLength={PASSWORD_MIN}
+                maxLength={PASSWORD_MAX}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Between {PASSWORD_MIN} and {PASSWORD_MAX} characters
+              </p>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={phase === 'saving'}>
