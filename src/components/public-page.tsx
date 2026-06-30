@@ -1,65 +1,58 @@
-import Link from 'next/link';
-import { Sprig } from '@/components/brand';
+import PublicHeader from '@/components/public-header';
+import PublicFooter from '@/components/public-footer';
 
 /**
- * Shared chrome for the public (anon-readable) CMS pages — FAQ, testimonials, stories.
- * Minimal brand header + a footer linking the three. Presentation only; no auth, no data.
+ * Shared chrome for the public (anon-readable) marketing + CMS pages — FAQ, testimonials,
+ * stories, pricing, contact, destinations. Editorial masthead between the shared header and
+ * footer. Presentation only; no auth, no data.
  */
 export default function PublicPage({
   eyebrow,
   title,
   intro,
+  wide,
   children,
 }: {
   eyebrow?: string;
   title: string;
   intro?: string;
+  /** Wider content column for grid-heavy pages (pricing, destinations). */
+  wide?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="brand-surface flex min-h-screen flex-col font-ui">
-      <header className="flex items-center justify-between px-6 py-5 sm:px-10">
-        <Link href="/" className="inline-flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center border border-[#b89a5c] text-gold">
-            <Sprig className="h-4 w-4" />
-          </span>
-          <span className="font-display text-lg font-semibold leading-none text-primary">
-            Malnad <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
-          </span>
-        </Link>
-        <Link
-          href="/login"
-          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-primary"
-        >
-          Log in
-        </Link>
-      </header>
+      <PublicHeader />
 
-      <main className="flex-1 px-6 py-10 sm:px-10 lg:py-16">
-        <div className="mx-auto max-w-3xl">
-          {eyebrow && (
-            <p className="mb-3 text-[12px] font-medium uppercase tracking-[0.18em] text-gold">{eyebrow}</p>
-          )}
-          <h1 className="font-display text-[2.6rem] font-normal leading-none tracking-tight text-primary">{title}</h1>
-          {intro && <p className="mt-3 max-w-2xl text-base font-light text-muted-foreground">{intro}</p>}
-          <div className="mt-10">{children}</div>
+      <main className="flex-1">
+        {/* Masthead */}
+        <div className="border-b border-border/60">
+          <div className="mx-auto max-w-6xl px-5 py-14 sm:px-8 lg:py-20">
+            <div className="max-w-3xl">
+              {eyebrow && (
+                <p className="mb-4 text-[12px] font-semibold uppercase tracking-[0.2em] text-gold">
+                  {eyebrow}
+                </p>
+              )}
+              <h1 className="text-balance font-display text-4xl font-normal leading-[1.02] tracking-tight text-primary sm:text-5xl">
+                {title}
+              </h1>
+              {intro && (
+                <p className="mt-5 max-w-2xl text-pretty text-lg font-light leading-relaxed text-muted-foreground">
+                  {intro}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="mx-auto px-5 py-12 sm:px-8 lg:py-16" style={{ maxWidth: wide ? '72rem' : '56rem' }}>
+          {children}
         </div>
       </main>
 
-      <footer className="border-t border-border px-6 py-8 sm:px-10">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-          <Link href="/faq" className="transition-colors hover:text-primary">
-            FAQ
-          </Link>
-          <Link href="/stories" className="transition-colors hover:text-primary">
-            Stories
-          </Link>
-          <Link href="/testimonials" className="transition-colors hover:text-primary">
-            Testimonials
-          </Link>
-          <span className="ml-auto text-xs">© {new Date().getFullYear()} Malnad Stories</span>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }

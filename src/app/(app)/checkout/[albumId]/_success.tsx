@@ -24,7 +24,7 @@ export default function SuccessScreen({
   email: string;
 }) {
   return (
-    <div className="fixed inset-0 z-[9500] flex flex-col items-center justify-center overflow-hidden bg-[#122019] px-6 text-center">
+    <div className="fixed inset-0 z-[9500] flex flex-col items-center justify-center overflow-hidden bg-primary-deep px-6 text-center">
       {/* closing book */}
       <div className="animate-book-close flex h-[150px] shadow-[0_30px_60px_rgb(0_0_0/0.45)]">
         <div className="w-3 rounded-l-[1px] bg-[linear-gradient(90deg,#16271f,#244235)]" />
@@ -42,15 +42,15 @@ export default function SuccessScreen({
         </div>
       </div>
 
-      <p className="animate-fade-in mt-9 text-[11px] font-semibold uppercase tracking-[0.3em] text-[#b89a5c]" style={{ animationDelay: '1.3s' }}>
+      <p className="animate-fade-in mt-9 text-[11px] font-semibold uppercase tracking-[0.3em] text-gold-light" style={{ animationDelay: '1.3s' }}>
         Order {orderId}
       </p>
-      <h1 className="animate-rise mt-5 max-w-[16ch] font-display text-[clamp(2.6rem,7vw,3.75rem)] font-normal leading-[1.04] text-[#f5efe3]" style={{ animationDelay: '1.4s' }}>
+      <h1 className="animate-rise mt-5 max-w-[16ch] font-display text-[clamp(2.6rem,7vw,3.75rem)] font-normal leading-[1.04] text-primary-foreground" style={{ animationDelay: '1.4s' }}>
         Your story is on its way.
       </h1>
       <span className="animate-draw-line mt-7 h-px bg-[linear-gradient(90deg,transparent,#b89a5c,transparent)]" style={{ ['--dw' as string]: '280px' }} />
-      <p className="animate-fade-in mt-7 text-[15px] font-light text-[#a9bdb0]" style={{ animationDelay: '2.2s' }}>
-        Hand-bound and delivered by <strong className="font-medium text-[#ecd9ad]">{estDelivery}</strong>.
+      <p className="animate-fade-in mt-7 text-[15px] font-light text-primary-foreground/60" style={{ animationDelay: '2.2s' }}>
+        Hand-bound and delivered by <strong className="font-medium text-gold-pale">{estDelivery}</strong>.
         {email ? (
           <>
             <br />
@@ -62,14 +62,14 @@ export default function SuccessScreen({
       <div className="animate-fade-in mt-9 flex flex-col gap-3 sm:flex-row" style={{ animationDelay: '2.5s' }}>
         <Button
           render={<Link href={`/orders/${orderId}`} />}
-          className="border-0 bg-[#ecd9ad] text-[#1e3a2f] hover:bg-[#f2e3bd]"
+          className="border-0 bg-gold-pale text-primary hover:bg-gold-pale/85"
         >
           <MapPin /> Track your album
         </Button>
         <Button
           variant="outline"
           render={<Link href="/dashboard" />}
-          className="border-[#ecd9ad]/40 bg-transparent text-[#ecd9ad] hover:bg-[#ecd9ad]/10"
+          className="border-gold-pale/40 bg-transparent text-gold-pale hover:bg-gold-pale/10"
         >
           <Library /> Back to library
         </Button>

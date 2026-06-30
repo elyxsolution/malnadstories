@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { computeFrameLayout, cssFilter, sharpenKernel, type EditConfig } from '@/lib/builder/model';
+import { computeFrameLayout, cssFilter, frameFinish, sharpenKernel, type EditConfig } from '@/lib/builder/model';
 
 /**
  * THE single render surface. Applies the non-destructive EditConfig at display time
@@ -60,12 +60,15 @@ export default function PhotoFrame({
 
   const layout = computeFrameLayout(frame.w, frame.h, nat.w, nat.h, edit);
   const sharpness = edit?.sharpness ?? 0;
+  // Container finish (opacity / rounded corners / soft shadow). Border-radius uses the
+  // measured short edge for crisp, uniform px corners on any aspect.
+  const finish = frameFinish(edit, Math.min(frame.w, frame.h) || undefined);
 
   return (
     <div
       ref={ref}
       className={`relative h-full w-full overflow-hidden ${className ?? ''}`}
-      style={{ filter: cssFilter(edit, sharpenId) }}
+      style={{ filter: cssFilter(edit, sharpenId), ...finish }}
     >
       {sharpness > 0 && (
         <svg width="0" height="0" className="absolute" aria-hidden>

@@ -15,6 +15,7 @@ const config: Config = {
         // Work Sans = UI sans. Fallbacks match if the vars are ever absent.
         display: ['var(--font-display)', 'Cormorant Garamond', 'Georgia', 'serif'],
         ui: ['var(--font-ui)', 'Work Sans', 'system-ui', 'sans-serif'],
+        handwritten: ['var(--font-accent-handwritten)', 'cursive'],
       },
       colors: {
         background: 'hsl(var(--background) / <alpha-value>)',
@@ -30,6 +31,9 @@ const config: Config = {
         primary: {
           DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
           foreground: 'hsl(var(--primary-foreground) / <alpha-value>)',
+          // Forest depth steps for the dark command rail, spines & wells.
+          deep: 'hsl(var(--primary-deep) / <alpha-value>)',
+          light: 'hsl(var(--primary-light) / <alpha-value>)',
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary) / <alpha-value>)',
@@ -56,11 +60,23 @@ const config: Config = {
           foreground: 'hsl(var(--warning-foreground) / <alpha-value>)',
         },
         // Accent gold — the Foundations "whisper" reserved for the rarest highlights.
-        gold: 'hsl(var(--gold) / <alpha-value>)',
+        gold: {
+          DEFAULT: 'hsl(var(--gold) / <alpha-value>)',
+          light: 'hsl(var(--gold-light) / <alpha-value>)',
+          pale: 'hsl(var(--gold-pale) / <alpha-value>)',
+        },
         info: 'hsl(var(--info) / <alpha-value>)',
         border: 'hsl(var(--border) / <alpha-value>)',
         input: 'hsl(var(--input) / <alpha-value>)',
         ring: 'hsl(var(--ring) / <alpha-value>)',
+        // Builder-scoped premium green — interaction-only accent in the Album Builder's
+        // white-first Pixory reskin. NEVER used in the cream customer journey.
+        studio: {
+          DEFAULT: 'hsl(var(--studio) / <alpha-value>)',
+          foreground: 'hsl(var(--studio-foreground) / <alpha-value>)',
+          bright: 'hsl(var(--studio-bright) / <alpha-value>)',
+          soft: 'hsl(var(--studio-soft) / <alpha-value>)',
+        },
       },
       // Editorial 2px corner system (Foundations). Crisp by default; pills/avatars keep
       // `rounded-full`. Remapping xl/2xl/3xl too so existing cards/modals sharpen globally.
@@ -88,6 +104,13 @@ const config: Config = {
           '0 1px 1px rgb(0 0 0 / 0.22), 0 8px 18px -6px rgb(0 0 0 / 0.45), 0 28px 56px -20px rgb(0 0 0 / 0.6)',
         // Soft green glow for active drop targets.
         glow: '0 0 0 3px hsl(158 40% 45% / 0.35), 0 12px 28px -10px hsl(158 45% 30% / 0.45)',
+        // Extremely soft, layered float for the white builder shell (Pixory calm). No
+        // heavy elevation — panels appear to rest gently above the neutral backdrop.
+        soft: '0 1px 2px rgb(16 24 20 / 0.03), 0 8px 24px -14px rgb(16 24 20 / 0.12)',
+        // White printed-paper page on the light neutral stage — soft, neutral drop.
+        'paper-light': '0 1px 2px rgb(16 24 20 / 0.05), 0 10px 26px -12px rgb(16 24 20 / 0.18)',
+        // Builder-green focus ring (interaction-only), used for focus-visible on the shell.
+        'studio-ring': '0 0 0 3px hsl(var(--studio-bright) / 0.30)',
       },
       keyframes: {
         'fade-in': {

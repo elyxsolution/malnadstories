@@ -1,6 +1,8 @@
 'use client';
 
 import PhotoFrame from './_photo-frame';
+import { TextBox, QrBox, StickerBox } from './_elements-render';
+import { backgroundStyle } from '@/lib/builder/elements';
 import type { Block, EditConfig, Overlay } from '@/lib/builder/model';
 
 /**
@@ -31,11 +33,14 @@ const overlapsHalf = (o: Overlay, half: PairHalf) =>
 export default function PairContent({
   block,
   photoFor,
+  stickerUrlFor,
   onFrameReady,
   half = 'full',
 }: {
   block: Block;
   photoFor: (id: string | undefined) => PairPhoto | undefined;
+  /** Resolve a sticker id → presigned URL (parallel to photoFor). Optional; stickers render only if resolved. */
+  stickerUrlFor?: (stickerId: string) => string | undefined;
   onFrameReady?: () => void;
   half?: PairHalf;
 }) {
@@ -46,7 +51,10 @@ export default function PairContent({
   const showRight = half === 'full' || half === 'right';
 
   return (
-    <div className="absolute inset-0">
+    // `container-type: inline-size` makes text `cqw` units scale with the open-pair width
+    // (identical ratio in canvas, preview, and PDF). Background renders beneath everything.
+    <div className="absolute inset-0" style={{ containerType: 'inline-size' }}>
+      {block.background && <div className="absolute inset-0" style={backgroundStyle(block.background)} />}
       {isDouble ? (
         // One image across the whole open pair; per-page clipping performs the split.
         left ? (
@@ -83,6 +91,22 @@ export default function PairContent({
           </div>
         );
       })}
+
+      {/* Text + QR sit above the photo layers. They carry no remote loads (cqw text, inline
+          SVG QR), so the PDF readiness counter is unaffected. The per-page clip window
+          handles half-splitting in PDF mode — no overlapsHalf filtering needed here. */}
+      {(block.texts ?? []).map((t) => (
+        <TextBox key={t.id} el={t} />
+      ))}
+      {(block.qrs ?? []).map((q) => (
+        <QrBox key={q.id} el={q} />
+      ))}
+
+      {/* Stickers — decorative artwork on top. Resolved via stickerUrlFor (a since-deleted
+          sticker resolves to undefined → renders nothing, like a missing photo). */}
+      {(block.stickers ?? []).map((s) => (
+        <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onFrameReady} />
+      ))}
     </div>
   );
 }

@@ -16,10 +16,12 @@ export default function Preview({
   blocks,
   photoMap,
   cover,
+  stickerUrlFor,
 }: {
   blocks: Block[];
   photoMap: Map<string, Photo>;
   cover: { url: string; name: string } | null;
+  stickerUrlFor?: (stickerId: string) => string | undefined;
 }) {
   const photoFor = (id: string | undefined) => {
     const p = id ? photoMap.get(id) : undefined;
@@ -62,7 +64,7 @@ export default function Preview({
             <figure key={block.key} className="mx-auto w-full max-w-2xl">
               {/* Open pair: two 3:4 pages side by side = 3:2, with a centre gutter. */}
               <div className="relative mx-auto aspect-[3/2] w-full overflow-hidden rounded-lg border bg-muted shadow-sm">
-                <PairContent block={block} photoFor={photoFor} />
+                <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
                 <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/70 mix-blend-difference" />
               </div>
               <figcaption className="mt-2 flex items-center justify-between text-xs text-muted-foreground">

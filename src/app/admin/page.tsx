@@ -97,11 +97,11 @@ export default async function AdminDashboard() {
 
   const alerts: { icon: typeof AlertTriangle; color: string; title: string; detail: string; href: string }[] = [];
   if (rejectedPhotos > 0)
-    alerts.push({ icon: ImageOff, color: 'text-amber-600', title: `${rejectedPhotos} photo${rejectedPhotos === 1 ? '' : 's'} failed processing`, detail: 'Rejected during image hardening (spoofed/undecodable/too large).', href: '/admin/system' });
+    alerts.push({ icon: ImageOff, color: 'text-warning', title: `${rejectedPhotos} photo${rejectedPhotos === 1 ? '' : 's'} failed processing`, detail: 'Rejected during image hardening (spoofed/undecodable/too large).', href: '/admin/system' });
   if (failedPdfs > 0)
     alerts.push({ icon: FileWarning, color: 'text-destructive', title: `${failedPdfs} PDF generation${failedPdfs === 1 ? '' : 's'} failed`, detail: 'Album preview PDFs that ended in a failed state.', href: '/admin/system' });
   if (stuckPdfs > 0)
-    alerts.push({ icon: Clock, color: 'text-amber-600', title: `${stuckPdfs} PDF${stuckPdfs === 1 ? '' : 's'} stuck generating`, detail: 'Generating for over 5 minutes — the worker sweep should recover these.', href: '/admin/system' });
+    alerts.push({ icon: Clock, color: 'text-warning', title: `${stuckPdfs} PDF${stuckPdfs === 1 ? '' : 's'} stuck generating`, detail: 'Generating for over 5 minutes — the worker sweep should recover these.', href: '/admin/system' });
 
   const cards = [
     { label: 'Total revenue', value: inr(revenue ?? 0) },

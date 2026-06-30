@@ -2,16 +2,13 @@
 
 import { Check } from 'lucide-react';
 
-export type CheckoutStep = 'ready' | 'summary' | 'shipping' | 'delivery' | 'payment' | 'review';
+export type CheckoutStep = 'summary' | 'shipping' | 'review';
 
-export const STEP_ORDER: CheckoutStep[] = ['ready', 'summary', 'shipping', 'delivery', 'payment', 'review'];
+export const STEP_ORDER: CheckoutStep[] = ['summary', 'shipping', 'review'];
 const STEP_LABEL: Record<CheckoutStep, string> = {
-  ready: 'Readiness',
   summary: 'Summary',
-  shipping: 'Shipping',
-  delivery: 'Delivery',
-  payment: 'Payment',
-  review: 'Review',
+  shipping: 'Address & Delivery',
+  review: 'Review & Pay',
 };
 
 /**

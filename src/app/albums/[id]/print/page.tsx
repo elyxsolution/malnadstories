@@ -3,7 +3,20 @@ import { createHash } from 'crypto';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
 import PrintAlbum, { type PrintPhoto, type PrintCover } from './_print-album';
-import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
+import {
+  LAYOUT_TEMPLATES,
+  type Background,
+  type Block,
+  type EditConfig,
+  type LayoutTemplate,
+  type Overlay,
+  type QrElement,
+  type StickerElement,
+  type TextElement,
+} from '@/lib/builder/model';
+import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { resolveStickerUrls } from '@/lib/stickers';
+import { builderFontVars } from '@/lib/fonts';
 
 // No caching: this route is token-gated and renders live album data for the worker.
 // `force-dynamic` forces dynamic RENDERING, but the per-fetch Data Cache can still
@@ -19,7 +32,13 @@ type PageRow = {
   layout_template: string | null;
   caption: string | null;
   photo_ids: string[] | null;
-  layout_config: { overlays?: Overlay[] } | null;
+  layout_config: {
+    overlays?: Overlay[];
+    texts?: TextElement[];
+    qrs?: QrElement[];
+    stickers?: StickerElement[];
+    background?: Background | null;
+  } | null;
 };
 
 /**
@@ -121,24 +140,59 @@ export default async function PrintPage({
 
   const { data: albumData } = await supabase
     .from('albums')
-    .select('id, cover_template_id')
+    .select('id, title, cover_template_id')
     .eq('id', params.id)
     .maybeSingle();
   if (!albumData) notFound();
+  const albumRow = albumData as { id: string; title: string; cover_template_id: string | null };
 
-  // Resolve the selected cover (admin template) and presign its artwork. Rendered as
-  // physical page 1; never carries user content. Null → renderer emits a plain cover.
-  const coverTemplateId = (albumData as { cover_template_id: string | null }).cover_template_id;
-  let cover: PrintCover = null;
-  if (coverTemplateId) {
+  // Custom cover design (0038). Best-effort: a not-yet-migrated `cover_config` column
+  // returns an error (not a throw) → we keep defaults, so the PDF still renders.
+  const { data: cfgRow } = await supabase.from('albums').select('cover_config').eq('id', params.id).maybeSingle();
+  const coverConfig = normalizeCoverConfig(
+    (cfgRow as { cover_config?: unknown } | null)?.cover_config as Parameters<typeof normalizeCoverConfig>[0],
+  );
+
+  // Resolve the cover IMAGE (page 1): chosen photo → admin template artwork → none (the
+  // renderer then uses the CSS background). The composition (title/tagline/typography/
+  // layout) comes from coverConfig, so the printed cover matches the builder exactly.
+  let coverImageUrl: string | null = null;
+  if (coverConfig.photoId) {
+    const { data: cp } = await supabase
+      .from('photos')
+      .select('sanitized_key')
+      .eq('id', coverConfig.photoId)
+      .eq('album_id', params.id)
+      .eq('status', 'ready')
+      .maybeSingle();
+    const key = (cp as { sanitized_key: string | null } | null)?.sanitized_key ?? null;
+    if (key) coverImageUrl = await presignGet(key, 900);
+  }
+  if (!coverImageUrl && !coverConfig.background && albumRow.cover_template_id) {
     const { data: coverRow } = await supabase
       .from('cover_templates')
       .select('image_key')
-      .eq('id', coverTemplateId)
+      .eq('id', albumRow.cover_template_id)
       .maybeSingle();
     const key = (coverRow as { image_key: string } | null)?.image_key;
-    if (key) cover = { url: await presignGet(key, 900) };
+    if (key) coverImageUrl = await presignGet(key, 900);
   }
+
+  // Back cover image — its own uploaded photo (no admin artwork on the back).
+  let backCoverImageUrl: string | null = null;
+  if (coverConfig.back.photoId) {
+    const { data: bp } = await supabase
+      .from('photos')
+      .select('sanitized_key')
+      .eq('id', coverConfig.back.photoId)
+      .eq('album_id', params.id)
+      .eq('status', 'ready')
+      .maybeSingle();
+    const key = (bp as { sanitized_key: string | null } | null)?.sanitized_key ?? null;
+    if (key) backCoverImageUrl = await presignGet(key, 900);
+  }
+
+  const cover: PrintCover = { imageUrl: coverImageUrl, backImageUrl: backCoverImageUrl, config: coverConfig, title: albumRow.title };
 
   // Only 'ready' photos have a sanitized key; presign the full-res master (longer
   // TTL so the worker finishes within the window). Never the raw original.
@@ -177,7 +231,19 @@ export default async function PrintPage({
       photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
       caption: r.caption ?? '',
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+      texts: r.layout_config?.texts ?? [],
+      qrs: r.layout_config?.qrs ?? [],
+      stickers: r.layout_config?.stickers ?? [],
+      background: r.layout_config?.background ?? null,
     }));
+
+  // Resolve presigned URLs for every sticker the album references (pages + cover) — by id, via
+  // the service role, so a deactivated-but-placed sticker still prints. PDF == builder preview.
+  const stickerUrls = await resolveStickerUrls([
+    ...blocks.flatMap((b) => b.stickers.map((s) => s.stickerId)),
+    ...coverConfig.stickers.map((s) => s.stickerId),
+    ...coverConfig.back.stickers.map((s) => s.stickerId),
+  ]);
 
   console.log('[print] rendering album', {
     albumId: params.id,
@@ -186,5 +252,11 @@ export default async function PrintPage({
     hasCover: !!cover,
   });
 
-  return <PrintAlbum blocks={blocks} photos={photos} cover={cover} />;
+  // Wrap in the full builder font library so every selectable typeface resolves in the PDF
+  // (this route is outside the (app) group; the root layout only carries the brand fonts).
+  return (
+    <div className={builderFontVars}>
+      <PrintAlbum blocks={blocks} photos={photos} cover={cover} stickerUrls={stickerUrls} />
+    </div>
+  );
 }

@@ -113,6 +113,7 @@ drizzle/
   0035_monitoring.sql                 health_checks (append-only per-service snapshots) + system_alerts (append-only; resolving marks; partial unique (dedupe_key) where not resolved = anti-fatigue). Admin-only RLS + service-role writes. Read-only collectors over existing tables; audit health.check/alert.created/alert.resolved
   0036_error_events.sql               error_events (append-only captured failures/exceptions/slow ops; deduped by fingerprint via partial unique (fingerprint) where not resolved → occurrences++). Admin-only RLS + service-role writes (no delete). record_error_event() SECURITY DEFINER RPC = single capture entrypoint (app + worker): dedupe-upsert + audit error.created + open a critical system_alert (reuses 0035). Phase 10B
   0037_perf_indexes.sql               PURELY ADDITIVE performance indexes (Phase 10D) — no schema/RLS/grant change: albums(user_id,updated_at), orders(user_id,placed_at), orders(album_id,status), addresses(user_id), payments(order_id). Targets the hottest RLS/lookup predicates the base tables (0001) never indexed
+  0039_stickers.sql                   sticker_categories + stickers (admin-managed decorative artwork for the cover + pages). Mirrors cover_templates (0023): artwork in private R2 under stickers/…; PUBLIC-READ active rows (anon/authenticated SELECT active); service-role writes only. RBAC `sticker:manage` (content role). Placed stickers store only `stickerId` in album jsonb — the print route/admin/builder resolve URLs by id so a deactivated-but-placed sticker still renders
 worker/                       Separate Node service (own package.json; pnpm install inside)
   src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
   src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
@@ -350,6 +351,8 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 29. `drizzle/0035_monitoring.sql` — Monitoring & alerting (Phase 10A); **run SQL FIRST** (the monitoring page reads these tables)
 30. `drizzle/0036_error_events.sql` — Error tracking & observability (Phase 10B); **run SQL FIRST** (the capture layer + Error Center read/write this table + the `record_error_event` RPC)
 31. `drizzle/0037_perf_indexes.sql` — Performance indexes (Phase 10D); purely additive (no schema/RLS/grant change) — safe to run any time, code works with or without it (queries just get faster)
+32. `drizzle/0038_album_cover_config.sql` — Editable custom front cover; adds `albums.cover_config` jsonb + extends the authenticated UPDATE column grant. Safe either way — `saveCoverDesign` is the only write that needs it; until it runs the builder loads with cover defaults and the rest of the flow is unaffected.
+33. `drizzle/0039_stickers.sql` — Sticker catalog (cover + page decorative artwork); **run SQL FIRST** (the builder + admin `/admin/stickers` read these tables). Public-read active rows + service-role writes (mirrors covers). Until it runs the Stickers panel is empty and the rest of the flow is unaffected.
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
 > rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
@@ -698,6 +701,47 @@ action input; ownership is re-verified on every server action.
 > Server-side image **re-validation / thumbnails** and the **downloadable preview
 > PDF** are both built (worker, above). The PDF is a faithful **preview**, not the
 > final pre-press file (exact bleed/DPI is a later tuning of the print-route page sizes).
+
+## Builder upgrade — Cover-as-page-0, stickers, fonts, colour, autocomplete — built
+
+A unification + editing-quality pass that makes the cover the FIRST page of one continuous
+editor (no more separate cover screen) and levels-up typography/colour/decoration across both
+cover and pages. Refactor-not-duplicate: the cover and pages share the same element machinery.
+
+- **Cover-as-page-0 (no separate screen).** The `view: 'cover'|'pages'` toggle + the dedicated
+  `_cover-editor.tsx` are GONE. `_builder` has a `coverFocused` flag; the canvas/inspector/rails
+  swap to the cover when it's focused. The cover is the first item in the page strip + bottom
+  navigator (`CoverDesignFromConfig` thumbnail). Storage is unchanged — still `albums.cover_config`
+  (jsonb) — but `CoverConfig` is ENRICHED with `texts: TextElement[]` + `stickers: StickerElement[]`
+  (`lib/builder/cover.ts`), so the cover gets the SAME free elements as pages. `normalizeCoverConfig`
+  defaults both to `[]`, so existing covers hydrate unchanged. The cover keeps its structured title
+  block (driven by `albums.title`, which stays the canonical title for dashboard/checkout/orders).
+- **Shared element machinery (the consistency requirement).** Extracted `_element-bits.tsx`
+  (`ElementControls`/`CtlBtn`/`InlineTextEditor`) + `_element-inspectors.tsx` (callback-based
+  `TextInspector`/`StickerInspector`), reused by BOTH the page canvas (`_block`) and the new
+  `_cover-canvas` (3:4, interactive text + stickers via the shared `_movable` engine). The cover
+  renderer (`_cover-render`) renders `config.texts`/`config.stickers` so flipbook + PDF match the
+  builder (a `renderElements` flag lets the editing canvas draw interactive versions instead).
+- **Stickers (cover + pages).** New `StickerElement` (id + `stickerId` + rect + rotation + opacity)
+  on `Block` AND `CoverConfig`; admin catalog in `0039` (see migrations). Placed stickers store only
+  `stickerId`; URLs are resolved by id (`lib/stickers.ts` `listActiveStickers`/`resolveStickerUrls`)
+  in the builder page, flipbook, PDF print route, and admin/purchased previews — a since-deactivated
+  but already-placed sticker still renders (same policy as covers). Admin UI `/admin/stickers`
+  (RBAC `sticker:manage`, content role). `StickerBox`/`StickerContent` in `_elements-render`.
+- **#5 Build For Me** moved ABOVE the layout grid (`_panel-layouts`). **#6 Auto Align** replaced the
+  AI-Assistant toolbar button — `lib/builder/auto-align.ts` tidies the focused page/cover's free
+  elements (centre + even distribution). Auto-layout ("Build it for me") stays in the Layouts panel.
+- **#8 Fonts** — ~20 Google fonts via `next/font` (`lib/fonts.ts` `builderFontVars`) + a pure
+  `lib/builder/fonts-catalog.ts` (key→stack; `TextFontKey = FontKey`; Zod `font` enums widened to
+  `FONT_KEYS`; legacy serif/sans/script kept). New `_font-picker.tsx` (live per-font preview) used on
+  cover + pages. `builderFontVars` is applied on the builder, the **print route**, and admin preview.
+- **#9 Professional colour picker** — `_color-picker.tsx` `ColorField` (HSV square + hue slider +
+  hex/RGB + presets + localStorage recent/saved; drop-in for the old `ColorRow`), used for text,
+  cover, and QR colours. **#7 Location autocomplete** — `_location-autocomplete.tsx` over the
+  predefined `lib/builder/locations.ts` (~300 destinations), wired into the cover title field.
+- **No payment/PDF/schema-shape risk:** `album_pages.layout_config` just gains an additive
+  `stickers` key (0006 CHECK only constrains `overlays`); the cover stays in `cover_config`; the
+  submit gate + checkout are unchanged.
 
 ## Admin console + fulfillment (Phase 1) — built
 

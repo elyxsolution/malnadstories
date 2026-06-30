@@ -4,50 +4,65 @@
 
 @layer base {
   /*
-   * Malnad Stories design tokens — premium printed-photobook brand.
-   * Palette: white canvas · soft sage/warm off-white surfaces · light-green accents
-   * · dark-green primary actions · warm neutral grays. High readability throughout.
-   * All values are HSL channels consumed as hsl(var(--x)) / hsl(var(--x) / <alpha>).
+   * Malnad Stories design tokens — the Claude Design "Foundations" editorial system.
+   * Palette: warm cream/paper canvas (#fbf8f1) · forest-green primary (#1e3a2f) ·
+   * warm-charcoal ink · a muted-gold "whisper" reserved for the rarest highlights.
+   * 2px editorial corners; soft warm-tinted shadows; faint paper grain.
+   * All values are HSL channels consumed as hsl(var(--x)) / hsl(var(--x) / <alpha>),
+   * so every Tailwind color key supports the `/<alpha>` modifier.
    */
   :root {
-    /* Claude Design "Foundations" — forest, paper, ink & a whisper of gold. Values are
-       the exact prototype hexes converted to HSL channels (consumed as hsl(var(--x))). */
-    --background: 42 50% 96%; /* Paper 50 #fbf8f1 — warm cream canvas */
-    --foreground: 37 17% 15%; /* Ink 800 #2c271f — warm charcoal */
+    /* Warm Ivory background + Warm Charcoal text ink. Greens kept as primary accent. */
+    --background: 42 37% 96%; /* Warm Ivory #fbf8f1 */
+    --foreground: 35 18% 11%; /* Warm Charcoal #211d17 */
 
-    --card: 0 0% 100%; /* white sheets float on the cream */
-    --card-foreground: 37 17% 15%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 37 17% 15%;
+    --card: 0 0% 100%; /* white cards separate by hairline border + soft shadow */
+    --card-foreground: 35 18% 11%;
+    --popover: 40 43% 92%; /* Ivory #f5efe3 */
+    --popover-foreground: 35 18% 11%;
 
-    --primary: 156 32% 17%; /* Forest 800 #1e3a2f — primary actions */
-    --primary-foreground: 40 44% 93%; /* Paper 100 #f5efe3 */
+    --primary: 156 36% 16%; /* Forest green — primary actions */
+    --primary-foreground: 42 37% 96%; /* Warm Ivory on Forest */
 
-    --secondary: 40 44% 93%; /* Paper 100 #f5efe3 — soft surface */
-    --secondary-foreground: 156 32% 17%;
+    --secondary: 40 43% 92%; /* Ivory #f5efe3 (chips/fills) */
+    --secondary-foreground: 156 36% 16%;
 
-    --muted: 40 41% 92%; /* quiet paper surface */
-    --muted-foreground: 38 16% 31%; /* Ink 500 #5d5343 — AA secondary text on cream */
+    --muted: 40 37% 88%; /* Ivory Neutral-200 */
+    --muted-foreground: 35 16% 35%; /* AA secondary text on ivory */
 
-    --accent: 38 41% 88%; /* Paper 200 #ede4d4 — warm highlight */
-    --accent-foreground: 156 32% 17%;
+    --accent: 40 43% 92%; /* soft ivory highlight */
+    --accent-foreground: 156 36% 16%;
 
-    --success: 139 26% 33%; /* #3f6b4d */
-    --success-foreground: 40 44% 93%;
-    --warning: 41 54% 40%; /* #9c7a2f */
-    --warning-foreground: 40 60% 98%;
+    --success: 138 26% 33%; /* deep green success #3f6b4d */
+    --success-foreground: 42 37% 96%;
+    --warning: 41 54% 40%; /* functional amber warning #9c7a2f */
+    --warning-foreground: 42 37% 96%;
 
-    --destructive: 10 53% 39%; /* Error #97402f */
-    --destructive-foreground: 40 44% 96%;
+    --destructive: 9 52% 39%; /* error red #97402f */
+    --destructive-foreground: 42 37% 96%;
 
-    /* Accent gold — a whisper, reserved for the rarest highlights (#a0813f). */
-    --gold: 41 44% 44%;
-    /* Info #47606b */
-    --info: 198 20% 35%;
+    --gold: 40 44% 44%; /* Muted Gold #a0813f (milestones only) */
+    --gold-light: 40 39% 54%; /* Gold Light #b89a5c (brand-mark hairline, book accent) */
+    --gold-pale: 42 62% 80%; /* Gold Pale #ecd9ad (on-forest accents, nav CTA, spine foil) */
+    --info: 198 20% 35%; /* Slate blue #47606b */
 
-    --border: 40 33% 84%; /* #e6dcc7 — warm paper hairline */
-    --input: 40 31% 78%; /* #d8ccb4 */
-    --ring: 152 28% 23%; /* #2a4a3b — forest focus ring */
+    /* Forest depth steps beyond --primary (#1e3a2f). Used for the dark command rail,
+       book spines and avatar wells — the "leather" end of the palette. */
+    --primary-deep: 152 28% 12%; /* Forest 900 #16271f */
+    --primary-light: 152 28% 23%; /* Forest 700 #2a4a3b (hover, wells) */
+
+    --border: 40 37% 88%; /* Ivory Neutral-200 hairline #ede4d4 */
+    --input: 40 37% 88%; /* input border */
+    --ring: 156 36% 16%; /* forest focus ring */
+
+    /* Builder-scoped premium green — the Album Builder's interaction-only accent
+       (white-first Pixory reskin). Distinct from the cream journey's forest --primary;
+       only ever referenced inside /albums/[id]/build. Used sparingly (~1–3% of pixels):
+       active rail tab, primary CTA, progress, selected ring, success, focus glow. */
+    --studio: 150 46% 33%; /* deep premium green — AA with white text (~#2d7d54) */
+    --studio-foreground: 0 0% 100%;
+    --studio-bright: 142 44% 45%; /* muted-premium #4CAF50-ish — small marks on white */
+    --studio-soft: 142 45% 96%; /* barely-there tint — transient drag-over/selected bg */
 
     --radius: 0.125rem; /* 2px — crisp editorial corners */
     --radius-sm: 2px;
@@ -85,6 +100,10 @@
     --border: 158 10% 18%;
     --input: 158 10% 20%;
     --ring: 150 40% 50%;
+    --gold-light: 40 45% 60%;
+    --gold-pale: 42 50% 78%;
+    --primary-deep: 152 20% 9%;
+    --primary-light: 150 22% 22%;
   }
 
   * {
@@ -157,63 +176,77 @@
   .animate-draw-line {
     animation: draw-line 1.4s var(--ease-premium) 1.1s both;
   }
+  /* Slow, immersive zoom for the auth left-panel image (Ken Burns). Motion-safe. */
+  @keyframes ms-kenburns {
+    from {
+      transform: scale(1.08);
+    }
+    to {
+      transform: scale(1);
+    }
+  }
+  .ms-kenburns {
+    animation: ms-kenburns 14s ease-out forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ms-kenburns {
+      animation: none;
+    }
+  }
 
   /* ── Album Builder "Studio" surfaces ─────────────────────────────────────────
      Scoped to the builder; no global token is changed so other pages are
      untouched. Two atmospheres: a bright workspace and a dark editing stage. */
 
-  /* Bright workspace backdrop behind the whole builder — warm, with soft depth. */
+  /* Bright, white-first workspace behind the whole builder. NEUTRAL (no green wash) so
+     green stays an interaction-only accent — Pixory's calm, spacious backdrop. */
   .builder-studio {
-    background:
-      radial-gradient(115% 70% at 50% -8%, hsl(150 28% 97%), transparent 62%),
-      radial-gradient(80% 60% at 100% 0%, hsl(150 30% 95% / 0.7), transparent 55%),
-      linear-gradient(180deg, hsl(150 18% 98.5%), hsl(150 12% 96%));
+    background: hsl(160 10% 98%);
   }
 
-  /* Warm cream "paper" surface (Foundations Paper 50). Reused across the customer
-     journey — library, details, checkout, confirmation, the creation wizard. */
+  /* Clean white customer surface with a barely-there green-neutral wash. Reused across
+     the journey — library, details, checkout, confirmation, the creation wizard. */
   .brand-surface {
     background:
-      radial-gradient(115% 65% at 50% -6%, hsl(40 50% 97.5%), transparent 60%),
-      linear-gradient(180deg, hsl(42 50% 96.5%), hsl(40 38% 94.5%));
+      radial-gradient(115% 65% at 50% -6%, hsl(160 24% 99%), transparent 60%),
+      linear-gradient(180deg, hsl(0 0% 100%), hsl(160 12% 98%));
   }
 
-  /* Global paper-grain overlay (rendered once in the root layout). Fractal noise at a
-     low opacity / multiply blend — the texture behind every screen. Non-interactive. */
+  /* Global grain overlay (rendered once in the root layout). Kept extremely faint so
+     the canvas reads clean/minimal — barely a texture, never noise. Non-interactive. */
   .paper-grain {
     position: fixed;
     inset: 0;
     z-index: 9999;
     pointer-events: none;
-    opacity: 0.045;
+    opacity: 0.035;
     mix-blend-mode: multiply;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
-  /* Dark matte stage where album spreads float (Lightroom / Apple Photos vibe). */
+  /* Very-light NEUTRAL canvas where album spreads float. Just dark enough to separate
+     the white paper (which carries a soft drop shadow) — the spread is the hero. */
   .builder-stage {
-    background:
-      radial-gradient(120% 90% at 50% -5%, hsl(160 16% 17%), transparent 65%),
-      linear-gradient(180deg, hsl(160 16% 12%), hsl(162 18% 9%));
+    background: hsl(150 7% 96.5%);
   }
 
-  /* Frosted floating panel (photo library, toolbars). */
+  /* Floating panel (photo library, toolbars). Solid white + hairline — no glass blur
+     on persistent chrome (blur is reserved for true overlays/modals). */
   .builder-panel {
-    background: linear-gradient(180deg, hsl(0 0% 100% / 0.92), hsl(150 20% 99% / 0.88));
-    backdrop-filter: saturate(1.1) blur(8px);
+    background: hsl(0 0% 100%);
+    border: 1px solid hsl(160 12% 90%);
   }
 
-  /* Glass control bar that sits on the dark stage. */
+  /* Floating control surface (filmstrip, focus controls, property panel). White with a
+     thin neutral border — gentle float (pair with shadow-soft), never heavy glass. */
   .builder-glass {
-    background: hsl(160 14% 13% / 0.72);
-    backdrop-filter: saturate(1.2) blur(10px);
-    border: 1px solid hsl(150 14% 90% / 0.12);
+    background: hsl(0 0% 100%);
+    border: 1px solid hsl(150 10% 90%);
   }
 
-  /* Subtle grain texture for the dark stage (kills banding, adds "material"). */
+  /* Grain was for the dark stage; the white canvas stays clean/minimal — no texture. */
   .stage-grain {
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-    opacity: 0.025;
+    display: none;
   }
 
   /* Skeleton loading shimmer — lightweight, CSS-only. */
@@ -307,9 +340,10 @@
       /* sheet 3 */
       7px 11px 0 -4px #f5f4ef,
       7px 11px 0 -3px rgb(16 24 20 / 0.06),
-      /* cast shadow on the stage */
-      0 10px 22px -8px rgb(0 0 0 / 0.45),
-      0 30px 60px -22px rgb(0 0 0 / 0.6);
+      /* cast shadow on the light neutral stage — soft + neutral, a gentle physical float */
+      0 1px 2px rgb(16 24 20 / 0.05),
+      0 10px 26px -12px rgb(16 24 20 / 0.2),
+      0 26px 52px -30px rgb(16 24 20 / 0.16);
   }
 
   /* The sewn spine that binds the open pair. A soft fold groove (reads on any
@@ -329,7 +363,7 @@
     width: 2px;
     background-image: repeating-linear-gradient(
       to bottom,
-      hsl(158 36% 28% / 0.55) 0 5px,
+      hsl(35 18% 20% / 0.22) 0 5px,
       transparent 5px 11px
     );
     mix-blend-mode: multiply;
@@ -344,5 +378,29 @@
       hsl(var(--border)) 0 5px,
       transparent 5px 9px
     );
+  }
+
+  /* Quiet, premium thin scrollbar for the builder's scrollable regions (sidebar,
+     canvas, timeline). Track is invisible; the thumb is a soft neutral that warms
+     to the studio green on hover — never a heavy default bar competing with content. */
+  .ms-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(150 8% 78%) transparent;
+  }
+  .ms-scroll::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .ms-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .ms-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(150 8% 80%);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .ms-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--studio-bright) / 0.6);
   }
 }

@@ -6,7 +6,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { PASSWORD_MAX, PASSWORD_MIN, validatePassword } from '@/lib/auth/policy';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY } from '@/components/brand';
 import { brandFontVars } from '@/lib/fonts';
@@ -49,7 +49,7 @@ export default function ResetPasswordPage() {
 
   return (
     <div className={`${brandFontVars} font-ui`}>
-      <AuthShell eyebrow="Account recovery" title="Choose a new password.">
+      <AuthShell title="Choose a new password" subtitle="Set a new password to get back into your memory workspace.">
         {phase === 'checking' && <p className="text-sm text-muted-foreground">Verifying your link…</p>}
 
         {phase === 'invalid' && (
@@ -77,10 +77,9 @@ export default function ResetPasswordPage() {
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
-              <Input
+              <PasswordInput
                 id="password"
                 name="password"
-                type="password"
                 autoComplete="new-password"
                 minLength={PASSWORD_MIN}
                 maxLength={PASSWORD_MAX}
@@ -90,7 +89,11 @@ export default function ResetPasswordPage() {
                 Between {PASSWORD_MIN} and {PASSWORD_MAX} characters
               </p>
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            )}
             <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={phase === 'saving'}>
               {phase === 'saving' ? 'Saving…' : 'Update password'}
             </Button>

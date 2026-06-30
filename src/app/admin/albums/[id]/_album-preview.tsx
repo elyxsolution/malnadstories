@@ -11,11 +11,14 @@ export default function AlbumPreview({
   photos,
   blocks,
   cover,
+  stickerUrls = {},
 }: {
   photos: Photo[];
   blocks: Block[];
   cover: { url: string; name: string } | null;
+  stickerUrls?: Record<string, string>;
 }) {
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
-  return <Preview blocks={blocks} photoMap={photoMap} cover={cover} />;
+  const stickerUrlFor = (id: string) => stickerUrls[id];
+  return <Preview blocks={blocks} photoMap={photoMap} cover={cover} stickerUrlFor={stickerUrlFor} />;
 }

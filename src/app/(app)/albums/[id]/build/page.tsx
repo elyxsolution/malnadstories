@@ -7,10 +7,22 @@ import Builder from './_builder';
 import PurchasedAlbum from './_purchased';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import { type Photo } from './_uploader';
-import { LAYOUT_TEMPLATES, type Block, type EditConfig, type LayoutTemplate, type Overlay } from '@/lib/builder/model';
+import {
+  LAYOUT_TEMPLATES,
+  type Background,
+  type Block,
+  type EditConfig,
+  type LayoutTemplate,
+  type Overlay,
+  type QrElement,
+  type StickerElement,
+  type TextElement,
+} from '@/lib/builder/model';
 import { listActiveCoverOptions } from '@/lib/covers';
+import { listActiveStickers, resolveStickerUrls } from '@/lib/stickers';
 import { listActiveTemplates } from '@/lib/templates/catalog';
-import { brandFontVars } from '@/lib/fonts';
+import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
+import { builderFontVars } from '@/lib/fonts';
 
 type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null };
 type PhotoRow = {
@@ -29,13 +41,22 @@ type PageRow = {
   layout_template: string | null;
   caption: string | null;
   photo_ids: string[] | null;
-  layout_config: { overlays?: Overlay[] } | null;
+  layout_config: {
+    overlays?: Overlay[];
+    texts?: TextElement[];
+    qrs?: QrElement[];
+    stickers?: StickerElement[];
+    background?: Background | null;
+  } | null;
 };
 
 export default async function BuildPage({ params }: { params: { id: string } }) {
   // Supabase server client: RLS "user_id = auth.uid()" scopes the SELECT. A foreign
   // or missing album → null → 404. No explicit AND(id, userId) needed.
   const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data } = await supabase
     .from('albums')
@@ -97,7 +118,13 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       template: r.layout_template as LayoutTemplate,
       photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
       caption: r.caption ?? '',
+      // Drop overlays whose photo was since deleted; text/QR/background carry no photo
+      // refs, so they hydrate verbatim (default to empty / null for legacy rows).
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+      texts: r.layout_config?.texts ?? [],
+      qrs: r.layout_config?.qrs ?? [],
+      stickers: r.layout_config?.stickers ?? [],
+      background: r.layout_config?.background ?? null,
     }));
 
   // Active cover designs (admin-managed; RLS exposes only active rows), with thumbnail
@@ -108,6 +135,27 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   // Active layout-template catalog (Phase 9E). Advisory presets the builder + auto-layout
   // can apply; only ACTIVE + geometry-valid templates are returned. Never gates anything.
   const layoutTemplates = await listActiveTemplates();
+
+  // Custom cover design (0038). Best-effort secondary read: if the `cover_config` column
+  // isn't migrated yet, supabase-js returns an error (not a throw) → we keep defaults, so
+  // the builder still loads. After the migration it hydrates the saved design.
+  let initialCoverConfig = DEFAULT_COVER_CONFIG;
+  {
+    const { data: cc } = await supabase.from('albums').select('cover_config').eq('id', album.id).maybeSingle();
+    const raw = (cc as { cover_config?: unknown } | null)?.cover_config;
+    if (raw) initialCoverConfig = normalizeCoverConfig(raw as Parameters<typeof normalizeCoverConfig>[0]);
+  }
+
+  // Sticker catalog (active, grouped — for the builder's Stickers panel) + presigned URLs for the
+  // stickers ALREADY placed on the pages/cover (service-role, so a deactivated-but-placed sticker
+  // still renders). The two combine into the builder's id→url resolver.
+  const stickerCatalog = await listActiveStickers();
+  const referencedStickerIds = [
+    ...initialBlocks.flatMap((b) => b.stickers.map((s) => s.stickerId)),
+    ...initialCoverConfig.stickers.map((s) => s.stickerId),
+    ...initialCoverConfig.back.stickers.map((s) => s.stickerId),
+  ];
+  const stickerUrls = await resolveStickerUrls(referencedStickerIds);
 
   // The album may reference a now-INACTIVE (soft-deleted) cover. It still renders in the
   // PDF (the print route resolves by id regardless of active), so resolve it for the
@@ -171,7 +219,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   if (paidOrder) {
     return (
-      <div className={`${brandFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
+      <div className={`${builderFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-10">
         <PurchasedAlbum
           albumId={album.id}
@@ -181,6 +229,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
           photos={photos}
           blocks={initialBlocks}
           cover={selectedCover ? { url: selectedCover.url, name: selectedCover.name } : null}
+          stickerUrls={stickerUrls}
           initialPdfStatus={initialPdfStatus}
         />
         </div>
@@ -189,24 +238,26 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   }
 
   return (
-    <div className={`${brandFontVars} builder-studio min-h-[calc(100vh-3.5rem)] font-ui`}>
+    <div className={`${builderFontVars} builder-studio font-ui`}>
       {/* Opportunistic worker pre-warm (≤ once / 10 min): the user is in the builder
           and will likely upload or generate a PDF soon, so wake the worker early. */}
       <WorkerPrewarm />
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
       <Builder
         albumId={album.id}
         title={album.title}
         size={album.size}
+        email={user?.email ?? ''}
         initialStatus={album.status}
         initialPhotos={photos}
         initialBlocks={initialBlocks}
         covers={covers}
         initialCoverId={album.cover_template_id}
+        initialCoverConfig={initialCoverConfig}
         initialReview={initialReview}
         layoutTemplates={layoutTemplates}
+        stickerCatalog={stickerCatalog}
+        stickerUrls={stickerUrls}
       />
-      </div>
     </div>
   );
 }

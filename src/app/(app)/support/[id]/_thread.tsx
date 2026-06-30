@@ -167,7 +167,7 @@ function Bubble({
         className={`max-w-[88%] whitespace-pre-wrap px-4 py-3 text-sm leading-relaxed ${
           isAdmin
             ? 'rounded-[2px] border border-border bg-card text-foreground'
-            : 'rounded-[2px] bg-[#1e3a2f] text-[#f5efe3]'
+            : 'rounded-[2px] bg-primary text-primary-foreground'
         }`}
       >
         {children}

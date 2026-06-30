@@ -3,7 +3,7 @@
 import { Check, RefreshCw, X, Loader2, Wand2 } from 'lucide-react';
 import Preview from './_preview';
 import { Button } from '@/components/ui/button';
-import { LUX_PRIMARY } from '@/components/brand';
+import { STUDIO_PRIMARY } from './_ui';
 import type { Block } from '@/lib/builder/model';
 import type { Photo } from './_uploader';
 import type { CoverOption } from '@/lib/covers';
@@ -57,12 +57,12 @@ export default function Proposal({
       >
         <div className="flex items-center justify-between border-b px-5 py-3.5">
           <div className="flex items-center gap-2.5">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-secondary text-foreground ring-1 ring-border">
               <Wand2 className="h-4 w-4" />
             </span>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gold">Proposed layout</p>
-              <h2 className="font-display text-[1.35rem] font-medium leading-tight tracking-tight text-primary">{title}</h2>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Proposed layout</p>
+              <h2 className="text-[1.2rem] font-semibold leading-tight tracking-tight text-foreground">{title}</h2>
             </div>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Close">
@@ -74,7 +74,7 @@ export default function Proposal({
         <div className="grid grid-cols-2 gap-px border-b bg-border sm:grid-cols-4">
           {stats.map((s) => (
             <div key={s.label} className="bg-card px-4 py-3 text-center">
-              <div className="font-display text-2xl font-semibold tabular-nums text-primary">{s.value}</div>
+              <div className="text-2xl font-semibold tabular-nums text-foreground">{s.value}</div>
               <div className="mt-0.5 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{s.label}</div>
             </div>
           ))}
@@ -101,7 +101,7 @@ export default function Proposal({
                 <RefreshCw /> Regenerate
               </Button>
             )}
-            <Button onClick={onAccept} disabled={busy} className={LUX_PRIMARY}>
+            <Button onClick={onAccept} disabled={busy} className={STUDIO_PRIMARY}>
               {busy ? <Loader2 className="animate-spin" /> : <Check />} {acceptLabel}
             </Button>
           </div>

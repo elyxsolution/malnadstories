@@ -10,14 +10,10 @@ import {
   ArrowRight,
   Minus,
   Plus,
-  ShieldCheck,
-  RefreshCw,
   Tag,
   Truck,
-  Check,
   AlertTriangle,
   Pencil,
-  CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -99,7 +95,7 @@ export default function Checkout({
   const [selectedId, setSelectedId] = useState<string | null>(defaultAddr?.id ?? null);
 
   // Stepped flow.
-  const [step, setStep] = useState<CheckoutStep>('ready');
+  const [step, setStep] = useState<CheckoutStep>('summary');
   const [maxIdx, setMaxIdx] = useState(0);
 
   const [scriptReady, setScriptReady] = useState(false);
@@ -320,7 +316,7 @@ export default function Checkout({
     go(STEP_ORDER[Math.min(STEP_ORDER.length - 1, curIdx + 1)]);
   };
   const back = () => {
-    if (step === 'ready') {
+    if (step === 'summary') {
       router.push(albumHref);
       return;
     }
@@ -328,15 +324,12 @@ export default function Checkout({
   };
 
   const readyWarnings = readiness.filter((r) => !r.ok).length;
-  const showRail = curIdx >= 1; // summary..review
+  const showRail = true; // summary..review
 
   // Footer labels.
   const nextLabel = (() => {
-    if (step === 'ready') return readyWarnings === 0 ? 'Everything’s ready — continue' : 'Continue anyway';
     if (step === 'summary') return 'Continue to shipping';
-    if (step === 'shipping') return 'Continue to delivery';
-    if (step === 'delivery') return 'Continue to payment';
-    if (step === 'payment') return 'Review order';
+    if (step === 'shipping') return 'Review order';
     return `Pay ${inr(breakdown.totalInr)}`;
   })();
   const nextDisabled = (() => {
@@ -356,7 +349,7 @@ export default function Checkout({
       />
 
       {/* Progress header */}
-      <header className="sticky top-14 z-20 flex h-16 items-center justify-between gap-4 border-b bg-background/85 px-5 backdrop-blur-md sm:px-8">
+      <header className="sticky top-14 z-20 flex h-16 items-center justify-between gap-4 border-b bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
         <span className="hidden font-display text-[19px] font-semibold text-primary sm:block">Malnad Stories</span>
         <CheckoutProgress step={step} maxIdx={maxIdx} onJump={go} />
         <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
@@ -369,30 +362,31 @@ export default function Checkout({
         <div className={`mx-auto w-full ${showRail ? 'max-w-5xl' : 'max-w-2xl'}`}>
           <div className={showRail ? 'grid items-start gap-8 lg:grid-cols-[1fr_340px]' : ''}>
             <div className="animate-rise min-w-0">
-              {step === 'ready' && <ReadyStep items={readiness} warnings={readyWarnings} />}
               {step === 'summary' && (
-                <SummaryStep
-                  albumTitle={albumTitle}
-                  albumSub={albumSub}
-                  formatName={formatName}
-                  albumSize={albumSize}
-                  photoCount={photoCount}
-                  estDelivery={estDelivery}
-                  tierLabel={tier.label}
-                  copies={copies}
-                  busy={busyControls}
-                  onCopies={changeCopies}
-                />
+                <div className="space-y-6">
+                  <ReadinessBanner items={readiness} warnings={readyWarnings} />
+                  <SummaryStep
+                    albumTitle={albumTitle}
+                    albumSub={albumSub}
+                    formatName={formatName}
+                    albumSize={albumSize}
+                    photoCount={photoCount}
+                    estDelivery={estDelivery}
+                    tierLabel={tier.label}
+                    copies={copies}
+                    busy={busyControls}
+                    onCopies={changeCopies}
+                  />
+                </div>
               )}
               {step === 'shipping' && (
-                <StepShell eyebrow="Where it’s going" title="Where shall we send it?">
-                  <AddressPicker addresses={addresses} selectedId={selectedId} onSelect={setSelectedId} />
-                </StepShell>
+                <div className="space-y-8">
+                  <StepShell eyebrow="Where & how" title="Delivery details">
+                    <AddressPicker addresses={addresses} selectedId={selectedId} onSelect={setSelectedId} />
+                  </StepShell>
+                  <DeliveryStep shippingMethod={shippingMethod} busy={busyControls} onChange={changeShipping} estDelivery={estDelivery} />
+                </div>
               )}
-              {step === 'delivery' && (
-                <DeliveryStep shippingMethod={shippingMethod} busy={busyControls} onChange={changeShipping} estDelivery={estDelivery} />
-              )}
-              {step === 'payment' && <PaymentStep />}
               {step === 'review' && (
                 <ReviewStep
                   albumTitle={albumTitle}
@@ -438,25 +432,34 @@ export default function Checkout({
       </main>
 
       {/* Footer nav */}
-      <footer className="sticky bottom-0 z-20 flex h-20 items-center justify-between gap-3 border-t bg-background/90 px-5 backdrop-blur-md sm:px-8">
-        <div className="min-w-[120px]">
-          <Button variant="ghost" onClick={back} disabled={paying}>
-            <ArrowLeft /> {step === 'ready' ? 'Back to album' : 'Back'}
+      <footer className="sticky bottom-0 z-20 flex h-20 items-center justify-between gap-3 border-t bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
+        <div className="min-w-[80px] sm:min-w-[120px]">
+          <Button variant="ghost" onClick={back} disabled={paying} size="sm" className="px-2 sm:px-4">
+            <ArrowLeft className="mr-1 h-4 w-4" /> {step === 'summary' ? 'Back to album' : 'Back'}
           </Button>
         </div>
+
+        {/* Sticky total on mobile only */}
+        <div className="flex flex-col items-center leading-none sm:hidden">
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Total</span>
+          <span className="font-display text-lg font-semibold tabular-nums text-primary">
+            {pricingBusy ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : inr(breakdown.totalInr)}
+          </span>
+        </div>
+
         <p className="hidden text-xs text-muted-foreground sm:block">
           {step === 'review' ? 'You won’t be charged until you confirm' : `Estimated delivery ${estDelivery}`}
         </p>
-        <div className="flex min-w-[120px] items-center justify-end gap-2">
+        <div className="flex min-w-[100px] sm:min-w-[120px] items-center justify-end gap-2">
           {step === 'review' && (orderStatus === null || orderStatus === 'pending') && (
-            <Button variant="ghost" size="sm" onClick={cancelCheckout} disabled={cancelling || paying} className="text-muted-foreground">
+            <Button variant="ghost" size="sm" onClick={cancelCheckout} disabled={cancelling || paying} className="text-muted-foreground px-2 sm:px-3">
               {cancelling ? <Loader2 className="animate-spin" /> : null} Cancel
             </Button>
           )}
-          <Button onClick={next} disabled={nextDisabled} className={LUX_PRIMARY}>
+          <Button onClick={next} disabled={nextDisabled} className={`${LUX_PRIMARY} px-3 sm:px-4`} size="sm">
             {step === 'review' ? (paying || !scriptReady ? <Loader2 className="animate-spin" /> : <Lock />) : null}
             {nextLabel}
-            {step !== 'review' && <ArrowRight />}
+            {step !== 'review' && <ArrowRight className="ml-1 h-4 w-4" />}
           </Button>
         </div>
       </footer>
@@ -494,39 +497,29 @@ function StepShell({ eyebrow, title, children }: { eyebrow: string; title: strin
   );
 }
 
-function ReadyStep({ items, warnings }: { items: ReadinessItem[]; warnings: number }) {
+function ReadinessBanner({ items, warnings }: { items: ReadinessItem[]; warnings: number }) {
+  if (warnings === 0) return null;
   return (
-    <StepShell eyebrow="The final chapter" title="Before it goes to print.">
-      <p className="-mt-4 mb-6 max-w-[54ch] text-[15px] leading-relaxed text-muted-foreground">
-        A printed album is permanent — so we check a few things first. These are advisory; you can continue whenever
-        you’re ready.
-      </p>
-      <div className="overflow-hidden rounded-2xl border bg-card shadow-panel">
-        <div className="flex items-center justify-between border-b px-6 py-3.5">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Album readiness</span>
-          <span className={`flex items-center gap-1.5 text-sm font-medium ${warnings === 0 ? 'text-success' : 'text-warning'}`}>
-            {warnings === 0 ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-            {warnings === 0 ? 'Ready to print' : `${warnings} need${warnings === 1 ? 's' : ''} attention`}
-          </span>
-        </div>
-        {items.map((it, i) => (
-          <div key={i} className="flex items-start gap-4 border-b px-6 py-4 last:border-0">
-            <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full ${it.ok ? 'bg-success/12 text-success' : 'bg-warning/15 text-warning'}`}>
-              {it.ok ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-            </span>
-            <div>
-              <p className="text-[15px] font-medium">{it.title}</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">{it.detail}</p>
-            </div>
+    <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 flex gap-3 items-start text-sm">
+      <AlertTriangle className="h-5 w-5 shrink-0 text-warning mt-0.5" />
+      <div>
+        <p className="font-semibold text-foreground">A few things need your attention before printing</p>
+        <p className="mt-1 text-muted-foreground text-xs leading-relaxed">
+          There {warnings === 1 ? 'is' : 'are'} {warnings} warning{warnings === 1 ? '' : 's'} regarding photo resolutions or blank pages.
+          While they won’t block checkout, a printed book is permanent. You can edit them in the builder.
+        </p>
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer hover:text-foreground font-medium select-none">View details</summary>
+          <div className="mt-2 space-y-2 border-t pt-2 border-warning/10">
+            {items.filter(it => !it.ok).map((it, i) => (
+              <div key={i}>
+                <strong className="text-foreground">{it.title}:</strong> {it.detail}
+              </div>
+            ))}
           </div>
-        ))}
+        </details>
       </div>
-      <p className="mt-4 text-[13px] font-light leading-relaxed text-muted-foreground">
-        {warnings === 0
-          ? 'Everything checks out — your album is ready for the press.'
-          : 'Warnings won’t stop you — but a printed album is permanent, so it’s worth a look. You can head back to the builder to make changes.'}
-      </p>
-    </StepShell>
+    </div>
   );
 }
 
@@ -578,7 +571,7 @@ function SummaryStep({
         </div>
       </div>
       <p className="mt-4 flex items-center gap-2.5 rounded-xl bg-secondary px-4 py-3 text-sm text-muted-foreground">
-        <Truck className="h-4 w-4 text-gold" /> Estimated delivery <strong className="font-medium text-foreground">{estDelivery}</strong> with {tierLabel} delivery.
+        <Truck className="h-4 w-4 text-primary" /> Estimated delivery <strong className="font-medium text-foreground">{estDelivery}</strong> with {tierLabel} delivery.
       </p>
     </StepShell>
   );
@@ -629,35 +622,6 @@ function DeliveryStep({
   );
 }
 
-function PaymentStep() {
-  return (
-    <StepShell eyebrow="Payment" title="A secure last step.">
-      <div className="rounded-2xl border bg-card p-6 shadow-panel">
-        <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-secondary text-primary">
-            <CreditCard className="h-5 w-5" />
-          </span>
-          <div>
-            <p className="font-medium">Pay securely with Razorpay</p>
-            <p className="text-sm text-muted-foreground">UPI, cards, net banking &amp; wallets — chosen on the next screen.</p>
-          </div>
-        </div>
-        <ul className="mt-5 space-y-2 text-sm text-muted-foreground">
-          <li className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 shrink-0 text-primary" /> We never see or store your card details.
-          </li>
-          <li className="flex items-center gap-2">
-            <Lock className="h-4 w-4 shrink-0 text-primary" /> Encrypted &amp; verified payment via Razorpay.
-          </li>
-          <li className="flex items-center gap-2">
-            <RefreshCw className="h-4 w-4 shrink-0 text-primary" /> You won’t be charged until you confirm on the review screen.
-          </li>
-        </ul>
-      </div>
-    </StepShell>
-  );
-}
-
 function ReviewStep({
   albumTitle,
   formatName,
@@ -696,22 +660,37 @@ function ReviewStep({
       value: address ? `${address.full_name}, ${address.line1}, ${address.city}, ${address.state} ${address.pincode}` : 'No address selected',
       step: 'shipping',
     },
-    { label: 'Delivery', value: `${tierLabel} · arrives ~${estDelivery} · ${shippingInr === 0 ? 'Free' : inr(shippingInr)}`, step: 'delivery' },
-    { label: 'Payment', value: 'Razorpay (UPI / card / net banking / wallet)', step: 'payment' },
+    { label: 'Delivery', value: `${tierLabel} · arrives ~${estDelivery} · ${shippingInr === 0 ? 'Free' : inr(shippingInr)}`, step: 'shipping' },
+    { label: 'Payment', value: 'Razorpay secure checkout (UPI, Cards, Netbanking, Wallets)', step: 'review' },
     { label: 'Coupon', value: appliedCode ?? 'None applied', step: 'summary' },
   ];
   return (
-    <StepShell eyebrow="One last look" title="Confirm your order.">
+    <StepShell eyebrow="Final check" title="Review & Pay">
       <div className="overflow-hidden rounded-2xl border bg-card shadow-panel">
         {rows.map((r) => (
           <div key={r.label} className="flex items-start gap-4 border-b px-6 py-4 last:border-0">
             <span className="w-20 shrink-0 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{r.label}</span>
             <span className="min-w-0 flex-1 text-sm leading-relaxed">{r.value}</span>
-            <button type="button" onClick={() => onEdit(r.step)} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-gold hover:underline">
-              <Pencil className="h-3 w-3" /> Edit
-            </button>
+            {r.step !== 'review' && (
+              <button type="button" onClick={() => onEdit(r.step)} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                <Pencil className="h-3 w-3" /> Edit
+              </button>
+            )}
           </div>
         ))}
+        
+        {/* Payment reassurance folded right here into the review box */}
+        <div className="bg-muted/10 border-t px-6 py-4 text-xs text-muted-foreground space-y-2">
+          <p className="font-semibold text-foreground flex items-center gap-1.5">
+            <Lock className="h-3.5 w-3.5 text-success" /> Secure Checkout Guarantees:
+          </p>
+          <ul className="list-disc pl-4 space-y-1">
+            <li>Payments processed securely via Razorpay (UPI, cards, net banking, wallets).</li>
+            <li>We never see or store your payment details.</li>
+            <li>Clicking the pay button below will launch the secure checkout window.</li>
+          </ul>
+        </div>
+
         <div className="flex items-baseline justify-between bg-secondary/40 px-6 py-4">
           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Total</span>
           <span className="font-display text-3xl font-semibold tabular-nums text-primary">{inr(total)}</span>
@@ -830,7 +809,7 @@ function OrderRail({
         </span>
       </div>
       <p className="flex items-center gap-2 border-t bg-secondary/30 px-5 py-3 text-[11.5px] text-muted-foreground">
-        <Truck className="h-3.5 w-3.5 text-gold" /> Est. delivery {estDelivery}
+        <Truck className="h-3.5 w-3.5 text-primary" /> Est. delivery {estDelivery}
       </p>
     </aside>
   );

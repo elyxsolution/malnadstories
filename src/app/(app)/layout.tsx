@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import AppHeader from '@/components/app-header';
+import AppHeaderGate from '@/components/app-header-gate';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -12,7 +12,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex flex-col min-h-screen">
-      <AppHeader email={user.email!} />
+      {/* Hidden on the builder route, which renders its own unified full-bleed header. */}
+      <AppHeaderGate email={user.email!} />
       <main className="flex-1">{children}</main>
     </div>
   );

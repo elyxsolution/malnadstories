@@ -1,13 +1,18 @@
 import 'server-only';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
+import { resolveStickerUrls } from '@/lib/stickers';
 import { type Photo } from '@/app/(app)/albums/[id]/build/_uploader';
 import {
   LAYOUT_TEMPLATES,
+  type Background,
   type Block,
   type EditConfig,
   type LayoutTemplate,
   type Overlay,
+  type QrElement,
+  type StickerElement,
+  type TextElement,
 } from '@/lib/builder/model';
 
 type PhotoRow = {
@@ -24,7 +29,13 @@ type PageRow = {
   layout_template: string | null;
   caption: string | null;
   photo_ids: string[] | null;
-  layout_config: { overlays?: Overlay[] } | null;
+  layout_config: {
+    overlays?: Overlay[];
+    texts?: TextElement[];
+    qrs?: QrElement[];
+    stickers?: StickerElement[];
+    background?: Background | null;
+  } | null;
 };
 
 /**
@@ -35,7 +46,12 @@ type PageRow = {
  */
 export async function loadAlbumForAdmin(
   albumId: string,
-): Promise<{ photos: Photo[]; blocks: Block[]; cover: { url: string; name: string } | null } | null> {
+): Promise<{
+  photos: Photo[];
+  blocks: Block[];
+  cover: { url: string; name: string } | null;
+  stickerUrls: Record<string, string>;
+} | null> {
   const svc = createServiceClient();
 
   const { data: albumRow } = await svc
@@ -96,7 +112,14 @@ export async function loadAlbumForAdmin(
       photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
       caption: r.caption ?? '',
       overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+      texts: r.layout_config?.texts ?? [],
+      qrs: r.layout_config?.qrs ?? [],
+      stickers: r.layout_config?.stickers ?? [],
+      background: r.layout_config?.background ?? null,
     }));
 
-  return { photos, blocks, cover };
+  // Resolve presigned URLs for every referenced sticker (service role → ignores `active`).
+  const stickerUrls = await resolveStickerUrls(blocks.flatMap((b) => b.stickers.map((s) => s.stickerId)));
+
+  return { photos, blocks, cover, stickerUrls };
 }

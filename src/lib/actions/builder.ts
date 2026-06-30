@@ -2,8 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
-import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema } from '@/lib/validations';
+import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema, CoverDesignSchema } from '@/lib/validations';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
+import { normalizeCoverConfig } from '@/lib/builder/cover';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
 import { sendReviewStatusEmail, sendReviewAdminSubmittedEmail } from '@/lib/email/review-events';
 
@@ -79,14 +80,30 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
   }
 
   if (blocks.length > 0) {
-    const rows = blocks.map((b, i) => ({
-      album_id: albumId,
-      page_number: i, // sequence position, not a physical leaf
-      layout_template: b.template,
-      caption: b.caption || null,
-      photo_ids: b.photoIds, // base slot only
-      layout_config: b.overlays.length > 0 ? { overlays: b.overlays } : null,
-    }));
+    const rows = blocks.map((b, i) => {
+      // layout_config holds overlays + the rich elements (texts / qrs / background).
+      // The DB CHECK (0006) requires `overlays` to be an array whenever the object is
+      // non-null, so we always include it when storing ANY element; otherwise store null.
+      const hasContent =
+        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background;
+      const layoutConfig = hasContent
+        ? {
+            overlays: b.overlays,
+            ...(b.texts.length > 0 ? { texts: b.texts } : {}),
+            ...(b.qrs.length > 0 ? { qrs: b.qrs } : {}),
+            ...(b.stickers.length > 0 ? { stickers: b.stickers } : {}),
+            ...(b.background ? { background: b.background } : {}),
+          }
+        : null;
+      return {
+        album_id: albumId,
+        page_number: i, // sequence position, not a physical leaf
+        layout_template: b.template,
+        caption: b.caption || null,
+        photo_ids: b.photoIds, // base slot only
+        layout_config: layoutConfig,
+      };
+    });
     const { error: insErr } = await supabase.from('album_pages').insert(rows);
     if (insErr) {
       console.error('saveLayout insert error:', insErr);
@@ -154,24 +171,36 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
 
   const { data: album } = await supabase
     .from('albums')
-    .select('id, size, status, cover_template_id')
+    .select('id, size, status, cover_template_id, cover_config')
     .eq('id', albumId)
     .maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
-  const { size, cover_template_id } = album as { size: number; cover_template_id: string | null };
+  const { size, cover_template_id, cover_config } = album as {
+    size: number;
+    cover_template_id: string | null;
+    cover_config: unknown;
+  };
 
   // A paid album is frozen — no re-submitting changed content.
   if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
-  // Cover is mandatory (physical page 1). It must be a currently-active template.
-  if (!cover_template_id) return { ok: false, error: 'Choose a cover design before submitting.' };
-  const { data: cover } = await supabase
-    .from('cover_templates')
-    .select('id')
-    .eq('id', cover_template_id)
-    .eq('active', true)
-    .maybeSingle();
-  if (!cover) return { ok: false, error: 'Your selected cover is no longer available — please pick another.' };
+  // Cover is mandatory (physical page 1). It's satisfied by an active base template OR a
+  // custom cover (an uploaded photo / a background) — the custom designer can stand alone.
+  const cfg = normalizeCoverConfig(cover_config as Parameters<typeof normalizeCoverConfig>[0]);
+  const hasCustomCover = !!cfg.photoId || !!cfg.background;
+  let hasActiveTemplate = false;
+  if (cover_template_id) {
+    const { data: cover } = await supabase
+      .from('cover_templates')
+      .select('id')
+      .eq('id', cover_template_id)
+      .eq('active', true)
+      .maybeSingle();
+    hasActiveTemplate = !!cover;
+  }
+  if (!hasActiveTemplate && !hasCustomCover) {
+    return { ok: false, error: 'Add a cover design before submitting (a template, a photo, or a background).' };
+  }
 
   const { data: pages } = await supabase
     .from('album_pages')
@@ -272,6 +301,63 @@ export async function selectCover(input: unknown): Promise<ActionResult> {
   if (error) {
     console.error('selectCover error:', error);
     return { ok: false, error: 'Could not save the cover selection.' };
+  }
+  return { ok: true };
+}
+
+/**
+ * Persist the full custom cover DESIGN: title (cover line 1), an optional base template,
+ * and the cover_config (subtitle, typography, layout, position, background, photo source).
+ * Authenticated client + RLS scopes to the owner; blocked once the album is part of a paid
+ * order. The base template and any chosen cover photo are re-verified server-side. Writes
+ * `albums.cover_config` (0038) — until that migration runs this single write fails cleanly.
+ */
+export async function saveCoverDesign(input: unknown): Promise<ActionResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const parsed = CoverDesignSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId, title, coverTemplateId, config } = parsed.data;
+
+  // Ownership gate (RLS).
+  const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
+  if (!album) return { ok: false, error: 'Album not found' };
+  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+
+  // A chosen base template must be a real, active cover.
+  if (coverTemplateId) {
+    const { data: cover } = await supabase
+      .from('cover_templates')
+      .select('id')
+      .eq('id', coverTemplateId)
+      .eq('active', true)
+      .maybeSingle();
+    if (!cover) return { ok: false, error: 'That cover is no longer available.' };
+  }
+
+  // A chosen cover photo must belong to THIS album and be processed (RLS scopes to owner).
+  if (config.photoId) {
+    const { data: p } = await supabase
+      .from('photos')
+      .select('id')
+      .eq('id', config.photoId)
+      .eq('album_id', albumId)
+      .eq('status', 'ready')
+      .maybeSingle();
+    if (!p) return { ok: false, error: 'That photo is not available for the cover.' };
+  }
+
+  const { error } = await supabase
+    .from('albums')
+    .update({ title, cover_template_id: coverTemplateId, cover_config: config, updated_at: new Date().toISOString() })
+    .eq('id', albumId);
+  if (error) {
+    console.error('saveCoverDesign error:', error);
+    return { ok: false, error: 'Could not save the cover design.' };
   }
   return { ok: true };
 }

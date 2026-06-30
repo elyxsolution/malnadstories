@@ -52,7 +52,7 @@ export default function Tray({
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-background text-muted-foreground/70 shadow-xs ring-1 ring-border">
           <ImageIcon className="h-5 w-5" />
         </div>
-        <p className="mt-3 font-display text-base font-semibold tracking-tight">Your photos live here</p>
+        <p className="mt-3 text-base font-semibold tracking-tight">Your photos live here</p>
         <p className="mt-0.5 text-xs text-muted-foreground">Add photos above, then drag them onto a page.</p>
       </div>
     );
@@ -77,17 +77,17 @@ export default function Tray({
             style={{ animationDelay: `${Math.min(i * 22, 260)}ms` }}
             className={`group relative aspect-square animate-scale-in overflow-hidden rounded-xl bg-muted shadow-xs ring-1 transition-all duration-200 ease-glide ${
               picked
-                ? 'ring-2 ring-gold shadow-card'
-                : 'ring-border/80'
+                ? 'ring-2 ring-studio-bright shadow-card'
+                : 'ring-border'
             } ${
               ready
-                ? 'cursor-grab hover:-translate-y-1 hover:shadow-card hover:ring-2 hover:ring-primary/50 active:scale-[0.97] active:cursor-grabbing'
+                ? 'cursor-grab hover:-translate-y-0.5 hover:shadow-card hover:ring-2 hover:ring-studio-bright/60 active:scale-[0.98] active:cursor-grabbing'
                 : ''
             }`}
             title={photo.filename}
           >
             {ready ? (
-              <div className={placed ? 'h-full w-full opacity-40 saturate-[0.85]' : 'h-full w-full transition-transform duration-[400ms] ease-glide group-hover:scale-[1.05]'}>
+              <div className={placed ? 'h-full w-full opacity-40 saturate-[0.85]' : 'h-full w-full transition-transform duration-[400ms] ease-glide group-hover:scale-[1.02]'}>
                 <PhotoFrame url={photo.thumbUrl} edit={photo.edit} alt={photo.filename} />
               </div>
             ) : photo.status === 'pending' ? (
@@ -108,7 +108,7 @@ export default function Tray({
             )}
 
             {ready && placed && (
-              <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-success/95 px-1.5 py-0.5 text-[10px] font-semibold text-success-foreground shadow-sm ring-1 ring-white/20 backdrop-blur-sm">
+              <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-studio px-1.5 py-0.5 text-[10px] font-semibold text-studio-foreground shadow-sm ring-1 ring-white/20 backdrop-blur-sm">
                 <Check className="h-2.5 w-2.5" /> Placed
               </span>
             )}
@@ -122,7 +122,7 @@ export default function Tray({
                     onEdit(photo);
                   }}
                   aria-label={`Edit ${photo.filename}`}
-                  className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
+                  className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-studio hover:text-studio-foreground"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>

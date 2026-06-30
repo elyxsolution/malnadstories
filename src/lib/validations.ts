@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { nameSchema, passwordSchema } from '@/lib/auth/policy';
+import { FONT_KEYS } from '@/lib/builder/fonts-catalog';
 
 export const SignupSchema = z.object({
   // Password (8–25) + display-name (2–60, normalised) policy lives in one place
@@ -71,7 +72,9 @@ const RectSchema = z.object({
 });
 
 // Two composable crop systems: free-form `crop` (full editor) + fixed-frame zoom/pan
-// (quick crop). Both optional; defaults compose to a plain cover-fit.
+// (quick crop). Both optional; defaults compose to a plain cover-fit. Tone & finish
+// (contrast/saturation/grayscale/opacity/border-radius/shadow) are additive — absent
+// fields render exactly as before.
 export const EditConfigSchema = z.object({
   crop: RectSchema.optional(),
   zoom: z.number().min(1).max(5).optional(),
@@ -83,6 +86,12 @@ export const EditConfigSchema = z.object({
   flipV: z.boolean().optional(),
   brightness: z.number().min(0).max(3).optional(),
   sharpness: z.number().min(0).max(3).optional(),
+  contrast: z.number().min(0).max(3).optional(),
+  saturation: z.number().min(0).max(3).optional(),
+  grayscale: z.number().min(0).max(1).optional(),
+  opacity: z.number().min(0).max(1).optional(),
+  borderRadius: z.number().min(0).max(0.5).optional(),
+  shadow: z.number().min(0).max(1).optional(),
 });
 
 const OverlaySchema = z.object({
@@ -93,12 +102,72 @@ const OverlaySchema = z.object({
   h: z.number().gt(0).max(1),
 });
 
+// Rich page elements (text · QR · background) — stored in layout_config jsonb alongside
+// `overlays`. Bounded + value-checked so a forged client can't store unbounded payloads.
+const HexColor = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Invalid colour');
+const HexOrTransparent = z.union([HexColor, z.literal('transparent')]);
+
+const TextElementSchema = z.object({
+  id: z.string().min(1).max(64),
+  text: z.string().max(600).default(''),
+  x: z.number().min(-0.5).max(1),
+  y: z.number().min(-0.5).max(1),
+  w: z.number().gt(0).max(1),
+  h: z.number().gt(0).max(1),
+  variant: z.enum(['heading', 'subtitle', 'paragraph']),
+  font: z.enum(FONT_KEYS),
+  size: z.number().min(6).max(220),
+  weight: z.number().int().min(100).max(900),
+  italic: z.boolean(),
+  underline: z.boolean(),
+  align: z.enum(['left', 'center', 'right']),
+  color: HexColor,
+  letterSpacing: z.number().min(-0.2).max(1),
+  lineHeight: z.number().min(0.8).max(3),
+  opacity: z.number().min(0).max(1),
+  rotation: z.number().min(-180).max(180),
+  shadow: z.boolean(),
+});
+
+const QrElementSchema = z.object({
+  id: z.string().min(1).max(64),
+  data: z.string().min(1).max(1024),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  w: z.number().gt(0).max(1),
+  h: z.number().gt(0).max(1),
+  fg: HexColor,
+  bg: HexOrTransparent,
+  padding: z.number().min(0).max(0.4),
+  radius: z.number().min(0).max(0.5),
+});
+
+const StickerElementSchema = z.object({
+  id: z.string().min(1).max(64),
+  stickerId: z.string().uuid(),
+  x: z.number().min(-0.5).max(1),
+  y: z.number().min(-0.5).max(1),
+  w: z.number().gt(0).max(1),
+  h: z.number().gt(0).max(1),
+  rotation: z.number().min(-180).max(180),
+  opacity: z.number().min(0).max(1),
+});
+
+const BackgroundSchema = z.object({
+  kind: z.enum(['color', 'gradient', 'texture']),
+  value: z.string().min(1).max(40),
+});
+
 const BlockSchema = z.object({
   template: z.enum(['single-pair', 'double-spread']),
   // single-pair: [leftId?, rightId?]; double-spread: [imageId?]. Up to 2 base slots.
   photoIds: z.array(z.string().uuid()).max(2),
   caption: z.string().max(200).optional().default(''),
   overlays: z.array(OverlaySchema).max(50).optional().default([]),
+  texts: z.array(TextElementSchema).max(30).optional().default([]),
+  qrs: z.array(QrElementSchema).max(10).optional().default([]),
+  stickers: z.array(StickerElementSchema).max(30).optional().default([]),
+  background: BackgroundSchema.nullable().optional().default(null),
 });
 
 export const SaveLayoutSchema = z
@@ -131,6 +200,58 @@ export const SelectCoverSchema = z.object({
   coverTemplateId: z.string().uuid('Invalid cover'),
 });
 
+// The BACK cover composition — its own image source + free elements (no admin artwork). Bounded
+// exactly like a content page so a forged client can't store unbounded payloads.
+const BackCoverConfigSchema = z.object({
+  background: BackgroundSchema.nullable().optional().default(null),
+  photoId: z.string().uuid().nullable().optional().default(null),
+  imageEdit: EditConfigSchema.nullable().optional().default(null),
+  texts: z.array(TextElementSchema).max(30).optional().default([]),
+  stickers: z.array(StickerElementSchema).max(30).optional().default([]),
+  qrs: z.array(QrElementSchema).max(10).optional().default([]),
+  showLogo: z.boolean().optional().default(false),
+});
+
+// Custom cover DESIGN — front (top-level) + spine + back composition. Stored in
+// albums.cover_config (0038). Bounded so a forged client can't store unbounded payloads.
+const CoverConfigSchema = z.object({
+  subtitle: z.string().max(120).optional().default(''),
+  author: z.string().max(80).optional().default(''),
+  spineTitle: z.string().max(80).optional().default(''),
+  spineColor: HexColor.optional().default('#ffffff'),
+  font: z.enum(FONT_KEYS).optional().default('serif'),
+  color: HexColor.optional().default('#ffffff'),
+  align: z.enum(['left', 'center', 'right']).optional().default('center'),
+  layout: z.enum(['classic', 'spotlight', 'banner', 'minimal']).optional().default('classic'),
+  posY: z.number().min(0.1).max(0.95).optional().default(0.8),
+  background: BackgroundSchema.nullable().optional().default(null),
+  photoId: z.string().uuid().nullable().optional().default(null),
+  imageEdit: EditConfigSchema.nullable().optional().default(null),
+  // Free elements on the FRONT cover — identical to page elements (Cover-as-page-0).
+  texts: z.array(TextElementSchema).max(30).optional().default([]),
+  stickers: z.array(StickerElementSchema).max(30).optional().default([]),
+  qrs: z.array(QrElementSchema).max(10).optional().default([]),
+  back: BackCoverConfigSchema.optional().default({
+    background: null,
+    photoId: null,
+    imageEdit: null,
+    texts: [],
+    stickers: [],
+    qrs: [],
+    showLogo: false,
+  }),
+});
+
+export const CoverDesignSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  title: z.string().trim().min(1, 'Album title is required').max(100, 'Title must be 100 characters or less'),
+  // Base cover artwork (admin template). Null = no template image (use a photo/background).
+  coverTemplateId: z.string().uuid('Invalid cover').nullable().optional().default(null),
+  config: CoverConfigSchema,
+});
+
+export type CoverDesignInput = z.infer<typeof CoverDesignSchema>;
+
 // ── Admin: cover templates ───────────────────────────────────────────────────
 // Admin uploads cover artwork to R2 (presign → PUT), then registers it. Image only.
 export const CoverPresignSchema = z.object({
@@ -155,6 +276,43 @@ export const SetCoverActiveSchema = z.object({
 
 export const DeleteCoverSchema = z.object({
   coverTemplateId: z.string().uuid('Invalid cover'),
+});
+
+// ── Admin: stickers ──────────────────────────────────────────────────────────
+// Admin uploads sticker artwork to R2 (presign → PUT), then registers it. Image only
+// (transparent PNG recommended). Mirrors the cover admin schemas.
+export const StickerPresignSchema = z.object({
+  filename: z.string().min(1).max(255),
+  contentType: z.enum(ALLOWED_UPLOAD_TYPES, {
+    message: 'Only JPEG, PNG, HEIC, or WebP images are allowed',
+  }),
+  size: z.number().int().positive('File is empty').max(MAX_UPLOAD_BYTES, 'Each file must be 20 MB or smaller'),
+});
+
+export const CreateStickerSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100),
+  categoryId: z.string().uuid('Invalid category').nullable().optional().default(null),
+  imageKey: z.string().min(1).max(512),
+  sort: z.number().int().min(0).max(9999).optional().default(0),
+});
+
+export const RenameStickerSchema = z.object({
+  stickerId: z.string().uuid('Invalid sticker'),
+  name: z.string().trim().min(1, 'Name is required').max(100),
+  categoryId: z.string().uuid('Invalid category').nullable().optional().default(null),
+});
+
+export const SetStickerActiveSchema = z.object({
+  stickerId: z.string().uuid('Invalid sticker'),
+  active: z.boolean(),
+});
+
+export const DeleteStickerSchema = z.object({
+  stickerId: z.string().uuid('Invalid sticker'),
+});
+
+export const CreateStickerCategorySchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(60),
 });
 
 // ── Addresses & checkout ─────────────────────────────────────────────────────

@@ -51,6 +51,7 @@ export default function PurchasedAlbum({
   photos,
   blocks,
   cover,
+  stickerUrls = {},
   initialPdfStatus,
 }: {
   albumId: string;
@@ -60,6 +61,7 @@ export default function PurchasedAlbum({
   photos: Photo[];
   blocks: Block[];
   cover: { url: string; name: string } | null;
+  stickerUrls?: Record<string, string>;
   initialPdfStatus: PdfStatus;
 }) {
   const [showPreview, setShowPreview] = useState(false);
@@ -241,7 +243,7 @@ export default function PurchasedAlbum({
       {/* Read-only album render (same renderer as the builder preview). */}
       {showPreview && (
         <section aria-label="Album preview" className="animate-rise rounded-2xl border bg-card p-4 shadow-panel">
-          <Preview blocks={blocks} photoMap={photoMap} cover={cover} />
+          <Preview blocks={blocks} photoMap={photoMap} cover={cover} stickerUrlFor={(id) => stickerUrls[id]} />
         </section>
       )}
     </div>

@@ -1,193 +1,123 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ArrowUp, ArrowDown, Trash2, ImagePlus, X, Layers, Replace, Crop, SlidersHorizontal } from 'lucide-react';
+import {
+  X,
+  Replace,
+  Crop,
+  SlidersHorizontal,
+  Copy,
+  Pencil,
+  ImagePlus,
+} from 'lucide-react';
 import PhotoFrame from './_photo-frame';
+import Movable, { SnapGuides, type SnapLine } from './_movable';
+import { TextContent, QrContent, StickerContent } from './_elements-render';
+import { ElementControls, CtlBtn, InlineTextEditor } from './_element-bits';
 import type { Photo } from './_uploader';
-import { PAGE_COST, TEMPLATE_LABEL, physicalStart, type Block, type Overlay } from '@/lib/builder/model';
-import { Button } from '@/components/ui/button';
-
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-
-export type BaseSlot = 'left' | 'right' | 'image';
-type Picking = { kind: 'base'; slot: BaseSlot } | { kind: 'add' } | { kind: 'replace'; index: number } | null;
+import { backgroundStyle, squareQrHeight, PAIR_ASPECT } from '@/lib/builder/elements';
+import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
+import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
 
 /**
- * One content PAIR (two physical pages) in the OPEN-BOOK view (aspect 3:2).
- *   single-pair    two independent base slots (left half + right half).
- *   double-spread  one image slot spanning the whole pair; the PDF splits it at centre.
- * Overlays float anywhere across the open pair (drag + resize), normalized to the box.
- * All per-photo editing (crop/zoom/rotate/flip/brightness/sharpen) is unchanged — it
- * lives on the photo via the editor and renders through the shared PhotoFrame.
+ * The premium open-book editing canvas for ONE spread (open pair, 3:2). Renders the page
+ * with a centre fold, soft paper shadow, page numbers, optional guides, and every editable
+ * element — base photos, floating photo overlays, text, and QR — each selectable, draggable,
+ * resizable (and text rotatable) through the shared `Movable` engine. All mutations flow
+ * through the builder hook (`api`), so persistence is unchanged.
  */
 export default function BlockCard({
+  api,
   block,
   index,
   blocks,
   photoMap,
   availablePhotos,
-  isFirst,
-  isLast,
-  onPatch,
-  onAssignBase,
-  onClearBase,
-  onQuickCrop,
+  selection,
+  onSelect,
   onEditPhoto,
-  onAddOverlay,
-  onReplaceOverlay,
-  onPatchOverlays,
-  onRemove,
-  onMove,
+  onQuickCrop,
+  stickerUrlFor,
   pickActive = false,
   onTapPlaceBase,
   showGuides = false,
 }: {
+  api: BuilderApi;
   block: Block;
   index: number;
   blocks: Block[];
   photoMap: Map<string, Photo>;
   availablePhotos: Photo[];
-  isFirst: boolean;
-  isLast: boolean;
-  onPatch: (patch: Partial<Block>) => void;
-  onAssignBase: (slot: BaseSlot, photoId: string) => void;
-  onClearBase: (slot: BaseSlot) => void;
-  onQuickCrop: (photoId: string, frameAspect: number, showGutter: boolean) => void;
-  /** Open the FULL photo editor (crop/rotate/brightness/flip) for a placed photo. */
+  selection: Selection;
+  onSelect: (s: Selection) => void;
   onEditPhoto: (photoId: string) => void;
-  onAddOverlay: (photoId: string) => void;
-  onReplaceOverlay: (index: number, photoId: string) => void;
-  onPatchOverlays: (overlays: Overlay[]) => void;
-  onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
-  /** Tap-to-place: when a tray photo is "picked up", clicking an empty base slot places it. */
+  onQuickCrop: (photoId: string, frameAspect: number, showGutter: boolean) => void;
+  stickerUrlFor?: (stickerId: string) => string | undefined;
   pickActive?: boolean;
   onTapPlaceBase?: (slot: BaseSlot) => void;
-  /** Show the margin / safe-zone guides overlay (client-only, presentation). */
   showGuides?: boolean;
 }) {
-  const [picking, setPicking] = useState<Picking>(null);
-  const baseRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [snap, setSnap] = useState<SnapLine[]>([]);
+  const [editingText, setEditingText] = useState<string | null>(null);
+  const [picking, setPicking] = useState<
+    { kind: 'base'; slot: BaseSlot } | { kind: 'replace'; index: number } | { kind: 'overlay-add' } | null
+  >(null);
 
   const isDouble = block.template === 'double-spread';
   const start = physicalStart(blocks, index);
-  const cost = PAGE_COST[block.template]; // always 2
-  const pageLabel = `Pages ${start}–${start + cost - 1}`;
+  const cost = PAGE_COST[block.template];
 
   const leftPhoto = block.photoIds[0] ? photoMap.get(block.photoIds[0]) : undefined;
   const rightPhoto = block.photoIds[1] ? photoMap.get(block.photoIds[1]) : undefined;
 
-  // ── overlay drag / resize (normalized to the open-pair box) ──────────────────
-  const drag = useRef<{ i: number; mode: 'move' | 'resize'; x: number; y: number; o: Overlay } | null>(null);
-  const startOverlay = (i: number, mode: 'move' | 'resize') => (e: React.PointerEvent) => {
-    e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    drag.current = { i, mode, x: e.clientX, y: e.clientY, o: block.overlays[i] };
-  };
-  const moveOverlay = (e: React.PointerEvent) => {
-    const base = baseRef.current;
-    if (!drag.current || !base) return;
-    const rect = base.getBoundingClientRect();
-    const dx = (e.clientX - drag.current.x) / rect.width;
-    const dy = (e.clientY - drag.current.y) / rect.height;
-    const { i, mode, o } = drag.current;
-    const next = [...block.overlays];
-    if (mode === 'move') {
-      next[i] = { ...o, x: clamp01(Math.min(o.x + dx, 1 - o.w)), y: clamp01(Math.min(o.y + dy, 1 - o.h)) };
-    } else {
-      next[i] = { ...o, w: Math.max(0.1, Math.min(o.w + dx, 1 - o.x)), h: Math.max(0.1, Math.min(o.h + dy, 1 - o.y)) };
-    }
-    onPatchOverlays(next);
-  };
-  const endOverlay = (e: React.PointerEvent) => {
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    drag.current = null;
-  };
-  const removeOverlay = (i: number) => onPatchOverlays(block.overlays.filter((_, idx) => idx !== i));
-
-  const pick = (id: string) => {
-    if (!picking) return;
-    if (picking.kind === 'base') onAssignBase(picking.slot, id);
-    else if (picking.kind === 'add') onAddOverlay(id);
-    else onReplaceOverlay(picking.index, id);
-    setPicking(null);
-  };
-  const pickerCurrent =
-    picking?.kind === 'base'
-      ? picking.slot === 'right'
-        ? rightPhoto
-        : leftPhoto
-      : picking?.kind === 'replace'
-        ? photoMap.get(block.overlays[picking.index]?.photoId)
-        : undefined;
+  const sel = (s: Selection) => selection.kind === s.kind && JSON.stringify(selection) === JSON.stringify(s);
 
   return (
     <div className="group/block">
-      <div className="mb-3 flex items-end justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-white/[0.08] text-[11px] font-semibold tabular-nums text-white/90 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.12)] ring-1 ring-white/15">
-            {index + 1}
-          </span>
-          <div className="flex flex-col leading-tight">
-            <span className="font-display text-[15px] font-semibold tracking-tight text-white/95">{TEMPLATE_LABEL[block.template]}</span>
-            <span className="text-[11px] text-white/50">
-              {pageLabel}
-              {isDouble && ' · one image across both pages'}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 opacity-70 transition-opacity duration-200 group-hover/block:opacity-100">
-          <button
-            type="button"
-            onClick={() => setPicking({ kind: 'add' })}
-            className="builder-glass inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-white/90 shadow-sm transition-colors duration-150 ease-glide hover:bg-white/10 hover:text-white"
-          >
-            <Layers className="h-3.5 w-3.5" /> Add overlay
-          </button>
-          <div className="builder-glass flex items-center gap-0.5 rounded-lg p-0.5 shadow-sm">
-            <button
-              type="button"
-              onClick={() => onMove(-1)}
-              disabled={isFirst}
-              aria-label="Move up"
-              className="grid h-7 w-7 place-items-center rounded-md text-white/80 transition-colors duration-150 ease-glide hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onMove(1)}
-              disabled={isLast}
-              aria-label="Move down"
-              className="grid h-7 w-7 place-items-center rounded-md text-white/80 transition-colors duration-150 ease-glide hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-25"
-            >
-              <ArrowDown className="h-4 w-4" />
-            </button>
-            <span className="mx-0.5 h-4 w-px bg-white/15" />
-            <button
-              type="button"
-              onClick={onRemove}
-              aria-label="Remove pair"
-              className="grid h-7 w-7 place-items-center rounded-md text-red-300/90 transition-colors hover:bg-red-500/20 hover:text-red-200"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
+      {/* Per-spread action bar — the explicit home for adding floating photo overlays. */}
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-muted-foreground">
+          {block.overlays.length > 0
+            ? `${block.overlays.length} overlay${block.overlays.length === 1 ? '' : 's'} on this spread`
+            : 'Tip: add framed photo overlays on top of the page'}
+        </span>
+        <button
+          type="button"
+          onClick={() => setPicking({ kind: 'overlay-add' })}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-studio/30 bg-card px-2.5 py-1.5 text-[12px] font-medium text-studio shadow-xs transition-all duration-150 ease-glide hover:border-studio/50 hover:bg-studio-soft active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+        >
+          <ImagePlus className="h-3.5 w-3.5" /> Add photo overlay
+        </button>
       </div>
 
-      {/* Open-pair canvas (3:2 = two 3:4 pages) rendered as a floating paper page. */}
-      <div ref={baseRef} className="album-page group/slot relative aspect-[3/2] w-full overflow-hidden rounded-xl transition-transform duration-300 ease-premium group-hover/block:-translate-y-1">
+      {/* The page — premium paper with fold, shadow, page numbers. Click empty area = deselect. */}
+      <div
+        ref={pageRef}
+        onPointerDown={() => onSelect({ kind: 'none' })}
+        className="album-page relative aspect-[3/2] w-full select-none overflow-hidden rounded-[14px]"
+        style={{ containerType: 'inline-size' }}
+      >
+        {/* Background layer */}
+        {block.background ? (
+          <div className="absolute inset-0" style={backgroundStyle(block.background)} />
+        ) : (
+          <div className="absolute inset-0 bg-white" />
+        )}
+
+        {/* Base photo slots */}
         {isDouble ? (
           <BaseSlotView
             photo={leftPhoto}
             label="Click or drop the image (spans both pages)"
+            selected={sel({ kind: 'base', slot: 'image' })}
             pickActive={pickActive}
             onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('image') : undefined}
+            onSelect={() => onSelect({ kind: 'base', slot: 'image' })}
             onPick={() => setPicking({ kind: 'base', slot: 'image' })}
-            onDrop={(id) => onAssignBase('image', id)}
-            onClear={() => onClearBase('image')}
-            onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], 3 / 2, true) : undefined}
+            onDrop={(id) => api.assignBaseSlot(block.key, 'image', id)}
+            onClear={() => api.clearBaseSlot(block.key, 'image')}
+            onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], PAIR_ASPECT, true) : undefined}
             onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
           />
         ) : (
@@ -196,11 +126,13 @@ export default function BlockCard({
               <BaseSlotView
                 photo={leftPhoto}
                 label="Left page"
+                selected={sel({ kind: 'base', slot: 'left' })}
                 pickActive={pickActive}
                 onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('left') : undefined}
+                onSelect={() => onSelect({ kind: 'base', slot: 'left' })}
                 onPick={() => setPicking({ kind: 'base', slot: 'left' })}
-                onDrop={(id) => onAssignBase('left', id)}
-                onClear={() => onClearBase('left')}
+                onDrop={(id) => api.assignBaseSlot(block.key, 'left', id)}
+                onClear={() => api.clearBaseSlot(block.key, 'left')}
                 onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], 3 / 4, false) : undefined}
                 onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
               />
@@ -209,11 +141,13 @@ export default function BlockCard({
               <BaseSlotView
                 photo={rightPhoto}
                 label="Right page"
+                selected={sel({ kind: 'base', slot: 'right' })}
                 pickActive={pickActive}
                 onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('right') : undefined}
+                onSelect={() => onSelect({ kind: 'base', slot: 'right' })}
                 onPick={() => setPicking({ kind: 'base', slot: 'right' })}
-                onDrop={(id) => onAssignBase('right', id)}
-                onClear={() => onClearBase('right')}
+                onDrop={(id) => api.assignBaseSlot(block.key, 'right', id)}
+                onClear={() => api.clearBaseSlot(block.key, 'right')}
                 onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], 3 / 4, false) : undefined}
                 onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
               />
@@ -221,95 +155,207 @@ export default function BlockCard({
           </>
         )}
 
-        {/* Margin / safe-zone guides (client-only overlay; never persisted/printed). */}
+        {/* Overlays (floating framed photos) */}
+        {block.overlays.map((o, i) => {
+          const photo = photoMap.get(o.photoId);
+          return (
+            <Movable
+              key={`ov-${i}`}
+              rect={o}
+              selected={sel({ kind: 'overlay', index: i })}
+              containerRef={pageRef}
+              ariaLabel="Photo overlay"
+              onSelect={() => onSelect({ kind: 'overlay', index: i })}
+              onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov, idx) => (idx === i ? { ...ov, ...r } : ov)))}
+              onSnap={setSnap}
+              className="overflow-hidden rounded-md border-2 border-white shadow-md"
+              controls={
+                <ElementControls
+                  onForward={i < block.overlays.length - 1 ? () => api.reorderOverlay(block.key, i, 1) : undefined}
+                  onBackward={i > 0 ? () => api.reorderOverlay(block.key, i, -1) : undefined}
+                  onDelete={() => {
+                    api.removeOverlay(block.key, i);
+                    onSelect({ kind: 'none' });
+                  }}
+                  extra={
+                    <>
+                      <CtlBtn label="Replace photo" onClick={() => setPicking({ kind: 'replace', index: i })}>
+                        <Replace />
+                      </CtlBtn>
+                      {photo && (
+                        <CtlBtn label="Edit photo" onClick={() => onEditPhoto(o.photoId)}>
+                          <SlidersHorizontal />
+                        </CtlBtn>
+                      )}
+                      <CtlBtn
+                        label="Duplicate overlay"
+                        onClick={() => {
+                          const ni = api.duplicateOverlay(block.key, i);
+                          if (ni !== undefined) onSelect({ kind: 'overlay', index: ni });
+                        }}
+                      >
+                        <Copy />
+                      </CtlBtn>
+                    </>
+                  }
+                />
+              }
+            >
+              {photo ? <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" /> : <div className="h-full w-full bg-muted" />}
+            </Movable>
+          );
+        })}
+
+        {/* Text elements */}
+        {block.texts.map((t) => (
+          <Movable
+            key={t.id}
+            rect={t}
+            rotation={t.rotation}
+            rotatable
+            minW={0.06}
+            minH={0.03}
+            selected={sel({ kind: 'text', id: t.id })}
+            containerRef={pageRef}
+            ariaLabel="Text"
+            onSelect={() => onSelect({ kind: 'text', id: t.id })}
+            onChange={(r) => api.patchText(block.key, t.id, r)}
+            onRotate={(deg) => api.patchText(block.key, t.id, { rotation: deg })}
+            onSnap={setSnap}
+            onDoubleClick={() => setEditingText(t.id)}
+            controls={
+              <ElementControls
+                onForward={() => api.reorderText(block.key, t.id, 1)}
+                onBackward={() => api.reorderText(block.key, t.id, -1)}
+                onDelete={() => {
+                  api.removeText(block.key, t.id);
+                  onSelect({ kind: 'none' });
+                }}
+                extra={
+                  <>
+                    <CtlBtn label="Edit text" onClick={() => setEditingText(t.id)}>
+                      <Pencil />
+                    </CtlBtn>
+                    <CtlBtn label="Duplicate" onClick={() => api.duplicateText(block.key, t.id)}>
+                      <Copy />
+                    </CtlBtn>
+                  </>
+                }
+              />
+            }
+          >
+            {editingText === t.id ? (
+              <InlineTextEditor
+                initial={t.text}
+                el={t}
+                onCommit={(text) => {
+                  api.patchText(block.key, t.id, { text });
+                  setEditingText(null);
+                }}
+              />
+            ) : (
+              <TextContent el={t} />
+            )}
+          </Movable>
+        ))}
+
+        {/* QR elements */}
+        {block.qrs.map((q) => (
+          <Movable
+            key={q.id}
+            rect={q}
+            keepSquare
+            squareRatio={PAIR_ASPECT}
+            minW={0.06}
+            selected={sel({ kind: 'qr', id: q.id })}
+            containerRef={pageRef}
+            ariaLabel="QR code"
+            onSelect={() => onSelect({ kind: 'qr', id: q.id })}
+            onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w) })}
+            onSnap={setSnap}
+            controls={
+              <ElementControls
+                onForward={undefined}
+                onBackward={undefined}
+                onDelete={() => {
+                  api.removeQr(block.key, q.id);
+                  onSelect({ kind: 'none' });
+                }}
+              />
+            }
+          >
+            <QrContent el={q} />
+          </Movable>
+        ))}
+
+        {/* Stickers */}
+        {block.stickers.map((s) => (
+          <Movable
+            key={s.id}
+            rect={s}
+            rotation={s.rotation}
+            rotatable
+            minW={0.04}
+            minH={0.04}
+            selected={sel({ kind: 'sticker', id: s.id })}
+            containerRef={pageRef}
+            ariaLabel="Sticker"
+            onSelect={() => onSelect({ kind: 'sticker', id: s.id })}
+            onChange={(r) => api.patchSticker(block.key, s.id, r)}
+            onRotate={(deg) => api.patchSticker(block.key, s.id, { rotation: deg })}
+            onSnap={setSnap}
+            controls={
+              <ElementControls
+                onForward={() => api.reorderSticker(block.key, s.id, 1)}
+                onBackward={() => api.reorderSticker(block.key, s.id, -1)}
+                onDelete={() => {
+                  api.removeSticker(block.key, s.id);
+                  onSelect({ kind: 'none' });
+                }}
+                extra={
+                  <CtlBtn
+                    label="Duplicate"
+                    onClick={() => {
+                      const ni = api.duplicateSticker(block.key, s.id);
+                      if (ni) onSelect({ kind: 'sticker', id: ni });
+                    }}
+                  >
+                    <Copy />
+                  </CtlBtn>
+                }
+              />
+            }
+          >
+            <StickerContent el={s} url={stickerUrlFor?.(s.stickerId)} />
+          </Movable>
+        ))}
+
+        {/* Snap guides while dragging */}
+        <SnapGuides lines={snap} />
+
+        {/* Guides — margins + safe-zone + bleed (client-only; never printed). */}
         {showGuides && (
           <div className="pointer-events-none absolute inset-0 z-[8]">
-            <div className="absolute left-[3%] top-[5%] h-[90%] w-[44%] border border-dashed border-[#97402f]/55" />
-            <div className="absolute right-[3%] top-[5%] h-[90%] w-[44%] border border-dashed border-[#97402f]/55" />
+            <div className="absolute inset-[1.5%] border border-dashed border-destructive/40" />
+            <div className="absolute left-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
+            <div className="absolute right-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
           </div>
         )}
 
-        {/* Signature bound spine — a fold groove carrying a faint running stitch. */}
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[5] -translate-x-1/2">
+        {/* Centre fold — bound spine groove with a faint running stitch. */}
+        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[6] -translate-x-1/2">
           <div className="album-binding h-full" />
           <div className="album-stitch absolute inset-y-0 left-1/2 -translate-x-1/2" />
         </div>
 
-        {/* Overlays */}
-        {block.overlays.map((o, i) => {
-          const photo = photoMap.get(o.photoId);
-          return (
-            <div
-              key={i}
-              className="group/ov absolute z-10 overflow-hidden rounded-md border-2 border-background shadow-md ring-1 ring-transparent transition-shadow duration-150 hover:shadow-elevated hover:ring-primary/60"
-              style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.w * 100}%`, height: `${o.h * 100}%` }}
-            >
-              <div
-                onPointerDown={startOverlay(i, 'move')}
-                onPointerMove={moveOverlay}
-                onPointerUp={endOverlay}
-                className="absolute inset-0 cursor-move touch-none"
-              >
-                {photo ? <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" /> : <div className="h-full w-full bg-muted" />}
-              </div>
-              <button
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeOverlay(i);
-                }}
-                aria-label="Delete overlay"
-                className="absolute left-1 top-1 z-10 rounded-md bg-background/80 p-1 text-destructive opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition-opacity duration-150 hover:bg-background group-hover/ov:opacity-100"
-              >
-                <X className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPicking({ kind: 'replace', index: i });
-                }}
-                aria-label="Replace overlay photo"
-                className="absolute right-1 top-1 z-10 rounded-md bg-background/80 p-1 opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition-opacity duration-150 hover:bg-background group-hover/ov:opacity-100"
-              >
-                <Replace className="h-3 w-3" />
-              </button>
-              {photo && (
-                <button
-                  type="button"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEditPhoto(o.photoId);
-                  }}
-                  aria-label="Edit overlay photo"
-                  title="Edit photo (crop, rotate, brightness, flip)"
-                  className="absolute right-1 top-8 z-10 rounded-md bg-background/80 p-1 opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition-opacity duration-150 hover:bg-background group-hover/ov:opacity-100"
-                >
-                  <SlidersHorizontal className="h-3 w-3" />
-                </button>
-              )}
-              <div
-                onPointerDown={startOverlay(i, 'resize')}
-                onPointerMove={moveOverlay}
-                onPointerUp={endOverlay}
-                className="absolute -bottom-1 -right-1 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded-sm border-2 border-background bg-primary shadow-sm transition-transform duration-150 hover:scale-110"
-              />
-            </div>
-          );
-        })}
+        {/* Page numbers */}
+        <span className="pointer-events-none absolute bottom-2 left-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
+          {start}
+        </span>
+        <span className="pointer-events-none absolute bottom-2 right-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
+          {start + cost - 1}
+        </span>
       </div>
-
-      <input
-        type="text"
-        value={block.caption}
-        onChange={(e) => onPatch({ caption: e.target.value })}
-        placeholder="Add a caption…"
-        maxLength={200}
-        className="builder-glass mt-3 h-9 w-full rounded-lg px-3 text-sm text-white shadow-sm outline-none transition-all duration-150 placeholder:text-white/40 focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-primary/60"
-      />
 
       {picking && (
         <PhotoPicker
@@ -318,13 +364,21 @@ export default function BlockCard({
               ? picking.slot === 'image'
                 ? 'Choose the spread image'
                 : `Choose the ${picking.slot} page photo`
-              : picking.kind === 'add'
-                ? 'Add an overlay photo'
-                : 'Replace overlay photo'
+              : picking.kind === 'replace'
+                ? 'Replace overlay photo'
+                : 'Add a photo overlay'
           }
-          current={pickerCurrent}
           available={availablePhotos}
-          onPick={pick}
+          onPick={(id) => {
+            if (picking.kind === 'base') api.assignBaseSlot(block.key, picking.slot, id);
+            else if (picking.kind === 'replace') api.replaceOverlay(block.key, picking.index, id);
+            else {
+              const newIndex = block.overlays.length;
+              api.addOverlay(block.key, id);
+              onSelect({ kind: 'overlay', index: newIndex });
+            }
+            setPicking(null);
+          }}
           onClose={() => setPicking(null)}
         />
       )}
@@ -332,12 +386,14 @@ export default function BlockCard({
   );
 }
 
-/** One base slot: click to pick, drop a tray photo, quick-crop, or clear. */
+// ── Base slot ─────────────────────────────────────────────────────────────────────
 function BaseSlotView({
   photo,
   label,
+  selected,
   pickActive = false,
   onTapPlace,
+  onSelect,
   onPick,
   onDrop,
   onClear,
@@ -346,8 +402,10 @@ function BaseSlotView({
 }: {
   photo?: Photo;
   label: string;
+  selected: boolean;
   pickActive?: boolean;
   onTapPlace?: () => void;
+  onSelect: () => void;
   onPick: () => void;
   onDrop: (photoId: string) => void;
   onClear: () => void;
@@ -355,12 +413,24 @@ function BaseSlotView({
   onEdit?: () => void;
 }) {
   const [over, setOver] = useState(false);
-  // Tap-to-place: with a photo "picked up", clicking an EMPTY slot drops it here;
-  // otherwise the click opens the existing picker.
   const tapToPlace = pickActive && !photo && !!onTapPlace;
+
   return (
     <div
-      onClick={tapToPlace ? onTapPlace : onPick}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        if (photo) onSelect();
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (tapToPlace) onTapPlace?.();
+        else if (!photo) onPick();
+        else onSelect();
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (photo && onEdit) onEdit();
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         if (!over) setOver(true);
@@ -373,75 +443,48 @@ function BaseSlotView({
         if (id) onDrop(id);
       }}
       className={`group/base absolute inset-0 cursor-pointer transition-all duration-200 ${
-        over ? 'ring-2 ring-inset ring-primary' : tapToPlace ? 'ring-2 ring-inset ring-gold/70' : ''
-      }`}
+        over ? 'ring-2 ring-inset ring-studio-bright' : tapToPlace ? 'ring-2 ring-inset ring-studio-bright/70' : ''
+      } ${selected ? 'ring-2 ring-inset ring-studio-bright' : ''}`}
     >
       {photo ? (
         <>
           <PhotoFrame url={photo.url} edit={photo.edit} alt={photo.filename} />
-          {/* hover scrim so the controls always read on any photo */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/30 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
-          {over && <div className="pointer-events-none absolute inset-0 z-[6] bg-primary/20 ring-2 ring-inset ring-primary" />}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/25 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
+          {over && <div className="pointer-events-none absolute inset-0 z-[6] bg-studio/15 ring-2 ring-inset ring-studio-bright" />}
           <div className="absolute right-1.5 top-1.5 z-[7] flex gap-1 opacity-0 transition-all duration-200 group-hover/base:opacity-100">
             {onEdit && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit();
-                }}
-                aria-label="Edit photo"
-                title="Edit photo (crop, rotate, brightness, flip)"
-                className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
-              >
+              <SlotBtn label="Edit photo" onClick={onEdit}>
                 <SlidersHorizontal className="h-3.5 w-3.5" />
-              </button>
+              </SlotBtn>
             )}
             {onCrop && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCrop();
-                }}
-                aria-label="Adjust crop"
-                title="Adjust crop (pan/zoom)"
-                className="rounded-lg bg-background/90 p-1.5 text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-primary hover:text-primary-foreground"
-              >
+              <SlotBtn label="Adjust crop" onClick={onCrop}>
                 <Crop className="h-3.5 w-3.5" />
-              </button>
+              </SlotBtn>
             )}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClear();
-              }}
-              aria-label="Remove photo"
-              className="rounded-lg bg-background/90 p-1.5 text-destructive shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
-            >
+            <SlotBtn label="Remove photo" destructive onClick={onClear}>
               <X className="h-3.5 w-3.5" />
-            </button>
+            </SlotBtn>
           </div>
         </>
       ) : (
         <div
           className={`flex h-full w-full flex-col items-center justify-center gap-2.5 px-3 text-center transition-colors duration-200 ${
-            over ? 'bg-accent/60' : 'bg-gradient-to-b from-secondary/60 to-muted/40'
+            over ? 'bg-studio-soft' : 'bg-transparent'
           }`}
         >
           <span
             className={`flex h-12 w-12 items-center justify-center rounded-2xl border border-dashed transition-all duration-200 ${
               over
-                ? 'scale-110 border-primary bg-primary/10 text-primary'
-                : 'border-muted-foreground/30 text-muted-foreground/70 group-hover/base:-translate-y-0.5 group-hover/base:border-primary/40 group-hover/base:bg-primary/5 group-hover/base:text-primary'
+                ? 'scale-105 border-studio-bright bg-studio/10 text-studio'
+                : 'border-foreground/15 text-foreground/40 group-hover/base:-translate-y-0.5 group-hover/base:border-studio-bright/50 group-hover/base:bg-studio-soft group-hover/base:text-studio'
             }`}
           >
             <ImagePlus className="h-5 w-5" />
           </span>
           <span
             className={`text-xs font-medium tracking-tight transition-colors duration-200 ${
-              over ? 'text-primary' : 'text-muted-foreground group-hover/base:text-foreground'
+              over ? 'text-studio' : 'text-foreground/55 group-hover/base:text-foreground'
             }`}
           >
             {over ? 'Drop to place' : tapToPlace ? 'Tap to place here' : label}
@@ -452,44 +495,75 @@ function BaseSlotView({
   );
 }
 
+function SlotBtn({
+  label,
+  onClick,
+  destructive,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`rounded-lg bg-background/90 p-1.5 shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors ${
+        destructive ? 'text-destructive hover:bg-destructive hover:text-destructive-foreground' : 'text-foreground hover:bg-studio hover:text-studio-foreground'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── Photo picker (base / overlay replace) ─────────────────────────────────────────
 function PhotoPicker({
   title,
-  current,
   available,
   onPick,
   onClose,
 }: {
   title: string;
-  current?: Photo;
   available: Photo[];
   onPick: (id: string) => void;
   onClose: () => void;
 }) {
-  const options = current && !available.some((p) => p.id === current.id) ? [current, ...available] : available;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-foreground/40 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="animate-rise w-full max-w-lg rounded-2xl border bg-background p-4 shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">{title}</h2>
-          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
-            <X />
-          </Button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        {options.length === 0 ? (
+        {available.length === 0 ? (
           <p className="mt-4 rounded-lg border border-dashed bg-muted/40 px-4 py-8 text-center text-sm text-muted-foreground">
             All photos are already placed. Free one up or upload more.
           </p>
         ) : (
           <div className="mt-3 grid max-h-[60vh] grid-cols-3 gap-2.5 overflow-y-auto p-0.5 sm:grid-cols-4">
-            {options.map((p) => (
+            {available.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => onPick(p.id)}
-                className={`relative aspect-square overflow-hidden rounded-lg bg-muted ring-1 ring-border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card hover:ring-primary/50 ${
-                  current?.id === p.id ? 'ring-2 ring-primary' : ''
-                }`}
                 title={p.filename}
+                className="relative aspect-square overflow-hidden rounded-lg bg-muted ring-1 ring-border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card hover:ring-studio-bright/60"
               >
                 <PhotoFrame url={p.url} edit={p.edit} alt={p.filename} />
               </button>

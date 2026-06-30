@@ -8,7 +8,7 @@ import { getPaidOrder } from '@/lib/orders/album-lock';
 import { orderStatusView } from '@/lib/orders/status';
 import { Button } from '@/components/ui/button';
 import { LUX_PRIMARY } from '@/components/brand';
-import Book from '@/components/book';
+import Book, { paletteFor } from '@/components/book';
 import CustomerShell from '@/components/customer-shell';
 
 const fmtDate = (iso: string) =>
@@ -70,7 +70,7 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
             {/* Book + actions */}
             <div>
               <div className="flex justify-center">
-                <Book title={album.title} coverImage={cover?.thumbUrl ?? null} size="lg" thickness={album.size >= 100 ? 16 : 12} />
+                <Book title={album.title} coverImage={cover?.thumbUrl ?? null} cover={paletteFor(album.id)} size="lg" thickness={album.size >= 100 ? 16 : 12} />
               </div>
 
               <div className="mt-7 flex flex-col gap-2">

@@ -121,6 +121,11 @@ export async function startAlbumPdfGeneration(
         photoIds: (r.photo_ids ?? []).filter(Boolean),
         caption: r.caption ?? '',
         overlays: r.layout_config?.overlays ?? [],
+        // Rich elements don't affect PDF completeness validation; defaults suffice here.
+        texts: [],
+        qrs: [],
+        stickers: [],
+        background: null,
       }));
 
     const check = validateAlbumForPdf(blocks, album.size, hasActiveCover);

@@ -24,8 +24,8 @@ export default function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
       <div className="animate-rise w-full max-w-md border bg-background shadow-elevated" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b px-5 py-3.5">
           <div className="flex items-center gap-2">
-            <Keyboard className="h-4 w-4 text-gold" />
-            <h2 className="font-display text-[1.35rem] font-medium tracking-tight">Keyboard shortcuts</h2>
+            <Keyboard className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-[1.05rem] font-semibold tracking-tight">Keyboard shortcuts</h2>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
             <X />

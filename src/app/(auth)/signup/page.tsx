@@ -2,19 +2,20 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { MailCheck } from 'lucide-react';
+import { MailCheck, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { SignupSchema } from '@/lib/validations';
 import { NAME_MAX, PASSWORD_MAX, PASSWORD_MIN } from '@/lib/auth/policy';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY } from '@/components/brand';
 import { brandFontVars } from '@/lib/fonts';
 import AuthShell from '../_auth-shell';
 
 export default function SignupPage() {
-  const [fields, setFields] = useState({ name: '', email: '', password: '' });
+  const [fields, setFields] = useState({ name: '', email: '', password: '', confirm: '' });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28,7 +29,13 @@ export default function SignupPage() {
     e.preventDefault();
     setError(null);
 
-    const result = SignupSchema.safeParse(fields);
+    // Confirm-password is a client-side guard (no schema change); the server still validates name/email/password.
+    if (fields.password !== fields.confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    const result = SignupSchema.safeParse({ name: fields.name, email: fields.email, password: fields.password });
     if (!result.success) {
       setError(result.error.issues[0].message);
       return;
@@ -56,7 +63,7 @@ export default function SignupPage() {
   if (success) {
     return (
       <div className={`${brandFontVars} font-ui`}>
-        <AuthShell eyebrow="Almost there" title="Check your email.">
+        <AuthShell title="Check your email" subtitle="One last step to activate your account.">
           <div className="flex flex-col items-center gap-4 text-center">
             <span className="grid h-12 w-12 place-items-center rounded-full bg-primary/[0.07] text-primary ring-1 ring-primary/15">
               <MailCheck className="h-6 w-6" />
@@ -76,7 +83,10 @@ export default function SignupPage() {
 
   return (
     <div className={`${brandFontVars} font-ui`}>
-      <AuthShell eyebrow="Begin" title="Create your account." subtitle="Your travels, bound beautifully.">
+      <AuthShell
+        title="Create Your Memory Workspace"
+        subtitle="Start preserving your travels, bound beautifully."
+      >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Full name</Label>
@@ -96,9 +106,9 @@ export default function SignupPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
+              name="password"
               autoComplete="new-password"
               minLength={PASSWORD_MIN}
               maxLength={PASSWORD_MAX}
@@ -110,16 +120,33 @@ export default function SignupPage() {
               Between {PASSWORD_MIN} and {PASSWORD_MAX} characters
             </p>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="space-y-2">
+            <Label htmlFor="confirm">Confirm password</Label>
+            <PasswordInput
+              id="confirm"
+              name="confirm"
+              autoComplete="new-password"
+              maxLength={PASSWORD_MAX}
+              value={fields.confirm}
+              onChange={update('confirm')}
+              required
+            />
+          </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={loading}>
-            {loading ? 'Creating account…' : 'Create account'}
+            {loading && <Loader2 className="animate-spin" />}
+            {loading ? 'Creating account…' : 'Create Account'}
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-sm text-muted-foreground">
           Already have an account?{' '}
           <Link href="/login" className="font-medium text-foreground underline-offset-2 hover:underline">
-            Log in
+            Sign In
           </Link>
         </p>
       </AuthShell>

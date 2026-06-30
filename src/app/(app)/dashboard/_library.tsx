@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Plus, ArrowRight, Trash2, Loader2, X, AlertTriangle, SearchX } from 'lucide-react';
-import Book from '@/components/book';
+import Book, { paletteFor } from '@/components/book';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { deleteAlbum } from '@/lib/actions/albums';
 
 export type LibraryAlbum = {
@@ -20,7 +21,7 @@ export type LibraryAlbum = {
 type Kind = 'draft' | 'ready' | 'ordered' | 'delivered';
 
 const KIND: Record<Kind, { label: string; color: string; bg: string; dot: string }> = {
-  draft: { label: 'Draft', color: 'text-muted-foreground', bg: 'bg-muted', dot: 'bg-muted-foreground/60' },
+  draft: { label: 'In progress', color: 'text-muted-foreground', bg: 'bg-muted', dot: 'bg-muted-foreground/60' },
   ready: { label: 'Ready to order', color: 'text-primary', bg: 'bg-primary/10', dot: 'bg-primary' },
   ordered: { label: 'Ordered', color: 'text-gold', bg: 'bg-gold/12', dot: 'bg-gold' },
   delivered: { label: 'Delivered', color: 'text-success', bg: 'bg-success/12', dot: 'bg-success' },
@@ -72,13 +73,13 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
     <div className="px-5 py-9 sm:px-8 lg:py-12">
       <div className="mx-auto max-w-5xl">
         {/* Greeting masthead */}
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/60">
           {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
-        <h1 className="mt-3 font-display text-[3.2rem] font-normal leading-none tracking-tight text-primary">
+        <h1 className="mt-2 font-display text-3xl sm:text-4xl font-medium tracking-tight text-primary">
           {greeting}.
         </h1>
-        <p className="mt-3 text-base font-light text-muted-foreground">
+        <p className="mt-1.5 text-sm text-muted-foreground font-light">
           {albums.length === 0
             ? 'Your shelf is waiting for its first story.'
             : `${albums.length} ${albums.length === 1 ? 'story' : 'stories'} on your shelf${draft ? ' — one still being written.' : '.'}`}
@@ -86,16 +87,16 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
 
         {/* Continue where you left off */}
         {draft && (
-          <div className="mt-10 flex flex-wrap items-center gap-7 bg-[#1e3a2f] px-8 py-7 text-[#f5efe3]">
-            <Book title={draft.title} size="sm" thickness={9} />
+          <div className="mt-8 flex flex-wrap items-center gap-7 bg-primary px-8 py-6 text-primary-foreground">
+            <Book title={draft.title} size="sm" thickness={9} cover={paletteFor(draft.id)} />
             <div className="min-w-[200px] flex-1">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-[#8aa395]">Pick up where you left off</p>
-              <p className="mt-1 font-display text-[28px] leading-tight text-[#f5efe3]">{draft.title}</p>
-              <p className="mt-1 text-[13px] text-[#a9bdb0]">{draft.size} pages · {KIND[kindOf(draft)].label}</p>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-primary-foreground/75">Pick up where you left off</p>
+              <p className="mt-1 font-display text-[26px] leading-tight text-primary-foreground">{draft.title}</p>
+              <p className="mt-1 text-sm text-primary-foreground/80">{draft.size} pages · {KIND[kindOf(draft)].label}</p>
             </div>
             <Button
               render={<Link href={`/albums/${draft.id}/build`} />}
-              className="border-0 bg-[#ecd9ad] text-[#1e3a2f] hover:bg-[#f2e3bd]"
+              variant="secondary"
             >
               Resume building <ArrowRight />
             </Button>
@@ -107,18 +108,18 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
           <h2 className="font-display text-3xl font-medium tracking-tight text-primary">Your stories</h2>
           <div className="flex items-center gap-2.5">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gold" />
-              <input
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search destinations…"
-                className="w-[200px] border border-input bg-card py-2 pl-8 pr-3 text-[13px] outline-none transition-colors focus:border-primary"
+                className="h-8 w-[200px] pl-8 pr-3 text-xs bg-card rounded-sm"
               />
             </div>
             <select
               value={year}
               onChange={(e) => setYear(e.target.value)}
-              className="border border-input bg-card px-3 py-2 text-[13px] outline-none"
+              className="h-8 rounded-sm border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-ring"
             >
               <option value="all">All years</option>
               {years.map((y) => (
@@ -197,6 +198,17 @@ function ShelfBook({ album }: { album: LibraryAlbum }) {
   const year = new Date(album.updatedAt).getFullYear().toString();
   const editable = !album.purchase;
 
+  useEffect(() => {
+    if (!confirming) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !deleting) {
+        setConfirming(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [confirming, deleting]);
+
   const onConfirm = async () => {
     setDeleting(true);
     setError(null);
@@ -212,7 +224,7 @@ function ShelfBook({ album }: { album: LibraryAlbum }) {
     <div className="group relative w-[150px]">
       <Link href={`/albums/${album.id}`} className="block">
         <div className="flex h-[248px] items-end justify-center">
-          <Book title={album.title} year={year} size="sm" thickness={album.size >= 100 ? 12 : 9} />
+          <Book title={album.title} year={year} size="sm" thickness={album.size >= 100 ? 12 : 9} cover={paletteFor(album.id)} />
         </div>
         <div className="mt-3.5">
           <p className="truncate font-display text-lg leading-tight text-primary">{album.title}</p>
@@ -229,7 +241,7 @@ function ShelfBook({ album }: { album: LibraryAlbum }) {
           type="button"
           onClick={() => setConfirming(true)}
           aria-label={`Delete ${album.title}`}
-          className="absolute right-0 top-2 rounded-[2px] bg-background/80 p-1.5 text-destructive opacity-0 shadow-sm transition-opacity hover:bg-background focus-visible:opacity-100 group-hover:opacity-100"
+          className="absolute right-0 top-2 rounded-[2px] bg-background/80 p-1.5 text-destructive opacity-40 shadow-sm transition-opacity hover:bg-background focus-visible:opacity-100 md:opacity-0 group-hover:opacity-100"
         >
           <Trash2 className="h-4 w-4" />
         </button>

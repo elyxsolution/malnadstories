@@ -1,0 +1,166 @@
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3000
+  - Environments: .env.local
+  - Experiments (use with caution):
+    · instrumentationHook
+
+ ✓ Starting...
+ ○ Compiling /instrumentation ...
+ ✓ Compiled /instrumentation in 5.2s (157 modules)
+ ✓ Ready in 16.5s
+ ○ Compiling /src/middleware ...
+ ✓ Compiled /src/middleware in 802ms (192 modules)
+ ○ Compiling / ...
+ ✓ Compiled / in 24.5s (911 modules)
+ GET / 200 in 1016ms
+ ✓ Compiled in 1044ms (311 modules)
+ GET / 200 in 2035ms
+ GET / 200 in 599ms
+ GET / 200 in 414ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 4.6s (1213 modules)
+ GET /login 200 in 5017ms
+ ○ Compiling /signup ...
+ ✓ Compiled /signup in 4.4s (1498 modules)
+ GET /signup 200 in 4858ms
+ ○ Compiling /faq ...
+ ✓ Compiled /faq in 807ms (1503 modules)
+ GET /faq 200 in 1233ms
+ ○ Compiling /testimonials ...
+ ✓ Compiled /testimonials in 2.2s (1509 modules)
+ GET /testimonials 200 in 2718ms
+ ○ Compiling /stories ...
+ ✓ Compiled /stories in 1816ms (1552 modules)
+ GET /stories 200 in 2783ms
+ GET / 200 in 652ms
+ ○ Compiling /dashboard ...
+ ✓ Compiled /dashboard in 4.3s (1714 modules)
+ ○ Compiling /api/worker/health ...
+ ✓ Compiled /api/worker/health in 1396ms (1195 modules)
+ ○ Compiling /albums/[id]/build ...
+ GET /api/worker/health 200 in 6118ms
+ ✓ Compiled /albums/[id]/build in 15.6s (2501 modules)
+ GET /api/worker/health 200 in 704ms
+ ○ Compiling /api/photos/presign ...
+ ✓ Compiled /api/photos/presign in 8.1s (1710 modules)
+ POST /api/photos/presign 200 in 10946ms
+ ○ Compiling /api/photos/confirm ...
+ ✓ Compiled /api/photos/confirm in 2.2s (1771 modules)
+ POST /api/photos/confirm 200 in 5072ms
+ ○ Compiling /api/photos ...
+ ✓ Compiled /api/photos in 1101ms (1773 modules)
+ GET /api/photos?albumId=0c90550f-f404-4a3a-bcd9-cdaea906243c 200 in 1755ms
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 2689ms
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 809ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 2580ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 2572ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1809ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1240ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1284ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1733ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1265ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1057ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1063ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1454ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1511ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 992ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1114ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 991ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1295ms
+saveCoverDesign error: {
+  code: 'PGRST204',
+  details: null,
+  hint: null,
+  message: "Could not find the 'cover_config' column of 'albums' in the schema cache"
+}
+ POST /albums/0c90550f-f404-4a3a-bcd9-cdaea906243c/build 200 in 1357ms

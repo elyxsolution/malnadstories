@@ -41,7 +41,7 @@ export default function TrayToolbar({
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="Search photos…"
-          className="w-full border border-input bg-background py-2 pl-8 pr-3 text-[13px] outline-none transition-colors focus:border-primary"
+          className="w-full rounded-lg border border-input bg-background py-2 pl-8 pr-3 text-[13px] outline-none transition-colors focus:border-studio-bright focus-visible:ring-2 focus-visible:ring-studio-bright/30"
         />
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -53,7 +53,7 @@ export default function TrayToolbar({
               type="button"
               onClick={() => onFilter(c.key)}
               className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                active ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-background text-muted-foreground hover:text-foreground'
+                active ? 'border-studio bg-studio text-studio-foreground' : 'border-input bg-background text-muted-foreground hover:text-foreground'
               }`}
             >
               {c.label}

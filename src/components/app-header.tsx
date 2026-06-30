@@ -6,7 +6,7 @@ import { brandFontVars } from '@/lib/fonts';
 export default function AppHeader({ email }: { email: string }) {
   return (
     <header
-      className={`${brandFontVars} sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b bg-background/80 px-6 backdrop-blur-md sm:px-8`}
+      className={`${brandFontVars} sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-6 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8`}
     >
       <Link href="/dashboard" className="inline-flex items-center gap-2 tracking-tight">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">

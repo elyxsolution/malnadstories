@@ -11,6 +11,7 @@ import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
 import { Check, AlertTriangle } from 'lucide-react';
 import AdminPdfControls from './_pdf-controls';
 import AlbumPreview from './_album-preview';
+import { builderFontVars } from '@/lib/fonts';
 
 export default async function AdminAlbumDetail({ params }: { params: { id: string } }) {
   await requireAdmin();
@@ -127,8 +128,8 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
 
       <h2 className="mt-6 mb-2 text-sm font-semibold">Album preview</h2>
       {view && view.blocks.length > 0 ? (
-        <div className="rounded-lg border bg-card p-4">
-          <AlbumPreview photos={view.photos} blocks={view.blocks} cover={view.cover} />
+        <div className={`${builderFontVars} rounded-lg border bg-card p-4`}>
+          <AlbumPreview photos={view.photos} blocks={view.blocks} cover={view.cover} stickerUrls={view.stickerUrls} />
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">This album has no layout to preview yet.</p>

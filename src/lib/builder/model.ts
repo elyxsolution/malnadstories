@@ -9,6 +9,7 @@
  * Placement model: each uploaded photo is placed AT MOST ONCE — as a base OR as an
  * overlay — so per-photo edits live on `photos.edit_config`, not per-slot.
  */
+import type { FontKey } from './fonts-catalog';
 
 /**
  * Real printed-photobook model. Every content unit is a PAIR — two physical pages —
@@ -82,6 +83,13 @@ export type EditConfig = {
   flipV?: boolean;
   brightness?: number; // 1 = no change (CSS filter)
   sharpness?: number; // 0 = no change (SVG feConvolveMatrix amount)
+  // ── Tone & finish (all optional; defaults compose to "no change") ────────────
+  contrast?: number; // 1 = no change (CSS filter)
+  saturation?: number; // 1 = no change (CSS filter saturate())
+  grayscale?: number; // 0 = full colour, 1 = mono (CSS filter)
+  opacity?: number; // 1 = opaque (applied to the frame container, not the filter)
+  borderRadius?: number; // 0 = square corners; fraction (0..0.5) of the frame's short edge
+  shadow?: number; // 0 = none; 0..1 soft drop-shadow intensity (container box-shadow)
 };
 
 export const FULL_CROP: Rect = { x: 0, y: 0, w: 1, h: 1 };
@@ -95,6 +103,86 @@ export const DEFAULT_OVERLAY_GEOM = { x: 0.55, y: 0.08, w: 0.34, h: 0.34 };
 /** Hard cap on overlays per block — UI is unlimited, this rejects abusive payloads. */
 export const MAX_OVERLAYS_PER_BLOCK = 50;
 
+// ── Rich page elements (text · QR · background) ────────────────────────────────
+// All additive + backward-compatible: stored in album_pages.layout_config jsonb
+// alongside `overlays` (which the existing CHECK requires to be an array). Old rows
+// have none of these → they hydrate to []/null and render exactly as before.
+
+export type TextVariant = 'heading' | 'subtitle' | 'paragraph';
+/** Selectable typeface key — defined by the shared font catalog (legacy serif/sans/script + library). */
+export type TextFontKey = FontKey;
+export type TextAlign = 'left' | 'center' | 'right';
+
+/** A free text element placed on the open pair (normalized rect, like an overlay). */
+export type TextElement = {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  variant: TextVariant;
+  font: TextFontKey;
+  size: number; // px at the reference open-pair width (REF_PAIR_W); scales with the canvas
+  weight: number; // 400 | 500 | 600 | 700
+  italic: boolean;
+  underline: boolean;
+  align: TextAlign;
+  color: string; // hex (validated server-side)
+  letterSpacing: number; // em
+  lineHeight: number; // unitless multiplier
+  opacity: number; // 0..1
+  rotation: number; // deg, -180..180
+  shadow: boolean;
+};
+
+/** A QR code generated from a URL/string, placed on the open pair. */
+export type QrElement = {
+  id: string;
+  data: string; // the URL/text to encode
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fg: string; // foreground hex
+  bg: string; // background hex (or 'transparent')
+  padding: number; // quiet-zone padding, 0..0.4 (fraction of the QR box)
+  radius: number; // container corner radius, 0..0.5 (fraction of the QR box short edge)
+};
+
+/** A page background — CSS-only (colour | gradient | texture) so the PDF never waits on a load. */
+export type Background = {
+  kind: 'color' | 'gradient' | 'texture';
+  value: string; // catalog key (resolved by backgroundStyle in elements.ts)
+};
+
+/**
+ * A decorative sticker (admin-managed artwork) placed on a page or the cover. Stores only the
+ * catalog `stickerId` + geometry — NEVER a URL (presigned URLs expire). The renderer resolves
+ * the id → presigned URL via a `stickerUrlFor` resolver (parallel to how photos are resolved),
+ * so the same element renders in the canvas, the preview, and the PDF.
+ */
+export type StickerElement = {
+  id: string;
+  stickerId: string; // FK to the admin stickers catalog
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number; // deg, -180..180
+  opacity: number; // 0..1
+};
+
+export const MAX_TEXTS_PER_BLOCK = 30;
+export const MAX_QRS_PER_BLOCK = 10;
+export const MAX_STICKERS_PER_BLOCK = 30;
+
+/** Geometry for a freshly added sticker (square, near the top-right of the page/cover). */
+export const DEFAULT_STICKER_GEOM = { x: 0.42, y: 0.12, w: 0.16, h: 0.16 };
+
+/** Reference open-pair width (px) that TextElement.size is authored against. */
+export const REF_PAIR_W = 1000;
+
 /** One content PAIR (two physical pages) in the working builder state. */
 export type Block = {
   key: string; // client-side id; not persisted (page_number is the persisted order)
@@ -104,7 +192,51 @@ export type Block = {
   photoIds: string[];
   caption: string;
   overlays: Overlay[]; // normalized 0..1 across the OPEN PAIR (both pages)
+  texts: TextElement[]; // free text elements (default [])
+  qrs: QrElement[]; // QR codes (default [])
+  stickers: StickerElement[]; // decorative stickers (default [])
+  background: Background | null; // page background (default null)
 };
+
+/** Build a fresh, empty block with all rich-element fields initialized. */
+export function makeBlock(template: LayoutTemplate, key?: string): Block {
+  return {
+    key: key ?? cryptoId(),
+    template,
+    photoIds: [],
+    caption: '',
+    overlays: [],
+    texts: [],
+    qrs: [],
+    stickers: [],
+    background: null,
+  };
+}
+
+/** Normalize a partially-shaped block (e.g. loaded/legacy) to a full Block. */
+export function normalizeBlock(b: Partial<Block> & { template: LayoutTemplate; key?: string }): Block {
+  return {
+    key: b.key ?? cryptoId(),
+    template: b.template,
+    photoIds: b.photoIds ?? [],
+    caption: b.caption ?? '',
+    overlays: b.overlays ?? [],
+    texts: b.texts ?? [],
+    qrs: b.qrs ?? [],
+    stickers: b.stickers ?? [],
+    background: b.background ?? null,
+  };
+}
+
+/** SSR/Node-safe id (crypto.randomUUID in the browser + modern Node; fallback otherwise). */
+export function cryptoId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  } catch {
+    /* fall through */
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 /** The base photo ids a unit requires filled to be complete. */
 export function requiredBaseCount(template: LayoutTemplate): number {
@@ -311,10 +443,40 @@ export function computeFrameLayout(
  */
 export function cssFilter(e: EditConfig | null | undefined, sharpenId: string): string {
   const brightness = e?.brightness ?? 1;
+  const contrast = e?.contrast ?? 1;
+  const saturation = e?.saturation ?? 1;
+  const grayscale = e?.grayscale ?? 0;
   const parts: string[] = [];
   if (brightness !== 1) parts.push(`brightness(${brightness})`);
+  if (contrast !== 1) parts.push(`contrast(${contrast})`);
+  if (saturation !== 1) parts.push(`saturate(${saturation})`);
+  if (grayscale > 0) parts.push(`grayscale(${clamp(grayscale, 0, 1)})`);
   if ((e?.sharpness ?? 0) > 0) parts.push(`url(#${sharpenId})`);
   return parts.length ? parts.join(' ') : 'none';
+}
+
+/**
+ * Container-level finish for a photo frame: opacity, rounded corners, and a soft drop
+ * shadow. These live on the frame's wrapper (not the CSS `filter`) so they compose with
+ * the geometry inside. Pure — the renderer (and the PDF print route) build the same style.
+ * `shortEdgePx` lets border-radius track the frame size; omit for a fractional fallback.
+ */
+export function frameFinish(
+  e: EditConfig | null | undefined,
+  shortEdgePx?: number,
+): { opacity?: number; borderRadius?: string; boxShadow?: string } {
+  const out: { opacity?: number; borderRadius?: string; boxShadow?: string } = {};
+  const opacity = e?.opacity ?? 1;
+  if (opacity < 1) out.opacity = clamp(opacity, 0, 1);
+  const radius = clamp(e?.borderRadius ?? 0, 0, 0.5);
+  if (radius > 0) out.borderRadius = shortEdgePx ? `${radius * shortEdgePx}px` : `${radius * 100}%`;
+  const shadow = clamp(e?.shadow ?? 0, 0, 1);
+  if (shadow > 0) {
+    const y = Math.round(6 + shadow * 22);
+    const blur = Math.round(12 + shadow * 40);
+    out.boxShadow = `0 ${y}px ${blur}px -8px rgba(20, 30, 24, ${0.18 + shadow * 0.32})`;
+  }
+  return out;
 }
 
 /**

@@ -80,6 +80,7 @@ export default function CreateWizard({
   const [description, setDescription] = useState('');
   const [productId, setProductId] = useState(products[0]?.id ?? '');
   const [coverId, setCoverId] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState(!!destination || !!fromDate || !!toDate || !!description);
 
   // Created album + photos
   const [albumId, setAlbumId] = useState<string | null>(null);
@@ -192,7 +193,7 @@ export default function CreateWizard({
       // Cinematic builder-entry veil, then hand off to the existing builder.
       if (!albumId) return;
       setEntering(true);
-      setTimeout(() => router.push(`/albums/${albumId}/build`), 1700);
+      setTimeout(() => router.push(`/albums/${albumId}/build`), 750);
       return;
     }
     go(step + 1);
@@ -233,7 +234,7 @@ export default function CreateWizard({
     }
     setProposal(null);
     setEntering(true);
-    setTimeout(() => router.push(`/albums/${albumId}/build`), 1700);
+    setTimeout(() => router.push(`/albums/${albumId}/build`), 750);
   };
 
   const continueLabel = ['Continue', 'Continue', 'Review', 'Open the builder'][step];
@@ -241,7 +242,7 @@ export default function CreateWizard({
   return (
     <div className="brand-surface flex min-h-[calc(100vh-3.5rem)] flex-col">
       {/* PROGRESS HEADER — sticks just below the global app header (h-14). */}
-      <header className="sticky top-14 z-20 flex h-16 items-center justify-between border-b bg-background/85 px-5 backdrop-blur-md sm:px-8">
+      <header className="sticky top-14 z-20 flex h-16 items-center justify-between border-b bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
         <span className="inline-flex items-center gap-2">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">
             <Sprig className="h-[15px] w-[15px]" />
@@ -305,48 +306,62 @@ export default function CreateWizard({
                   className="h-auto border-0 border-b border-input bg-transparent px-0 py-2 font-display text-2xl font-medium shadow-none focus-visible:border-primary focus-visible:ring-0"
                 />
               </Field>
-              <Field label="Destination · optional" icon={<MapPin className="h-4 w-4 text-primary/70" />}>
-                <Input value={destination} onChange={(e) => setDestination(e.target.value)} disabled={locked} placeholder="Where to?" maxLength={120} />
-              </Field>
-              {/* Album Period — native date pickers (both optional; From ≤ To). */}
-              <Field label="Album period · optional" icon={<Calendar className="h-4 w-4 text-primary/70" />}>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="fromDate" className="text-xs font-normal text-muted-foreground">From</Label>
-                    <Input
-                      id="fromDate"
-                      type="date"
-                      value={fromDate}
-                      max={toDate || undefined}
-                      onChange={(e) => setFromDate(e.target.value)}
+              {showDetails ? (
+                <>
+                  <Field label="Destination · optional" icon={<MapPin className="h-4 w-4 text-primary/70" />}>
+                    <Input value={destination} onChange={(e) => setDestination(e.target.value)} disabled={locked} placeholder="Where to?" maxLength={120} />
+                  </Field>
+                  {/* Album Period — native date pickers (both optional; From ≤ To). */}
+                  <Field label="Album period · optional" icon={<Calendar className="h-4 w-4 text-primary/70" />}>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="fromDate" className="text-xs font-normal text-muted-foreground">From</Label>
+                        <Input
+                          id="fromDate"
+                          type="date"
+                          value={fromDate}
+                          max={toDate || undefined}
+                          onChange={(e) => setFromDate(e.target.value)}
+                          disabled={locked}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="toDate" className="text-xs font-normal text-muted-foreground">To</Label>
+                        <Input
+                          id="toDate"
+                          type="date"
+                          value={toDate}
+                          min={fromDate || undefined}
+                          onChange={(e) => setToDate(e.target.value)}
+                          disabled={locked}
+                        />
+                      </div>
+                    </div>
+                    {dateError && <p className="text-xs text-destructive">The “From” date must be on or before the “To” date.</p>}
+                  </Field>
+                  <Field label="A few words · optional">
+                    <textarea
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
                       disabled={locked}
+                      rows={2}
+                      maxLength={500}
+                      placeholder="What made this trip worth keeping?"
+                      className="flex w-full rounded-lg border border-input bg-background px-3 py-2 font-display text-lg italic text-foreground shadow-xs outline-none placeholder:not-italic placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
                     />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="toDate" className="text-xs font-normal text-muted-foreground">To</Label>
-                    <Input
-                      id="toDate"
-                      type="date"
-                      value={toDate}
-                      min={fromDate || undefined}
-                      onChange={(e) => setToDate(e.target.value)}
-                      disabled={locked}
-                    />
-                  </div>
+                  </Field>
+                </>
+              ) : (
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDetails(true)}
+                    className="text-sm font-medium text-primary hover:underline"
+                  >
+                    + Add trip details (optional)
+                  </button>
                 </div>
-                {dateError && <p className="text-xs text-destructive">The “From” date must be on or before the “To” date.</p>}
-              </Field>
-              <Field label="A few words · optional">
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  disabled={locked}
-                  rows={2}
-                  maxLength={500}
-                  placeholder="What made this trip worth keeping?"
-                  className="flex w-full rounded-lg border border-input bg-background px-3 py-2 font-display text-lg italic text-foreground shadow-xs outline-none placeholder:not-italic placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
-                />
-              </Field>
+              )}
             </div>
           )}
 
@@ -379,7 +394,7 @@ export default function CreateWizard({
                           thickness={Math.max(10, Math.round(p.pages / 1.6))}
                         />
                         {selected && (
-                          <span className="absolute -top-2 right-4 grid h-7 w-7 place-items-center rounded-full bg-gold text-[#fbf8f1] shadow-[0_6px_16px_rgb(160_129_63/0.4)]">
+                          <span className="absolute -top-2 right-4 grid h-7 w-7 place-items-center rounded-full bg-gold text-background shadow-[0_6px_16px_rgb(160_129_63/0.4)]">
                             <Check className="h-4 w-4" />
                           </span>
                         )}
@@ -397,8 +412,8 @@ export default function CreateWizard({
                   );
                 })}
               </div>
-              <p className="text-center font-display text-base italic text-muted-foreground">
-                You can add or remove pages any time while building.
+              <p className="text-center font-display text-sm italic text-muted-foreground">
+                Pages and cover are bound in this size. Layouts and photos remain fully flexible while building.
               </p>
               <div>
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Cover design</p>
@@ -557,7 +572,7 @@ export default function CreateWizard({
       </main>
 
       {/* FOOTER NAV */}
-      <footer className="sticky bottom-0 z-20 flex h-20 items-center justify-between border-t bg-background/90 px-5 backdrop-blur-md sm:px-8">
+      <footer className="sticky bottom-0 z-20 flex h-20 items-center justify-between border-t bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
         <div className="min-w-[120px]">
           {step > 0 && (
             <Button variant="ghost" onClick={() => go(step - 1)} disabled={creating}>
@@ -596,15 +611,19 @@ export default function CreateWizard({
 
       {/* CINEMATIC BUILDER-ENTRY VEIL */}
       {entering && (
-        <div className="animate-fade-in fixed inset-0 z-[120] flex flex-col items-center justify-center bg-[#122019] text-center">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#b89a5c]">Opening your album</p>
-          <h2 className="animate-rise mt-6 max-w-[18ch] font-display text-[clamp(2.5rem,7vw,4rem)] font-normal leading-tight text-[#f5efe3]">
+        <div
+          onClick={() => router.push(`/albums/${albumId}/build`)}
+          className="animate-fade-in fixed inset-0 z-[120] flex cursor-pointer flex-col items-center justify-center bg-[linear-gradient(180deg,hsl(156_36%_12%),hsl(156_36%_8%))] text-center"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gold/80">Opening your album</p>
+          <h2 className="animate-rise mt-6 max-w-[18ch] font-display text-[clamp(2.5rem,7vw,4rem)] font-normal leading-tight text-primary-foreground">
             {title || 'Your story'}
           </h2>
-          <span className="mt-7 h-px w-60 bg-[linear-gradient(90deg,transparent,#b89a5c,transparent)]" />
-          <div className="mt-8 flex items-center gap-3 text-sm text-[#a9bdb0]">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#ecd9ad]" /> Preparing your spreads…
+          <span className="mt-7 h-px w-60 bg-[linear-gradient(90deg,transparent,hsl(var(--gold)/0.6),transparent)]" />
+          <div className="mt-8 flex items-center gap-3 text-sm text-primary-foreground/70">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-gold/80" /> Preparing your spreads…
           </div>
+          <p className="absolute bottom-6 text-[10px] uppercase tracking-widest text-primary-foreground/30">Click anywhere to skip</p>
         </div>
       )}
     </div>

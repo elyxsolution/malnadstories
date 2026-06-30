@@ -31,6 +31,7 @@ export const CAPABILITIES = [
   'cms:edit', 'cms:publish', 'cms:archive',
   'template:edit', 'template:publish', 'template:archive',
   'cover:manage',
+  'sticker:manage',
   'coupon:manage',
   'analytics:view',
   'system:view',
@@ -68,6 +69,7 @@ const CONTENT: Capability[] = [
   'cms:edit', 'cms:publish', 'cms:archive',
   'template:edit', 'template:publish', 'template:archive',
   'cover:manage',
+  'sticker:manage',
 ];
 
 export const ROLE_CAPABILITIES: Record<AdminRole, Capability[]> = {
@@ -102,6 +104,7 @@ const ROUTE_CAPABILITY: { prefix: string; capability: Capability }[] = [
   { prefix: '/admin/customers', capability: 'customer:view' },
   { prefix: '/admin/albums', capability: 'album:view' },
   { prefix: '/admin/covers', capability: 'cover:manage' },
+  { prefix: '/admin/stickers', capability: 'sticker:manage' },
   { prefix: '/admin/coupons', capability: 'coupon:manage' },
   { prefix: '/admin/cms', capability: 'cms:edit' },
   { prefix: '/admin/templates', capability: 'template:edit' },

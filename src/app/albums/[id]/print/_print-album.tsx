@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
+import { CoverDesignFromConfig, BackCoverDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { Block, EditConfig } from '@/lib/builder/model';
+import type { CoverConfig } from '@/lib/builder/cover';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
-export type PrintCover = { url: string } | null;
+/** The custom cover design: front rendered on page 1, back on the final physical page. */
+export type PrintCover = { imageUrl: string | null; backImageUrl: string | null; config: CoverConfig; title: string } | null;
 
 /**
  * Print-only album renderer — the PHYSICAL photobook, one PDF page per physical page:
@@ -50,10 +53,12 @@ export default function PrintAlbum({
   blocks,
   photos,
   cover,
+  stickerUrls = {},
 }: {
   blocks: Block[];
   photos: PrintPhoto[];
   cover: PrintCover;
+  stickerUrls?: Record<string, string>;
 }) {
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const photoFor = useCallback(
@@ -63,6 +68,7 @@ export default function PrintAlbum({
     },
     [photoMap],
   );
+  const stickerUrlFor = useCallback((id: string) => stickerUrls[id], [stickerUrls]);
 
   // Frames the worker must wait for — counted to MATCH what each physical page renders
   // (memory opt: single-pair photos render once on their own page, not twice; overlays
@@ -82,11 +88,22 @@ export default function PrintAlbum({
       }
       return n;
     };
+    // Stickers render on BOTH physical pages (not half-filtered, like text/QR — the clip window
+    // shows the right portion), so each placed sticker with a resolved URL = 2 frames. The cover
+    // renders its stickers once. The back cover is the final page (its own base + stickers).
+    const coverStickers = cover ? cover.config.stickers.filter((s) => stickerUrls[s.stickerId]).length : 0;
+    const backStickers = cover ? cover.config.back.stickers.filter((s) => stickerUrls[s.stickerId]).length : 0;
     return (
-      (cover ? 1 : 0) +
-      blocks.reduce((s, b) => s + framesOnHalf(b, 'left') + framesOnHalf(b, 'right'), 0)
+      (cover ? 2 : 0) + // front cover base + back cover base
+      coverStickers +
+      backStickers +
+      blocks.reduce(
+        (s, b) =>
+          s + framesOnHalf(b, 'left') + framesOnHalf(b, 'right') + b.stickers.filter((st) => stickerUrls[st.stickerId]).length * 2,
+        0,
+      )
     );
-  }, [blocks, photoMap, cover]);
+  }, [blocks, photoMap, cover, stickerUrls]);
 
   const [, setLoaded] = useState(0);
   const loadedRef = useRef(0);
@@ -115,11 +132,16 @@ export default function PrintAlbum({
     <>
       <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />
 
-      {/* Page 1 — Cover */}
+      {/* Page 1 — Cover (the customer's custom design: image/background + title/tagline) */}
       <div className="pdf-page">
         {cover ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={cover.url} alt="" className="cover-img" onLoad={onFrameReady} onError={onFrameReady} />
+          <CoverDesignFromConfig
+            config={cover.config}
+            title={cover.title}
+            imageUrl={cover.imageUrl}
+            stickerUrlFor={stickerUrlFor}
+            onReady={onFrameReady}
+          />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">Cover</div>
         )}
@@ -132,10 +154,21 @@ export default function PrintAlbum({
       {/* Content — each pair → two physical pages (left half, right half). */}
       {blocks.map((block) => (
         <div key={block.key} style={{ display: 'contents' }}>
-          <PhysicalPage side="left" block={block} photoFor={photoFor} onFrameReady={onFrameReady} />
-          <PhysicalPage side="right" block={block} photoFor={photoFor} onFrameReady={onFrameReady} />
+          <PhysicalPage side="left" block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} />
+          <PhysicalPage side="right" block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} />
         </div>
       ))}
+
+      {/* Back matter — blank inside-back cover (left, right) then the Back cover (final page). */}
+      {cover && (
+        <>
+          <div className="pdf-page" />
+          <div className="pdf-page" />
+          <div className="pdf-page">
+            <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} onReady={onFrameReady} />
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -144,11 +177,13 @@ function PhysicalPage({
   side,
   block,
   photoFor,
+  stickerUrlFor,
   onFrameReady,
 }: {
   side: 'left' | 'right';
   block: Block;
   photoFor: (id: string | undefined) => { url: string; edit?: EditConfig | null } | undefined;
+  stickerUrlFor?: (stickerId: string) => string | undefined;
   onFrameReady: () => void;
 }) {
   // Left page shows x∈[0,6in] of the 12in open pair; right page shifts it by one page.
@@ -156,7 +191,7 @@ function PhysicalPage({
   return (
     <div className="pdf-page">
       <div className="pair-clip" style={{ left: side === 'left' ? '0' : '-100%' }}>
-        <PairContent block={block} photoFor={photoFor} onFrameReady={onFrameReady} half={side} />
+        <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} half={side} />
       </div>
     </div>
   );

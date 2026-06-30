@@ -77,7 +77,18 @@ const OVERLAY_SLOTS: { x: number; y: number; w: number; h: number }[] = [
 
 function mk(i: number, template: LayoutTemplate, photoIds: string[], overlays: Overlay[]): Block {
   // Deterministic key (no randomness) — keys are client identity only, never persisted.
-  return { key: `auto-${i}`, template, photoIds: photoIds.filter(Boolean), caption: '', overlays };
+  // Rich-element fields start empty (auto-layout only arranges photos).
+  return {
+    key: `auto-${i}`,
+    template,
+    photoIds: photoIds.filter(Boolean),
+    caption: '',
+    overlays,
+    texts: [],
+    qrs: [],
+    stickers: [],
+    background: null,
+  };
 }
 
 /**

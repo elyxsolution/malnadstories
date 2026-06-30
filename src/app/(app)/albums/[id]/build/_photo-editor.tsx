@@ -16,7 +16,7 @@ const ASPECTS: { key: string; label: string; r: number | null }[] = [
 import { savePhotoEdit } from '@/lib/actions/builder';
 import PhotoFrame from './_photo-frame';
 import { Button } from '@/components/ui/button';
-import { LUX_PRIMARY } from '@/components/brand';
+import { STUDIO_PRIMARY } from './_ui';
 
 const MIN_CROP = 0.08;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -218,12 +218,12 @@ export default function PhotoEditor({
       >
         <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-secondary text-primary">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-secondary text-foreground">
               <SlidersHorizontal className="h-3.5 w-3.5" />
             </span>
             <div className="min-w-0">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Edit photo</p>
-              <h2 className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight" title={filename}>
+              <h2 className="truncate text-[15px] font-semibold leading-tight tracking-tight" title={filename}>
                 {filename}
               </h2>
             </div>
@@ -328,7 +328,7 @@ export default function PhotoEditor({
                     onClick={() => setCropAspect(a.r, a.key)}
                     className={`rounded-[2px] border px-2 py-1 text-[11px] font-medium transition-colors ${
                       aspectKey === a.key
-                        ? 'border-primary bg-primary text-primary-foreground'
+                        ? 'border-studio bg-studio text-studio-foreground'
                         : 'border-input bg-background text-muted-foreground hover:text-foreground'
                     }`}
                   >
@@ -355,7 +355,7 @@ export default function PhotoEditor({
             <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={apply} disabled={saving} className={LUX_PRIMARY}>
+            <Button size="sm" onClick={apply} disabled={saving} className={STUDIO_PRIMARY}>
               {saving && <Loader2 className="animate-spin" />} Apply
             </Button>
           </div>
@@ -401,7 +401,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="lux-range"
         style={{
-          background: `linear-gradient(to right, hsl(var(--primary)) ${fill}%, hsl(var(--muted)) ${fill}%)`,
+          background: `linear-gradient(to right, hsl(var(--studio)) ${fill}%, hsl(var(--muted)) ${fill}%)`,
         }}
       />
     </label>
