@@ -50,6 +50,7 @@ type PageRow = {
     qrs?: QrElement[];
     stickers?: StickerElement[];
     background?: Background | null;
+    preset?: string;
   } | null;
 };
 
@@ -128,6 +129,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       qrs: r.layout_config?.qrs ?? [],
       stickers: r.layout_config?.stickers ?? [],
       background: r.layout_config?.background ?? null,
+      preset: r.layout_config?.preset,
     }));
 
   // Active cover designs (admin-managed; RLS exposes only active rows), with thumbnail
@@ -149,6 +151,15 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     canSaveBlueprint = roleHasCapability(ctx.role, 'template:edit');
   } catch {
     canSaveBlueprint = false;
+  }
+
+  // Blueprint EDIT mode (0046): if this album is a blueprint draft, the builder "Save" updates the
+  // SAME blueprint. Resilient best-effort read — a not-yet-migrated column returns an error (not a
+  // throw), so the builder still loads normally for every other album.
+  let blueprintDraftOf: string | null = null;
+  if (canSaveBlueprint) {
+    const { data: draftRow } = await supabase.from('albums').select('blueprint_draft_of').eq('id', album.id).maybeSingle();
+    blueprintDraftOf = (draftRow as { blueprint_draft_of?: string | null } | null)?.blueprint_draft_of ?? null;
   }
 
   const coverTemplates = (await listActiveCoverTemplates()).map((t) => ({
@@ -284,6 +295,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         layoutTemplates={layoutTemplates}
         coverTemplates={coverTemplates}
         canSaveBlueprint={canSaveBlueprint}
+        blueprintDraftOf={blueprintDraftOf}
         stickerCatalog={stickerCatalog}
         stickerUrls={stickerUrls}
       />

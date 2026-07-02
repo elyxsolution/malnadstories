@@ -79,7 +79,7 @@ import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
-import { saveAlbumAsBlueprint } from '@/lib/actions/admin/templates';
+import { saveAlbumAsBlueprint, updateBlueprintFromAlbum } from '@/lib/actions/admin/templates';
 import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { type ActiveTemplate } from '@/lib/templates/catalog';
@@ -118,6 +118,7 @@ export default function Builder({
   layoutTemplates = [],
   coverTemplates = [],
   canSaveBlueprint = false,
+  blueprintDraftOf = null,
   stickerCatalog = [],
   stickerUrls = {},
 }: {
@@ -137,6 +138,8 @@ export default function Builder({
   coverTemplates?: BuilderCoverTemplate[];
   /** Admin (content/super_admin) only — enables "Save as Blueprint" (0043). */
   canSaveBlueprint?: boolean;
+  /** When set, this album is a blueprint-editing draft (0046) — "Save" updates that blueprint. */
+  blueprintDraftOf?: string | null;
   stickerCatalog?: StickerCategory[];
   stickerUrls?: Record<string, string>;
 }) {
@@ -1215,20 +1218,25 @@ export default function Builder({
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       {assistantOpen && <Assistant onAction={(kind) => generate(kind, 0)} onClose={() => setAssistantOpen(false)} photoCount={enginePhotos.length} availableCount={availableEngine.length} hasLayout={blocks.length > 0} />}
 
-      {/* Admin-only: distil the current album's layout into a reusable Blueprint (0043). */}
-      {canSaveBlueprint && (
-        <>
-          <button
-            type="button"
-            onClick={() => setBlueprintOpen(true)}
-            className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-studio bg-background/95 px-3 py-2 text-[12px] font-medium text-studio shadow-elevated backdrop-blur-sm hover:bg-studio-soft"
-          >
-            <BookImage className="h-4 w-4" /> Save as Blueprint
-          </button>
-          {blueprintOpen && (
-            <SaveBlueprintDialog albumId={albumId} defaultName={albumTitle} onClose={() => setBlueprintOpen(false)} />
-          )}
-        </>
+      {/* Admin blueprint EDIT mode (0046): saving updates the SAME blueprint, then returns to admin. */}
+      {blueprintDraftOf ? (
+        <BlueprintEditBar albumId={albumId} />
+      ) : (
+        /* Admin-only: distil the current album's layout into a reusable Blueprint (0043). */
+        canSaveBlueprint && (
+          <>
+            <button
+              type="button"
+              onClick={() => setBlueprintOpen(true)}
+              className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-studio bg-background/95 px-3 py-2 text-[12px] font-medium text-studio shadow-elevated backdrop-blur-sm hover:bg-studio-soft"
+            >
+              <BookImage className="h-4 w-4" /> Save as Blueprint
+            </button>
+            {blueprintOpen && (
+              <SaveBlueprintDialog albumId={albumId} defaultName={albumTitle} onClose={() => setBlueprintOpen(false)} />
+            )}
+          </>
+        )
       )}
       {proposal && (
         <Proposal
@@ -1244,6 +1252,37 @@ export default function Builder({
         />
       )}
       {workerModal}
+    </div>
+  );
+}
+
+/** Admin blueprint EDIT bar (0046) — a persistent banner + Save that updates the SAME blueprint. */
+function BlueprintEditBar({ albumId }: { albumId: string }) {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const save = async () => {
+    setMsg(null);
+    setSaving(true);
+    const res = await updateBlueprintFromAlbum({ albumId });
+    setSaving(false);
+    if (!res.ok) return setMsg(res.error);
+    router.push('/admin/templates');
+  };
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center gap-3 border-t border-studio/30 bg-studio-soft/95 px-4 py-2.5 backdrop-blur-sm">
+      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-studio">
+        <BookImage className="h-4 w-4" /> Editing blueprint — arrange the pages, then save your changes.
+      </span>
+      {msg && <span className="text-[12px] text-destructive">{msg}</span>}
+      <div className="ml-auto flex items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={() => router.push('/admin/templates')} disabled={saving}>
+          Discard
+        </Button>
+        <Button size="sm" onClick={save} disabled={saving} className={STUDIO_PRIMARY}>
+          {saving ? <Loader2 className="animate-spin" /> : <BookImage />} Save blueprint
+        </Button>
+      </div>
     </div>
   );
 }

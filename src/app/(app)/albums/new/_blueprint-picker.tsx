@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Search, X, Star, Sparkles, Pin, Clock, LayoutGrid, Eye, Check, Wand2, Loader2, ImageOff } from 'lucide-react';
+import { Search, X, Star, Sparkles, Pin, Clock, LayoutGrid, Eye, Check, Wand2, Loader2, ImageOff, Crown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { blueprintMatch, type BlueprintMatchTone } from '@/lib/builder/blueprint';
 import { categoryLabel } from '@/lib/templates/model';
@@ -17,7 +17,9 @@ export type PickerBlueprint = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  isDefault: boolean;
   isNew: boolean;
+  breakdown: { label: string; count: number }[];
   thumbUrl: string | null;
 };
 
@@ -89,6 +91,9 @@ export default function BlueprintPicker({
             </span>
           )}
           <span className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${MATCH_STYLE[m.tone]}`}>{m.label}</span>
+          {b.isDefault && (
+            <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-gold/90 px-2 py-0.5 text-[10px] font-semibold text-background"><Crown className="h-3 w-3" /> Default</span>
+          )}
           <span className="absolute inset-x-0 bottom-0 flex translate-y-2 items-center justify-center gap-1 bg-gradient-to-t from-black/45 to-transparent py-3 opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
             <span className="inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-medium text-foreground shadow-sm"><Eye className="h-3.5 w-3.5" /> Preview</span>
           </span>
@@ -216,6 +221,18 @@ export default function BlueprintPicker({
                   </div>
                 ))}
               </dl>
+              {preview.breakdown.length > 0 && (
+                <div className="mt-3">
+                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Layout breakdown</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {preview.breakdown.map((b) => (
+                      <span key={b.label} className="rounded-md bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
+                        <span className="font-semibold tabular-nums">{b.count}</span> {b.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="mt-auto flex flex-col gap-2 pt-5">
                 <Button onClick={() => onApply(preview.id, true)} disabled={busy || uploaded === 0}>
                   {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Use + auto place my {uploaded} photo{uploaded === 1 ? '' : 's'}

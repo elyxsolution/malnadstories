@@ -82,7 +82,9 @@ export function useBlocks(initial: Block[]) {
   // ── blocks ─────────────────────────────────────────────────────────────────
   const addBlock = (template: LayoutTemplate, size: number) => {
     if (!canAdd(blocks, size, template)) return;
-    mutate((prev) => [...prev, makeBlock(template)]);
+    // A manually-added spread maps to the base preset (Single / Full bleed) for accurate breakdowns.
+    const preset = template === 'double-spread' ? 'full-bleed' : 'single';
+    mutate((prev) => [...prev, { ...makeBlock(template), preset }]);
   };
 
   const patchBlock = (key: string, patch: Partial<Block>) => mutate((prev) => patchBlockByKey(prev, key, patch));
@@ -367,7 +369,8 @@ export function useBlocks(initial: Block[]) {
       .slice(0, pool.length)
       .map((slot, i) => ({ photoId: pool[i], x: slot.x, y: slot.y, w: slot.w, h: slot.h }));
 
-    patchBlock(key, { template: preset.base, photoIds: keptBase, overlays: newOverlays });
+    // Stamp the preset id so blueprint breakdowns are accurate + the choice survives round-trips.
+    patchBlock(key, { template: preset.base, photoIds: keptBase, overlays: newOverlays, preset: preset.key });
   };
 
   // ── photos lifecycle (block side only — photo rows are owned by the orchestrator) ──
@@ -384,6 +387,7 @@ export function useBlocks(initial: Block[]) {
       qrs: b.qrs,
       stickers: b.stickers,
       background: b.background,
+      preset: b.preset,
     }));
 
   const replaceAll = (next: Block[]) => mutate(() => next);

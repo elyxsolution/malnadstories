@@ -5,6 +5,7 @@ import { db } from '@/db';
 import { layoutTemplates } from '@/db/schema';
 import { requireTemplateCapability } from '@/lib/templates/access';
 import { presignGet } from '@/lib/r2';
+import { normalizeBlueprint, blueprintBreakdown } from '@/lib/builder/blueprint';
 import BlueprintList, { type BlueprintRow } from './_blueprints';
 import {
   TEMPLATE_CATEGORIES,
@@ -71,28 +72,35 @@ export default async function AdminTemplatesPage({
       featured: layoutTemplates.featured,
       popular: layoutTemplates.popular,
       pinned: layoutTemplates.pinned,
+      isDefault: layoutTemplates.isDefault,
+      blueprint: layoutTemplates.blueprint,
       thumbKey: layoutTemplates.thumbKey,
       updatedAt: layoutTemplates.updatedAt,
     })
     .from(layoutTemplates)
     .where(isNotNull(layoutTemplates.blueprint))
-    .orderBy(desc(layoutTemplates.pinned), desc(layoutTemplates.featured), asc(layoutTemplates.sort), desc(layoutTemplates.updatedAt));
+    .orderBy(desc(layoutTemplates.isDefault), desc(layoutTemplates.pinned), desc(layoutTemplates.featured), asc(layoutTemplates.sort), desc(layoutTemplates.updatedAt));
 
   const blueprints: BlueprintRow[] = await Promise.all(
-    blueprintRows.map(async (r) => ({
-      id: r.id,
-      name: r.name,
-      category: r.category,
-      status: r.status,
-      pageCount: r.pageCount ?? 0,
-      slotCount: r.slotCount ?? 0,
-      recommendedPhotos: r.recommendedPhotos ?? 0,
-      featured: r.featured,
-      popular: r.popular,
-      pinned: r.pinned,
-      thumbUrl: r.thumbKey ? await presignGet(r.thumbKey, 3600) : null,
-      updatedAt: r.updatedAt as unknown as string,
-    })),
+    blueprintRows.map(async (r) => {
+      const bp = normalizeBlueprint(r.blueprint);
+      return {
+        id: r.id,
+        name: r.name,
+        category: r.category,
+        status: r.status,
+        pageCount: r.pageCount ?? 0,
+        slotCount: r.slotCount ?? 0,
+        recommendedPhotos: r.recommendedPhotos ?? 0,
+        featured: r.featured,
+        popular: r.popular,
+        pinned: r.pinned,
+        isDefault: r.isDefault,
+        breakdown: bp ? blueprintBreakdown(bp) : [],
+        thumbUrl: r.thumbKey ? await presignGet(r.thumbKey, 3600) : null,
+        updatedAt: r.updatedAt as unknown as string,
+      };
+    }),
   );
 
   const total = totalRes[0]?.c ?? 0;
@@ -192,20 +200,31 @@ export default async function AdminTemplatesPage({
         </div>
       </form>
 
-      {/* Whole-album Blueprints (0043). Authored via "Save as Blueprint" in the builder. */}
-      <section className="mb-8">
-        <div className="mb-2 flex items-center gap-2">
-          <BookImage className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Album Blueprints</h2>
+      {/* SECTION 1 — Layout Presets (LEVEL 1): reusable single-spread page layouts the builder uses. */}
+      <section className="mb-10">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-secondary text-[11px] font-semibold text-muted-foreground">1</span>
+          <h2 className="text-sm font-semibold">Layout Presets</h2>
         </div>
-        <BlueprintList rows={blueprints} />
+        <p className="mb-3 pl-8 text-xs text-muted-foreground">
+          Reusable page layouts (Single, Panorama, Collage, Story…) — the building blocks customers and Blueprints assemble.
+        </p>
+        <TemplateList rows={listRows} />
       </section>
 
-      <div className="mb-2 flex items-center gap-2">
-        <Plus className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Single-spread presets</h2>
-      </div>
-      <TemplateList rows={listRows} />
+      {/* SECTION 2 — Album Blueprints (LEVEL 2): complete albums built from the presets above. */}
+      <section>
+        <div className="mb-1 flex items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-secondary text-[11px] font-semibold text-muted-foreground">2</span>
+          <BookImage className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Album Blueprints</h2>
+        </div>
+        <p className="mb-3 pl-8 text-xs text-muted-foreground">
+          Complete albums assembled from Layout Presets, grouped by size. Give each size one ⭐ Default — that&rsquo;s what
+          Auto Create uses. Build them via <span className="font-medium">Save as Blueprint</span> in the builder.
+        </p>
+        <BlueprintList rows={blueprints} />
+      </section>
 
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between text-sm">

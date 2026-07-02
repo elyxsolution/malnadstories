@@ -12,14 +12,18 @@ import {
   TemplateSaveSchema,
   TemplateStatusSchema,
   TemplateDuplicateSchema,
+  LayoutPresetIdSchema,
   SaveAlbumAsBlueprintSchema,
   UpdateBlueprintMetaSchema,
   BlueprintFeatureSchema,
   BlueprintReorderSchema,
   BlueprintDeleteSchema,
+  SetBlueprintDefaultSchema,
+  OpenBlueprintForEditingSchema,
+  UpdateBlueprintFromAlbumSchema,
   BlueprintSchema,
 } from '@/lib/validations';
-import { blueprintFromBlocks, blueprintStats } from '@/lib/builder/blueprint';
+import { blueprintFromBlocks, blueprintStats, applyBlueprint, normalizeBlueprint } from '@/lib/builder/blueprint';
 import { LAYOUT_TEMPLATES, type Block, type LayoutTemplate } from '@/lib/builder/model';
 import { startBlueprintThumbnail } from '@/lib/blueprints/thumbnail';
 
@@ -232,6 +236,104 @@ export async function duplicateTemplate(input: unknown): Promise<TemplateActionR
   return { ok: true, id: newId };
 }
 
+// ── Layout Preset — safe delete (dependency-checked) ─────────────────────────────
+// A layout PRESET is a layout_templates row with a NULL blueprint. Deleting the row can never
+// break rendering (albums/blueprints store their own materialized geometry + a preset KEY, never
+// the row id). But as a PRODUCT safety rule we still refuse to delete a preset that is "in use":
+// we count how many ALBUMS (incl. draft/blueprint-draft albums) and BLUEPRINTS reference this
+// preset by its stored key (the block.preset id we persist), NOT by renderer geometry. The preset's
+// stable key for matching is its slug (e.g. 'panorama'). Referenced → blocked (Archive instead).
+
+export type PresetDeps = { albums: number; blueprints: number };
+
+/** Count blueprints + albums whose stored block preset key === this preset's slug. Service role. */
+async function presetReferences(svc: Svc, slug: string): Promise<PresetDeps> {
+  // Albums (incl. draft + blueprint-draft albums): pages whose stored preset key matches. Fetch only
+  // the matching pages via a JSON filter, then dedupe by album.
+  let albums = 0;
+  try {
+    const { data } = await svc.from('album_pages').select('album_id').filter('layout_config->>preset', 'eq', slug);
+    albums = new Set(((data ?? []) as { album_id: string }[]).map((p) => p.album_id)).size;
+  } catch (e) {
+    console.error('[admin] presetReferences album scan failed', e);
+  }
+  // Blueprints: any block in the stored blueprint jsonb uses this preset key (catalog is small).
+  let blueprints = 0;
+  try {
+    const { data } = await svc.from('layout_templates').select('id, blueprint').not('blueprint', 'is', null);
+    for (const r of (data ?? []) as { id: string; blueprint: { blocks?: { preset?: string }[] } | null }[]) {
+      if ((r.blueprint?.blocks ?? []).some((b) => b?.preset === slug)) blueprints += 1;
+    }
+  } catch (e) {
+    console.error('[admin] presetReferences blueprint scan failed', e);
+  }
+  return { albums, blueprints };
+}
+
+export type PresetDepsResult = { ok: true; deps: PresetDeps } | { ok: false; error: string };
+
+/** Read-only dependency analysis for the delete confirmation dialog. Gated. */
+export async function checkLayoutPresetDependencies(input: unknown): Promise<PresetDepsResult> {
+  try {
+    await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = LayoutPresetIdSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+
+  const svc = createServiceClient();
+  const { data } = await svc.from('layout_templates').select('slug').eq('id', parsed.data.id).is('blueprint', null).maybeSingle();
+  const row = data as { slug: string } | null;
+  if (!row) return { ok: false, error: 'Layout preset not found.' };
+  return { ok: true, deps: await presetReferences(svc, row.slug) };
+}
+
+export type DeletePresetResult = { ok: true } | { ok: false; error: string; blocked?: boolean; deps?: PresetDeps };
+
+/**
+ * Permanently delete a layout preset — ONLY when it has zero references. Re-runs the dependency
+ * check inside the action (defense against a TOCTOU race), refuses with a structured `blocked`
+ * result if referenced (never partial-deletes), else removes the row + any cached thumbnail, audits,
+ * and busts the catalog cache. Service-role; requires template:edit.
+ */
+export async function deleteLayoutPreset(input: unknown): Promise<DeletePresetResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = LayoutPresetIdSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { id } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data } = await svc.from('layout_templates').select('slug, thumb_key').eq('id', id).is('blueprint', null).maybeSingle();
+  const preset = data as { slug: string; thumb_key: string | null } | null;
+  if (!preset) return { ok: false, error: 'Layout preset not found.' };
+
+  // Always audit the ATTEMPT (security), then re-check dependencies right before deleting.
+  await audit(svc, actor.userId, 'preset.delete_attempted', id, { slug: preset.slug });
+  const deps = await presetReferences(svc, preset.slug);
+  if (deps.albums > 0 || deps.blueprints > 0) {
+    await audit(svc, actor.userId, 'preset.delete_blocked', id, { slug: preset.slug, ...deps });
+    return { ok: false, blocked: true, deps, error: 'This layout preset is still in use.' };
+  }
+
+  const { error } = await svc.from('layout_templates').delete().eq('id', id).is('blueprint', null);
+  if (error) {
+    console.error('[admin] deleteLayoutPreset error', error);
+    return { ok: false, error: 'Could not delete the layout preset.' };
+  }
+  if (preset.thumb_key) await deleteObject(preset.thumb_key).catch(() => {});
+
+  await audit(svc, actor.userId, 'preset.deleted', id, { slug: preset.slug });
+  revalidatePath('/admin/templates');
+  revalidateTag(CACHE_TAGS.templatesActive);
+  return { ok: true };
+}
+
 // ── Album Blueprints (0043) ────────────────────────────────────────────────────
 // Blueprints are layout_templates rows with a non-null `blueprint`. They reuse this module's auth
 // (requireTemplateCapability), service-role writes, audit, and cache tag — NO new admin module.
@@ -274,7 +376,7 @@ export async function saveAlbumAsBlueprint(input: unknown): Promise<TemplateActi
     layout_template: string | null;
     caption: string | null;
     photo_ids: string[] | null;
-    layout_config: { overlays?: unknown[]; texts?: unknown[]; qrs?: unknown[]; stickers?: unknown[]; background?: unknown } | null;
+    layout_config: { overlays?: unknown[]; texts?: unknown[]; qrs?: unknown[]; stickers?: unknown[]; background?: unknown; preset?: string } | null;
   };
   const blocks = ((pageData ?? []) as PageRow[])
     .filter((r) => isTpl(r.layout_template))
@@ -290,6 +392,7 @@ export async function saveAlbumAsBlueprint(input: unknown): Promise<TemplateActi
           qrs: (r.layout_config?.qrs ?? []) as Block['qrs'],
           stickers: (r.layout_config?.stickers ?? []) as Block['stickers'],
           background: (r.layout_config?.background ?? null) as Block['background'],
+          preset: r.layout_config?.preset,
         }) satisfies Block,
     );
   if (blocks.length === 0) return { ok: false, error: 'This album has no pages to blueprint yet.' };
@@ -329,6 +432,173 @@ export async function saveAlbumAsBlueprint(input: unknown): Promise<TemplateActi
   revalidatePath('/admin/templates');
   bustTemplates();
   return { ok: true, id };
+}
+
+// Turn Block[] into album_pages rows (mirrors saveLayout's persistence shape, incl. preset).
+function blocksToPageRows(albumId: string, blocks: Block[]) {
+  return blocks.map((b, i) => {
+    const hasContent =
+      b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background || !!b.preset;
+    return {
+      album_id: albumId,
+      page_number: i,
+      layout_template: b.template,
+      caption: b.caption || null,
+      photo_ids: b.photoIds,
+      layout_config: hasContent
+        ? {
+            overlays: b.overlays,
+            ...(b.texts.length > 0 ? { texts: b.texts } : {}),
+            ...(b.qrs.length > 0 ? { qrs: b.qrs } : {}),
+            ...(b.stickers.length > 0 ? { stickers: b.stickers } : {}),
+            ...(b.background ? { background: b.background } : {}),
+            ...(b.preset ? { preset: b.preset } : {}),
+          }
+        : null,
+    };
+  });
+}
+
+/**
+ * Open a blueprint for editing in the EXISTING builder (0046). Creates a short-lived admin-owned
+ * DRAFT album from the blueprint's layout (empty photo slots), returns its id so the caller opens
+ * `/albums/[id]/build`. The builder detects the draft (albums.blueprint_draft_of) and turns "Save"
+ * into an update of the SAME blueprint. Reuses the builder + applyBlueprint — no new editor.
+ */
+export type OpenBlueprintResult = { ok: true; albumId: string } | { ok: false; error: string };
+export async function openBlueprintForEditing(input: unknown): Promise<OpenBlueprintResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = OpenBlueprintForEditingSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { id } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data: bpRow } = await svc.from('layout_templates').select('id, name, page_count, blueprint').eq('id', id).not('blueprint', 'is', null).maybeSingle();
+  const bp = bpRow as { id: string; name: string; page_count: number | null; blueprint: unknown } | null;
+  if (!bp) return { ok: false, error: 'Blueprint not found.' };
+  const size = bp.page_count ?? 0;
+  if (!size) return { ok: false, error: 'This blueprint has no page count.' };
+
+  // Clean up any earlier draft for this blueprint by this admin (cascade removes its pages).
+  await svc.from('albums').delete().eq('user_id', actor.userId).eq('blueprint_draft_of', id);
+
+  const { data: albumRow, error: albErr } = await svc
+    .from('albums')
+    .insert({ user_id: actor.userId, title: `Blueprint: ${bp.name}`, size, blueprint_draft_of: id })
+    .select('id')
+    .single();
+  if (albErr || !albumRow) {
+    console.error('[admin] openBlueprintForEditing album insert error', albErr);
+    return { ok: false, error: 'Could not open the blueprint for editing.' };
+  }
+  const albumId = (albumRow as { id: string }).id;
+
+  // Materialize the blueprint's layout (empty slots) into album_pages so the builder loads it.
+  const normalized = normalizeBlueprint(bp.blueprint);
+  const blocks = normalized ? applyBlueprint(normalized, []) : [];
+  if (blocks.length > 0) {
+    const { error: pagesErr } = await svc.from('album_pages').insert(blocksToPageRows(albumId, blocks));
+    if (pagesErr) {
+      console.error('[admin] openBlueprintForEditing pages insert error', pagesErr);
+      await svc.from('albums').delete().eq('id', albumId);
+      return { ok: false, error: 'Could not open the blueprint for editing.' };
+    }
+  }
+
+  await audit(svc, actor.userId, 'blueprint.edit_opened', id, { albumId });
+  return { ok: true, albumId };
+}
+
+/**
+ * Save an edited draft album back into its SAME blueprint (0046) and regenerate the thumbnail, then
+ * delete the draft. This is the "Save Blueprint" action the builder calls in edit mode. Updates the
+ * layout + derived stats in place — no rebuild-from-scratch, no new blueprint row.
+ */
+export async function updateBlueprintFromAlbum(input: unknown): Promise<TemplateActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = UpdateBlueprintFromAlbumSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data: album } = await svc.from('albums').select('id, user_id, blueprint_draft_of').eq('id', albumId).maybeSingle();
+  const a = album as { id: string; user_id: string; blueprint_draft_of: string | null } | null;
+  if (!a || !a.blueprint_draft_of) return { ok: false, error: 'This album is not a blueprint draft.' };
+  if (a.user_id !== actor.userId) return { ok: false, error: 'You can only save your own blueprint draft.' };
+  const blueprintId = a.blueprint_draft_of;
+
+  const { data: pageData } = await svc
+    .from('album_pages')
+    .select('page_number, layout_template, caption, photo_ids, layout_config')
+    .eq('album_id', albumId)
+    .order('page_number', { ascending: true });
+
+  type PageRow = {
+    layout_template: string | null;
+    caption: string | null;
+    photo_ids: string[] | null;
+    layout_config: { overlays?: unknown[]; texts?: unknown[]; qrs?: unknown[]; stickers?: unknown[]; background?: unknown; preset?: string } | null;
+  };
+  const blocks = ((pageData ?? []) as PageRow[])
+    .filter((r) => isTpl(r.layout_template))
+    .map(
+      (r) =>
+        ({
+          key: '',
+          template: r.layout_template as LayoutTemplate,
+          photoIds: r.photo_ids ?? [],
+          caption: r.caption ?? '',
+          overlays: (r.layout_config?.overlays ?? []) as Block['overlays'],
+          texts: (r.layout_config?.texts ?? []) as Block['texts'],
+          qrs: (r.layout_config?.qrs ?? []) as Block['qrs'],
+          stickers: (r.layout_config?.stickers ?? []) as Block['stickers'],
+          background: (r.layout_config?.background ?? null) as Block['background'],
+          preset: r.layout_config?.preset,
+        }) satisfies Block,
+    );
+  if (blocks.length === 0) return { ok: false, error: 'Add at least one page before saving.' };
+
+  const bp = blueprintFromBlocks(blocks);
+  const check = BlueprintSchema.safeParse(bp);
+  if (!check.success) return { ok: false, error: 'The layout could not be saved as a blueprint.' };
+  const stats = blueprintStats(bp);
+
+  const { error } = await svc
+    .from('layout_templates')
+    .update({
+      blueprint: bp,
+      page_count: stats.pageCount,
+      slot_count: stats.slotCount,
+      recommended_photos: stats.recommendedPhotos,
+      geometry: { base: bp.blocks[0]?.template ?? 'single-pair', overlays: [] },
+      updated_at: new Date().toISOString(),
+      updated_by: actor.userId,
+    })
+    .eq('id', blueprintId)
+    .not('blueprint', 'is', null);
+  if (error) {
+    console.error('[admin] updateBlueprintFromAlbum error', error);
+    return { ok: false, error: 'Could not save the blueprint.' };
+  }
+
+  // Regenerate the thumbnail for the new layout, then remove the draft album (cascade removes pages).
+  await startBlueprintThumbnail(blueprintId);
+  await svc.from('albums').delete().eq('id', albumId);
+
+  await audit(svc, actor.userId, 'blueprint.updated_from_builder', blueprintId, { pageCount: stats.pageCount, slotCount: stats.slotCount });
+  revalidatePath('/admin/templates');
+  bustTemplates();
+  return { ok: true, id: blueprintId };
 }
 
 /** Edit a blueprint's metadata (name/description/category). Geometry edits = re-save from an album. */
@@ -401,6 +671,52 @@ export async function reorderBlueprints(input: unknown): Promise<TemplateSimpleR
     if (error) return { ok: false, error: 'Could not save the new order.' };
   }
   await audit(svc, actor.userId, 'blueprint.reordered', ids[0], { count: ids.length });
+  revalidatePath('/admin/templates');
+  bustTemplates();
+  return { ok: true };
+}
+
+/**
+ * Set (or clear) the ONE default blueprint for its album size (0045). Setting a default first
+ * clears any existing default for the same page_count (the partial unique index also guards this),
+ * so Auto Create is deterministic. Clearing (isDefault=false) just unsets this one.
+ */
+export async function setDefaultBlueprint(input: unknown): Promise<TemplateSimpleResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = SetBlueprintDefaultSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { id, isDefault } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data: row } = await svc.from('layout_templates').select('page_count').eq('id', id).not('blueprint', 'is', null).maybeSingle();
+  const r = row as { page_count: number | null } | null;
+  if (!r) return { ok: false, error: 'Blueprint not found.' };
+
+  if (isDefault && r.page_count != null) {
+    // Clear the current default for this size FIRST (so the unique index never trips).
+    const { error: clearErr } = await svc
+      .from('layout_templates')
+      .update({ is_default: false })
+      .eq('page_count', r.page_count)
+      .not('blueprint', 'is', null)
+      .eq('is_default', true);
+    if (clearErr) {
+      console.error('[admin] setDefaultBlueprint clear error', clearErr);
+      return { ok: false, error: 'Could not update the default.' };
+    }
+  }
+
+  const { error } = await svc.from('layout_templates').update({ is_default: isDefault }).eq('id', id);
+  if (error) {
+    console.error('[admin] setDefaultBlueprint error', error);
+    return { ok: false, error: 'Could not update the default.' };
+  }
+  await audit(svc, actor.userId, isDefault ? 'blueprint.set_default' : 'blueprint.unset_default', id, { pageCount: r.page_count });
   revalidatePath('/admin/templates');
   bustTemplates();
   return { ok: true };

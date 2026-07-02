@@ -6,7 +6,7 @@ import { recordTiming } from '@/lib/observability/log';
 import { PERF_THRESHOLDS } from '@/lib/observability/model';
 import { CACHE_TAGS, CACHE_TTL } from '@/lib/cache';
 import { validateGeometry, normalizeGeometry, type TemplateCategory, type TemplateGeometry } from './model';
-import { normalizeBlueprint, type Blueprint } from '@/lib/builder/blueprint';
+import { normalizeBlueprint, blueprintBreakdown, type Blueprint, type BlueprintBreakdown } from '@/lib/builder/blueprint';
 
 /**
  * Active layout-template catalog for the builder + auto-layout. Read via the service role
@@ -81,7 +81,9 @@ export type ActiveBlueprint = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  isDefault: boolean;
   isNew: boolean;
+  breakdown: BlueprintBreakdown;
   blueprint: Blueprint;
   thumbKey: string | null;
 };
@@ -94,7 +96,7 @@ const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
   const svc = createServiceClient();
   const { data } = await svc
     .from('layout_templates')
-    .select('id, name, description, category, page_count, slot_count, recommended_photos, featured, popular, pinned, blueprint, thumb_key, created_at')
+    .select('id, name, description, category, page_count, slot_count, recommended_photos, featured, popular, pinned, is_default, blueprint, thumb_key, created_at')
     .eq('status', 'active')
     .not('blueprint', 'is', null)
     .order('pinned', { ascending: false })
@@ -114,6 +116,7 @@ const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
     featured: boolean;
     popular: boolean;
     pinned: boolean;
+    is_default: boolean;
     blueprint: unknown;
     thumb_key: string | null;
     created_at: string;
@@ -135,7 +138,9 @@ const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
       featured: r.featured,
       popular: r.popular,
       pinned: r.pinned,
+      isDefault: r.is_default,
       isNew: new Date(r.created_at).getTime() >= newCutoff,
+      breakdown: blueprintBreakdown(bp),
       blueprint: bp,
       thumbKey: r.thumb_key,
     });

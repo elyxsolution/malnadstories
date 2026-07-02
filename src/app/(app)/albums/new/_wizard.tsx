@@ -18,11 +18,10 @@ import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY, Sprig } from '@/components/brand';
 import { createAlbumDraft } from '@/lib/actions/albums';
 import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
-import { photoCap, type Block } from '@/lib/builder/model';
-import { autoLayout, summarizePlan, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
+import { photoCap } from '@/lib/builder/model';
+import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
 import Book from '@/components/book';
 import Uploader, { type Photo } from '../[id]/build/_uploader';
-import Proposal from '../[id]/build/_proposal';
 import BlueprintPicker from './_blueprint-picker';
 import { LayoutTemplate, Sparkles, Dices } from 'lucide-react';
 import type { CoverOption } from '@/lib/covers';
@@ -81,7 +80,9 @@ export type WizardBlueprint = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  isDefault: boolean;
   isNew: boolean;
+  breakdown: { label: string; count: number }[];
   thumbUrl: string | null;
 };
 
@@ -129,10 +130,6 @@ export default function CreateWizard({
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [entering, setEntering] = useState(false); // cinematic builder-entry veil
 
-  // "Build it for me" proposal (deterministic engine; preview before any persistence).
-  const [proposal, setProposal] = useState<{ blocks: Block[]; strategy: number; summary: ReturnType<typeof summarizePlan> } | null>(null);
-  const [generating, setGenerating] = useState(false);
-
   // Blueprint strategies (0043): busy flag, choose-blueprint picker, and the applied result summary.
   const [bpBusy, setBpBusy] = useState(false);
   const [bpError, setBpError] = useState<string | null>(null);
@@ -141,6 +138,7 @@ export default function CreateWizard({
   // Auto Create staged loading (Step 5).
   const [autoCreating, setAutoCreating] = useState(false);
   const [autoStage, setAutoStage] = useState(0);
+  const [autoConfirm, setAutoConfirm] = useState<WizardBlueprint | null>(null); // "not enough photos" pre-confirm
 
   const product = products.find((p) => p.id === productId);
   const cap = product ? photoCap(product.pages) : 100;
@@ -267,28 +265,6 @@ export default function CreateWizard({
   // existing saveLayout, then the cinematic veil launches the existing builder. Active
   // templates (when present) give the layout varied, geometry-driven overlay slots.
   const enginePhotos: EnginePhoto[] = ready.map((p) => ({ id: p.id, width: p.width ?? null, height: p.height ?? null, takenAt: p.takenAt }));
-  const photoMap = new Map(photos.map((p) => [p.id, p]));
-  const selectedCover = covers.find((c) => c.id === coverId) ?? null;
-
-  const buildForMe = (strategy = 0) => {
-    if (!product) return;
-    const blocks = autoLayout(enginePhotos, product.pages, strategy, templates);
-    setProposal({ blocks, strategy, summary: summarizePlan(blocks, enginePhotos.length) });
-  };
-  const acceptWiz = async () => {
-    if (!albumId || !proposal) return;
-    setGenerating(true);
-    const res = await saveLayout({ albumId, blocks: serializeBlocks(proposal.blocks) });
-    setGenerating(false);
-    if (!res.ok) {
-      setError(res.error);
-      setProposal(null);
-      return;
-    }
-    setProposal(null);
-    setEntering(true);
-    setTimeout(() => router.push(`/albums/${albumId}/build`), 750);
-  };
 
   // ── Blueprint strategies (Options 1 & 2) ─────────────────────────────────────
   const matchingBlueprints = blueprints
@@ -318,11 +294,32 @@ export default function CreateWizard({
     }
   };
 
+  // The blueprint Auto Create WILL use: the admin's default for this size, else the closest
+  // capacity (matches the server's deterministic choice). Null when no blueprints exist for the size.
+  const autoTarget: WizardBlueprint | null = matchingBlueprints.length
+    ? matchingBlueprints.find((b) => b.isDefault) ??
+      matchingBlueprints.reduce(
+        (best, b) => (Math.abs(b.slotCount - ready.length) < Math.abs(best.slotCount - ready.length) ? b : best),
+        matchingBlueprints[0],
+      )
+    : null;
+
+  // Auto Create entry (Step 5) — gate on "not enough photos" (uploaded < capacity), then proceed.
+  const runAutoCreate = () => {
+    if (!albumId || !product) return;
+    if (autoTarget && ready.length < autoTarget.slotCount) {
+      setAutoConfirm(autoTarget); // show Upload More / Continue Anyway
+      return;
+    }
+    proceedAutoCreate();
+  };
+
   // ── Auto Create (Step 5) — staged "beautiful loading", then blueprint auto-select (or, if no
   // matching blueprints exist, the deterministic auto-layout). Always ends in the builder. ───────
-  const runAutoCreate = async () => {
+  const proceedAutoCreate = async () => {
     if (!albumId || !product) return;
     setBpError(null);
+    setAutoConfirm(null);
     setAutoStage(0);
     setAutoCreating(true);
     // Advance the visible stages on a gentle cadence while the real work runs underneath.
@@ -729,12 +726,24 @@ export default function CreateWizard({
                   emoji="🎲"
                   Icon={Dices}
                   title="Auto Create"
-                  desc="We’ll pick the most suitable album blueprint for your photos and place them automatically. A beautiful album in seconds."
-                  stats={[
-                    { label: 'Pages', value: `${product?.pages ?? ''}` },
-                    { label: 'Photos', value: `${ready.length}` },
-                    { label: 'Ready in', value: '~ seconds' },
-                  ]}
+                  desc={
+                    autoTarget
+                      ? `We’ll build your album from the “${autoTarget.name}” blueprint and place your photos automatically. A beautiful album in seconds.`
+                      : 'We’ll arrange your photos into a full album automatically. A beautiful album in seconds.'
+                  }
+                  stats={
+                    autoTarget
+                      ? [
+                          { label: 'Blueprint', value: autoTarget.name },
+                          { label: 'Capacity', value: `${autoTarget.slotCount}` },
+                          { label: 'Your photos', value: `${ready.length}` },
+                        ]
+                      : [
+                          { label: 'Pages', value: `${product?.pages ?? ''}` },
+                          { label: 'Photos', value: `${ready.length}` },
+                          { label: 'Ready in', value: '~ seconds' },
+                        ]
+                  }
                   cta="Auto Create Album"
                   onClick={runAutoCreate}
                   disabled={!albumId || autoCreating}
@@ -803,23 +812,6 @@ export default function CreateWizard({
         </div>
       </footer>
 
-      {/* "Build it for me" PREVIEW */}
-      {proposal && (
-        <Proposal
-          title="Your generated album"
-          blocks={proposal.blocks}
-          photoMap={photoMap}
-          cover={selectedCover}
-          summary={proposal.summary}
-          canRegenerate
-          busy={generating}
-          acceptLabel="Open my album"
-          onAccept={acceptWiz}
-          onRegenerate={() => buildForMe(proposal.strategy + 1)}
-          onCancel={() => setProposal(null)}
-        />
-      )}
-
       {/* Premium template browser (Steps 2 & 3) */}
       {bpPickerOpen && (
         <BlueprintPicker
@@ -855,6 +847,41 @@ export default function CreateWizard({
             <Button onClick={launchBuilder} className={`mt-5 w-full ${LUX_PRIMARY}`}>
               Open my album <ArrowRight />
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* AUTO CREATE — "not enough photos" pre-confirm (never fails) */}
+      {autoConfirm && (
+        <div className="animate-fade-in fixed inset-0 z-[118] flex items-center justify-center bg-black/60 p-4" onClick={() => setAutoConfirm(null)}>
+          <div className="animate-scale-in w-full max-w-md rounded-2xl border bg-background p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
+            <h2 className="font-display text-xl font-semibold tracking-tight">A few more photos will fill it out</h2>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              The <span className="font-medium text-foreground">{autoConfirm.name}</span> blueprint holds{' '}
+              {autoConfirm.slotCount} photos. You’ve uploaded {ready.length}. You can add more, or continue now — the extra
+              frames will simply stay empty for you to fill later.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+              {[
+                { k: 'Capacity', v: autoConfirm.slotCount },
+                { k: 'Uploaded', v: ready.length },
+                { k: 'Empty frames', v: Math.max(0, autoConfirm.slotCount - ready.length) },
+                { k: 'Unused', v: Math.max(0, ready.length - autoConfirm.slotCount) },
+              ].map((s) => (
+                <div key={s.k} className="rounded-lg border bg-card px-1.5 py-2">
+                  <div className="text-base font-semibold tabular-nums">{s.v}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.k}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-col gap-2">
+              <Button variant="outline" onClick={() => { setAutoConfirm(null); go(2); }}>
+                <ImageIcon /> Upload more photos
+              </Button>
+              <Button onClick={proceedAutoCreate} className={LUX_PRIMARY}>
+                Continue anyway <ArrowRight />
+              </Button>
+            </div>
           </div>
         </div>
       )}

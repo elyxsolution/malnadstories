@@ -200,6 +200,10 @@ export type Block = {
   qrs: QrElement[]; // QR codes (default [])
   stickers: StickerElement[]; // decorative stickers (default [])
   background: Background | null; // page background (default null)
+  // Additive, optional: the LAYOUT PRESET key this block was created from (single / panorama /
+  // collage / …). Persisted in layout_config so blueprint breakdowns are accurate. The renderer
+  // never reads it; absent/legacy blocks fall back to inference from the geometry.
+  preset?: string;
 };
 
 /** Build a fresh, empty block with all rich-element fields initialized. */

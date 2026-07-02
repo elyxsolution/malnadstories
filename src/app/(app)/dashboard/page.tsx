@@ -18,12 +18,18 @@ export default async function DashboardPage() {
   // Slow-read observability (Phase 10D): non-blocking — records a deduped warning only when
   // the dashboard reads cross the threshold (the new albums/orders user_id indexes target this).
   const startedAt = Date.now();
-  const { data, error } = await supabase
+  // Hide blueprint-editing DRAFT albums (0046) from the customer library. Resilient: if the column
+  // isn't migrated yet, fall back to the unfiltered query so the dashboard never breaks.
+  let albumRes = await supabase
     .from('albums')
     .select('id, title, size, status, updated_at')
+    .is('blueprint_draft_of', null)
     .order('updated_at', { ascending: false });
-  if (error) throw error;
-  const userAlbums = (data ?? []) as AlbumRow[];
+  if (albumRes.error) {
+    albumRes = await supabase.from('albums').select('id, title, size, status, updated_at').order('updated_at', { ascending: false });
+  }
+  if (albumRes.error) throw albumRes.error;
+  const userAlbums = (albumRes.data ?? []) as AlbumRow[];
 
   // Most-recent paid order per album (RLS-scoped) — same authoritative purchase signal.
   const { data: orderData } = await supabase

@@ -58,6 +58,9 @@ export const albums = pgTable('albums', {
   // Selected cover design (admin-managed template). Null until chosen; required to
   // submit / generate the PDF. ON DELETE SET NULL handled in 0023.
   coverTemplateId: uuid('cover_template_id'),
+  // When set, this is a short-lived admin DRAFT album used to edit a blueprint in the builder
+  // (0046). Hidden from the customer dashboard; deleted when the blueprint is saved.
+  blueprintDraftOf: uuid('blueprint_draft_of'),
   // Custom cover DESIGN (0038): subtitle, typography, layout, position, background,
   // optional photo source. The cover title is `title`. Null = plain template cover.
   coverConfig: jsonb('cover_config'),
@@ -445,6 +448,8 @@ export const layoutTemplates = pgTable('layout_templates', {
   featured: boolean('featured').notNull().default(false),
   popular: boolean('popular').notNull().default(false),
   pinned: boolean('pinned').notNull().default(false),
+  // Default blueprint per album size (0045) — at most one per page_count; used by Auto Create.
+  isDefault: boolean('is_default').notNull().default(false),
   sort: integer('sort').notNull().default(0),
   thumbKey: text('thumb_key'),
   // Blueprint preview render token (0044) — short-lived gate for the worker's screenshot route.

@@ -87,7 +87,7 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
       // The DB CHECK (0006) requires `overlays` to be an array whenever the object is
       // non-null, so we always include it when storing ANY element; otherwise store null.
       const hasContent =
-        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background;
+        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background || !!b.preset;
       const layoutConfig = hasContent
         ? {
             overlays: b.overlays,
@@ -95,6 +95,7 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
             ...(b.qrs.length > 0 ? { qrs: b.qrs } : {}),
             ...(b.stickers.length > 0 ? { stickers: b.stickers } : {}),
             ...(b.background ? { background: b.background } : {}),
+            ...(b.preset ? { preset: b.preset } : {}),
           }
         : null;
       return {
@@ -469,10 +470,13 @@ export async function autoSelectAndApplyBlueprint(input: unknown): Promise<AutoS
   const matching = all.filter((b) => b.pageCount === a.size);
   if (matching.length === 0) return { ok: false, error: 'No blueprints are available for this album size yet.' };
 
+  // DETERMINISTIC (0045): use the admin's DEFAULT blueprint for this size. Only if no default is
+  // set do we fall back to the closest-capacity match (first by the catalog's pinned/featured/sort
+  // order — NOT random) so Auto Create is always predictable and admin-controlled.
   const uploaded = (await readyPhotoIds(supabase, albumId)).length;
-  const minDiff = Math.min(...matching.map((b) => Math.abs(b.slotCount - uploaded)));
-  const closest = matching.filter((b) => Math.abs(b.slotCount - uploaded) === minDiff);
-  const chosen = closest[Math.floor(Math.random() * closest.length)]; // random tie-break
+  const chosen =
+    matching.find((b) => b.isDefault) ??
+    matching.reduce((best, b) => (Math.abs(b.slotCount - uploaded) < Math.abs(best.slotCount - uploaded) ? b : best), matching[0]);
 
   const res = await applyBlueprintById(supabase, albumId, chosen.id, true, undefined);
   if (!res.ok) return { ok: false, error: res.error };

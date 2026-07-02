@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, ChevronUp, ChevronDown, Search, X, Check, RefreshCw, LayoutGrid } from 'lucide-react';
+import { Loader2, Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, Search, X, Check, RefreshCw, LayoutGrid, Crown, PencilRuler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { categoryLabel, statusChip, statusLabel } from '@/lib/templates/model';
 import {
@@ -10,9 +10,10 @@ import {
   duplicateTemplate,
   deleteBlueprint,
   setBlueprintFeatured,
-  reorderBlueprints,
   updateBlueprintMeta,
   regenerateBlueprintThumbnail,
+  setDefaultBlueprint,
+  openBlueprintForEditing,
 } from '@/lib/actions/admin/templates';
 
 export type BlueprintRow = {
@@ -26,12 +27,19 @@ export type BlueprintRow = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  isDefault: boolean;
+  breakdown: { label: string; count: number }[];
   thumbUrl: string | null;
   updatedAt: string;
 };
 
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
+/**
+ * Album Blueprints — grouped by album size (Section 2). Each size has at most one Default (⭐, used
+ * by Auto Create). Cards show the thumbnail, capacity, recommended, layout breakdown, badges, and
+ * quick actions. Reuses the existing gated server actions; refreshes on change.
+ */
 export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -50,6 +58,17 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
     [rows, query, statusFilter],
   );
 
+  // Group by album size (page count), ascending.
+  const groups = useMemo(() => {
+    const map = new Map<number, BlueprintRow[]>();
+    for (const r of filtered) {
+      const list = map.get(r.pageCount) ?? [];
+      list.push(r);
+      map.set(r.pageCount, list);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
+  }, [filtered]);
+
   const run = async (id: string, fn: () => Promise<{ ok: boolean; error?: string }>) => {
     setBusy(id);
     const res = await fn();
@@ -58,30 +77,37 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
     router.refresh();
   };
 
-  const move = (i: number, dir: -1 | 1) => {
-    const ids = filtered.map((r) => r.id);
-    const j = i + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    run(filtered[i].id, () => reorderBlueprints({ ids }));
+  // Edit the blueprint's LAYOUT in the existing builder (0046): open a draft, then navigate to it.
+  const editInBuilder = async (id: string) => {
+    setBusy(id);
+    const res = await openBlueprintForEditing({ id });
+    if (!res.ok) {
+      setBusy(null);
+      return alert(res.error);
+    }
+    router.push(`/albums/${res.albumId}/build`);
   };
 
   if (rows.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-        No album blueprints yet. Build an album, then use <span className="font-medium">Save as Blueprint</span> in the builder.
-      </p>
+      <div className="rounded-2xl border border-dashed p-8 text-center">
+        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-secondary text-muted-foreground"><LayoutGrid className="h-6 w-6" /></div>
+        <p className="mt-3 font-medium">No album blueprints yet</p>
+        <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+          Build an album in the builder, then use <span className="font-medium">Save as Blueprint</span>. Assign one default per size so Auto Create is predictable.
+        </p>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search blueprints…" className="h-8 w-full rounded-md border bg-background pl-8 pr-3 text-sm outline-none focus:border-ring" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search blueprints…" className="h-9 w-full rounded-lg border bg-background pl-8 pr-3 text-sm outline-none focus:border-ring" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-8 rounded-md border bg-background px-2 text-sm outline-none">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-9 rounded-lg border bg-background px-2.5 text-sm outline-none">
           <option value="all">Any status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
@@ -89,83 +115,126 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
         </select>
       </div>
 
-      <div className="overflow-hidden rounded-xl border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">Blueprint</th>
-              <th className="px-3 py-2 text-left font-medium">Pages</th>
-              <th className="px-3 py-2 text-left font-medium">Capacity</th>
-              <th className="px-3 py-2 text-left font-medium">Recommended</th>
-              <th className="px-3 py-2 text-left font-medium">Status</th>
-              <th className="px-3 py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {filtered.map((r, i) => {
-              const active = r.status === 'active';
-              return (
-                <tr key={r.id} className="hover:bg-muted/30">
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex flex-col">
-                        <button type="button" onClick={() => move(i, -1)} disabled={busy !== null || i === 0} className="text-muted-foreground disabled:opacity-30"><ChevronUp className="h-3.5 w-3.5" /></button>
-                        <button type="button" onClick={() => move(i, 1)} disabled={busy !== null || i === filtered.length - 1} className="text-muted-foreground disabled:opacity-30"><ChevronDown className="h-3.5 w-3.5" /></button>
-                      </div>
-                      <div className="relative h-14 w-16 flex-none overflow-hidden rounded-md border bg-muted">
-                        {r.thumbUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={r.thumbUrl} alt={r.name} className="absolute inset-0 h-full w-full object-cover" />
-                        ) : (
-                          <span className="absolute inset-0 grid place-items-center text-muted-foreground/40"><LayoutGrid className="h-4 w-4" /></span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate font-medium">{r.name}</span>
-                          {r.pinned && <Pin className="h-3 w-3 text-studio" aria-label="Pinned" />}
-                          {r.featured && <Star className="h-3 w-3 text-gold" aria-label="Featured" />}
-                          {r.popular && <Sparkles className="h-3 w-3 text-studio-bright" aria-label="Popular" />}
-                        </div>
-                        <span className="text-[11px] text-muted-foreground">{categoryLabel(r.category)} · {fmtDate(r.updatedAt)}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 tabular-nums">{r.pageCount}</td>
-                  <td className="px-3 py-2 tabular-nums font-medium">{r.slotCount}</td>
-                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.recommendedPhotos}</td>
-                  <td className="px-3 py-2">
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusChip(r.status)}`}>{statusLabel(r.status)}</span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center justify-end gap-0.5">
-                      <IconBtn label="Edit" onClick={() => setEditing(r)}><Pencil className="h-4 w-4" /></IconBtn>
-                      <IconBtn label={active ? 'Deactivate' : 'Activate'} busy={busy === r.id} onClick={() => run(r.id, () => setTemplateStatus({ id: r.id, status: active ? 'inactive' : 'active' }))}>
-                        {active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </IconBtn>
-                      <IconBtn label={r.featured ? 'Unfeature' : 'Feature'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, featured: !r.featured }))} className={r.featured ? 'text-gold' : ''}><Star className="h-4 w-4" /></IconBtn>
-                      <IconBtn label={r.popular ? 'Unmark popular' : 'Mark popular'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, popular: !r.popular }))} className={r.popular ? 'text-studio-bright' : ''}><Sparkles className="h-4 w-4" /></IconBtn>
-                      <IconBtn label={r.pinned ? 'Unpin' : 'Pin'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, pinned: !r.pinned }))} className={r.pinned ? 'text-studio' : ''}><Pin className="h-4 w-4" /></IconBtn>
-                      <IconBtn label="Duplicate" onClick={() => run(r.id, () => duplicateTemplate({ id: r.id }))}><Copy className="h-4 w-4" /></IconBtn>
-                      <IconBtn label="Regenerate thumbnail" onClick={() => run(r.id, () => regenerateBlueprintThumbnail({ id: r.id }))}><RefreshCw className="h-4 w-4" /></IconBtn>
-                      {r.status !== 'archived' && (
-                        <IconBtn label="Archive" onClick={() => run(r.id, () => setTemplateStatus({ id: r.id, status: 'archived' }))} className="text-amber-600"><Archive className="h-4 w-4" /></IconBtn>
-                      )}
-                      <IconBtn label="Delete" onClick={() => { if (confirm(`Delete blueprint “${r.name}”? This cannot be undone.`)) run(r.id, () => deleteBlueprint({ id: r.id })); }} className="text-destructive"><Trash2 className="h-4 w-4" /></IconBtn>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {groups.length === 0 ? (
+        <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">No blueprints match your filters.</p>
+      ) : (
+        groups.map(([size, items]) => {
+          const hasDefault = items.some((b) => b.isDefault);
+          return (
+            <section key={size}>
+              <div className="mb-2.5 flex items-center gap-2">
+                <h3 className="text-sm font-semibold">{size} Pages</h3>
+                <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{items.length}</span>
+                {!hasDefault && <span className="rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-600">No default set</span>}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {items.map((r) => (
+                  <BlueprintCard key={r.id} r={r} busy={busy === r.id} onEdit={() => setEditing(r)} onEditLayout={() => editInBuilder(r.id)} run={run} />
+                ))}
+              </div>
+            </section>
+          );
+        })
+      )}
 
       {editing && (
         <EditMeta row={editing} busy={busy === editing.id} onClose={() => setEditing(null)} onSave={(patch) => run(editing.id, () => updateBlueprintMeta({ id: editing.id, ...patch })).then(() => setEditing(null))} />
       )}
     </div>
   );
+}
+
+function BlueprintCard({
+  r,
+  busy,
+  onEdit,
+  onEditLayout,
+  run,
+}: {
+  r: BlueprintRow;
+  busy: boolean;
+  onEdit: () => void;
+  onEditLayout: () => void;
+  run: (id: string, fn: () => Promise<{ ok: boolean; error?: string }>) => Promise<void>;
+}) {
+  const active = r.status === 'active';
+  return (
+    <div className={`flex flex-col overflow-hidden rounded-2xl border bg-card shadow-xs transition-shadow hover:shadow-card ${r.isDefault ? 'ring-2 ring-gold/50' : ''}`}>
+      <div className="relative aspect-[4/3] w-full bg-muted">
+        {r.thumbUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={r.thumbUrl} alt={r.name} loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+        ) : (
+          <span className="absolute inset-0 grid place-items-center text-muted-foreground/40"><LayoutGrid className="h-6 w-6" /></span>
+        )}
+        <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+          {r.isDefault && <Badge className="bg-gold/90 text-background"><Crown className="h-3 w-3" /> Default</Badge>}
+          {r.featured && <Badge className="bg-primary/90 text-primary-foreground"><Star className="h-3 w-3" /> Featured</Badge>}
+          {r.pinned && <Badge className="bg-studio text-white"><Pin className="h-3 w-3" /> Pinned</Badge>}
+          {r.popular && <Badge className="bg-studio-bright/90 text-white"><Sparkles className="h-3 w-3" /> Popular</Badge>}
+        </div>
+        <span className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${statusChip(r.status)}`}>{statusLabel(r.status)}</span>
+      </div>
+
+      <div className="flex flex-1 flex-col p-3">
+        <p className="truncate text-sm font-semibold" title={r.name}>{r.name}</p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{categoryLabel(r.category)} · {fmtDate(r.updatedAt)}</p>
+        <div className="mt-2 grid grid-cols-3 gap-1 text-center">
+          {[{ k: 'Pages', v: r.pageCount }, { k: 'Holds', v: r.slotCount }, { k: 'Rec.', v: r.recommendedPhotos }].map((s) => (
+            <div key={s.k} className="rounded-md bg-secondary/50 py-1">
+              <div className="text-[13px] font-semibold tabular-nums">{s.v}</div>
+              <div className="text-[9px] uppercase tracking-wide text-muted-foreground">{s.k}</div>
+            </div>
+          ))}
+        </div>
+        {r.breakdown.length > 0 && (
+          <p className="mt-2 line-clamp-1 text-[10px] text-muted-foreground">{r.breakdown.map((b) => `${b.count} ${b.label}`).join(' · ')}</p>
+        )}
+
+        {/* Edit the layout in the builder (0046) + rename metadata */}
+        <div className="mt-3 grid grid-cols-2 gap-1.5">
+          <Button size="sm" disabled={busy} onClick={onEditLayout} className="h-7 text-[12px]">
+            {busy ? <Loader2 className="animate-spin" /> : <PencilRuler className="h-3.5 w-3.5" />} Edit layout
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onEdit} className="h-7 text-[12px]">
+            <Pencil className="h-3.5 w-3.5" /> Rename
+          </Button>
+        </div>
+
+        {/* Set default (per size) */}
+        <div className="mt-2">
+          {r.isDefault ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gold"><Crown className="h-3.5 w-3.5" /> Default for {r.pageCount} pages</span>
+          ) : (
+            <Button size="sm" variant="outline" disabled={busy || !active} onClick={() => run(r.id, () => setDefaultBlueprint({ id: r.id }))} className="h-7 w-full text-[12px]">
+              {busy ? <Loader2 className="animate-spin" /> : <Crown className="h-3.5 w-3.5" />} Set as default
+            </Button>
+          )}
+          {!active && !r.isDefault && <p className="mt-1 text-[10px] text-muted-foreground">Activate to make it selectable as default.</p>}
+        </div>
+
+        {/* Quick actions */}
+        <div className="mt-2 flex flex-wrap items-center gap-0.5 border-t pt-2">
+          <IconBtn label={active ? 'Deactivate' : 'Activate'} busy={busy} onClick={() => run(r.id, () => setTemplateStatus({ id: r.id, status: active ? 'inactive' : 'active' }))}>
+            {active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </IconBtn>
+          <IconBtn label={r.featured ? 'Unfeature' : 'Feature'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, featured: !r.featured }))} className={r.featured ? 'text-gold' : ''}><Star className="h-4 w-4" /></IconBtn>
+          <IconBtn label={r.popular ? 'Unmark popular' : 'Mark popular'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, popular: !r.popular }))} className={r.popular ? 'text-studio-bright' : ''}><Sparkles className="h-4 w-4" /></IconBtn>
+          <IconBtn label={r.pinned ? 'Unpin' : 'Pin'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, pinned: !r.pinned }))} className={r.pinned ? 'text-studio' : ''}><Pin className="h-4 w-4" /></IconBtn>
+          <IconBtn label="Duplicate" onClick={() => run(r.id, () => duplicateTemplate({ id: r.id }))}><Copy className="h-4 w-4" /></IconBtn>
+          <IconBtn label="Regenerate thumbnail" onClick={() => run(r.id, () => regenerateBlueprintThumbnail({ id: r.id }))}><RefreshCw className="h-4 w-4" /></IconBtn>
+          {r.status !== 'archived' && (
+            <IconBtn label="Archive" onClick={() => run(r.id, () => setTemplateStatus({ id: r.id, status: 'archived' }))} className="text-amber-600"><Archive className="h-4 w-4" /></IconBtn>
+          )}
+          <IconBtn label="Delete" onClick={() => { if (confirm(`Delete blueprint “${r.name}”? This cannot be undone.`)) run(r.id, () => deleteBlueprint({ id: r.id })); }} className="text-destructive"><Trash2 className="h-4 w-4" /></IconBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Badge({ className, children }: { className: string; children: React.ReactNode }) {
+  return <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${className}`}>{children}</span>;
 }
 
 function IconBtn({ label, onClick, busy, className, children }: { label: string; onClick: () => void; busy?: boolean; className?: string; children: React.ReactNode }) {
@@ -176,7 +245,7 @@ function IconBtn({ label, onClick, busy, className, children }: { label: string;
   );
 }
 
-function EditMeta({ row, busy, onClose, onSave }: { row: BlueprintRow; busy: boolean; onClose: () => void; onSave: (patch: { name: string; description?: string; category: string }) => void }) {
+function EditMeta({ row, busy, onClose, onSave }: { row: BlueprintRow; busy: boolean; onClose: () => void; onSave: (patch: { name: string; category: string }) => void }) {
   const [name, setName] = useState(row.name);
   const [category, setCategory] = useState(row.category);
   return (

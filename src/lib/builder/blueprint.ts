@@ -21,6 +21,7 @@ import {
   type StickerElement,
   type TextElement,
 } from './model';
+import { LAYOUT_PRESETS } from './elements';
 
 export const BLUEPRINT_VERSION = 1 as const;
 
@@ -33,7 +34,22 @@ export type BlueprintBlock = {
   qrs: QrElement[];
   stickers: StickerElement[];
   background: Background | null;
+  // The LAYOUT PRESET id this block was built from — stored so breakdowns/editing/analytics are
+  // accurate (recommendation). Falls back to inference for legacy blocks with no stored preset.
+  preset?: string;
 };
+
+/** Infer a preset key from a block's geometry when none was stored (legacy/manual blocks). */
+export function inferPresetKey(template: LayoutTemplate, overlayCount: number): string {
+  const match = LAYOUT_PRESETS.find((p) => p.base === template && p.overlays.length === overlayCount);
+  if (match) return match.key;
+  return template === 'double-spread' ? 'full-bleed' : 'single';
+}
+
+/** Human label for a preset key (from the LAYOUT_PRESETS catalog). */
+export function presetLabel(key: string): string {
+  return LAYOUT_PRESETS.find((p) => p.key === key)?.label ?? key;
+}
 
 export type Blueprint = {
   version: typeof BLUEPRINT_VERSION;
@@ -45,6 +61,25 @@ export type BlueprintStats = {
   slotCount: number; // total photo slots (base + overlays) = capacity
   recommendedPhotos: number; // sensible target = capacity
 };
+
+/**
+ * Layout-type breakdown of a blueprint (PURE) — derived from the primitives it uses. The renderer
+ * has two primitives (single-pair = two facing pages, double-spread = one image across the fold);
+ * everything else is overlay insets. Drives the "layout breakdown" shown on blueprint cards.
+ */
+export type BlueprintBreakdown = { key: string; label: string; count: number }[];
+export function blueprintBreakdown(bp: Blueprint): BlueprintBreakdown {
+  // Count by the actual LAYOUT PRESET each block was built from (stored id → label), inferring for
+  // any legacy block without one. Gives accurate "12 Panorama · 8 Full bleed · 6 Collage" breakdowns.
+  const counts = new Map<string, number>();
+  for (const b of bp.blocks) {
+    const key = b.preset ?? inferPresetKey(b.template, b.overlaySlots.length);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([key, count]) => ({ key, label: presetLabel(key), count }))
+    .sort((a, b) => b.count - a.count);
+}
 
 /** Derived stats — NEVER hand-entered. Capacity = every base slot + every overlay slot. */
 export function blueprintStats(bp: Blueprint): BlueprintStats {
@@ -73,6 +108,8 @@ export function blueprintFromBlocks(blocks: Block[]): Blueprint {
       qrs: b.qrs ?? [],
       stickers: b.stickers ?? [],
       background: b.background ?? null,
+      // Store the preset id (explicit, or inferred from geometry) so it survives round-trips.
+      preset: b.preset ?? inferPresetKey(b.template, b.overlays.length),
     })),
   };
 }
@@ -146,6 +183,7 @@ export function applyBlueprint(bp: Blueprint, photoIds: string[]): Block[] {
       qrs: b.qrs ?? [],
       stickers: b.stickers ?? [],
       background: b.background ?? null,
+      preset: b.preset ?? inferPresetKey(b.template, b.overlaySlots.length),
     } satisfies Block;
   });
 }
@@ -158,16 +196,18 @@ export function normalizeBlueprint(raw: unknown): Blueprint | null {
   const blocks: BlueprintBlock[] = [];
   for (const b of r.blocks as Record<string, unknown>[]) {
     const template = b.template === 'double-spread' ? 'double-spread' : 'single-pair';
+    const overlaySlots = Array.isArray(b.overlaySlots)
+      ? (b.overlaySlots as Rect[]).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))
+      : [];
     blocks.push({
       template,
       caption: typeof b.caption === 'string' ? b.caption : '',
-      overlaySlots: Array.isArray(b.overlaySlots)
-        ? (b.overlaySlots as Rect[]).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))
-        : [],
+      overlaySlots,
       texts: Array.isArray(b.texts) ? (b.texts as TextElement[]) : [],
       qrs: Array.isArray(b.qrs) ? (b.qrs as QrElement[]) : [],
       stickers: Array.isArray(b.stickers) ? (b.stickers as StickerElement[]) : [],
       background: (b.background as Background | null) ?? null,
+      preset: typeof b.preset === 'string' ? b.preset : inferPresetKey(template, overlaySlots.length),
     });
   }
   return { version: BLUEPRINT_VERSION, blocks };

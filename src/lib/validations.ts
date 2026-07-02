@@ -182,6 +182,8 @@ const BlockSchema = z.object({
   qrs: z.array(QrElementSchema).max(10).optional().default([]),
   stickers: z.array(StickerElementSchema).max(30).optional().default([]),
   background: BackgroundSchema.nullable().optional().default(null),
+  // The layout-preset id this block was built from (additive; for accurate blueprint breakdowns).
+  preset: z.string().max(40).optional(),
 });
 
 export const SaveLayoutSchema = z
@@ -805,6 +807,11 @@ export const TemplateDuplicateSchema = z.object({
   id: z.string().uuid('Invalid template'),
 });
 
+// Safe delete of a layout PRESET — gated by a dependency check on the stored per-block preset keys.
+export const LayoutPresetIdSchema = z.object({
+  id: z.string().uuid('Invalid preset'),
+});
+
 export type TemplateSaveInput = z.infer<typeof TemplateSaveSchema>;
 export type TemplateStatusInput = z.infer<typeof TemplateStatusSchema>;
 
@@ -860,6 +867,22 @@ export const BlueprintReorderSchema = z.object({
 
 export const BlueprintDeleteSchema = z.object({
   id: z.string().uuid('Invalid blueprint'),
+});
+
+// Set (or clear) the ONE default blueprint for its album size (0045). Auto Create uses it.
+export const SetBlueprintDefaultSchema = z.object({
+  id: z.string().uuid('Invalid blueprint'),
+  isDefault: z.boolean().optional().default(true),
+});
+
+// Open a blueprint for editing in the builder (0046) — creates a draft album from it.
+export const OpenBlueprintForEditingSchema = z.object({
+  id: z.string().uuid('Invalid blueprint'),
+});
+
+// Save the edited draft album back into its SAME blueprint (0046).
+export const UpdateBlueprintFromAlbumSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
 });
 
 // Apply a blueprint to a NEW album at creation (Phase C). autoPlace fills the slots with the
