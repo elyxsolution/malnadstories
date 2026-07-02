@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, isNull, isNotNull, or } from 'drizzle-orm';
 import { Plus, BookImage } from 'lucide-react';
 import { db } from '@/db';
 import { layoutTemplates } from '@/db/schema';
 import { requireTemplateCapability } from '@/lib/templates/access';
+import BlueprintList, { type BlueprintRow } from './_blueprints';
 import {
   TEMPLATE_CATEGORIES,
   TEMPLATE_STATUSES,
@@ -30,11 +31,11 @@ export default async function AdminTemplatesPage({
   const page = Math.max(1, Number(searchParams.page) || 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  const conds = [];
+  const conds = [isNull(layoutTemplates.blueprint)]; // presets only — blueprints listed separately below
   if (category) conds.push(eq(layoutTemplates.category, category));
   if (status) conds.push(eq(layoutTemplates.status, status));
   if (q) conds.push(or(ilike(layoutTemplates.name, `%${q}%`), ilike(layoutTemplates.slug, `%${q}%`))!);
-  const where = conds.length ? and(...conds) : sql`true`;
+  const where = and(...conds);
 
   const [rows, totalRes] = await Promise.all([
     db
@@ -54,6 +55,40 @@ export default async function AdminTemplatesPage({
       .offset(offset),
     db.select({ c: count() }).from(layoutTemplates).where(where),
   ]);
+
+  // Whole-album Blueprints (0043) — same table, blueprint IS NOT NULL. Listed in their own section
+  // with capacity/page-count/merchandising. All statuses shown (admins manage active + drafts).
+  const blueprintRows = await db
+    .select({
+      id: layoutTemplates.id,
+      name: layoutTemplates.name,
+      category: layoutTemplates.category,
+      status: layoutTemplates.status,
+      pageCount: layoutTemplates.pageCount,
+      slotCount: layoutTemplates.slotCount,
+      recommendedPhotos: layoutTemplates.recommendedPhotos,
+      featured: layoutTemplates.featured,
+      popular: layoutTemplates.popular,
+      pinned: layoutTemplates.pinned,
+      updatedAt: layoutTemplates.updatedAt,
+    })
+    .from(layoutTemplates)
+    .where(isNotNull(layoutTemplates.blueprint))
+    .orderBy(desc(layoutTemplates.pinned), desc(layoutTemplates.featured), asc(layoutTemplates.sort), desc(layoutTemplates.updatedAt));
+
+  const blueprints: BlueprintRow[] = blueprintRows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    category: r.category,
+    status: r.status,
+    pageCount: r.pageCount ?? 0,
+    slotCount: r.slotCount ?? 0,
+    recommendedPhotos: r.recommendedPhotos ?? 0,
+    featured: r.featured,
+    popular: r.popular,
+    pinned: r.pinned,
+    updatedAt: r.updatedAt as unknown as string,
+  }));
 
   const total = totalRes[0]?.c ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -83,8 +118,10 @@ export default async function AdminTemplatesPage({
     <div className="mx-auto max-w-6xl p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">Layout templates</h1>
-          <p className="text-sm text-muted-foreground">Curated layout presets the builder &amp; auto-layout can use.</p>
+          <h1 className="text-xl font-bold">Layouts &amp; Blueprints</h1>
+          <p className="text-sm text-muted-foreground">
+            Single-spread presets for the builder &amp; auto-layout, plus whole-album Blueprints customers can start from.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -150,6 +187,19 @@ export default async function AdminTemplatesPage({
         </div>
       </form>
 
+      {/* Whole-album Blueprints (0043). Authored via "Save as Blueprint" in the builder. */}
+      <section className="mb-8">
+        <div className="mb-2 flex items-center gap-2">
+          <BookImage className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Album Blueprints</h2>
+        </div>
+        <BlueprintList rows={blueprints} />
+      </section>
+
+      <div className="mb-2 flex items-center gap-2">
+        <Plus className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Single-spread presets</h2>
+      </div>
       <TemplateList rows={listRows} />
 
       {totalPages > 1 && (

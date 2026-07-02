@@ -1,10 +1,12 @@
 import 'server-only';
 import { unstable_cache } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/service';
+import { presignGet } from '@/lib/r2';
 import { recordTiming } from '@/lib/observability/log';
 import { PERF_THRESHOLDS } from '@/lib/observability/model';
 import { CACHE_TAGS, CACHE_TTL } from '@/lib/cache';
 import { validateGeometry, normalizeGeometry, type TemplateCategory, type TemplateGeometry } from './model';
+import { normalizeBlueprint, type Blueprint } from '@/lib/builder/blueprint';
 
 /**
  * Active layout-template catalog for the builder + auto-layout. Read via the service role
@@ -32,6 +34,7 @@ const fetchActiveTemplates = async (): Promise<ActiveTemplate[]> => {
     .from('layout_templates')
     .select('id, name, category, geometry')
     .eq('status', 'active')
+    .is('blueprint', null) // presets only — whole-album blueprints are served separately
     .order('category', { ascending: true })
     .order('updated_at', { ascending: false });
   recordTiming('templates', 'listActive', Date.now() - startedAt, PERF_THRESHOLDS.slowQueryMs, {
@@ -60,4 +63,96 @@ const getActiveTemplatesCached = unstable_cache(fetchActiveTemplates, ['template
 
 export async function listActiveTemplates(): Promise<ActiveTemplate[]> {
   return getActiveTemplatesCached();
+}
+
+// ── Album Blueprints (0043) ────────────────────────────────────────────────────
+// The active whole-album blueprint catalog (creation flow + admin). Blueprints live in the SAME
+// layout_templates table (blueprint IS NOT NULL); read via the service role, cached under the same
+// `templates-active` tag so any layout-template mutation refreshes both. Only ACTIVE blueprints are
+// returned → only active blueprints are ever user-visible. Stats are stored (derived on write).
+export type ActiveBlueprint = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: TemplateCategory;
+  pageCount: number;
+  slotCount: number;
+  recommendedPhotos: number;
+  featured: boolean;
+  popular: boolean;
+  pinned: boolean;
+  blueprint: Blueprint;
+  thumbKey: string | null;
+};
+
+const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
+  const startedAt = Date.now();
+  const svc = createServiceClient();
+  const { data } = await svc
+    .from('layout_templates')
+    .select('id, name, description, category, page_count, slot_count, recommended_photos, featured, popular, pinned, blueprint, thumb_key')
+    .eq('status', 'active')
+    .not('blueprint', 'is', null)
+    .order('pinned', { ascending: false })
+    .order('featured', { ascending: false })
+    .order('sort', { ascending: true })
+    .order('updated_at', { ascending: false });
+  recordTiming('blueprints', 'listActive', Date.now() - startedAt, PERF_THRESHOLDS.slowQueryMs, { category: 'system' });
+
+  const rows = (data ?? []) as {
+    id: string;
+    name: string;
+    description: string | null;
+    category: string;
+    page_count: number | null;
+    slot_count: number | null;
+    recommended_photos: number | null;
+    featured: boolean;
+    popular: boolean;
+    pinned: boolean;
+    blueprint: unknown;
+    thumb_key: string | null;
+  }[];
+
+  const out: ActiveBlueprint[] = [];
+  for (const r of rows) {
+    const bp = normalizeBlueprint(r.blueprint);
+    if (!bp) continue; // defense in depth
+    out.push({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      category: r.category as TemplateCategory,
+      pageCount: r.page_count ?? 0,
+      slotCount: r.slot_count ?? 0,
+      recommendedPhotos: r.recommended_photos ?? r.slot_count ?? 0,
+      featured: r.featured,
+      popular: r.popular,
+      pinned: r.pinned,
+      blueprint: bp,
+      thumbKey: r.thumb_key,
+    });
+  }
+  return out;
+};
+
+const getActiveBlueprintsCached = unstable_cache(fetchActiveBlueprints, ['blueprints-active'], {
+  tags: [CACHE_TAGS.templatesActive],
+  revalidate: CACHE_TTL.templatesActive,
+});
+
+export type BlueprintOption = ActiveBlueprint & { thumbUrl: string | null };
+
+/** Active blueprints with a short-lived presigned thumbnail URL (signed OUTSIDE the cache). */
+export async function listActiveBlueprints(): Promise<BlueprintOption[]> {
+  const rows = await getActiveBlueprintsCached();
+  return Promise.all(
+    rows.map(async (r) => ({ ...r, thumbUrl: r.thumbKey ? await presignGet(r.thumbKey, 3600) : null })),
+  );
+}
+
+/** One active blueprint by id (creation-apply path). */
+export async function getActiveBlueprint(id: string): Promise<ActiveBlueprint | null> {
+  const rows = await getActiveBlueprintsCached();
+  return rows.find((r) => r.id === id) ?? null;
 }

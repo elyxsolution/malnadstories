@@ -18,7 +18,7 @@ import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY, Sprig } from '@/components/brand';
 import { Wand2 } from 'lucide-react';
 import { createAlbumDraft } from '@/lib/actions/albums';
-import { saveLayout } from '@/lib/actions/builder';
+import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
 import { photoCap, type Block } from '@/lib/builder/model';
 import { autoLayout, summarizePlan, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
 import Book from '@/components/book';
@@ -59,12 +59,26 @@ function composePeriod(from: string, to: string): string {
  * (optionally after a deterministic "Build it for me" auto-layout). No AI.
  */
 type CoverTemplateOption = { id: string; name: string; previewUrl: string | null };
+export type WizardBlueprint = {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  pageCount: number;
+  slotCount: number;
+  recommendedPhotos: number;
+  featured: boolean;
+  popular: boolean;
+  pinned: boolean;
+  thumbUrl: string | null;
+};
 
 export default function CreateWizard({
   products,
   covers,
   coverTemplates = [],
   templates = [],
+  blueprints = [],
 }: {
   products: Product[];
   covers: CoverOption[];
@@ -72,6 +86,8 @@ export default function CreateWizard({
   coverTemplates?: CoverTemplateOption[];
   /** Active layout presets — feed the deterministic auto-layout for varied "Build it for me". */
   templates?: TemplateChoice[];
+  /** Active whole-album blueprints (0043) — the auto-select / choose-blueprint strategies. */
+  blueprints?: WizardBlueprint[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -104,6 +120,12 @@ export default function CreateWizard({
   // "Build it for me" proposal (deterministic engine; preview before any persistence).
   const [proposal, setProposal] = useState<{ blocks: Block[]; strategy: number; summary: ReturnType<typeof summarizePlan> } | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  // Blueprint strategies (0043): busy flag, choose-blueprint picker, and the applied result summary.
+  const [bpBusy, setBpBusy] = useState(false);
+  const [bpError, setBpError] = useState<string | null>(null);
+  const [bpPickerOpen, setBpPickerOpen] = useState(false);
+  const [bpResult, setBpResult] = useState<{ name: string; capacity: number; placed: number; unused: number } | null>(null);
 
   const product = products.find((p) => p.id === productId);
   const cap = product ? photoCap(product.pages) : 100;
@@ -251,6 +273,45 @@ export default function CreateWizard({
     setProposal(null);
     setEntering(true);
     setTimeout(() => router.push(`/albums/${albumId}/build`), 750);
+  };
+
+  // ── Blueprint strategies (Options 1 & 2) ─────────────────────────────────────
+  const matchingBlueprints = blueprints
+    .filter((b) => !!product && b.pageCount === product.pages)
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.featured) - Number(a.featured) || Number(b.popular) - Number(a.popular));
+
+  const launchBuilder = () => {
+    if (!albumId) return;
+    setEntering(true);
+    setTimeout(() => router.push(`/albums/${albumId}/build`), 750);
+  };
+
+  // Option 1 — auto-select the closest-capacity blueprint for this size + photo count, then place.
+  const runAutoSelect = async () => {
+    if (!albumId) return;
+    setBpBusy(true);
+    setBpError(null);
+    const res = await autoSelectAndApplyBlueprint({ albumId });
+    setBpBusy(false);
+    if (!res.ok) return setBpError(res.error);
+    setBpResult({ name: res.blueprintName, capacity: res.capacity, placed: res.placed, unused: res.unused });
+  };
+
+  // Option 2 — apply a chosen blueprint (optionally auto-placing photos).
+  const runApplyBlueprint = async (bpId: string, autoPlace: boolean) => {
+    if (!albumId) return;
+    setBpBusy(true);
+    setBpError(null);
+    const res = await applyBlueprintToAlbum({ albumId, blueprintId: bpId, autoPlace });
+    setBpBusy(false);
+    if (!res.ok) return setBpError(res.error);
+    if (autoPlace) {
+      const name = matchingBlueprints.find((b) => b.id === bpId)?.name ?? 'Blueprint';
+      setBpPickerOpen(false);
+      setBpResult({ name, capacity: res.capacity, placed: res.placed, unused: res.unused });
+    } else {
+      launchBuilder();
+    }
   };
 
   const continueLabel = ['Continue', 'Continue', 'Review', 'Open the builder'][step];
@@ -609,6 +670,26 @@ export default function CreateWizard({
                 </div>
               </div>
 
+              {/* Start from a whole-album Blueprint (0043) — Options 1 & 2. */}
+              {matchingBlueprints.length > 0 && (
+                <div className="rounded-2xl border p-5">
+                  <p className="font-display text-[17px] font-semibold tracking-tight">Start from a blueprint</p>
+                  <p className="mt-1 text-[13px] text-muted-foreground">
+                    A blueprint is a whole-album layout ({product?.pages} pages). We place your {ready.length} photo
+                    {ready.length === 1 ? '' : 's'} into it — you can edit everything afterwards.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button onClick={runAutoSelect} disabled={bpBusy || !albumId} className={LUX_PRIMARY}>
+                      {bpBusy ? <Loader2 className="animate-spin" /> : <Wand2 />} Auto-select best fit
+                    </Button>
+                    <Button variant="outline" onClick={() => setBpPickerOpen(true)} disabled={bpBusy}>
+                      <ImageIcon /> Choose a blueprint ({matchingBlueprints.length})
+                    </Button>
+                  </div>
+                  {bpError && <p className="mt-2 text-sm text-destructive">{bpError}</p>}
+                </div>
+              )}
+
               {/* Build it for me — deterministic auto-layout, previewed before it saves. */}
               <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gold/30 bg-gold/[0.05] p-5">
                 <div className="flex items-center gap-3">
@@ -670,6 +751,83 @@ export default function CreateWizard({
           onRegenerate={() => buildForMe(proposal.strategy + 1)}
           onCancel={() => setProposal(null)}
         />
+      )}
+
+      {/* Blueprint picker (Option 2) */}
+      {bpPickerOpen && (
+        <div className="animate-fade-in fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={() => setBpPickerOpen(false)}>
+          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-elevated" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b px-5 py-3">
+              <h2 className="font-display text-lg font-semibold">Choose a blueprint</h2>
+              <button type="button" onClick={() => setBpPickerOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="ms-scroll grid flex-1 grid-cols-2 gap-4 overflow-y-auto p-5 sm:grid-cols-3">
+              {matchingBlueprints.map((b) => {
+                const diff = ready.length - b.slotCount;
+                const fit = diff === 0 ? 'Perfect fit' : diff < 0 ? `${-diff} slots to spare` : `${diff} photos won't fit`;
+                const fitTone = diff === 0 ? 'text-primary' : diff < 0 ? 'text-muted-foreground' : 'text-warning';
+                return (
+                  <div key={b.id} className="flex flex-col overflow-hidden rounded-xl border bg-card">
+                    <div className="relative aspect-[4/3] w-full bg-muted">
+                      {b.thumbUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={b.thumbUrl} alt={b.name} className="absolute inset-0 h-full w-full object-cover" />
+                      ) : (
+                        <span className="absolute inset-0 grid place-items-center text-center text-xs text-muted-foreground">
+                          {b.pageCount} pages · {b.slotCount} slots
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-1 flex-col p-3">
+                      <p className="truncate text-sm font-medium" title={b.name}>{b.name}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {b.pageCount} pages · holds {b.slotCount} · ~{b.recommendedPhotos} recommended
+                      </p>
+                      <p className={`mt-0.5 text-[11px] font-medium ${fitTone}`}>{fit}</p>
+                      <div className="mt-auto flex flex-col gap-1.5 pt-3">
+                        <Button size="sm" onClick={() => runApplyBlueprint(b.id, true)} disabled={bpBusy || ready.length === 0} className={LUX_PRIMARY}>
+                          {bpBusy ? <Loader2 className="animate-spin" /> : <Wand2 />} Use + auto place
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => runApplyBlueprint(b.id, false)} disabled={bpBusy}>
+                          Use blueprint
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {bpError && <p className="border-t px-5 py-2 text-sm text-destructive">{bpError}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Blueprint applied — summary + launch (Options 1 & 2) */}
+      {bpResult && (
+        <div className="animate-fade-in fixed inset-0 z-[115] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl border bg-background p-6 text-center shadow-elevated">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary/[0.08] text-primary ring-1 ring-primary/15">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+            <h2 className="mt-3 font-display text-xl font-semibold tracking-tight">Your album is arranged</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{bpResult.name}</p>
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+              {[
+                { label: 'Capacity', value: bpResult.capacity },
+                { label: 'Placed', value: bpResult.placed },
+                { label: 'Unused', value: bpResult.unused },
+              ].map((s) => (
+                <div key={s.label} className="rounded-lg border bg-card px-1.5 py-2">
+                  <div className="text-lg font-semibold tabular-nums text-foreground">{s.value}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{s.label}</div>
+                </div>
+              ))}
+            </div>
+            <Button onClick={launchBuilder} className={`mt-5 w-full ${LUX_PRIMARY}`}>
+              Open my album <ArrowRight />
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* CINEMATIC BUILDER-ENTRY VEIL */}

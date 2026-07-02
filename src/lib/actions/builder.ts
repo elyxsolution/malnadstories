@@ -2,9 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
-import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema, CoverDesignSchema } from '@/lib/validations';
+import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema, CoverDesignSchema, ApplyBlueprintSchema } from '@/lib/validations';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { applyBlueprint, shuffleIds } from '@/lib/builder/blueprint';
+import { getActiveBlueprint, listActiveBlueprints } from '@/lib/templates/catalog';
 import { hasPaidOrder } from '@/lib/orders/album-lock';
 import { sendReviewStatusEmail, sendReviewAdminSubmittedEmail } from '@/lib/email/review-events';
 
@@ -360,4 +362,119 @@ export async function saveCoverDesign(input: unknown): Promise<ActionResult> {
     return { ok: false, error: 'Could not save the cover design.' };
   }
   return { ok: true };
+}
+
+// ── Album Blueprints (0043) — apply to an album (Phase C) ──────────────────────
+// Applying a blueprint PRODUCES ordinary Block[] (photos assigned to base+overlay slots) and
+// persists via the SAME saveLayout below — so ownership, edit-lock, placed-once, overflow, and
+// the renderer/PDF/worker are all reused unchanged. Auto-place is optional; a seed makes the
+// randomized fill reproducible. Never overwrites a paid album (edit lock).
+
+export type ApplyBlueprintResult =
+  | { ok: true; blueprintId: string; capacity: number; placed: number; unused: number }
+  | { ok: false; error: string };
+
+type ServerClient = ReturnType<typeof createClient>;
+
+/** Ready photo ids in display order (taken_at asc, nulls last), RLS-scoped to the owner. */
+async function readyPhotoIds(supabase: ServerClient, albumId: string): Promise<string[]> {
+  const { data } = await supabase
+    .from('photos')
+    .select('id')
+    .eq('album_id', albumId)
+    .eq('status', 'ready')
+    .order('taken_at', { ascending: true, nullsFirst: false })
+    .order('uploaded_at', { ascending: true });
+  return ((data ?? []) as { id: string }[]).map((r) => r.id);
+}
+
+async function applyBlueprintById(
+  supabase: ServerClient,
+  albumId: string,
+  blueprintId: string,
+  autoPlace: boolean,
+  seed: number | undefined,
+): Promise<ApplyBlueprintResult> {
+  const bp = await getActiveBlueprint(blueprintId);
+  if (!bp) return { ok: false, error: 'That blueprint is no longer available.' };
+
+  const ready = autoPlace ? await readyPhotoIds(supabase, albumId) : [];
+  const ordered = autoPlace && seed !== undefined ? shuffleIds(ready, seed) : ready;
+  const blocks = applyBlueprint(bp.blueprint, ordered);
+
+  const res = await saveLayout({
+    albumId,
+    blocks: blocks.map((b) => ({
+      template: b.template,
+      photoIds: b.photoIds,
+      caption: b.caption,
+      overlays: b.overlays,
+      texts: b.texts,
+      qrs: b.qrs,
+      stickers: b.stickers,
+      background: b.background,
+    })),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  const placed = blocks.reduce((s, b) => s + b.photoIds.filter(Boolean).length + b.overlays.length, 0);
+  return { ok: true, blueprintId, capacity: bp.slotCount, placed, unused: Math.max(0, ready.length - placed) };
+}
+
+/** Option 2: apply a chosen blueprint (with optional auto-place). */
+export async function applyBlueprintToAlbum(input: unknown): Promise<ApplyBlueprintResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const parsed = ApplyBlueprintSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId, blueprintId, autoPlace, seed } = parsed.data;
+
+  const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
+  if (!album) return { ok: false, error: 'Album not found' };
+  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+
+  return applyBlueprintById(supabase, albumId, blueprintId, autoPlace, seed);
+}
+
+export type AutoSelectBlueprintResult =
+  | { ok: true; blueprintId: string; blueprintName: string; capacity: number; placed: number; unused: number }
+  | { ok: false; error: string };
+
+/**
+ * Option 1: auto-select the best-fit blueprint for the album's page count + uploaded photo count,
+ * then apply it. Filters active blueprints to the album's exact page count, chooses the CLOSEST
+ * capacity to the uploaded count, and breaks ties RANDOMLY. Always auto-places.
+ */
+export async function autoSelectAndApplyBlueprint(input: unknown): Promise<AutoSelectBlueprintResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const parsed = ApplyBlueprintSchema.pick({ albumId: true }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId } = parsed.data;
+
+  const { data: album } = await supabase.from('albums').select('id, size').eq('id', albumId).maybeSingle();
+  const a = album as { id: string; size: number } | null;
+  if (!a) return { ok: false, error: 'Album not found' };
+  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+
+  const all = await listActiveBlueprints();
+  const matching = all.filter((b) => b.pageCount === a.size);
+  if (matching.length === 0) return { ok: false, error: 'No blueprints are available for this album size yet.' };
+
+  const uploaded = (await readyPhotoIds(supabase, albumId)).length;
+  const minDiff = Math.min(...matching.map((b) => Math.abs(b.slotCount - uploaded)));
+  const closest = matching.filter((b) => Math.abs(b.slotCount - uploaded) === minDiff);
+  const chosen = closest[Math.floor(Math.random() * closest.length)]; // random tie-break
+
+  const res = await applyBlueprintById(supabase, albumId, chosen.id, true, undefined);
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, blueprintId: chosen.id, blueprintName: chosen.name, capacity: res.capacity, placed: res.placed, unused: res.unused };
 }

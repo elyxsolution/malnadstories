@@ -5,15 +5,18 @@ import {
   ALBUM_PDF_QUEUE,
   R2_CLEANUP_QUEUE,
   COVER_THUMBNAIL_QUEUE,
+  BLUEPRINT_THUMBNAIL_QUEUE,
   type ImageHardeningJob,
   type AlbumPdfJob,
   type R2CleanupJob,
   type CoverThumbnailJob,
+  type BlueprintThumbnailJob,
 } from './queue.js';
 import { processPhoto } from './jobs/image-hardening.js';
 import { generateAlbumPdf, closeBrowser } from './jobs/album-pdf.js';
 import { cleanupR2 } from './jobs/r2-cleanup.js';
 import { generateCoverThumbnail } from './jobs/cover-thumbnail.js';
+import { generateBlueprintThumbnail } from './jobs/blueprint-thumbnail.js';
 import { sweepPdfs } from './jobs/pdf-recovery.js';
 import { startHealthServer } from './health-server.js';
 import { supabase } from './supabase.js';
@@ -58,6 +61,7 @@ async function main(): Promise<void> {
   await boss.createQueue(ALBUM_PDF_QUEUE);
   await boss.createQueue(R2_CLEANUP_QUEUE);
   await boss.createQueue(COVER_THUMBNAIL_QUEUE);
+  await boss.createQueue(BLUEPRINT_THUMBNAIL_QUEUE);
 
   await boss.work<ImageHardeningJob>(
     IMAGE_HARDENING_QUEUE,
@@ -155,7 +159,29 @@ async function main(): Promise<void> {
     },
   );
 
-  console.log('[worker] image-hardening + album-pdf + r2-cleanup + cover-thumbnail workers started');
+  // Blueprint thumbnails (0044) — heavy (Chromium); process one at a time, like album-pdf.
+  await boss.work<BlueprintThumbnailJob>(
+    BLUEPRINT_THUMBNAIL_QUEUE,
+    { pollingIntervalSeconds: 2, batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) {
+        try {
+          await generateBlueprintThumbnail(job.data);
+        } catch (e) {
+          await captureException(e, {
+            source: 'blueprint-thumbnail',
+            category: 'system',
+            severity: 'error',
+            requestId: jobRequestId(BLUEPRINT_THUMBNAIL_QUEUE),
+            metadata: { blueprintId: job.data.blueprintId },
+          });
+          throw e;
+        }
+      }
+    },
+  );
+
+  console.log('[worker] image-hardening + album-pdf + r2-cleanup + cover-thumbnail + blueprint-thumbnail workers started');
 
   await sweepPending(boss);
   await sweepPdfs(boss).catch((e) => console.error('[worker] pdf-recovery sweep error:', e));

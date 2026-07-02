@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
 import { getPaidOrder } from '@/lib/orders/album-lock';
+import { getAdminContext } from '@/lib/auth/require-admin';
+import { roleHasCapability } from '@/lib/auth/capabilities';
 import Builder from './_builder';
 import PurchasedAlbum from './_purchased';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
@@ -139,6 +141,16 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   // Active cover-DESIGN templates (Task 2) — the in-builder "Cover Templates" panel. Only the
   // fields the panel needs; applying one copies its config into cover_config (no link kept).
+  // Admin capability: content/super_admin may "Save as Blueprint" from the builder (Phase B) —
+  // this reuses the builder for blueprint authoring. Best-effort; a non-admin is simply false.
+  let canSaveBlueprint = false;
+  try {
+    const ctx = await getAdminContext();
+    canSaveBlueprint = roleHasCapability(ctx.role, 'template:edit');
+  } catch {
+    canSaveBlueprint = false;
+  }
+
   const coverTemplates = (await listActiveCoverTemplates()).map((t) => ({
     id: t.id,
     name: t.name,
@@ -271,6 +283,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialReview={initialReview}
         layoutTemplates={layoutTemplates}
         coverTemplates={coverTemplates}
+        canSaveBlueprint={canSaveBlueprint}
         stickerCatalog={stickerCatalog}
         stickerUrls={stickerUrls}
       />

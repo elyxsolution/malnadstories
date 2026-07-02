@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   BookImage,
+  Loader2,
 } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
@@ -62,6 +63,7 @@ import {
   canAdd,
   isAlbumComplete,
   placedPhotoIds,
+  requiredBaseCount,
   cryptoId,
   type Background,
   type Block,
@@ -77,6 +79,7 @@ import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
+import { saveAlbumAsBlueprint } from '@/lib/actions/admin/templates';
 import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { type ActiveTemplate } from '@/lib/templates/catalog';
@@ -114,6 +117,7 @@ export default function Builder({
   initialReview,
   layoutTemplates = [],
   coverTemplates = [],
+  canSaveBlueprint = false,
   stickerCatalog = [],
   stickerUrls = {},
 }: {
@@ -131,6 +135,8 @@ export default function Builder({
   layoutTemplates?: ActiveTemplate[];
   /** Active cover-design templates (Task 2) — applied into cover_config, fully editable after. */
   coverTemplates?: BuilderCoverTemplate[];
+  /** Admin (content/super_admin) only — enables "Save as Blueprint" (0043). */
+  canSaveBlueprint?: boolean;
   stickerCatalog?: StickerCategory[];
   stickerUrls?: Record<string, string>;
 }) {
@@ -160,6 +166,8 @@ export default function Builder({
   const [editLayout, setEditLayout] = useState<'focus' | 'grid'>('focus');
   const [zoomPct, setZoomPct] = useState(100);
   const [showGuides, setShowGuides] = useState(false);
+  // Admin-only "Save as Blueprint" (0043).
+  const [blueprintOpen, setBlueprintOpen] = useState(false);
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -273,6 +281,15 @@ export default function Builder({
 
   // ── tray ───────────────────────────────────────────────────────────────────
   const readyUnplaced = photos.filter((p) => p.status === 'ready' && !placed.has(p.id));
+
+  // Photo indicators (capacity/placed/remaining/unused) — derived from existing state only.
+  // "Remaining slots" = empty BASE frames across the current layout; "Unused" = ready photos
+  // not yet placed. Reuses requiredBaseCount + placedPhotoIds; no new model.
+  const placedCount = placed.size;
+  const emptyBaseSlots = blocks.reduce(
+    (s, b) => s + Math.max(0, requiredBaseCount(b.template) - b.photoIds.filter(Boolean).length),
+    0,
+  );
   const trayQuery = traySearch.trim().toLowerCase();
   const visiblePhotos = photos.filter((p) => {
     if (trayQuery && !p.filename.toLowerCase().includes(trayQuery)) return false;
@@ -777,6 +794,12 @@ export default function Builder({
                     </span>
                   </div>
                   <Uploader albumId={albumId} remaining={photoCap(size) - photos.length} onUploaded={onUploaded} ensureWorkerReady={ensureReady} />
+                  {/* Photo indicators — placed / remaining frames / unused (Auto Photo Placement telemetry). */}
+                  <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
+                    <PhotoStat label="Placed" value={placedCount} />
+                    <PhotoStat label="Empty frames" value={emptyBaseSlots} tone={emptyBaseSlots > 0 ? 'warning' : 'ok'} />
+                    <PhotoStat label="Unused" value={readyUnplaced.length} tone={readyUnplaced.length > 0 ? 'muted' : 'ok'} />
+                  </div>
                 </div>
                 <div className="ms-scroll flex-1 overflow-y-auto p-4">
                   <TrayToolbar
@@ -1188,6 +1211,22 @@ export default function Builder({
       )}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       {assistantOpen && <Assistant onAction={(kind) => generate(kind, 0)} onClose={() => setAssistantOpen(false)} photoCount={enginePhotos.length} availableCount={availableEngine.length} hasLayout={blocks.length > 0} />}
+
+      {/* Admin-only: distil the current album's layout into a reusable Blueprint (0043). */}
+      {canSaveBlueprint && (
+        <>
+          <button
+            type="button"
+            onClick={() => setBlueprintOpen(true)}
+            className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-studio bg-background/95 px-3 py-2 text-[12px] font-medium text-studio shadow-elevated backdrop-blur-sm hover:bg-studio-soft"
+          >
+            <BookImage className="h-4 w-4" /> Save as Blueprint
+          </button>
+          {blueprintOpen && (
+            <SaveBlueprintDialog albumId={albumId} defaultName={albumTitle} onClose={() => setBlueprintOpen(false)} />
+          )}
+        </>
+      )}
       {proposal && (
         <Proposal
           title={proposal.title}
@@ -1202,6 +1241,83 @@ export default function Builder({
         />
       )}
       {workerModal}
+    </div>
+  );
+}
+
+/** Admin-only dialog to save the current album's layout as a reusable Blueprint (0043). */
+function SaveBlueprintDialog({ albumId, defaultName, onClose }: { albumId: string; defaultName: string; onClose: () => void }) {
+  const [name, setName] = useState(defaultName || 'New blueprint');
+  const [category, setCategory] = useState('story');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const save = async () => {
+    setMsg(null);
+    if (!name.trim()) return setMsg('Give the blueprint a name.');
+    setSaving(true);
+    const res = await saveAlbumAsBlueprint({ albumId, name: name.trim(), category });
+    setSaving(false);
+    if (!res.ok) return setMsg(res.error);
+    setDone(true);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl border bg-background p-5 shadow-elevated" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-base font-semibold">Save as Blueprint</h2>
+        {done ? (
+          <>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Blueprint saved (inactive). Activate it in Admin → Layouts to make it available to customers.
+            </p>
+            <div className="mt-4 flex justify-end">
+              <Button size="sm" onClick={onClose}>Done</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Captures this album&rsquo;s page sequence, layouts, overlay slots, and decorative elements as a reusable
+              blueprint. Photos are not included — the slots are filled per customer.
+            </p>
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Name</label>
+                <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-studio-bright" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Category</label>
+                <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-studio-bright">
+                  {['solo', 'pair', 'collage', 'panoramic', 'story'].map((c) => (
+                    <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {msg && <p className="mt-2 text-sm text-destructive">{msg}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+              <Button size="sm" onClick={save} disabled={saving}>
+                {saving ? <Loader2 className="animate-spin" /> : <BookImage />} Save blueprint
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Compact photo-placement stat tile (builder Images panel). */
+function PhotoStat({ label, value, tone = 'ok' }: { label: string; value: number; tone?: 'ok' | 'warning' | 'muted' }) {
+  const toneCls =
+    tone === 'warning' ? 'text-warning' : tone === 'muted' ? 'text-muted-foreground' : 'text-foreground';
+  return (
+    <div className="rounded-lg border bg-card px-1.5 py-2">
+      <div className={`text-base font-semibold tabular-nums ${toneCls}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
     </div>
   );
 }

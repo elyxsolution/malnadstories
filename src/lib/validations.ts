@@ -808,6 +808,71 @@ export const TemplateDuplicateSchema = z.object({
 export type TemplateSaveInput = z.infer<typeof TemplateSaveSchema>;
 export type TemplateStatusInput = z.infer<typeof TemplateStatusSchema>;
 
+// ── Album Blueprints (0043) ────────────────────────────────────────────────────
+// A whole-album blueprint = a sequence of page units, each a layout primitive + EMPTY overlay
+// slots (geometry, no photo) + decorative elements. Reuses the SAME bounded element schemas as
+// album blocks, so an imported/authored blueprint can never carry a shape the renderer can't
+// handle. Applying it produces ordinary album Block[] (photos assigned to slots).
+const BlueprintBlockSchema = z.object({
+  template: z.enum(['single-pair', 'double-spread']),
+  caption: z.string().max(200).optional().default(''),
+  overlaySlots: z.array(RectSchema).max(50).optional().default([]),
+  texts: z.array(TextElementSchema).max(30).optional().default([]),
+  qrs: z.array(QrElementSchema).max(10).optional().default([]),
+  stickers: z.array(StickerElementSchema).max(30).optional().default([]),
+  background: BackgroundSchema.nullable().optional().default(null),
+});
+
+export const BlueprintSchema = z.object({
+  version: z.literal(1),
+  blocks: z.array(BlueprintBlockSchema).min(1, 'A blueprint needs at least one page').max(100, 'Too many pages'),
+});
+
+// "Save current album as blueprint" — reads the album's blocks server-side; the client sends only
+// the album id + metadata (the blueprint itself is distilled from the album, never client-supplied).
+export const SaveAlbumAsBlueprintSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  name: z.string().trim().min(1, 'Name is required').max(120, 'Name is too long'),
+  description: z.string().trim().max(500, 'Description is too long').optional(),
+  category: z.enum(TEMPLATE_CATEGORY_VALUES).default('story'),
+  featured: z.boolean().optional().default(false),
+  popular: z.boolean().optional().default(false),
+  pinned: z.boolean().optional().default(false),
+});
+
+export const UpdateBlueprintMetaSchema = z.object({
+  id: z.string().uuid('Invalid blueprint'),
+  name: z.string().trim().min(1, 'Name is required').max(120, 'Name is too long'),
+  description: z.string().trim().max(500, 'Description is too long').optional(),
+  category: z.enum(TEMPLATE_CATEGORY_VALUES),
+});
+
+export const BlueprintFeatureSchema = z.object({
+  id: z.string().uuid('Invalid blueprint'),
+  featured: z.boolean().optional(),
+  popular: z.boolean().optional(),
+  pinned: z.boolean().optional(),
+});
+
+export const BlueprintReorderSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Nothing to reorder').max(500, 'Too many items'),
+});
+
+export const BlueprintDeleteSchema = z.object({
+  id: z.string().uuid('Invalid blueprint'),
+});
+
+// Apply a blueprint to a NEW album at creation (Phase C). autoPlace fills the slots with the
+// album's uploaded photos; seed makes "randomize" reproducible.
+export const ApplyBlueprintSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  blueprintId: z.string().uuid('Invalid blueprint'),
+  autoPlace: z.boolean().optional().default(true),
+  seed: z.number().int().optional(),
+});
+
+export type SaveAlbumAsBlueprintInput = z.infer<typeof SaveAlbumAsBlueprintSchema>;
+
 // ── Courier & Shipping (0033) ─────────────────────────────────────────────────
 // Mirrors the DB CHECK enums (lib/shipping/model). shipment_status/external_reference are
 // server/DB/provider controlled — never client input beyond the bounded fields below.

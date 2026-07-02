@@ -20,6 +20,7 @@ export const IMAGE_HARDENING_QUEUE = 'image-hardening';
 export const ALBUM_PDF_QUEUE = 'album-pdf';
 export const R2_CLEANUP_QUEUE = 'r2-cleanup';
 export const COVER_THUMBNAIL_QUEUE = 'cover-thumbnail';
+export const BLUEPRINT_THUMBNAIL_QUEUE = 'blueprint-thumbnail';
 
 let bossPromise: Promise<PgBoss> | null = null;
 
@@ -37,6 +38,7 @@ function getBoss(): Promise<PgBoss> {
       await boss.createQueue(ALBUM_PDF_QUEUE);
       await boss.createQueue(R2_CLEANUP_QUEUE);
       await boss.createQueue(COVER_THUMBNAIL_QUEUE);
+      await boss.createQueue(BLUEPRINT_THUMBNAIL_QUEUE);
       return boss;
     })().catch((e) => {
       bossPromise = null; // allow a later retry if startup failed
@@ -94,4 +96,15 @@ export async function enqueueCoverThumbnail(coverTemplateId: string): Promise<st
     { coverTemplateId },
     { retryLimit: 3, retryDelay: 30, retryBackoff: true, singletonKey: coverTemplateId },
   );
+}
+
+/**
+ * Enqueue blueprint thumbnail generation (0044). The raw render token rides in the payload; the
+ * worker validates it against the CURRENT stored hash, so — like album-pdf — NO singletonKey (a
+ * newer request must not be dropped in favour of a stale-token job). retryLimit 2 covers transient
+ * render/upload failures; the token TTL bounds staleness. Best-effort from the blueprint actions.
+ */
+export async function enqueueBlueprintThumbnail(blueprintId: string, token: string): Promise<string | null> {
+  const boss = await getBoss();
+  return boss.send(BLUEPRINT_THUMBNAIL_QUEUE, { blueprintId, token }, { retryLimit: 2, retryDelay: 20, retryBackoff: true });
 }

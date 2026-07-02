@@ -116,7 +116,7 @@ async function stage<T>(
   }
 }
 
-async function getBrowser(): Promise<Browser> {
+export async function getBrowser(): Promise<Browser> {
   const existing = await browserPromise?.catch(() => null);
   if (existing && existing.connected) return existing;
   browserPromise = puppeteer.launch({

@@ -1,0 +1,158 @@
+/**
+ * Album Blueprint — PURE model + producer (no React, no I/O). Extends the layout-template concept
+ * from a single-spread preset to a WHOLE album, and produces the existing `Block[]` on apply, so
+ * nothing new ever reaches the renderer / saveLayout / PDF / worker. Mirrors auto-layout.ts (a
+ * producer, not a data model the renderer sees).
+ *
+ * A Blueprint is a sequence of page units. Each unit is one of the existing renderer primitives
+ * (single-pair | double-spread) plus EMPTY overlay slots (geometry only, no photo) and decorative
+ * elements (texts / QR / stickers / background). Applying a blueprint assigns uploaded photos to
+ * the base + overlay slots, emitting ordinary album Block[].
+ */
+import {
+  PAGE_COST,
+  requiredBaseCount,
+  cryptoId,
+  type Background,
+  type Block,
+  type LayoutTemplate,
+  type QrElement,
+  type Rect,
+  type StickerElement,
+  type TextElement,
+} from './model';
+
+export const BLUEPRINT_VERSION = 1 as const;
+
+/** One page unit of a blueprint — a layout primitive + empty overlay slots + decorative elements. */
+export type BlueprintBlock = {
+  template: LayoutTemplate;
+  caption: string;
+  overlaySlots: Rect[]; // empty overlay geometry (0..1) — photos assigned on apply
+  texts: TextElement[];
+  qrs: QrElement[];
+  stickers: StickerElement[];
+  background: Background | null;
+};
+
+export type Blueprint = {
+  version: typeof BLUEPRINT_VERSION;
+  blocks: BlueprintBlock[];
+};
+
+export type BlueprintStats = {
+  pageCount: number; // physical content leaves (Σ PAGE_COST)
+  slotCount: number; // total photo slots (base + overlays) = capacity
+  recommendedPhotos: number; // sensible target = capacity
+};
+
+/** Derived stats — NEVER hand-entered. Capacity = every base slot + every overlay slot. */
+export function blueprintStats(bp: Blueprint): BlueprintStats {
+  let pageCount = 0;
+  let slotCount = 0;
+  for (const b of bp.blocks) {
+    pageCount += PAGE_COST[b.template];
+    slotCount += requiredBaseCount(b.template) + b.overlaySlots.length;
+  }
+  return { pageCount, slotCount, recommendedPhotos: slotCount };
+}
+
+/**
+ * Distill an album's live Block[] into a reusable Blueprint: keep the page sequence, layouts,
+ * overlay GEOMETRY, and decorative elements; DROP the photos (base ids + overlay photo ids →
+ * empty slots). This is how "Save current album as Blueprint" reuses the builder for authoring.
+ */
+export function blueprintFromBlocks(blocks: Block[]): Blueprint {
+  return {
+    version: BLUEPRINT_VERSION,
+    blocks: blocks.map((b) => ({
+      template: b.template,
+      caption: b.caption ?? '',
+      overlaySlots: b.overlays.map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h })),
+      texts: b.texts ?? [],
+      qrs: b.qrs ?? [],
+      stickers: b.stickers ?? [],
+      background: b.background ?? null,
+    })),
+  };
+}
+
+/** Deterministic seeded shuffle (Fisher–Yates, mulberry32) so "Randomize" is reproducible per seed. */
+export function shuffleIds(ids: string[], seed: number): string[] {
+  const out = [...ids];
+  let s = seed >>> 0;
+  const rand = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Apply a blueprint to a set of photos → album Block[]. Fills base slots then overlay slots in
+ * page order, each photo used at most once; slots beyond the supplied photos stay empty (a valid
+ * draft). Extra photos beyond capacity are ignored. Decorative elements copy verbatim. The result
+ * is ordinary Block[] — persisted via the existing saveLayout, rendered by the existing pipeline.
+ */
+export function applyBlueprint(bp: Blueprint, photoIds: string[]): Block[] {
+  const queue = [...photoIds];
+  const next = (): string | null => (queue.length ? queue.shift()! : null);
+
+  return bp.blocks.map((b, i) => {
+    const photoIdsForBase: string[] = [];
+    for (let s = 0; s < requiredBaseCount(b.template); s++) {
+      const id = next();
+      if (id) photoIdsForBase.push(id);
+    }
+    const overlays = [];
+    for (const slot of b.overlaySlots) {
+      const id = next();
+      if (!id) break; // out of photos → remaining overlay slots stay empty
+      overlays.push({ photoId: id, x: slot.x, y: slot.y, w: slot.w, h: slot.h });
+    }
+    return {
+      key: `bp-${i}`,
+      template: b.template,
+      photoIds: photoIdsForBase,
+      caption: b.caption ?? '',
+      overlays,
+      texts: b.texts ?? [],
+      qrs: b.qrs ?? [],
+      stickers: b.stickers ?? [],
+      background: b.background ?? null,
+    } satisfies Block;
+  });
+}
+
+/** Normalize arbitrary stored JSON into a safe Blueprint (defensive; pairs with the Zod gate). */
+export function normalizeBlueprint(raw: unknown): Blueprint | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { version?: unknown; blocks?: unknown };
+  if (!Array.isArray(r.blocks)) return null;
+  const blocks: BlueprintBlock[] = [];
+  for (const b of r.blocks as Record<string, unknown>[]) {
+    const template = b.template === 'double-spread' ? 'double-spread' : 'single-pair';
+    blocks.push({
+      template,
+      caption: typeof b.caption === 'string' ? b.caption : '',
+      overlaySlots: Array.isArray(b.overlaySlots)
+        ? (b.overlaySlots as Rect[]).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))
+        : [],
+      texts: Array.isArray(b.texts) ? (b.texts as TextElement[]) : [],
+      qrs: Array.isArray(b.qrs) ? (b.qrs as QrElement[]) : [],
+      stickers: Array.isArray(b.stickers) ? (b.stickers as StickerElement[]) : [],
+      background: (b.background as Background | null) ?? null,
+    });
+  }
+  return { version: BLUEPRINT_VERSION, blocks };
+}
+
+// Re-export so callers building fresh blocks have a stable id source (parity with auto-layout).
+export { cryptoId };
