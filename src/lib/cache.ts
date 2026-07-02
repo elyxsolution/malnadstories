@@ -21,10 +21,12 @@
 export const CACHE_TAGS = {
   cmsPublic: 'cms-public',
   templatesActive: 'templates-active',
+  coverTemplatesActive: 'cover-templates-active',
 } as const;
 
 /** Time-based backstop TTLs in SECONDS (tag invalidation is the primary path). */
 export const CACHE_TTL = {
   cmsPublic: 300, // public marketing/help content changes rarely
   templatesActive: 300, // the curated preset catalog changes rarely
+  coverTemplatesActive: 300, // the curated cover-design catalog changes rarely
 } as const;

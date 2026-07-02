@@ -103,6 +103,7 @@ const ROUTE_CAPABILITY: { prefix: string; capability: Capability }[] = [
   { prefix: '/admin/reprints', capability: 'reprint:view' },
   { prefix: '/admin/customers', capability: 'customer:view' },
   { prefix: '/admin/albums', capability: 'album:view' },
+  { prefix: '/admin/cover-templates', capability: 'cover:manage' },
   { prefix: '/admin/covers', capability: 'cover:manage' },
   { prefix: '/admin/stickers', capability: 'sticker:manage' },
   { prefix: '/admin/coupons', capability: 'coupon:manage' },

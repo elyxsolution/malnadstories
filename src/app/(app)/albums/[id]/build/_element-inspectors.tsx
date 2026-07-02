@@ -14,6 +14,10 @@ import {
   Copy,
   ArrowUp,
   ArrowDown,
+  FlipHorizontal,
+  FlipVertical,
+  Lock,
+  LockOpen,
 } from 'lucide-react';
 import { Section, Row, Slider, Toggle } from './_controls';
 import FontPicker from './_font-picker';
@@ -194,6 +198,19 @@ export function StickerInspector({
             <ArrowDown />
           </StickerActionBtn>
         </div>
+        {/* Flip + Lock. Lock freezes canvas drag/resize/rotate (Movable honours el.locked); the
+            inspector stays available so it can always be unlocked. */}
+        <div className="grid grid-cols-3 gap-2">
+          <StickerActionBtn label="Flip H" active={!!el.flipH} onClick={() => onChange({ flipH: !el.flipH })}>
+            <FlipHorizontal />
+          </StickerActionBtn>
+          <StickerActionBtn label="Flip V" active={!!el.flipV} onClick={() => onChange({ flipV: !el.flipV })}>
+            <FlipVertical />
+          </StickerActionBtn>
+          <StickerActionBtn label={el.locked ? 'Unlock' : 'Lock'} active={!!el.locked} onClick={() => onChange({ locked: !el.locked })}>
+            {el.locked ? <LockOpen /> : <Lock />}
+          </StickerActionBtn>
+        </div>
       </Section>
 
       <Section title="Adjust">
@@ -317,11 +334,13 @@ function StickerActionBtn({
   label,
   onClick,
   disabled,
+  active,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  active?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -330,7 +349,12 @@ function StickerActionBtn({
       onClick={onClick}
       disabled={disabled}
       title={label}
-      className="flex items-center justify-center gap-1.5 rounded-lg border border-border bg-card py-2 text-[12px] font-medium text-foreground shadow-xs transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5"
+      aria-pressed={active}
+      className={`flex items-center justify-center gap-1.5 rounded-lg border py-2 text-[12px] font-medium shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5 ${
+        active
+          ? 'border-studio-bright bg-studio-soft text-studio'
+          : 'border-border bg-card text-foreground hover:bg-secondary'
+      }`}
     >
       {children}
       {label}

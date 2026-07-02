@@ -21,6 +21,7 @@ import {
   MessageSquareWarning,
   ChevronLeft,
   ChevronRight,
+  BookImage,
 } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
@@ -41,6 +42,7 @@ import Proposal from './_proposal';
 import CoverCanvas, { COVER_NO_SELECTION, type CoverSelection, type CoverSide } from './_cover-canvas';
 import { CoverSpread } from './_cover-render';
 import CoverPanel from './_panel-cover';
+import CoverTemplatesPanel, { type BuilderCoverTemplate } from './_panel-cover-templates';
 import StickersPanel from './_panel-stickers';
 import { TextInspector, StickerInspector, QrInspector, SpineInspector } from './_element-inspectors';
 import PhotoEditor from './_photo-editor';
@@ -72,7 +74,7 @@ import {
 } from '@/lib/builder/model';
 import { PAIR_ASPECT, makeText, makeSticker, makeQr, type LayoutPreset } from '@/lib/builder/elements';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
-import { type CoverConfig } from '@/lib/builder/cover';
+import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
 import { Button } from '@/components/ui/button';
@@ -85,10 +87,13 @@ import { STUDIO_PRIMARY } from './_ui';
 // the library never touches `window` during render, and its bundle only ships when opened.
 const Flipbook = dynamic(() => import('./_flipbook'), { ssr: false });
 
-type RailTab = 'images' | 'layouts' | 'text' | 'stickers' | 'backgrounds' | 'qr';
+type RailTab = 'images' | 'layouts' | 'templates' | 'text' | 'stickers' | 'backgrounds' | 'qr';
+// 'layouts' is content-page only; 'templates' (cover designs) is cover-only. The rail is filtered
+// per mode below so each shows only its relevant tools.
 const RAIL: { key: RailTab; label: string; Icon: typeof Images }[] = [
   { key: 'images', label: 'Images', Icon: Images },
   { key: 'layouts', label: 'Layouts', Icon: LayoutTemplateIcon },
+  { key: 'templates', label: 'Templates', Icon: BookImage },
   { key: 'text', label: 'Text', Icon: TypeIcon },
   { key: 'stickers', label: 'Stickers', Icon: Sticker },
   { key: 'backgrounds', label: 'Backdrop', Icon: Palette },
@@ -108,6 +113,7 @@ export default function Builder({
   initialCoverConfig,
   initialReview,
   layoutTemplates = [],
+  coverTemplates = [],
   stickerCatalog = [],
   stickerUrls = {},
 }: {
@@ -123,6 +129,8 @@ export default function Builder({
   initialCoverConfig: CoverConfig;
   initialReview: { status: string; requestedChanges: string | null } | null;
   layoutTemplates?: ActiveTemplate[];
+  /** Active cover-design templates (Task 2) — applied into cover_config, fully editable after. */
+  coverTemplates?: BuilderCoverTemplate[];
   stickerCatalog?: StickerCategory[];
   stickerUrls?: Record<string, string>;
 }) {
@@ -495,6 +503,7 @@ export default function Builder({
   const focusBlock = (i: number) => {
     setCoverFocused(false);
     setCoverSel(COVER_NO_SELECTION);
+    setRailTab((t) => (t === 'templates' ? 'images' : t)); // templates is cover-only
     setCurrent(i);
   };
   const goPrev = () => {
@@ -734,7 +743,7 @@ export default function Builder({
         {/* LEFT — rail + sidebar */}
         <div className="flex flex-none border-r border-border/70 bg-card">
           <nav className="flex w-[68px] flex-col items-center gap-1 border-r border-border/70 py-3" aria-label="Tools">
-            {(coverFocused ? RAIL.filter((t) => t.key !== 'layouts') : RAIL).map((t) => {
+            {RAIL.filter((t) => (coverFocused ? t.key !== 'layouts' : t.key !== 'templates')).map((t) => {
               const active = railTab === t.key;
               return (
                 <button
@@ -802,6 +811,23 @@ export default function Builder({
                 onAutoLayout={() => setAssistantOpen(true)}
                 canAutoLayout={enginePhotos.length > 0}
               />
+            )}
+
+            {/* Cover Templates (Task 2) — cover-only. Applying copies the template's CoverConfig into
+                cover_config via the SAME updateCover→saveCoverDesign path; no template link is kept. */}
+            {coverFocused && railTab === 'templates' && (
+              <div className="flex min-h-0 flex-1 flex-col p-4">
+                <h2 className="mb-3 text-[13px] font-semibold tracking-tight text-foreground">Cover templates</h2>
+                <CoverTemplatesPanel
+                  templates={coverTemplates}
+                  stickerUrlFor={stickerUrlFor}
+                  hasExistingDesign={isCustomCover(coverConfig)}
+                  onApply={(cfg) => {
+                    updateCover({ config: cfg });
+                    setCoverSel(COVER_NO_SELECTION);
+                  }}
+                />
+              </div>
             )}
 
             {railTab === 'text' && (

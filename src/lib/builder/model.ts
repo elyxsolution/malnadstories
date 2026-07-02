@@ -171,6 +171,10 @@ export type StickerElement = {
   h: number;
   rotation: number; // deg, -180..180
   opacity: number; // 0..1
+  // Additive, all optional so legacy jsonb rows hydrate + render identically when absent.
+  flipH?: boolean; // mirror horizontally (scaleX(-1))
+  flipV?: boolean; // mirror vertically (scaleY(-1))
+  locked?: boolean; // freeze drag/resize/rotate on the canvas (Movable honours this)
 };
 
 export const MAX_TEXTS_PER_BLOCK = 30;

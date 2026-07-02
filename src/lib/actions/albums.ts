@@ -8,6 +8,9 @@ import { redirect } from 'next/navigation';
 import { CreateAlbumSchema } from '@/lib/validations';
 import { enqueueR2Cleanup } from '@/lib/queue';
 import { hasActiveOrder } from '@/lib/orders/album-lock';
+import { getActiveCoverTemplateConfig } from '@/lib/cover-templates/catalog';
+import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
+import type { CoverConfig } from '@/lib/builder/cover';
 
 export type AlbumActionState = { error: string } | null;
 export type DeleteResult = { ok: true } | { ok: false; error: string };
@@ -48,24 +51,38 @@ async function insertAlbumForUser(
     .maybeSingle();
   if (!product) return { ok: false, error: 'Invalid size selected. Please try again.' };
 
-  // Cover is mandatory at creation and must be an ACTIVE template (RLS exposes only
-  // active rows to authenticated). Never trust the client's id without this check.
-  const { data: cover } = await supabase
-    .from('cover_templates')
-    .select('id')
-    .eq('id', data.coverTemplateId)
-    .eq('active', true)
-    .maybeSingle();
-  if (!cover) return { ok: false, error: 'That cover design is unavailable. Please choose another.' };
+  // Cover source resolution (Phase 3). Three mutually-exclusive paths:
+  //   1. coverDesignTemplateId → copy the builder-JSON template's CoverConfig into the album
+  //      (fully editable; photoIds nulled by applyCoverTemplateToAlbum). cover_template_id stays null.
+  //   2. coverTemplateId → legacy uploaded-PNG cover artwork; must be an ACTIVE row.
+  //   3. neither → a blank custom cover (the customer designs it in the builder before submit).
+  let appliedCoverConfig: CoverConfig | null = null;
+  if (data.coverDesignTemplateId) {
+    // Read via the service-role catalog (validates + re-checks active) so a forged/inactive id
+    // can't be applied; the config is deep-cloned with photo slots cleared.
+    const tplConfig = await getActiveCoverTemplateConfig(data.coverDesignTemplateId);
+    if (!tplConfig) return { ok: false, error: 'That cover template is unavailable. Please choose another.' };
+    appliedCoverConfig = applyCoverTemplateToAlbum(tplConfig);
+  } else if (data.coverTemplateId) {
+    // Legacy PNG artwork must be an ACTIVE template (RLS exposes only active rows to authenticated).
+    const { data: cover } = await supabase
+      .from('cover_templates')
+      .select('id')
+      .eq('id', data.coverTemplateId)
+      .eq('active', true)
+      .maybeSingle();
+    if (!cover) return { ok: false, error: 'That cover design is unavailable. Please choose another.' };
+  }
 
-  // user_id from the verified JWT; status omitted → DB 'draft' default (0021).
+  // user_id from the verified JWT; status omitted → DB 'draft' default (0021). cover_template_id
+  // is null for the design-template / blank paths.
   const { data: album, error: insertError } = await supabase
     .from('albums')
     .insert({
       user_id: userId,
       title: data.title,
       size: (product as { pages: number }).pages,
-      cover_template_id: data.coverTemplateId,
+      cover_template_id: data.coverTemplateId ?? null,
       destination: data.destination ?? null,
       travel_dates: data.travelDates ?? null,
       description: data.description ?? null,
@@ -77,7 +94,16 @@ async function insertAlbumForUser(
     console.error('Album insert error:', insertError);
     return { ok: false, error: 'Could not create album. Please try again.' };
   }
-  return { ok: true, id: (album as { id: string }).id };
+  const albumId = (album as { id: string }).id;
+
+  // Copy the design template's config onto the album (0038 grants authenticated UPDATE(cover_config)).
+  // Best-effort: a failure here shouldn't lose the created album — the customer can re-pick in the builder.
+  if (appliedCoverConfig) {
+    const { error: cfgErr } = await supabase.from('albums').update({ cover_config: appliedCoverConfig }).eq('id', albumId);
+    if (cfgErr) console.error('apply cover template config error (album created; cover left blank):', cfgErr);
+  }
+
+  return { ok: true, id: albumId };
 }
 
 export async function createAlbum(
@@ -93,7 +119,8 @@ export async function createAlbum(
   const parsed = CreateAlbumSchema.safeParse({
     title: formData.get('title'),
     productId: formData.get('productId'),
-    coverTemplateId: formData.get('coverTemplateId'),
+    coverTemplateId: formData.get('coverTemplateId') || undefined,
+    coverDesignTemplateId: formData.get('coverDesignTemplateId') || undefined,
     destination: formData.get('destination'),
     travelDates: formData.get('travelDates'),
     description: formData.get('description'),

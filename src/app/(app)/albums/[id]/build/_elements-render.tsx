@@ -101,6 +101,13 @@ export function QrBox({ el }: { el: QrElement }) {
  * regardless of the box. `url` is resolved by the CALLER (catalog/print resolver, parallel to
  * photos). Missing url → nothing (a since-deleted sticker simply disappears, like a missing photo).
  */
+/** Flip transform shared by both sticker renderers (applied to the artwork, inside any rotation). */
+function stickerFlip(el: StickerElement): string | undefined {
+  const sx = el.flipH ? -1 : 1;
+  const sy = el.flipV ? -1 : 1;
+  return sx === 1 && sy === 1 ? undefined : `scale(${sx}, ${sy})`;
+}
+
 export function StickerContent({ el, url }: { el: StickerElement; url?: string }) {
   if (!url) return null;
   return (
@@ -110,7 +117,7 @@ export function StickerContent({ el, url }: { el: StickerElement; url?: string }
       alt=""
       draggable={false}
       className="h-full w-full select-none object-contain"
-      style={{ opacity: el.opacity }}
+      style={{ opacity: el.opacity, transform: stickerFlip(el) }}
     />
   );
 }
@@ -131,7 +138,15 @@ export function StickerBox({ el, url, onReady }: { el: StickerElement; url?: str
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt="" onLoad={onReady} onError={onReady} draggable={false} className="h-full w-full object-contain" />
+      <img
+        src={url}
+        alt=""
+        onLoad={onReady}
+        onError={onReady}
+        draggable={false}
+        className="h-full w-full object-contain"
+        style={{ transform: stickerFlip(el) }}
+      />
     </div>
   );
 }

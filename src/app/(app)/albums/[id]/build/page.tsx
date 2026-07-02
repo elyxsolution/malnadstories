@@ -21,6 +21,7 @@ import {
 import { listActiveCoverOptions } from '@/lib/covers';
 import { listActiveStickers, resolveStickerUrls } from '@/lib/stickers';
 import { listActiveTemplates } from '@/lib/templates/catalog';
+import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
 import { builderFontVars } from '@/lib/fonts';
 
@@ -135,6 +136,20 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   // Active layout-template catalog (Phase 9E). Advisory presets the builder + auto-layout
   // can apply; only ACTIVE + geometry-valid templates are returned. Never gates anything.
   const layoutTemplates = await listActiveTemplates();
+
+  // Active cover-DESIGN templates (Task 2) — the in-builder "Cover Templates" panel. Only the
+  // fields the panel needs; applying one copies its config into cover_config (no link kept).
+  const coverTemplates = (await listActiveCoverTemplates()).map((t) => ({
+    id: t.id,
+    name: t.name,
+    category: t.category,
+    featured: t.featured,
+    popular: t.popular,
+    pinned: t.pinned,
+    isNew: t.isNew,
+    config: t.config,
+    previewUrl: t.previewUrl,
+  }));
 
   // Custom cover design (0038). Best-effort secondary read: if the `cover_config` column
   // isn't migrated yet, supabase-js returns an error (not a throw) → we keep defaults, so
@@ -255,6 +270,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialCoverConfig={initialCoverConfig}
         initialReview={initialReview}
         layoutTemplates={layoutTemplates}
+        coverTemplates={coverTemplates}
         stickerCatalog={stickerCatalog}
         stickerUrls={stickerUrls}
       />

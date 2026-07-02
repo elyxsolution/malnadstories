@@ -11,11 +11,28 @@ import {
   RenameStickerSchema,
   SetStickerActiveSchema,
   DeleteStickerSchema,
+  ReplaceStickerArtworkSchema,
+  ReorderStickersSchema,
+  BulkStickerActiveSchema,
+  BulkStickerDeleteSchema,
   CreateStickerCategorySchema,
+  RenameStickerCategorySchema,
+  DeleteStickerCategorySchema,
+  ReorderStickerCategoriesSchema,
 } from '@/lib/validations';
 
 export type StickerActionResult = { ok: true } | { ok: false; error: string };
 const KEY_PREFIX = 'stickers/';
+
+/** Normalise tags: trim, lowercase, drop blanks, de-dupe, cap at 20. */
+function normalizeTags(tags: string[] | undefined): string[] {
+  const seen = new Set<string>();
+  for (const t of tags ?? []) {
+    const v = t.trim().toLowerCase();
+    if (v) seen.add(v);
+  }
+  return Array.from(seen).slice(0, 20);
+}
 
 /**
  * Admin-only sticker management. Authorization is enforced HERE (requireCapability) and writes go
@@ -98,12 +115,13 @@ export async function renameSticker(input: unknown): Promise<StickerActionResult
   }
   const parsed = RenameStickerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const { stickerId, name, categoryId } = parsed.data;
+  const { stickerId, name, categoryId, tags } = parsed.data;
+  const cleanTags = normalizeTags(tags);
 
   const svc = createServiceClient();
   const { data, error } = await svc
     .from('stickers')
-    .update({ name, category_id: categoryId ?? null })
+    .update({ name, category_id: categoryId ?? null, tags: cleanTags })
     .eq('id', stickerId)
     .select('id')
     .maybeSingle();
@@ -118,9 +136,158 @@ export async function renameSticker(input: unknown): Promise<StickerActionResult
     p_action: 'sticker.updated',
     p_entity_type: 'sticker',
     p_entity_id: stickerId,
-    p_metadata: { name, category_id: categoryId ?? null },
+    p_metadata: { name, category_id: categoryId ?? null, tags: cleanTags },
   });
 
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/**
+ * Replace a sticker's artwork with a freshly-uploaded R2 object (same upload pipeline as create:
+ * presignStickerUpload → PUT → this). The stickerId is UNCHANGED, so every album that already
+ * placed it now shows the new artwork (placements store only the sticker id). The old objects are
+ * deleted after the row is updated. width/height/thumb are reset (stickers have no thumb job).
+ */
+export async function replaceStickerArtwork(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = ReplaceStickerArtworkSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { stickerId, imageKey } = parsed.data;
+  if (!imageKey.startsWith(KEY_PREFIX)) return { ok: false, error: 'Invalid image reference.' };
+
+  const svc = createServiceClient();
+  const { data: prev } = await svc.from('stickers').select('image_key, thumb_key').eq('id', stickerId).maybeSingle();
+  const before = prev as { image_key: string; thumb_key: string | null } | null;
+  if (!before) return { ok: false, error: 'Sticker not found.' };
+
+  const { error } = await svc
+    .from('stickers')
+    .update({ image_key: imageKey, thumb_key: null, width: null, height: null })
+    .eq('id', stickerId);
+  if (error) {
+    console.error('[admin] replaceStickerArtwork error', error);
+    return { ok: false, error: 'Could not replace the artwork.' };
+  }
+
+  // Delete the old objects (best-effort) only after the row points at the new key.
+  const stale = [before.image_key, before.thumb_key].filter((k): k is string => !!k && k !== imageKey);
+  await Promise.all(stale.map((k) => deleteObject(k).catch(() => {})));
+
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: 'sticker.artwork_replaced',
+    p_entity_type: 'sticker',
+    p_entity_id: stickerId,
+    p_metadata: { image_key: imageKey },
+  });
+
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/** Persist a new display order (array position = sort index). */
+export async function reorderStickers(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = ReorderStickersSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { ids } = parsed.data;
+
+  const svc = createServiceClient();
+  for (let i = 0; i < ids.length; i++) {
+    const { error } = await svc.from('stickers').update({ sort: i }).eq('id', ids[i]);
+    if (error) {
+      console.error('[admin] reorderStickers error', error);
+      return { ok: false, error: 'Could not save the new order.' };
+    }
+  }
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: 'sticker.reordered',
+    p_entity_type: 'sticker',
+    p_entity_id: ids[0],
+    p_metadata: { count: ids.length },
+  });
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/** Bulk enable/disable a selection. */
+export async function setStickersActiveBulk(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = BulkStickerActiveSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { ids, active } = parsed.data;
+
+  const svc = createServiceClient();
+  const { error } = await svc.from('stickers').update({ active }).in('id', ids);
+  if (error) {
+    console.error('[admin] setStickersActiveBulk error', error);
+    return { ok: false, error: 'Could not update the stickers.' };
+  }
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: active ? 'sticker.bulk_enabled' : 'sticker.bulk_disabled',
+    p_entity_type: 'sticker',
+    p_entity_id: ids[0],
+    p_metadata: { ids, active },
+  });
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/** Bulk delete a selection (+ R2 cleanup). Placements of a deleted sticker simply stop rendering. */
+export async function deleteStickersBulk(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = BulkStickerDeleteSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { ids } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data: rows } = await svc.from('stickers').select('image_key, thumb_key').in('id', ids);
+
+  const { error } = await svc.from('stickers').delete().in('id', ids);
+  if (error) {
+    console.error('[admin] deleteStickersBulk error', error);
+    return { ok: false, error: 'Could not delete the stickers.' };
+  }
+
+  const keys = ((rows ?? []) as { image_key?: string; thumb_key?: string }[])
+    .flatMap((r) => [r.image_key, r.thumb_key])
+    .filter((k): k is string => !!k);
+  await Promise.all(keys.map((k) => deleteObject(k).catch(() => {})));
+
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: 'sticker.bulk_deleted',
+    p_entity_type: 'sticker',
+    p_entity_id: ids[0],
+    p_metadata: { count: ids.length },
+  });
   revalidatePath('/admin/stickers');
   return { ok: true };
 }
@@ -237,6 +404,101 @@ export async function createStickerCategory(input: unknown): Promise<StickerActi
     p_metadata: { name, slug },
   });
 
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/** Rename a category (slug is left stable so existing links/filters don't shift). */
+export async function renameStickerCategory(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = RenameStickerCategorySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { categoryId, name } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data, error } = await svc.from('sticker_categories').update({ name }).eq('id', categoryId).select('id').maybeSingle();
+  if (error || !data) {
+    console.error('[admin] renameStickerCategory error', error);
+    return { ok: false, error: 'Could not rename the category.' };
+  }
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: 'sticker_category.updated',
+    p_entity_type: 'sticker',
+    p_entity_id: categoryId,
+    p_metadata: { name },
+  });
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/**
+ * Delete a category. stickers.category_id is ON DELETE SET NULL (0039), so member stickers become
+ * "Uncategorized" rather than being deleted — no artwork is lost.
+ */
+export async function deleteStickerCategory(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = DeleteStickerCategorySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { categoryId } = parsed.data;
+
+  const svc = createServiceClient();
+  const { error } = await svc.from('sticker_categories').delete().eq('id', categoryId);
+  if (error) {
+    console.error('[admin] deleteStickerCategory error', error);
+    return { ok: false, error: 'Could not delete the category.' };
+  }
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: 'sticker_category.deleted',
+    p_entity_type: 'sticker',
+    p_entity_id: categoryId,
+    p_metadata: {},
+  });
+  revalidatePath('/admin/stickers');
+  return { ok: true };
+}
+
+/** Persist a new category display order (array position = sort index). */
+export async function reorderStickerCategories(input: unknown): Promise<StickerActionResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCapability('sticker:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = ReorderStickerCategoriesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { ids } = parsed.data;
+
+  const svc = createServiceClient();
+  for (let i = 0; i < ids.length; i++) {
+    const { error } = await svc.from('sticker_categories').update({ sort: i }).eq('id', ids[i]);
+    if (error) {
+      console.error('[admin] reorderStickerCategories error', error);
+      return { ok: false, error: 'Could not save the new order.' };
+    }
+  }
+  await svc.rpc('log_audit', {
+    p_actor_id: actor.userId,
+    p_actor_type: 'admin',
+    p_action: 'sticker_category.reordered',
+    p_entity_type: 'sticker',
+    p_entity_id: ids[0],
+    p_metadata: { count: ids.length },
+  });
   revalidatePath('/admin/stickers');
   return { ok: true };
 }

@@ -103,6 +103,8 @@ export const stickers = pgTable('stickers', {
   height: integer('height'),
   sort: integer('sort').notNull().default(0),
   active: boolean('active').notNull().default(true),
+  // Searchable keyword labels (0042). Additive; defaults to '{}'.
+  tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
   createdBy: uuid('created_by').references(() => profiles.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -438,6 +440,32 @@ export const layoutTemplates = pgTable('layout_templates', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// Admin-designed cover TEMPLATES (0040). Unlike cover_templates (0023 = an uploaded PNG used as a
+// backdrop image), a row here stores a full CoverConfig snapshot (lib/builder/cover.ts) built in the
+// SAME cover editor customers use. Applying one deep-copies its config into albums.cover_config
+// (photoIds nulled), fully editable thereafter. Active-read model (authenticated SELECT active rows;
+// admins write via service role). Renders through the existing CoverConfig path — PDF parity by construction.
+export const coverDesignTemplates = pgTable('cover_design_templates', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  description: text('description'),
+  category: text('category').notNull().default('general'),
+  status: text('status').notNull().default('inactive'),
+  config: jsonb('config').notNull(),
+  previewKey: text('preview_key'),
+  thumbKey: text('thumb_key'),
+  featured: boolean('featured').notNull().default(false),
+  // Merchandising flags (0041) — surface "Popular" + sticky "Pinned" shelves in the picker.
+  popular: boolean('popular').notNull().default(false),
+  pinned: boolean('pinned').notNull().default(false),
+  sort: integer('sort').notNull().default(0),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ── Courier & Shipping (0033) ─────────────────────────────────────────────────

@@ -302,6 +302,7 @@ function SidePane({
           rect={s}
           rotation={s.rotation}
           rotatable
+          locked={s.locked}
           minW={0.04}
           minH={0.04}
           selected={selOf('sticker', s.id)}

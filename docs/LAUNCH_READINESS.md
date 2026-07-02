@@ -11,7 +11,7 @@
 - [ ] **Razorpay LIVE** keys set + LIVE webhook registered (`payment.captured`, `payment.failed`) with `RAZORPAY_WEBHOOK_SECRET`.
 - [ ] **Email** sender on a **verified domain** in Resend (`EMAIL_FROM`); `RESEND_API_KEY` set. `NEXT_PUBLIC_SITE_URL` has **no trailing slash**.
 - [ ] R2 env complete (`R2_*`) and bucket CORS allows PUT/GET from the app origin.
-- [ ] Migrations applied through **0037** in order; confirm **0020 + 0021** (column lockdowns) applied.
+- [ ] Migrations applied through **0037** in order; ~~confirm **0020 + 0021** (column lockdowns) applied~~ — ✅ **0020 + 0021 applied to production**.
 - [ ] At least one admin has a back-office role (or relies on the super_admin default).
 
 ## 1. Customer journey

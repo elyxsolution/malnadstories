@@ -23,19 +23,29 @@ const optionalText = (max: number, msg: string) =>
     z.string().max(max, msg).optional(),
   );
 
-export const CreateAlbumSchema = z.object({
-  title: z
-    .string()
-    .min(1, 'Album title is required')
-    .max(100, 'Title must be 100 characters or less'),
-  productId: z.string().uuid('Please select an album size'),
-  // Cover is chosen at creation (Phase F.1) — mandatory, must be an active template.
-  coverTemplateId: z.string().uuid('Please choose a cover design'),
-  // Optional metadata (Phase 2A) — never gates creation.
-  destination: optionalText(120, 'Destination must be 120 characters or less'),
-  travelDates: optionalText(60, 'Travel dates must be 60 characters or less'),
-  description: optionalText(500, 'Description must be 500 characters or less'),
-});
+export const CreateAlbumSchema = z
+  .object({
+    title: z
+      .string()
+      .min(1, 'Album title is required')
+      .max(100, 'Title must be 100 characters or less'),
+    productId: z.string().uuid('Please select an album size'),
+    // Cover source (Phase 3). Exactly one path (or neither = blank custom cover):
+    //   coverTemplateId       → legacy uploaded-PNG cover artwork (0023), kept for back-compat.
+    //   coverDesignTemplateId → a full builder-JSON cover DESIGN template (0040); its CoverConfig
+    //                           is copied into albums.cover_config, fully editable thereafter.
+    // Both optional so "Custom Cover" (blank) is also valid; they are mutually exclusive.
+    coverTemplateId: z.string().uuid('Please choose a cover design').optional(),
+    coverDesignTemplateId: z.string().uuid('Invalid cover template').optional(),
+    // Optional metadata (Phase 2A) — never gates creation.
+    destination: optionalText(120, 'Destination must be 120 characters or less'),
+    travelDates: optionalText(60, 'Travel dates must be 60 characters or less'),
+    description: optionalText(500, 'Description must be 500 characters or less'),
+  })
+  .refine((d) => !(d.coverTemplateId && d.coverDesignTemplateId), {
+    message: 'Choose either a cover artwork or a cover template, not both.',
+    path: ['coverDesignTemplateId'],
+  });
 
 // Photo upload — presign + confirm. Mirrors the server-side limits in src/lib/r2.ts.
 const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'] as const;
@@ -151,6 +161,10 @@ const StickerElementSchema = z.object({
   h: z.number().gt(0).max(1),
   rotation: z.number().min(-180).max(180),
   opacity: z.number().min(0).max(1),
+  // Additive optional transforms/state (builder sticker ops). Absent → renders as before.
+  flipH: z.boolean().optional(),
+  flipV: z.boolean().optional(),
+  locked: z.boolean().optional(),
 });
 
 const BackgroundSchema = z.object({
@@ -214,7 +228,9 @@ const BackCoverConfigSchema = z.object({
 
 // Custom cover DESIGN — front (top-level) + spine + back composition. Stored in
 // albums.cover_config (0038). Bounded so a forged client can't store unbounded payloads.
-const CoverConfigSchema = z.object({
+// Exported so the admin cover-DESIGN-template schemas (0040) reuse the exact same bounded
+// shape — an admin template IS a CoverConfig snapshot, so there is one validation source.
+export const CoverConfigSchema = z.object({
   subtitle: z.string().max(120).optional().default(''),
   author: z.string().max(80).optional().default(''),
   spineTitle: z.string().max(80).optional().default(''),
@@ -251,6 +267,81 @@ export const CoverDesignSchema = z.object({
 });
 
 export type CoverDesignInput = z.infer<typeof CoverDesignSchema>;
+
+// ── Admin: cover DESIGN templates (0040) ──────────────────────────────────────
+// An admin cover template IS a CoverConfig snapshot (reuses CoverConfigSchema above), built
+// in the same cover editor. status/slug/actor are server/DB controlled (status defaults to
+// 'inactive' on create). Mirrors TemplateSaveSchema (layout templates).
+const COVER_TEMPLATE_CATEGORY_VALUES = [
+  'general', 'travel', 'wedding', 'minimal', 'bold', 'classic', 'seasonal',
+] as const;
+const COVER_TEMPLATE_STATUS_VALUES = ['active', 'inactive', 'archived'] as const;
+
+export const CoverTemplateSaveSchema = z.object({
+  id: z.string().uuid().optional(), // present = update; absent = create
+  name: z.string().trim().min(1, 'Name is required').max(120, 'Name is too long'),
+  slug: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+    z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/, 'Slug must be lowercase letters, numbers and dashes.').optional(),
+  ),
+  description: z.string().trim().max(500, 'Description is too long').optional(),
+  category: z.enum(COVER_TEMPLATE_CATEGORY_VALUES).default('general'),
+  featured: z.boolean().optional().default(false),
+  // Merchandising flags (0041) — additive, default false.
+  popular: z.boolean().optional().default(false),
+  pinned: z.boolean().optional().default(false),
+  config: CoverConfigSchema,
+});
+
+export const CoverTemplateStatusSchema = z.object({
+  id: z.string().uuid('Invalid template'),
+  status: z.enum(COVER_TEMPLATE_STATUS_VALUES),
+});
+
+export const CoverTemplateFeatureSchema = z.object({
+  id: z.string().uuid('Invalid template'),
+  featured: z.boolean(),
+});
+
+export const CoverTemplateReorderSchema = z.object({
+  // Ordered list of template ids → their new sort index is the array position.
+  ids: z.array(z.string().uuid()).min(1, 'Nothing to reorder').max(500, 'Too many items'),
+});
+
+export const CoverTemplateDuplicateSchema = z.object({
+  id: z.string().uuid('Invalid template'),
+});
+
+// ── Cover template import/export (Task 2) ──────────────────────────────────────
+// A portable, versioned template file. schemaVersion gates compatibility (reject others).
+// The body reuses the SAME bounded field rules as save + CoverConfigSchema, so an imported
+// file can never carry a shape the editor/renderer can't handle. IDs/slug/status are NOT part
+// of the payload — an import always mints a fresh row (or overwrites a chosen target's content).
+export const COVER_TEMPLATE_EXPORT_VERSION = 1 as const;
+
+export const CoverTemplateImportSchema = z.object({
+  schemaVersion: z.literal(COVER_TEMPLATE_EXPORT_VERSION, {
+    message: `Unsupported template file version (expected ${COVER_TEMPLATE_EXPORT_VERSION}).`,
+  }),
+  name: z.string().trim().min(1, 'Name is required').max(120, 'Name is too long'),
+  description: z.string().trim().max(500).optional(),
+  category: z.enum(COVER_TEMPLATE_CATEGORY_VALUES).default('general'),
+  featured: z.boolean().optional().default(false),
+  popular: z.boolean().optional().default(false),
+  pinned: z.boolean().optional().default(false),
+  config: CoverConfigSchema,
+});
+
+// Wraps the file with an optional overwrite target. overwriteId present → replace that row's
+// content; absent → create a fresh (inactive) template.
+export const CoverTemplateImportRequestSchema = z.object({
+  overwriteId: z.string().uuid().optional(),
+  data: CoverTemplateImportSchema,
+});
+
+export type CoverTemplateImport = z.infer<typeof CoverTemplateImportSchema>;
+export type CoverTemplateSaveInput = z.infer<typeof CoverTemplateSaveSchema>;
+export type CoverTemplateStatusInput = z.infer<typeof CoverTemplateStatusSchema>;
 
 // ── Admin: cover templates ───────────────────────────────────────────────────
 // Admin uploads cover artwork to R2 (presign → PUT), then registers it. Image only.
@@ -296,10 +387,18 @@ export const CreateStickerSchema = z.object({
   sort: z.number().int().min(0).max(9999).optional().default(0),
 });
 
+// Tag list — bounded searchable keywords. Normalised (lowercased, de-duped) in the action.
+const StickerTagsSchema = z
+  .array(z.string().trim().min(1).max(30))
+  .max(20, 'Too many tags (max 20)')
+  .optional()
+  .default([]);
+
 export const RenameStickerSchema = z.object({
   stickerId: z.string().uuid('Invalid sticker'),
   name: z.string().trim().min(1, 'Name is required').max(100),
   categoryId: z.string().uuid('Invalid category').nullable().optional().default(null),
+  tags: StickerTagsSchema,
 });
 
 export const SetStickerActiveSchema = z.object({
@@ -311,8 +410,41 @@ export const DeleteStickerSchema = z.object({
   stickerId: z.string().uuid('Invalid sticker'),
 });
 
+// Replace a sticker's artwork with a freshly-uploaded R2 object (key under stickers/…).
+export const ReplaceStickerArtworkSchema = z.object({
+  stickerId: z.string().uuid('Invalid sticker'),
+  imageKey: z.string().min(1).max(512),
+});
+
+// Persist a new display order (array position = sort index).
+export const ReorderStickersSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Nothing to reorder').max(1000, 'Too many items'),
+});
+
+// Bulk operations over a selection of sticker ids.
+export const BulkStickerActiveSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Select at least one sticker').max(500, 'Too many items'),
+  active: z.boolean(),
+});
+export const BulkStickerDeleteSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Select at least one sticker').max(500, 'Too many items'),
+});
+
 export const CreateStickerCategorySchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(60),
+});
+
+export const RenameStickerCategorySchema = z.object({
+  categoryId: z.string().uuid('Invalid category'),
+  name: z.string().trim().min(1, 'Name is required').max(60),
+});
+
+export const DeleteStickerCategorySchema = z.object({
+  categoryId: z.string().uuid('Invalid category'),
+});
+
+export const ReorderStickerCategoriesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Nothing to reorder').max(200, 'Too many items'),
 });
 
 // ── Addresses & checkout ─────────────────────────────────────────────────────

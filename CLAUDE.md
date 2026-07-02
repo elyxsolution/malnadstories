@@ -101,7 +101,7 @@ drizzle/
   0019_lock_profile_role.sql          column-scoped profiles grants: authenticated can write only (id,name,phone)/(name,phone) — role/id/created_at/delete locked (anti self-promotion)
   0020_photos_column_lockdown.sql     column-scoped photos grants: authenticated writes only INSERT(user_id,album_id,r2_key,original_filename)/UPDATE(edit_config)/DELETE — worker columns service-role-only (no hardening bypass)
   0021_album_status_hardening.sql     column-scoped albums grants: status is server-only (submitAlbum→service role); INSERT(user_id,title,size,cover_template_id)/UPDATE(title,cover_template_id,updated_at); CHECK narrowed to (draft,submitted)
-  0022_email_log.sql                  email delivery audit + idempotency (claim 'sending' → 'sent'/'failed'); service-write, admin-read. (0020/0021 still pending backlog)
+  0022_email_log.sql                  email delivery audit + idempotency (claim 'sending' → 'sent'/'failed'); service-write, admin-read. (0020/0021 now applied to production)
   0025_album_pdf_recovery.sql         album_pdfs.requested_at + attempts — backend PDF stuck-job recovery (timeout + retry cap)
   0028_support_center.sql             support_tickets + support_messages (customer-owned RLS); SECURITY DEFINER triggers (ticket-created/message audit + auto-transition) + admin RPCs (admin_set_support_status / admin_assign_support_ticket); admin-read, audited via log_audit
   0029_refund_reprint.sql             refund_requests + reprint_requests (customer-owned RLS; column-scoped grants hide admin_notes/resolved_by; partial unique index = one active per order); SECURITY DEFINER created-triggers + admin status/note RPCs. RECORDS DECISIONS ONLY — no Razorpay/payment/order-status side effects
@@ -337,9 +337,9 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 17. `drizzle/0017_admin_rpcs_and_consumption.sql` — admin RPCs + process_razorpay_event rewrite (run WITH the matching app deploy)
 18. `drizzle/0018_coupon_created_reason.sql` — coupons.created_reason + admin_create_coupon extension
 19. `drizzle/0019_lock_profile_role.sql` — column-scoped profiles grants (anti self-promotion to admin)
-19a. `drizzle/0020_photos_column_lockdown.sql` — column-scoped photos grants (deploy code first)
-19b. `drizzle/0021_album_status_hardening.sql` — column-scoped albums grants + status server-only (deploy code first)
-20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 are pending backlog, run when built)
+19a. `drizzle/0020_photos_column_lockdown.sql` — column-scoped photos grants (deploy code first) — ✅ APPLIED to production
+19b. `drizzle/0021_album_status_hardening.sql` — column-scoped albums grants + status server-only (deploy code first) — ✅ APPLIED to production
+20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 now applied to production)
 21. `drizzle/0025_album_pdf_recovery.sql` — album_pdfs.requested_at + attempts (backend PDF recovery)
 22. `drizzle/0028_support_center.sql` — Support Center (tickets + messages); **run SQL FIRST** (new code reads these tables/RPCs)
 23. `drizzle/0029_refund_reprint.sql` — Refund & Reprint requests; **run SQL FIRST** (new code reads these tables/RPCs)
@@ -1206,9 +1206,9 @@ security, or architecture change.
 - Pre-press PDF tuning (exact bleed/DPI/ICC for the print partner)
 - Travel agency portal (`/agency`)
 - ✅ Pre-launch hardening `0020` (photos column lockdown) + `0021` (albums.status
-  hardening) are now WRITTEN + paired code shipped (createAlbum drops explicit status;
-  submitAlbum writes status via service role). **Deploy order: ship code FIRST, then run
-  the SQL.** Not yet applied to the production DB.
+  hardening) are WRITTEN + paired code shipped (createAlbum drops explicit status;
+  submitAlbum writes status via service role) **and now APPLIED to the production DB**
+  (code shipped first, then the SQL was run). No longer a backlog item.
 
 ## Checkout copies + coupon UI (Stage D) — built
 

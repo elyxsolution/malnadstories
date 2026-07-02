@@ -58,13 +58,18 @@ function composePeriod(from: string, to: string): string {
  * Memories so the existing Uploader can upload into it; Review opens the existing builder
  * (optionally after a deterministic "Build it for me" auto-layout). No AI.
  */
+type CoverTemplateOption = { id: string; name: string; previewUrl: string | null };
+
 export default function CreateWizard({
   products,
   covers,
+  coverTemplates = [],
   templates = [],
 }: {
   products: Product[];
   covers: CoverOption[];
+  /** Active builder-JSON cover DESIGN templates (0040) — a fully-editable starting point. */
+  coverTemplates?: CoverTemplateOption[];
   /** Active layout presets — feed the deterministic auto-layout for varied "Build it for me". */
   templates?: TemplateChoice[];
 }) {
@@ -79,7 +84,14 @@ export default function CreateWizard({
   const [toDate, setToDate] = useState('');
   const [description, setDescription] = useState('');
   const [productId, setProductId] = useState(products[0]?.id ?? '');
+  // Cover choice is one of three, mutually exclusive:
+  //   coverId    → legacy PNG artwork · designId → builder-JSON design template · customCover → blank
   const [coverId, setCoverId] = useState<string | null>(null);
+  const [designId, setDesignId] = useState<string | null>(null);
+  const [customCover, setCustomCover] = useState(false);
+  const pickArtwork = (id: string) => { setCoverId(id); setDesignId(null); setCustomCover(false); };
+  const pickDesign = (id: string) => { setDesignId(id); setCoverId(null); setCustomCover(false); };
+  const pickCustom = () => { setCustomCover(true); setCoverId(null); setDesignId(null); };
   const [showDetails, setShowDetails] = useState(!!destination || !!fromDate || !!toDate || !!description);
 
   // Created album + photos
@@ -168,7 +180,9 @@ export default function CreateWizard({
     const res = await createAlbumDraft({
       title: title.trim(),
       productId,
-      coverTemplateId: coverId,
+      // Exactly one cover source (or neither, for a blank custom cover).
+      coverTemplateId: coverId ?? undefined,
+      coverDesignTemplateId: designId ?? undefined,
       destination,
       travelDates: travelPeriod,
       description,
@@ -199,9 +213,11 @@ export default function CreateWizard({
     go(step + 1);
   };
 
+  // A cover choice is required at Format: a PNG artwork, a design template, or an explicit blank.
+  const hasCoverChoice = !!coverId || !!designId || customCover;
   const canContinue = (() => {
     if (step === 0) return title.trim().length > 0 && !dateError;
-    if (step === 1) return !!productId && !!coverId;
+    if (step === 1) return !!productId && hasCoverChoice;
     return true;
   })();
 
@@ -415,19 +431,48 @@ export default function CreateWizard({
               <p className="text-center font-display text-sm italic text-muted-foreground">
                 Pages and cover are bound in this size. Layouts and photos remain fully flexible while building.
               </p>
-              <div>
-                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Cover design</p>
-                {covers.length === 0 ? (
-                  <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-                    No cover designs are available yet.
+              {/* Cover templates — full designs, fully editable after you pick one. */}
+              {coverTemplates.length > 0 && (
+                <div>
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Cover templates · a designed starting point you can fully edit
                   </p>
-                ) : (
+                  <div className="grid grid-cols-3 gap-3">
+                    {coverTemplates.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => !locked && pickDesign(t.id)}
+                        disabled={locked}
+                        className={`overflow-hidden rounded-xl border bg-muted text-left transition-all ${
+                          designId === t.id ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-ring'
+                        } ${locked ? 'opacity-60' : ''}`}
+                      >
+                        <div className="relative aspect-[3/4] w-full">
+                          {t.previewUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={t.previewUrl} alt={t.name} className="absolute inset-0 h-full w-full object-cover" />
+                          ) : (
+                            <span className="absolute inset-0 grid place-items-center text-xs text-muted-foreground">{t.name}</span>
+                          )}
+                        </div>
+                        <span className="block truncate px-2 py-1.5 text-xs font-medium">{t.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Legacy uploaded-artwork covers (kept for back-compat). */}
+              {covers.length > 0 && (
+                <div>
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Cover artwork</p>
                   <div className="grid grid-cols-3 gap-3">
                     {covers.map((c) => (
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => !locked && setCoverId(c.id)}
+                        onClick={() => !locked && pickArtwork(c.id)}
                         disabled={locked}
                         className={`overflow-hidden rounded-xl border bg-muted text-left transition-all ${
                           coverId === c.id ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-ring'
@@ -441,8 +486,26 @@ export default function CreateWizard({
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {/* Custom (blank) cover — design it from scratch in the builder. */}
+              <button
+                type="button"
+                onClick={() => !locked && pickCustom()}
+                disabled={locked}
+                className={`flex w-full items-center gap-3 rounded-xl border p-4 text-left transition-all ${
+                  customCover ? 'ring-2 ring-primary' : 'hover:ring-2 hover:ring-ring'
+                } ${locked ? 'opacity-60' : ''}`}
+              >
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+                  <ImageIcon className="h-5 w-5" />
+                </span>
+                <span>
+                  <span className="block text-sm font-medium">Custom cover</span>
+                  <span className="block text-xs text-muted-foreground">Start from a blank cover and design it yourself.</span>
+                </span>
+              </button>
               {locked && (
                 <p className="text-center text-xs text-muted-foreground">
                   Your album is created — size &amp; cover are set. You can adjust photos and layout in the builder.

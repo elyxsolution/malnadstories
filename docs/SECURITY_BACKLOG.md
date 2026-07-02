@@ -1,20 +1,22 @@
 # Pre-launch Security Hardening Backlog
 
-> **STATUS (authored):** `0020` and `0021` are now WRITTEN as
+> **STATUS: ✅ DONE — APPLIED TO PRODUCTION.** `0020` and `0021` are WRITTEN as
 > `drizzle/0020_photos_column_lockdown.sql` and `drizzle/0021_album_status_hardening.sql`,
-> with their paired code changes shipped (`createAlbum` no longer inserts `status`;
-> `submitAlbum` writes `status` via the service role). The migration designs below were
-> **drift-corrected** before authoring — the original `0021` sketch predated the cover
-> feature and omitted `cover_template_id`/`updated_at` from the album grants (which would
-> have broken `selectCover` and `createAlbum`). **Deploy order: ship the code FIRST, then
-> run the SQL in the Supabase Dashboard.** They are NOT yet applied to production.
+> their paired code changes are shipped (`createAlbum` no longer inserts `status`;
+> `submitAlbum` writes `status` via the service role), and **the SQL has now been run
+> against the production DB** (code was shipped first, then the migrations were applied
+> in the Supabase Dashboard). The migration designs below were **drift-corrected** before
+> authoring — the original `0021` sketch predated the cover feature and omitted
+> `cover_template_id`/`updated_at` from the album grants (which would have broken
+> `selectCover` and `createAlbum`). This backlog is closed; the notes below are retained
+> for historical/audit reference.
 
 These close the remaining "client can write server-controlled columns" findings from the
 admin/payment security reviews — the same class as the `0019` `profiles.role` fix.
 
 ---
 
-## 0020_photos_column_lockdown.sql — MEDIUM
+## 0020_photos_column_lockdown.sql — MEDIUM — ✅ APPLIED TO PRODUCTION
 
 ### Risk assessment
 `authenticated` holds table-wide `INSERT/UPDATE/DELETE` on **all** `photos` columns
@@ -54,7 +56,7 @@ write the migration, then test upload → process → edit → delete end-to-end
 
 ---
 
-## 0021_album_status_hardening.sql — MEDIUM
+## 0021_album_status_hardening.sql — MEDIUM — ✅ APPLIED TO PRODUCTION
 
 ### Risk assessment
 `authenticated` can write `albums.status` directly (full CRUD, no column lock, no
@@ -96,7 +98,8 @@ migration, verify create → build → submit → checkout and that a direct
 
 ---
 
-## Sequencing
-Both are **pre-launch** (not blockers for Stage D, which doesn't touch these tables).
-Recommended order: `0020` (pure grants, ~30 min) then `0021` (grants + the `submitAlbum`
-service-role change). Run each migration **with** its matching app deploy.
+## Sequencing — ✅ COMPLETED
+Both were **pre-launch** (not blockers for Stage D, which doesn't touch these tables).
+They were applied in the recommended order: `0020` (pure grants) then `0021` (grants +
+the `submitAlbum` service-role change), each **with** its matching app deploy (code
+first, then SQL). Both are now live in production; nothing further to do here.
