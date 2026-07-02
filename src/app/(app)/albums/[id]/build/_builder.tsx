@@ -38,7 +38,8 @@ import BackgroundsPanel from './_panel-backgrounds';
 import QrPanel from './_panel-qr';
 import TextPanel from './_panel-text';
 import ShortcutsOverlay from './_shortcuts';
-import Assistant, { type AssistKind } from './_assistant';
+import BuildMethod, { type BuilderBlueprint } from './_build-method';
+import BlueprintPicker from '../../new/_blueprint-picker';
 import Proposal from './_proposal';
 import CoverCanvas, { COVER_NO_SELECTION, type CoverSelection, type CoverSide } from './_cover-canvas';
 import { CoverSpread } from './_cover-render';
@@ -53,7 +54,6 @@ import {
   autoLayout,
   regenerate,
   fillEmptyFrames,
-  orderByDate,
   summarizePlan,
   type EnginePhoto,
 } from '@/lib/builder/auto-layout';
@@ -76,6 +76,7 @@ import {
 } from '@/lib/builder/model';
 import { PAIR_ASPECT, makeText, makeSticker, makeQr, type LayoutPreset } from '@/lib/builder/elements';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
+import { applyBlueprint } from '@/lib/builder/blueprint';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
@@ -89,6 +90,9 @@ import { STUDIO_PRIMARY } from './_ui';
 // The flipbook (react-pageflip) is a client-only modal — load it on demand and skip SSR so
 // the library never touches `window` during render, and its bundle only ships when opened.
 const Flipbook = dynamic(() => import('./_flipbook'), { ssr: false });
+
+/** Custom-mode auto-fill kinds (Fill Empty / Replace All / Randomize). Replaces the old AssistKind. */
+type LayoutKind = 'build' | 'fill' | 'suggest';
 
 type RailTab = 'images' | 'layouts' | 'templates' | 'text' | 'stickers' | 'backgrounds' | 'qr';
 // 'layouts' is content-page only; 'templates' (cover designs) is cover-only. The rail is filtered
@@ -117,6 +121,7 @@ export default function Builder({
   initialReview,
   layoutTemplates = [],
   coverTemplates = [],
+  blueprints = [],
   canSaveBlueprint = false,
   blueprintDraftOf = null,
   stickerCatalog = [],
@@ -136,6 +141,8 @@ export default function Builder({
   layoutTemplates?: ActiveTemplate[];
   /** Active cover-design templates (Task 2) — applied into cover_config, fully editable after. */
   coverTemplates?: BuilderCoverTemplate[];
+  /** Active whole-album blueprints for THIS album size (0043) — the "Build it for me" workflow. */
+  blueprints?: BuilderBlueprint[];
   /** Admin (content/super_admin) only — enables "Save as Blueprint" (0043). */
   canSaveBlueprint?: boolean;
   /** When set, this album is a blueprint-editing draft (0046) — "Save" updates that blueprint. */
@@ -183,9 +190,11 @@ export default function Builder({
   const [flipbookOpen, setFlipbookOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  // "Build it for me" → the 3-option Blueprint workflow (Full Auto / Choose / Custom) + its picker.
+  const [buildMethodOpen, setBuildMethodOpen] = useState(false);
+  const [bpPickerOpen, setBpPickerOpen] = useState(false);
   const [proposal, setProposal] = useState<{
-    kind: AssistKind;
+    kind: LayoutKind;
     strategy: number;
     blocks: Block[];
     title: string;
@@ -573,7 +582,7 @@ export default function Builder({
   const availableEngine = availablePhotos.map((p): EnginePhoto => ({ id: p.id, width: p.width ?? null, height: p.height ?? null, takenAt: p.takenAt }));
   const templateChoices = useMemo(() => layoutTemplates.map((t) => ({ base: t.geometry.base, overlays: t.geometry.overlays })), [layoutTemplates]);
 
-  const generate = (kind: AssistKind, strategy = 0) => {
+  const generate = (kind: LayoutKind, strategy = 0) => {
     let proposed: Block[];
     let title2: string;
     switch (kind) {
@@ -589,13 +598,33 @@ export default function Builder({
         proposed = fillEmptyFrames(blocks, availableEngine);
         title2 = 'Fill empty frames';
         break;
-      case 'date':
-        proposed = orderByDate(blocks, enginePhotos);
-        title2 = 'Organize by date';
-        break;
     }
     setProposal({ kind, strategy, blocks: proposed, title: title2, summary: summarizePlan(proposed, enginePhotos.length) });
-    setAssistantOpen(false);
+    setBuildMethodOpen(false);
+  };
+
+  // ── Blueprint apply (reuses the wizard's workflow inside the builder) ────────────
+  // The default blueprint Full Auto uses (admin's default for this size, else closest capacity).
+  const defaultBlueprint: BuilderBlueprint | null = blueprints.length
+    ? blueprints.find((b) => b.isDefault) ??
+      blueprints.reduce((best, b) => (Math.abs(b.slotCount - enginePhotos.length) < Math.abs(best.slotCount - enginePhotos.length) ? b : best), blueprints[0])
+    : null;
+
+  // Apply a blueprint to the CURRENT album (client-side, reusing pure applyBlueprint), then the user
+  // reviews + Saves — identical persistence to the existing "apply proposal" path.
+  const applyBlueprintInBuilder = (bp: BuilderBlueprint, autoPlace: boolean) => {
+    const ids = autoPlace ? enginePhotos.map((p) => p.id) : []; // enginePhotos are date-ordered (page load)
+    api.replaceAll(applyBlueprint(bp.blueprint, ids));
+    setCurrent(0);
+    setBuildMethodOpen(false);
+    setBpPickerOpen(false);
+    setMessage({ kind: 'ok', text: `Applied “${bp.name}” — review it, then Save.` });
+  };
+
+  // Full Auto → the default blueprint (or, with no blueprints for this size, the deterministic auto-layout).
+  const runFullAuto = () => {
+    if (defaultBlueprint) applyBlueprintInBuilder(defaultBlueprint, true);
+    else generate('build', 0);
   };
   const acceptProposal = () => {
     if (!proposal) return;
@@ -837,7 +866,7 @@ export default function Builder({
                 canAddTemplate={(t) => canAdd(blocks, size, t)}
                 onAddBlock={addBlock}
                 onApplyPreset={applyPreset}
-                onAutoLayout={() => setAssistantOpen(true)}
+                onAutoLayout={() => setBuildMethodOpen(true)}
                 canAutoLayout={enginePhotos.length > 0}
               />
             )}
@@ -943,7 +972,7 @@ export default function Builder({
           ) : (
           <div className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10">
             {blocks.length === 0 ? (
-              <EmptyCanvas onBuild={() => generate('build', 0)} onAdd={() => addBlock('single-pair')} canBuild={enginePhotos.length > 0} />
+              <EmptyCanvas onBuild={() => setBuildMethodOpen(true)} onAdd={() => addBlock('single-pair')} canBuild={enginePhotos.length > 0} />
             ) : editLayout === 'grid' ? (
               <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2">
                 {blocks.map((b, i) => (
@@ -1216,7 +1245,40 @@ export default function Builder({
         />
       )}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
-      {assistantOpen && <Assistant onAction={(kind) => generate(kind, 0)} onClose={() => setAssistantOpen(false)} photoCount={enginePhotos.length} availableCount={availableEngine.length} hasLayout={blocks.length > 0} />}
+      {/* "Build it for me" — the SAME Auto Create / Choose Blueprint / Custom workflow as the wizard. */}
+      {buildMethodOpen && (
+        <BuildMethod
+          albumSize={size}
+          uploaded={enginePhotos.length}
+          defaultTarget={defaultBlueprint}
+          blueprintCount={blueprints.length}
+          onFullAuto={runFullAuto}
+          onChoose={() => {
+            setBuildMethodOpen(false);
+            setBpPickerOpen(true);
+          }}
+          onFillEmpty={() => generate('fill', 0)}
+          onReplaceAll={() => generate('build', 0)}
+          onRandomize={() => generate('suggest', 0)}
+          onUploadMore={() => {
+            setBuildMethodOpen(false);
+            setRailTab('images');
+          }}
+          onClose={() => setBuildMethodOpen(false)}
+        />
+      )}
+      {bpPickerOpen && (
+        <BlueprintPicker
+          blueprints={blueprints}
+          uploaded={enginePhotos.length}
+          busy={false}
+          onApply={(id, autoPlace) => {
+            const bp = blueprints.find((b) => b.id === id);
+            if (bp) applyBlueprintInBuilder(bp, autoPlace);
+          }}
+          onClose={() => setBpPickerOpen(false)}
+        />
+      )}
 
       {/* Admin blueprint EDIT mode (0046): saving updates the SAME blueprint, then returns to admin. */}
       {blueprintDraftOf ? (

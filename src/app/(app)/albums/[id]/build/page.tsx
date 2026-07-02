@@ -22,7 +22,7 @@ import {
 } from '@/lib/builder/model';
 import { listActiveCoverOptions } from '@/lib/covers';
 import { listActiveStickers, resolveStickerUrls } from '@/lib/stickers';
-import { listActiveTemplates } from '@/lib/templates/catalog';
+import { listActiveTemplates, listActiveBlueprints } from '@/lib/templates/catalog';
 import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
 import { builderFontVars } from '@/lib/fonts';
@@ -162,6 +162,28 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     blueprintDraftOf = (draftRow as { blueprint_draft_of?: string | null } | null)?.blueprint_draft_of ?? null;
   }
 
+  // Active whole-album Blueprints for THIS album size — the builder's "Build it for me" now offers
+  // the SAME Auto Create / Choose Blueprint / Custom workflow as the creation wizard (reused).
+  const blueprints = (await listActiveBlueprints())
+    .filter((b) => b.pageCount === album.size)
+    .map((b) => ({
+      id: b.id,
+      name: b.name,
+      description: b.description,
+      category: b.category,
+      pageCount: b.pageCount,
+      slotCount: b.slotCount,
+      recommendedPhotos: b.recommendedPhotos,
+      featured: b.featured,
+      popular: b.popular,
+      pinned: b.pinned,
+      isDefault: b.isDefault,
+      isNew: b.isNew,
+      breakdown: b.breakdown,
+      thumbUrl: b.thumbUrl,
+      blueprint: b.blueprint,
+    }));
+
   const coverTemplates = (await listActiveCoverTemplates()).map((t) => ({
     id: t.id,
     name: t.name,
@@ -294,6 +316,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialReview={initialReview}
         layoutTemplates={layoutTemplates}
         coverTemplates={coverTemplates}
+        blueprints={blueprints}
         canSaveBlueprint={canSaveBlueprint}
         blueprintDraftOf={blueprintDraftOf}
         stickerCatalog={stickerCatalog}
