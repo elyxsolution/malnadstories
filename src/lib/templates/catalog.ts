@@ -81,16 +81,20 @@ export type ActiveBlueprint = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  isNew: boolean;
   blueprint: Blueprint;
   thumbKey: string | null;
 };
+
+/** A blueprint is "Recently added" within this window. */
+const BLUEPRINT_NEW_DAYS = 21;
 
 const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
   const startedAt = Date.now();
   const svc = createServiceClient();
   const { data } = await svc
     .from('layout_templates')
-    .select('id, name, description, category, page_count, slot_count, recommended_photos, featured, popular, pinned, blueprint, thumb_key')
+    .select('id, name, description, category, page_count, slot_count, recommended_photos, featured, popular, pinned, blueprint, thumb_key, created_at')
     .eq('status', 'active')
     .not('blueprint', 'is', null)
     .order('pinned', { ascending: false })
@@ -112,8 +116,10 @@ const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
     pinned: boolean;
     blueprint: unknown;
     thumb_key: string | null;
+    created_at: string;
   }[];
 
+  const newCutoff = Date.now() - BLUEPRINT_NEW_DAYS * 24 * 60 * 60 * 1000;
   const out: ActiveBlueprint[] = [];
   for (const r of rows) {
     const bp = normalizeBlueprint(r.blueprint);
@@ -129,6 +135,7 @@ const fetchActiveBlueprints = async (): Promise<ActiveBlueprint[]> => {
       featured: r.featured,
       popular: r.popular,
       pinned: r.pinned,
+      isNew: new Date(r.created_at).getTime() >= newCutoff,
       blueprint: bp,
       thumbKey: r.thumb_key,
     });

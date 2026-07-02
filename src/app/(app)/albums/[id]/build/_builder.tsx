@@ -290,6 +290,8 @@ export default function Builder({
     (s, b) => s + Math.max(0, requiredBaseCount(b.template) - b.photoIds.filter(Boolean).length),
     0,
   );
+  // Blueprint/layout CAPACITY = every base + overlay photo slot across the current spreads.
+  const totalSlots = blocks.reduce((s, b) => s + requiredBaseCount(b.template) + b.overlays.length, 0);
   const trayQuery = traySearch.trim().toLowerCase();
   const visiblePhotos = photos.filter((p) => {
     if (trayQuery && !p.filename.toLowerCase().includes(trayQuery)) return false;
@@ -794,8 +796,9 @@ export default function Builder({
                     </span>
                   </div>
                   <Uploader albumId={albumId} remaining={photoCap(size) - photos.length} onUploaded={onUploaded} ensureWorkerReady={ensureReady} />
-                  {/* Photo indicators — placed / remaining frames / unused (Auto Photo Placement telemetry). */}
-                  <div className="mt-3 grid grid-cols-3 gap-1.5 text-center">
+                  {/* Live photo indicators — capacity / placed / remaining frames / unused. */}
+                  <div className="mt-3 grid grid-cols-2 gap-1.5 text-center">
+                    <PhotoStat label="Capacity" value={totalSlots} />
                     <PhotoStat label="Placed" value={placedCount} />
                     <PhotoStat label="Empty frames" value={emptyBaseSlots} tone={emptyBaseSlots > 0 ? 'warning' : 'ok'} />
                     <PhotoStat label="Unused" value={readyUnplaced.length} tone={readyUnplaced.length > 0 ? 'muted' : 'ok'} />

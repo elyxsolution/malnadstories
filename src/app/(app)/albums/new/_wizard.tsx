@@ -16,7 +16,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY, Sprig } from '@/components/brand';
-import { Wand2 } from 'lucide-react';
 import { createAlbumDraft } from '@/lib/actions/albums';
 import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
 import { photoCap, type Block } from '@/lib/builder/model';
@@ -24,11 +23,23 @@ import { autoLayout, summarizePlan, serializeBlocks, type EnginePhoto, type Temp
 import Book from '@/components/book';
 import Uploader, { type Photo } from '../[id]/build/_uploader';
 import Proposal from '../[id]/build/_proposal';
+import BlueprintPicker from './_blueprint-picker';
+import { LayoutTemplate, Sparkles, Dices } from 'lucide-react';
 import type { CoverOption } from '@/lib/covers';
 
 type Product = { id: string; name: string; pages: number; basePrice: string };
 
-const STEPS = ['Begin', 'Format', 'Memories', 'Review'] as const;
+const STEPS = ['Begin', 'Format', 'Memories', 'Create'] as const;
+
+// Auto Create staged loading copy (Step 5).
+const AUTO_STAGES = [
+  'Finding suitable templates…',
+  'Comparing photo capacity…',
+  'Selecting the best blueprint…',
+  'Placing your photos…',
+  'Preparing your album…',
+  'Opening the builder…',
+] as const;
 const ROMAN = ['I', 'II', 'III', 'IV'];
 const LAST_STEP = STEPS.length - 1; // 3 (Review)
 
@@ -70,6 +81,7 @@ export type WizardBlueprint = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  isNew: boolean;
   thumbUrl: string | null;
 };
 
@@ -126,6 +138,9 @@ export default function CreateWizard({
   const [bpError, setBpError] = useState<string | null>(null);
   const [bpPickerOpen, setBpPickerOpen] = useState(false);
   const [bpResult, setBpResult] = useState<{ name: string; capacity: number; placed: number; unused: number } | null>(null);
+  // Auto Create staged loading (Step 5).
+  const [autoCreating, setAutoCreating] = useState(false);
+  const [autoStage, setAutoStage] = useState(0);
 
   const product = products.find((p) => p.id === productId);
   const cap = product ? photoCap(product.pages) : 100;
@@ -286,17 +301,6 @@ export default function CreateWizard({
     setTimeout(() => router.push(`/albums/${albumId}/build`), 750);
   };
 
-  // Option 1 — auto-select the closest-capacity blueprint for this size + photo count, then place.
-  const runAutoSelect = async () => {
-    if (!albumId) return;
-    setBpBusy(true);
-    setBpError(null);
-    const res = await autoSelectAndApplyBlueprint({ albumId });
-    setBpBusy(false);
-    if (!res.ok) return setBpError(res.error);
-    setBpResult({ name: res.blueprintName, capacity: res.capacity, placed: res.placed, unused: res.unused });
-  };
-
   // Option 2 — apply a chosen blueprint (optionally auto-placing photos).
   const runApplyBlueprint = async (bpId: string, autoPlace: boolean) => {
     if (!albumId) return;
@@ -314,7 +318,52 @@ export default function CreateWizard({
     }
   };
 
-  const continueLabel = ['Continue', 'Continue', 'Review', 'Open the builder'][step];
+  // ── Auto Create (Step 5) — staged "beautiful loading", then blueprint auto-select (or, if no
+  // matching blueprints exist, the deterministic auto-layout). Always ends in the builder. ───────
+  const runAutoCreate = async () => {
+    if (!albumId || !product) return;
+    setBpError(null);
+    setAutoStage(0);
+    setAutoCreating(true);
+    // Advance the visible stages on a gentle cadence while the real work runs underneath.
+    const timer = setInterval(() => setAutoStage((s: number) => Math.min(s + 1, AUTO_STAGES.length - 2)), 700);
+    const startedAt = Date.now();
+
+    let ok = false;
+    let errMsg: string | null = null;
+    try {
+      if (matchingBlueprints.length > 0) {
+        const res = await autoSelectAndApplyBlueprint({ albumId });
+        ok = res.ok;
+        if (!res.ok) errMsg = res.error;
+      } else {
+        // Graceful fallback: no blueprint for this size → deterministic auto-layout.
+        const blocks = autoLayout(enginePhotos, product.pages, 0, templates);
+        const res = await saveLayout({ albumId, blocks: serializeBlocks(blocks) });
+        ok = res.ok;
+        if (!res.ok) errMsg = res.error;
+      }
+    } catch {
+      errMsg = 'Something went wrong. Please try again.';
+    }
+    clearInterval(timer);
+
+    // Ensure the loader is on-screen at least ~2.6s so it never flashes.
+    const wait = Math.max(0, 2600 - (Date.now() - startedAt));
+    await new Promise((r) => setTimeout(r, wait));
+    if (!ok) {
+      setAutoCreating(false);
+      setBpError(errMsg ?? 'Could not auto-create your album.');
+      return;
+    }
+    setAutoStage(AUTO_STAGES.length - 1);
+    setTimeout(() => router.push(`/albums/${albumId}/build`), 500);
+  };
+
+  const featuredCount = matchingBlueprints.filter((b) => b.featured || b.pinned).length;
+  const categoryCount = new Set(matchingBlueprints.map((b) => b.category)).size;
+
+  const continueLabel = ['Continue', 'Continue', 'Continue', 'Open the builder'][step];
 
   return (
     <div className="brand-surface flex min-h-[calc(100vh-3.5rem)] flex-col">
@@ -632,11 +681,14 @@ export default function CreateWizard({
           {step === 3 && (
             <div className="space-y-6">
               <div className="text-center">
-                <Eyebrow chapter="IV" label="Review" center />
+                <Eyebrow chapter="IV" label="Create" center />
                 <h1 className="mt-3 font-display text-[2.4rem] font-semibold leading-none tracking-tight">
-                  Ready to begin building.
+                  Choose how to build your album.
                 </h1>
-                <p className="mt-3 text-[15px] text-muted-foreground">One last look before you step into the builder.</p>
+                <p className="mx-auto mt-3 max-w-lg text-[15px] text-muted-foreground">
+                  Three ways to turn your {ready.length} photo{ready.length === 1 ? '' : 's'} into a finished book — pick the
+                  one that suits you. You can always edit everything in the builder afterwards.
+                </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-[1.3fr_1fr]">
                 <div className="rounded-2xl border bg-card p-6">
@@ -670,44 +722,56 @@ export default function CreateWizard({
                 </div>
               </div>
 
-              {/* Start from a whole-album Blueprint (0043) — Options 1 & 2. */}
-              {matchingBlueprints.length > 0 && (
-                <div className="rounded-2xl border p-5">
-                  <p className="font-display text-[17px] font-semibold tracking-tight">Start from a blueprint</p>
-                  <p className="mt-1 text-[13px] text-muted-foreground">
-                    A blueprint is a whole-album layout ({product?.pages} pages). We place your {ready.length} photo
-                    {ready.length === 1 ? '' : 's'} into it — you can edit everything afterwards.
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button onClick={runAutoSelect} disabled={bpBusy || !albumId} className={LUX_PRIMARY}>
-                      {bpBusy ? <Loader2 className="animate-spin" /> : <Wand2 />} Auto-select best fit
-                    </Button>
-                    <Button variant="outline" onClick={() => setBpPickerOpen(true)} disabled={bpBusy}>
-                      <ImageIcon /> Choose a blueprint ({matchingBlueprints.length})
-                    </Button>
-                  </div>
-                  {bpError && <p className="mt-2 text-sm text-destructive">{bpError}</p>}
-                </div>
-              )}
-
-              {/* Build it for me — deterministic auto-layout, previewed before it saves. */}
-              <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-gold/30 bg-gold/[0.05] p-5">
-                <div className="flex items-center gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/[0.07] text-primary ring-1 ring-primary/15">
-                    <Wand2 className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="font-display text-[17px] font-semibold tracking-tight">Build it for me</p>
-                    <p className="text-[13px] text-muted-foreground">
-                      I’ll arrange your {ready.length} photo{ready.length === 1 ? '' : 's'} into a full album — you preview
-                      it before anything is saved. Or open the builder to choose layouts yourself.
-                    </p>
-                  </div>
-                </div>
-                <Button onClick={() => buildForMe(0)} disabled={ready.length === 0 || !albumId} className={LUX_PRIMARY}>
-                  <Wand2 /> Generate my album
-                </Button>
+              {/* CHOOSE HOW TO BUILD — three intentional cards (Step 1). */}
+              <div className="grid gap-4 md:grid-cols-3">
+                {/* 1 · Auto Create */}
+                <MethodCard
+                  emoji="🎲"
+                  Icon={Dices}
+                  title="Auto Create"
+                  desc="We’ll pick the most suitable album blueprint for your photos and place them automatically. A beautiful album in seconds."
+                  stats={[
+                    { label: 'Pages', value: `${product?.pages ?? ''}` },
+                    { label: 'Photos', value: `${ready.length}` },
+                    { label: 'Ready in', value: '~ seconds' },
+                  ]}
+                  cta="Auto Create Album"
+                  onClick={runAutoCreate}
+                  disabled={!albumId || autoCreating}
+                  primary
+                />
+                {/* 2 · Choose a Template */}
+                <MethodCard
+                  emoji="📚"
+                  Icon={LayoutTemplate}
+                  title="Choose a Template"
+                  desc="Browse professionally designed album blueprints and pick the style you like — then place your photos."
+                  stats={
+                    matchingBlueprints.length > 0
+                      ? [
+                          { label: 'Templates', value: `${matchingBlueprints.length}` },
+                          { label: 'Categories', value: `${categoryCount}` },
+                          { label: 'Featured', value: `${featuredCount}` },
+                        ]
+                      : [{ label: '', value: 'No templates for this size yet' }]
+                  }
+                  cta="Browse Templates"
+                  onClick={() => setBpPickerOpen(true)}
+                  disabled={matchingBlueprints.length === 0 || autoCreating}
+                />
+                {/* 3 · Design My Own */}
+                <MethodCard
+                  emoji="✨"
+                  Icon={Sparkles}
+                  title="Design My Own"
+                  desc="Start with a blank album and design every page exactly how you want, with full control in the builder."
+                  stats={[{ label: '', value: 'Full creative control' }]}
+                  cta="Open Builder"
+                  onClick={launchBuilder}
+                  disabled={!albumId || autoCreating}
+                />
               </div>
+              {bpError && <p className="text-center text-sm text-destructive">{bpError}</p>}
             </div>
           )}
 
@@ -728,11 +792,14 @@ export default function CreateWizard({
           {step === 2 && photos.length > 0 ? `${photos.length} of ${cap} photos · ≈ ${estPages} pages` : ''}
         </div>
         <div className="flex min-w-[120px] justify-end">
-          <Button onClick={next} disabled={!canContinue || creating} className={LUX_PRIMARY}>
-            {creating ? <Loader2 className="animate-spin" /> : null}
-            {continueLabel}
-            {!creating && (step === LAST_STEP ? <ImageIcon /> : <ArrowRight />)}
-          </Button>
+          {/* The final "Create" step's actions live in the three method cards — no competing footer CTA. */}
+          {step < LAST_STEP && (
+            <Button onClick={next} disabled={!canContinue || creating} className={LUX_PRIMARY}>
+              {creating ? <Loader2 className="animate-spin" /> : null}
+              {continueLabel}
+              {!creating && <ArrowRight />}
+            </Button>
+          )}
         </div>
       </footer>
 
@@ -753,53 +820,15 @@ export default function CreateWizard({
         />
       )}
 
-      {/* Blueprint picker (Option 2) */}
+      {/* Premium template browser (Steps 2 & 3) */}
       {bpPickerOpen && (
-        <div className="animate-fade-in fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={() => setBpPickerOpen(false)}>
-          <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-elevated" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b px-5 py-3">
-              <h2 className="font-display text-lg font-semibold">Choose a blueprint</h2>
-              <button type="button" onClick={() => setBpPickerOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
-            </div>
-            <div className="ms-scroll grid flex-1 grid-cols-2 gap-4 overflow-y-auto p-5 sm:grid-cols-3">
-              {matchingBlueprints.map((b) => {
-                const diff = ready.length - b.slotCount;
-                const fit = diff === 0 ? 'Perfect fit' : diff < 0 ? `${-diff} slots to spare` : `${diff} photos won't fit`;
-                const fitTone = diff === 0 ? 'text-primary' : diff < 0 ? 'text-muted-foreground' : 'text-warning';
-                return (
-                  <div key={b.id} className="flex flex-col overflow-hidden rounded-xl border bg-card">
-                    <div className="relative aspect-[4/3] w-full bg-muted">
-                      {b.thumbUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={b.thumbUrl} alt={b.name} className="absolute inset-0 h-full w-full object-cover" />
-                      ) : (
-                        <span className="absolute inset-0 grid place-items-center text-center text-xs text-muted-foreground">
-                          {b.pageCount} pages · {b.slotCount} slots
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex flex-1 flex-col p-3">
-                      <p className="truncate text-sm font-medium" title={b.name}>{b.name}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {b.pageCount} pages · holds {b.slotCount} · ~{b.recommendedPhotos} recommended
-                      </p>
-                      <p className={`mt-0.5 text-[11px] font-medium ${fitTone}`}>{fit}</p>
-                      <div className="mt-auto flex flex-col gap-1.5 pt-3">
-                        <Button size="sm" onClick={() => runApplyBlueprint(b.id, true)} disabled={bpBusy || ready.length === 0} className={LUX_PRIMARY}>
-                          {bpBusy ? <Loader2 className="animate-spin" /> : <Wand2 />} Use + auto place
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => runApplyBlueprint(b.id, false)} disabled={bpBusy}>
-                          Use blueprint
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {bpError && <p className="border-t px-5 py-2 text-sm text-destructive">{bpError}</p>}
-          </div>
-        </div>
+        <BlueprintPicker
+          blueprints={matchingBlueprints}
+          uploaded={ready.length}
+          busy={bpBusy}
+          onApply={runApplyBlueprint}
+          onClose={() => setBpPickerOpen(false)}
+        />
       )}
 
       {/* Blueprint applied — summary + launch (Options 1 & 2) */}
@@ -827,6 +856,26 @@ export default function CreateWizard({
               Open my album <ArrowRight />
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* AUTO CREATE — staged loading (Step 5) */}
+      {autoCreating && (
+        <div className="animate-fade-in fixed inset-0 z-[125] flex flex-col items-center justify-center bg-[linear-gradient(180deg,hsl(156_36%_12%),hsl(156_36%_8%))] px-6 text-center">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10 text-gold ring-1 ring-white/10">
+            <Dices className="h-7 w-7 animate-pulse" />
+          </span>
+          <h2 className="mt-6 font-display text-[clamp(1.9rem,5vw,2.6rem)] font-normal leading-tight text-primary-foreground">Creating your album</h2>
+          <ol className="mt-7 space-y-2.5 text-left">
+            {AUTO_STAGES.map((s, i) => (
+              <li key={s} className={`flex items-center gap-3 text-[15px] transition-all duration-300 ${i <= autoStage ? 'text-primary-foreground' : 'text-primary-foreground/30'}`}>
+                <span className={`grid h-5 w-5 flex-none place-items-center rounded-full transition-colors ${i < autoStage ? 'bg-gold text-background' : i === autoStage ? 'bg-white/15 text-gold' : 'bg-white/5'}`}>
+                  {i < autoStage ? <Check className="h-3 w-3" /> : i === autoStage ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                </span>
+                {s}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 
@@ -876,6 +925,59 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     <div className="flex items-baseline justify-between">
       <span className="text-sm text-primary-foreground/70">{label}</span>
       <span className="font-display text-2xl font-semibold tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+/** One of the three "Choose how to build" method cards (Step 1). Premium, with a single clear CTA. */
+function MethodCard({
+  emoji,
+  Icon,
+  title,
+  desc,
+  stats,
+  cta,
+  onClick,
+  disabled,
+  primary = false,
+}: {
+  emoji: string;
+  Icon: typeof ArrowRight;
+  title: string;
+  desc: string;
+  stats: { label: string; value: string }[];
+  cta: string;
+  onClick: () => void;
+  disabled?: boolean;
+  primary?: boolean;
+}) {
+  return (
+    <div
+      className={`group flex flex-col rounded-2xl border p-5 text-left transition-all duration-200 ease-glide ${
+        disabled ? 'opacity-60' : 'hover:-translate-y-1 hover:shadow-elevated'
+      } ${primary ? 'border-primary/30 bg-primary/[0.03] ring-1 ring-primary/10' : 'bg-card'}`}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-primary/[0.07] text-xl ring-1 ring-primary/15" aria-hidden>
+          {emoji}
+        </span>
+        <div>
+          <h3 className="font-display text-[18px] font-semibold tracking-tight">{title}</h3>
+          {primary && <span className="text-[11px] font-medium uppercase tracking-wide text-primary/80">Fastest</span>}
+        </div>
+      </div>
+      <p className="mt-3 flex-1 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
+      <div className="mt-4 space-y-1 border-t pt-3">
+        {stats.map((s, i) => (
+          <div key={i} className="flex items-center justify-between text-[12px]">
+            {s.label ? <span className="text-muted-foreground">{s.label}</span> : <span />}
+            <span className={`font-medium tabular-nums ${s.label ? 'text-foreground' : 'text-muted-foreground'}`}>{s.value}</span>
+          </div>
+        ))}
+      </div>
+      <Button onClick={onClick} disabled={disabled} className={`mt-4 w-full ${primary ? LUX_PRIMARY : ''}`} variant={primary ? 'default' : 'outline'}>
+        <Icon /> {cta}
+      </Button>
     </div>
   );
 }

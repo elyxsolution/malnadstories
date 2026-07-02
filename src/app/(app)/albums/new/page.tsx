@@ -39,6 +39,7 @@ export default async function NewAlbumPage() {
     featured: b.featured,
     popular: b.popular,
     pinned: b.pinned,
+    isNew: b.isNew,
     thumbUrl: b.thumbUrl,
   }));
 

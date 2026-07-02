@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, ChevronUp, ChevronDown, Search, X, Check } from 'lucide-react';
+import { Loader2, Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, ChevronUp, ChevronDown, Search, X, Check, RefreshCw, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { categoryLabel, statusChip, statusLabel } from '@/lib/templates/model';
 import {
@@ -12,6 +12,7 @@ import {
   setBlueprintFeatured,
   reorderBlueprints,
   updateBlueprintMeta,
+  regenerateBlueprintThumbnail,
 } from '@/lib/actions/admin/templates';
 
 export type BlueprintRow = {
@@ -25,6 +26,7 @@ export type BlueprintRow = {
   featured: boolean;
   popular: boolean;
   pinned: boolean;
+  thumbUrl: string | null;
   updatedAt: string;
 };
 
@@ -110,6 +112,14 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
                         <button type="button" onClick={() => move(i, -1)} disabled={busy !== null || i === 0} className="text-muted-foreground disabled:opacity-30"><ChevronUp className="h-3.5 w-3.5" /></button>
                         <button type="button" onClick={() => move(i, 1)} disabled={busy !== null || i === filtered.length - 1} className="text-muted-foreground disabled:opacity-30"><ChevronDown className="h-3.5 w-3.5" /></button>
                       </div>
+                      <div className="relative h-14 w-16 flex-none overflow-hidden rounded-md border bg-muted">
+                        {r.thumbUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={r.thumbUrl} alt={r.name} className="absolute inset-0 h-full w-full object-cover" />
+                        ) : (
+                          <span className="absolute inset-0 grid place-items-center text-muted-foreground/40"><LayoutGrid className="h-4 w-4" /></span>
+                        )}
+                      </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="truncate font-medium">{r.name}</span>
@@ -137,6 +147,7 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
                       <IconBtn label={r.popular ? 'Unmark popular' : 'Mark popular'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, popular: !r.popular }))} className={r.popular ? 'text-studio-bright' : ''}><Sparkles className="h-4 w-4" /></IconBtn>
                       <IconBtn label={r.pinned ? 'Unpin' : 'Pin'} onClick={() => run(r.id, () => setBlueprintFeatured({ id: r.id, pinned: !r.pinned }))} className={r.pinned ? 'text-studio' : ''}><Pin className="h-4 w-4" /></IconBtn>
                       <IconBtn label="Duplicate" onClick={() => run(r.id, () => duplicateTemplate({ id: r.id }))}><Copy className="h-4 w-4" /></IconBtn>
+                      <IconBtn label="Regenerate thumbnail" onClick={() => run(r.id, () => regenerateBlueprintThumbnail({ id: r.id }))}><RefreshCw className="h-4 w-4" /></IconBtn>
                       {r.status !== 'archived' && (
                         <IconBtn label="Archive" onClick={() => run(r.id, () => setTemplateStatus({ id: r.id, status: 'archived' }))} className="text-amber-600"><Archive className="h-4 w-4" /></IconBtn>
                       )}

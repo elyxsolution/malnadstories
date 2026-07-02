@@ -4,6 +4,7 @@ import { Plus, BookImage } from 'lucide-react';
 import { db } from '@/db';
 import { layoutTemplates } from '@/db/schema';
 import { requireTemplateCapability } from '@/lib/templates/access';
+import { presignGet } from '@/lib/r2';
 import BlueprintList, { type BlueprintRow } from './_blueprints';
 import {
   TEMPLATE_CATEGORIES,
@@ -70,25 +71,29 @@ export default async function AdminTemplatesPage({
       featured: layoutTemplates.featured,
       popular: layoutTemplates.popular,
       pinned: layoutTemplates.pinned,
+      thumbKey: layoutTemplates.thumbKey,
       updatedAt: layoutTemplates.updatedAt,
     })
     .from(layoutTemplates)
     .where(isNotNull(layoutTemplates.blueprint))
     .orderBy(desc(layoutTemplates.pinned), desc(layoutTemplates.featured), asc(layoutTemplates.sort), desc(layoutTemplates.updatedAt));
 
-  const blueprints: BlueprintRow[] = blueprintRows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    category: r.category,
-    status: r.status,
-    pageCount: r.pageCount ?? 0,
-    slotCount: r.slotCount ?? 0,
-    recommendedPhotos: r.recommendedPhotos ?? 0,
-    featured: r.featured,
-    popular: r.popular,
-    pinned: r.pinned,
-    updatedAt: r.updatedAt as unknown as string,
-  }));
+  const blueprints: BlueprintRow[] = await Promise.all(
+    blueprintRows.map(async (r) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      status: r.status,
+      pageCount: r.pageCount ?? 0,
+      slotCount: r.slotCount ?? 0,
+      recommendedPhotos: r.recommendedPhotos ?? 0,
+      featured: r.featured,
+      popular: r.popular,
+      pinned: r.pinned,
+      thumbUrl: r.thumbKey ? await presignGet(r.thumbKey, 3600) : null,
+      updatedAt: r.updatedAt as unknown as string,
+    })),
+  );
 
   const total = totalRes[0]?.c ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

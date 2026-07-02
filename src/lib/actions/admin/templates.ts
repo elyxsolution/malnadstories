@@ -406,6 +406,21 @@ export async function reorderBlueprints(input: unknown): Promise<TemplateSimpleR
   return { ok: true };
 }
 
+/** Re-run thumbnail generation for a blueprint (Step 8). Reuses the existing worker pipeline. */
+export async function regenerateBlueprintThumbnail(input: unknown): Promise<TemplateSimpleResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = BlueprintDeleteSchema.safeParse(input); // { id }
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  await startBlueprintThumbnail(parsed.data.id);
+  await audit(createServiceClient(), actor.userId, 'blueprint.thumbnail_regenerated', parsed.data.id, {});
+  return { ok: true };
+}
+
 /** Hard-delete a blueprint (+ its cached thumbnail). Archive (setTemplateStatus) is the soft option. */
 export async function deleteBlueprint(input: unknown): Promise<TemplateSimpleResult> {
   let actor: { userId: string };

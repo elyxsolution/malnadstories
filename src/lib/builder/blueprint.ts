@@ -77,6 +77,25 @@ export function blueprintFromBlocks(blocks: Block[]): Blueprint {
   };
 }
 
+/**
+ * Fit assessment for the picker (Step 6) — PURE. Compares an album's uploaded photo count against a
+ * blueprint's capacity (slot_count) and recommended count. Drives a visual "match" badge; no I/O.
+ */
+export type BlueprintMatchTone = 'best' | 'great' | 'good' | 'few' | 'over';
+export type BlueprintMatch = { label: string; tone: BlueprintMatchTone };
+
+export function blueprintMatch(uploaded: number, slotCount: number, recommended: number): BlueprintMatch {
+  if (slotCount <= 0) return { label: 'Great Match', tone: 'great' };
+  if (uploaded > slotCount) return { label: "Some photos won't fit", tone: 'over' };
+  if (uploaded === 0) return { label: 'Add photos to place', tone: 'few' };
+  if (uploaded === slotCount) return { label: 'Great Match', tone: 'great' };
+  const ref = recommended > 0 ? recommended : slotCount;
+  const ratio = uploaded / ref;
+  if (ratio >= 0.85) return { label: 'Recommended', tone: 'best' };
+  if (ratio >= 0.5) return { label: 'Good Match', tone: 'good' };
+  return { label: 'Requires more photos', tone: 'few' };
+}
+
 /** Deterministic seeded shuffle (Fisher–Yates, mulberry32) so "Randomize" is reproducible per seed. */
 export function shuffleIds(ids: string[], seed: number): string[] {
   const out = [...ids];
