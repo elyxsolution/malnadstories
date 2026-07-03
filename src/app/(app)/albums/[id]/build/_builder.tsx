@@ -22,7 +22,6 @@ import {
   ChevronLeft,
   ChevronRight,
   BookImage,
-  Loader2,
 } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
@@ -33,6 +32,7 @@ import Navigator from './_navigator';
 import Inspector from './_inspector';
 import BuilderHeader from './_header';
 import CanvasToolbar from './_toolbar';
+import { BlueprintHeader, ExitBlueprintDialog, type BlueprintMeta } from './_blueprint-chrome';
 import LayoutsPanel from './_panel-layouts';
 import BackgroundsPanel from './_panel-backgrounds';
 import QrPanel from './_panel-qr';
@@ -80,7 +80,7 @@ import { applyBlueprint } from '@/lib/builder/blueprint';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
-import { saveAlbumAsBlueprint, updateBlueprintFromAlbum } from '@/lib/actions/admin/templates';
+import { updateBlueprintFromAlbum, exitBlueprintDraft } from '@/lib/actions/admin/templates';
 import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { type ActiveTemplate } from '@/lib/templates/catalog';
@@ -122,8 +122,8 @@ export default function Builder({
   layoutTemplates = [],
   coverTemplates = [],
   blueprints = [],
-  canSaveBlueprint = false,
   blueprintDraftOf = null,
+  blueprintMeta = null,
   stickerCatalog = [],
   stickerUrls = {},
 }: {
@@ -143,10 +143,10 @@ export default function Builder({
   coverTemplates?: BuilderCoverTemplate[];
   /** Active whole-album blueprints for THIS album size (0043) — the "Build it for me" workflow. */
   blueprints?: BuilderBlueprint[];
-  /** Admin (content/super_admin) only — enables "Save as Blueprint" (0043). */
-  canSaveBlueprint?: boolean;
-  /** When set, this album is a blueprint-editing draft (0046) — "Save" updates that blueprint. */
+  /** When set, this album is a blueprint-editing draft (0046) — the builder enters Blueprint Mode. */
   blueprintDraftOf?: string | null;
+  /** Blueprint identity for Blueprint-Mode chrome (0046) — only present in blueprint-edit mode. */
+  blueprintMeta?: BlueprintMeta | null;
   stickerCatalog?: StickerCategory[];
   stickerUrls?: Record<string, string>;
 }) {
@@ -162,7 +162,8 @@ export default function Builder({
   const [coverConfig, setCoverConfig] = useState<CoverConfig>(initialCoverConfig);
   const coverSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [railTab, setRailTab] = useState<RailTab>('images');
+  // Blueprint Mode opens on Layouts (blueprints carry no photos); customer albums open on Images.
+  const [railTab, setRailTab] = useState<RailTab>(blueprintDraftOf ? 'layouts' : 'images');
   // Cover is page 0 of one continuous editor: `coverFocused` swaps the canvas + inspector to
   // the cover; `current` is the focused content spread otherwise.
   const [coverFocused, setCoverFocused] = useState(false);
@@ -176,8 +177,12 @@ export default function Builder({
   const [editLayout, setEditLayout] = useState<'focus' | 'grid'>('focus');
   const [zoomPct, setZoomPct] = useState(100);
   const [showGuides, setShowGuides] = useState(false);
-  // Admin-only "Save as Blueprint" (0043).
-  const [blueprintOpen, setBlueprintOpen] = useState(false);
+
+  // ── Blueprint Mode (0046) — editing a reusable blueprint, not a customer album ──
+  const blueprintMode = !!blueprintDraftOf;
+  const [blueprintSaving, setBlueprintSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<number | null>(blueprintMeta ? new Date(blueprintMeta.updatedAt).getTime() : null);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -663,6 +668,43 @@ export default function Builder({
     router.push('/dashboard');
   };
 
+  // ── Blueprint Mode persistence + exit ──────────────────────────────────────────
+  // Save Blueprint = persist the current pages (saveLayout) then distil them into THIS blueprint
+  // (updateBlueprintFromAlbum). One click, in-place — the admin keeps editing afterwards.
+  const saveBlueprint = useCallback(async (): Promise<boolean> => {
+    setBlueprintSaving(true);
+    setMessage(null);
+    const layout = await saveLayout({ albumId, blocks: api.serialize() });
+    if (!layout.ok) {
+      setBlueprintSaving(false);
+      setMessage({ kind: 'err', text: layout.error });
+      return false;
+    }
+    const res = await updateBlueprintFromAlbum({ albumId });
+    setBlueprintSaving(false);
+    if (!res.ok) {
+      setMessage({ kind: 'err', text: res.error });
+      return false;
+    }
+    api.setDirty(false);
+    setLastSaved(Date.now());
+    setMessage({ kind: 'ok', text: 'Blueprint saved.' });
+    return true;
+  }, [albumId, api]);
+
+  // Leaving Blueprint Mode returns to the admin catalog (which restores search/filters/scroll). The
+  // draft album is cleaned up server-side; an abandoned never-saved new blueprint is removed too.
+  const doExitBlueprint = useCallback(async () => {
+    setExitDialogOpen(false);
+    await exitBlueprintDraft({ albumId }); // best-effort cleanup
+    router.push('/admin/templates');
+  }, [albumId, router]);
+
+  const requestExitBlueprint = () => {
+    if (api.dirty) setExitDialogOpen(true);
+    else void doExitBlueprint();
+  };
+
   const submit = async () => {
     setSubmitting(true);
     setMessage(null);
@@ -715,7 +757,8 @@ export default function Builder({
       }
       if (mod && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
-        if (api.dirty) void save();
+        // ⌘S saves the RIGHT thing per mode: the blueprint (distil) or the customer layout.
+        if (api.dirty) void (blueprintMode ? saveBlueprint() : save());
         return;
       }
       if (typing) return;
@@ -730,6 +773,7 @@ export default function Builder({
         setEditingPhoto(null);
         setQuickCrop(null);
         setPickedId(null);
+        setExitDialogOpen(false);
         setSelection(NO_SELECTION);
       } else if (editLayout === 'focus' && e.key === 'ArrowLeft') {
         setCurrent((c) => Math.max(0, c - 1));
@@ -739,16 +783,27 @@ export default function Builder({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [api, save, editLayout, blocks.length]);
+  }, [api, save, saveBlueprint, blueprintMode, editLayout, blocks.length]);
 
-  const photoForOverview = (id: string | undefined) => {
+  const photoForOverview = (id: string | null | undefined) => {
     const p = id ? photoMap.get(id) : undefined;
     return p ? { url: p.url, edit: p.edit } : undefined;
   };
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)]">
-      <BuilderHeader email={email} status={status} saving={saving} exiting={exiting} onSaveExit={saveAndExit} />
+      {blueprintMode ? (
+        <BlueprintHeader
+          meta={blueprintMeta}
+          size={size}
+          capacity={totalSlots}
+          recommended={totalSlots}
+          lastSaved={lastSaved}
+          dirty={api.dirty}
+        />
+      ) : (
+        <BuilderHeader email={email} status={status} saving={saving} exiting={exiting} onSaveExit={saveAndExit} />
+      )}
       <CanvasToolbar
         title={albumTitle}
         status={status}
@@ -769,16 +824,21 @@ export default function Builder({
         onActualSize={resetZoom}
         onAutoAlign={autoAlignCurrent}
         canAutoAlign={canAutoAlign}
+        onBuildForMe={() => setBuildMethodOpen(true)}
         onPreview={() => setFlipbookOpen(true)}
         onSave={save}
         saving={saving}
         onSubmit={submit}
         submitting={submitting}
         albumId={albumId}
+        blueprintMode={blueprintMode}
+        onSaveBlueprint={saveBlueprint}
+        onExitBlueprint={requestExitBlueprint}
+        blueprintSaving={blueprintSaving}
       />
 
-      {/* Review banner */}
-      {review?.status === 'changes_requested' && (
+      {/* Review banner — customer-only (blueprints are never reviewed/ordered) */}
+      {!blueprintMode && review?.status === 'changes_requested' && (
         <div className="flex items-start gap-2.5 border-b border-warning/30 bg-warning/5 px-4 py-2.5 sm:px-6">
           <MessageSquareWarning className="mt-0.5 h-4 w-4 flex-none text-warning" />
           <p className="text-[13px] text-foreground">
@@ -866,8 +926,6 @@ export default function Builder({
                 canAddTemplate={(t) => canAdd(blocks, size, t)}
                 onAddBlock={addBlock}
                 onApplyPreset={applyPreset}
-                onAutoLayout={() => setBuildMethodOpen(true)}
-                canAutoLayout={enginePhotos.length > 0}
               />
             )}
 
@@ -972,7 +1030,7 @@ export default function Builder({
           ) : (
           <div className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10">
             {blocks.length === 0 ? (
-              <EmptyCanvas onBuild={() => setBuildMethodOpen(true)} onAdd={() => addBlock('single-pair')} canBuild={enginePhotos.length > 0} />
+              <EmptyCanvas blueprintMode={blueprintMode} onBuild={() => setBuildMethodOpen(true)} onAdd={() => addBlock('single-pair')} canBuild={enginePhotos.length > 0} />
             ) : editLayout === 'grid' ? (
               <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2">
                 {blocks.map((b, i) => (
@@ -1280,25 +1338,17 @@ export default function Builder({
         />
       )}
 
-      {/* Admin blueprint EDIT mode (0046): saving updates the SAME blueprint, then returns to admin. */}
-      {blueprintDraftOf ? (
-        <BlueprintEditBar albumId={albumId} />
-      ) : (
-        /* Admin-only: distil the current album's layout into a reusable Blueprint (0043). */
-        canSaveBlueprint && (
-          <>
-            <button
-              type="button"
-              onClick={() => setBlueprintOpen(true)}
-              className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-1.5 rounded-full border border-studio bg-background/95 px-3 py-2 text-[12px] font-medium text-studio shadow-elevated backdrop-blur-sm hover:bg-studio-soft"
-            >
-              <BookImage className="h-4 w-4" /> Save as Blueprint
-            </button>
-            {blueprintOpen && (
-              <SaveBlueprintDialog albumId={albumId} defaultName={albumTitle} onClose={() => setBlueprintOpen(false)} />
-            )}
-          </>
-        )
+      {/* Blueprint Mode exit confirmation (0046) — only when there are unsaved changes. */}
+      {exitDialogOpen && (
+        <ExitBlueprintDialog
+          saving={blueprintSaving}
+          onSave={async () => {
+            const ok = await saveBlueprint();
+            if (ok) await doExitBlueprint();
+          }}
+          onDiscard={doExitBlueprint}
+          onCancel={() => setExitDialogOpen(false)}
+        />
       )}
       {proposal && (
         <Proposal
@@ -1318,102 +1368,6 @@ export default function Builder({
   );
 }
 
-/** Admin blueprint EDIT bar (0046) — a persistent banner + Save that updates the SAME blueprint. */
-function BlueprintEditBar({ albumId }: { albumId: string }) {
-  const router = useRouter();
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const save = async () => {
-    setMsg(null);
-    setSaving(true);
-    const res = await updateBlueprintFromAlbum({ albumId });
-    setSaving(false);
-    if (!res.ok) return setMsg(res.error);
-    router.push('/admin/templates');
-  };
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center gap-3 border-t border-studio/30 bg-studio-soft/95 px-4 py-2.5 backdrop-blur-sm">
-      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-studio">
-        <BookImage className="h-4 w-4" /> Editing blueprint — arrange the pages, then save your changes.
-      </span>
-      {msg && <span className="text-[12px] text-destructive">{msg}</span>}
-      <div className="ml-auto flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/admin/templates')} disabled={saving}>
-          Discard
-        </Button>
-        <Button size="sm" onClick={save} disabled={saving} className={STUDIO_PRIMARY}>
-          {saving ? <Loader2 className="animate-spin" /> : <BookImage />} Save blueprint
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** Admin-only dialog to save the current album's layout as a reusable Blueprint (0043). */
-function SaveBlueprintDialog({ albumId, defaultName, onClose }: { albumId: string; defaultName: string; onClose: () => void }) {
-  const [name, setName] = useState(defaultName || 'New blueprint');
-  const [category, setCategory] = useState('story');
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-
-  const save = async () => {
-    setMsg(null);
-    if (!name.trim()) return setMsg('Give the blueprint a name.');
-    setSaving(true);
-    const res = await saveAlbumAsBlueprint({ albumId, name: name.trim(), category });
-    setSaving(false);
-    if (!res.ok) return setMsg(res.error);
-    setDone(true);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-xl border bg-background p-5 shadow-elevated" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-base font-semibold">Save as Blueprint</h2>
-        {done ? (
-          <>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Blueprint saved (inactive). Activate it in Admin → Layouts to make it available to customers.
-            </p>
-            <div className="mt-4 flex justify-end">
-              <Button size="sm" onClick={onClose}>Done</Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              Captures this album&rsquo;s page sequence, layouts, overlay slots, and decorative elements as a reusable
-              blueprint. Photos are not included — the slots are filled per customer.
-            </p>
-            <div className="mt-3 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Name</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-studio-bright" />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Category</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-studio-bright">
-                  {['solo', 'pair', 'collage', 'panoramic', 'story'].map((c) => (
-                    <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            {msg && <p className="mt-2 text-sm text-destructive">{msg}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
-              <Button size="sm" onClick={save} disabled={saving}>
-                {saving ? <Loader2 className="animate-spin" /> : <BookImage />} Save blueprint
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /** Compact photo-placement stat tile (builder Images panel). */
 function PhotoStat({ label, value, tone = 'ok' }: { label: string; value: number; tone?: 'ok' | 'warning' | 'muted' }) {
   const toneCls =
@@ -1426,24 +1380,40 @@ function PhotoStat({ label, value, tone = 'ok' }: { label: string; value: number
   );
 }
 
-function EmptyCanvas({ onBuild, onAdd, canBuild }: { onBuild: () => void; onAdd: () => void; canBuild: boolean }) {
+function EmptyCanvas({ blueprintMode, onBuild, onAdd, canBuild }: { blueprintMode?: boolean; onBuild: () => void; onAdd: () => void; canBuild: boolean }) {
   return (
     <div className="mx-auto mt-6 max-w-md animate-scale-in rounded-2xl border border-dashed border-border bg-card/70 p-12 text-center">
       <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-secondary text-muted-foreground ring-1 ring-border">
         <LayoutGrid className="h-6 w-6" />
       </div>
-      <p className="mt-4 font-display text-xl font-semibold tracking-tight text-foreground">Start your story</p>
-      <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-        Add a single page (a photo on each side) or a double page (one image across the fold) — or let us arrange your photos.
-      </p>
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
-        <Button size="sm" onClick={onBuild} disabled={!canBuild} className={STUDIO_PRIMARY}>
-          <Wand2 /> Build it for me
-        </Button>
-        <Button variant="outline" size="sm" onClick={onAdd}>
-          <Plus /> Start manually
-        </Button>
-      </div>
+      {blueprintMode ? (
+        <>
+          <p className="mt-4 font-display text-xl font-semibold tracking-tight text-foreground">Design your blueprint</p>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
+            Add pages, then arrange layouts, overlay slots, text and stickers. Photos aren&rsquo;t added here — each customer fills the slots with their own.
+          </p>
+          <div className="mt-6 flex items-center justify-center">
+            <Button size="sm" onClick={onAdd} className={STUDIO_PRIMARY}>
+              <Plus /> Add a page
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="mt-4 font-display text-xl font-semibold tracking-tight text-foreground">Start your story</p>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
+            Add a single page (a photo on each side) or a double page (one image across the fold) — or let us arrange your photos.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+            <Button size="sm" onClick={onBuild} disabled={!canBuild} className={STUDIO_PRIMARY}>
+              <Wand2 /> Build it for me
+            </Button>
+            <Button variant="outline" size="sm" onClick={onAdd}>
+              <Plus /> Start manually
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

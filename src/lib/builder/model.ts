@@ -94,10 +94,17 @@ export type EditConfig = {
 
 export const FULL_CROP: Rect = { x: 0, y: 0, w: 1, h: 1 };
 
-/** An overlay photo on a block: its photo + normalized rect (0..1 of the page box). */
-export type Overlay = { photoId: string; x: number; y: number; w: number; h: number };
+/**
+ * A photo container floating on a block — normalized rect (0..1 of the OPEN PAIR) plus an
+ * OPTIONAL photo. `photoId === null` is a genuine EMPTY PLACEHOLDER: the container exists
+ * independently of whether a photo has been assigned (exactly like an empty base slot, which
+ * is represented by a missing `photoIds` index). This is what lets a Blueprint store overlay
+ * geometry with no photos and round-trip it through save → DB → load → builder without the
+ * slot disappearing. A photo is assigned later (auto-fill or manual drag/pick).
+ */
+export type Overlay = { photoId: string | null; x: number; y: number; w: number; h: number };
 
-/** Geometry for a freshly added overlay (no photo yet — caller sets photoId). */
+/** Geometry for a freshly added overlay (no photo yet — caller sets photoId, or null for a placeholder). */
 export const DEFAULT_OVERLAY_GEOM = { x: 0.55, y: 0.08, w: 0.34, h: 0.34 };
 
 /** Hard cap on overlays per block — UI is unlimited, this rejects abusive payloads. */

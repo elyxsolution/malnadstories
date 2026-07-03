@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, Wand2, Square, BookOpen } from 'lucide-react';
+import { Plus, Square, BookOpen } from 'lucide-react';
 import { LAYOUT_PRESETS, type LayoutPreset } from '@/lib/builder/elements';
 import { LAYOUT_TEMPLATES, type LayoutTemplate } from '@/lib/builder/model';
 
@@ -39,37 +39,16 @@ export default function LayoutsPanel({
   canAddTemplate,
   onAddBlock,
   onApplyPreset,
-  onAutoLayout,
-  canAutoLayout,
 }: {
   hasTarget: boolean;
   canAddTemplate: (t: LayoutTemplate) => boolean;
   onAddBlock: (t: LayoutTemplate) => void;
   onApplyPreset: (preset: LayoutPreset) => void;
-  onAutoLayout: () => void;
-  canAutoLayout: boolean;
 }) {
   return (
     <div className="ms-scroll flex-1 space-y-6 overflow-y-auto p-4">
-      {/* Auto layout first — "Build it for me" stays immediately visible above the layout grid. */}
-      <section>
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Auto layout</p>
-        <button
-          type="button"
-          onClick={onAutoLayout}
-          disabled={!canAutoLayout}
-          className="group flex w-full items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left text-sm font-medium text-foreground shadow-xs transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:border-studio-bright/50 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40"
-        >
-          <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-studio/10 text-studio">
-            <Wand2 className="h-4 w-4" />
-          </span>
-          <span className="flex-1 leading-tight">
-            Build it for me
-            <span className="block text-[11px] font-normal text-muted-foreground">Arrange every photo automatically</span>
-          </span>
-        </button>
-      </section>
-
+      {/* "Build it for me" lives in the top toolbar as the single Build entry point — this panel is
+          for hand-assembling spreads (add a spread + apply a layout). */}
       <section>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Add a spread</p>
         <div className="grid grid-cols-2 gap-2">

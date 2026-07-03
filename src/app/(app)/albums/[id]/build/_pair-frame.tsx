@@ -36,13 +36,21 @@ export default function PairContent({
   stickerUrlFor,
   onFrameReady,
   half = 'full',
+  showPlaceholders = false,
 }: {
   block: Block;
-  photoFor: (id: string | undefined) => PairPhoto | undefined;
+  photoFor: (id: string | null | undefined) => PairPhoto | undefined;
   /** Resolve a sticker id → presigned URL (parallel to photoFor). Optional; stickers render only if resolved. */
   stickerUrlFor?: (stickerId: string) => string | undefined;
   onFrameReady?: () => void;
   half?: PairHalf;
+  /**
+   * When true, an EMPTY overlay (photoId=null, or an unresolved photo) draws a visible slot
+   * outline instead of rendering nothing. This is what makes a BLUEPRINT preview/thumbnail
+   * represent the template (its overlay containers) rather than a completed album. The real
+   * customer PDF/print/preview leaves it false, so unfilled placeholders never print.
+   */
+  showPlaceholders?: boolean;
 }) {
   const isDouble = block.template === 'double-spread';
   const left = photoFor(block.photoIds[0]);
@@ -80,13 +88,15 @@ export default function PairContent({
       {block.overlays.map((o, i) => {
         if (!overlapsHalf(o, half)) return null;
         const photo = photoFor(o.photoId);
-        if (!photo) return null;
+        const style = { left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.w * 100}%`, height: `${o.h * 100}%` };
+        // Empty (placeholder) overlay: draw the slot outline only when explicitly previewing a
+        // template; otherwise render nothing (real albums never print an unfilled container).
+        if (!photo) {
+          if (!showPlaceholders) return null;
+          return <OverlayPlaceholder key={i} style={style} />;
+        }
         return (
-          <div
-            key={i}
-            className="absolute overflow-hidden border-2 border-white shadow"
-            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.w * 100}%`, height: `${o.h * 100}%` }}
-          >
+          <div key={i} className="absolute overflow-hidden border-2 border-white shadow" style={style}>
             <PhotoFrame url={photo.url} edit={photo.edit} onReady={onFrameReady} />
           </div>
         );
@@ -107,6 +117,18 @@ export default function PairContent({
       {(block.stickers ?? []).map((s) => (
         <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onFrameReady} />
       ))}
+    </div>
+  );
+}
+
+/** An unfilled overlay container — a dashed slot outline shown only in template previews. */
+function OverlayPlaceholder({ style }: { style: React.CSSProperties }) {
+  return (
+    <div
+      className="absolute flex items-center justify-center rounded-[3px] border-2 border-dashed border-black/25 bg-black/[0.04]"
+      style={style}
+    >
+      <span className="text-[9px] font-medium uppercase tracking-wide text-black/30">Photo</span>
     </div>
   );
 }

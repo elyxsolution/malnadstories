@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { and, asc, count, desc, eq, ilike, isNull, isNotNull, or } from 'drizzle-orm';
 import { Plus, BookImage } from 'lucide-react';
 import { db } from '@/db';
-import { layoutTemplates } from '@/db/schema';
+import { layoutTemplates, products } from '@/db/schema';
 import { requireTemplateCapability } from '@/lib/templates/access';
+import NewBlueprintButton from './_new-blueprint';
 import { presignGet } from '@/lib/r2';
 import { normalizeBlueprint, blueprintBreakdown } from '@/lib/builder/blueprint';
 import BlueprintList, { type BlueprintRow } from './_blueprints';
@@ -103,6 +104,10 @@ export default async function AdminTemplatesPage({
     }),
   );
 
+  // Data-driven album sizes for the New Blueprint picker (active products, distinct, ascending).
+  const sizeRows = await db.select({ pages: products.pages }).from(products).where(eq(products.isActive, true));
+  const blueprintSizes = Array.from(new Set(sizeRows.map((r) => r.pages))).sort((a, b) => a - b);
+
   const total = totalRes[0]?.c ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -145,10 +150,12 @@ export default async function AdminTemplatesPage({
           </Link>
           <Link
             href="/admin/templates/new"
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
           >
-            <Plus className="h-4 w-4" /> New template
+            <Plus className="h-4 w-4" /> New preset
           </Link>
+          {/* Primary action — author a whole-album blueprint in the builder. */}
+          <NewBlueprintButton sizes={blueprintSizes} />
         </div>
       </div>
 
@@ -214,14 +221,17 @@ export default async function AdminTemplatesPage({
 
       {/* SECTION 2 — Album Blueprints (LEVEL 2): complete albums built from the presets above. */}
       <section>
-        <div className="mb-1 flex items-center gap-2">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-secondary text-[11px] font-semibold text-muted-foreground">2</span>
           <BookImage className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">Album Blueprints</h2>
+          <div className="ml-auto">
+            <NewBlueprintButton sizes={blueprintSizes} />
+          </div>
         </div>
         <p className="mb-3 pl-8 text-xs text-muted-foreground">
           Complete albums assembled from Layout Presets, grouped by size. Give each size one ⭐ Default — that&rsquo;s what
-          Auto Create uses. Build them via <span className="font-medium">Save as Blueprint</span> in the builder.
+          Auto Create uses. Create one with <span className="font-medium">+ New Blueprint</span> to design it in the builder.
         </p>
         <BlueprintList rows={blueprints} />
       </section>

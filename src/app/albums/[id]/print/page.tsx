@@ -230,7 +230,10 @@ export default async function PrintPage({
       template: r.layout_template as LayoutTemplate,
       photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
       caption: r.caption ?? '',
-      overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+      // Print is the FINAL physical book: only overlays with a real, still-present photo render.
+      // Empty placeholders (photoId=null) and deleted-photo overlays are intentionally excluded
+      // so an unfilled container never prints as an empty box.
+      overlays: (r.layout_config?.overlays ?? []).filter((o) => o.photoId != null && photoIdSet.has(o.photoId)),
       texts: r.layout_config?.texts ?? [],
       qrs: r.layout_config?.qrs ?? [],
       stickers: r.layout_config?.stickers ?? [],

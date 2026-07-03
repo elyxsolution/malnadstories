@@ -111,7 +111,12 @@ export async function loadAlbumForAdmin(
       template: r.layout_template as LayoutTemplate,
       photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
       caption: r.caption ?? '',
-      overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+      // Preserve overlay containers; an unassigned/deleted-photo overlay becomes an empty
+      // placeholder (photoId=null) — it renders nothing in the admin preview/PDF but the slot
+      // is not silently dropped (parallel to the builder's own hydration).
+      overlays: (r.layout_config?.overlays ?? []).map((o) =>
+        o.photoId && photoIdSet.has(o.photoId) ? o : { ...o, photoId: null },
+      ),
       texts: r.layout_config?.texts ?? [],
       qrs: r.layout_config?.qrs ?? [],
       stickers: r.layout_config?.stickers ?? [],

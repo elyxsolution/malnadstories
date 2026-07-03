@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, Search, X, Check, RefreshCw, LayoutGrid, Crown, PencilRuler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,25 @@ export type BlueprintRow = {
 
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
+// Persisted list UI (search + status filter + scroll) so returning from the builder lands the admin
+// exactly where they left off — no re-finding the blueprint they just edited.
+const UI_KEY = 'admin.blueprints.ui';
+type UiState = { q?: string; statusFilter?: string; scrollY?: number };
+const readUi = (): UiState => {
+  try {
+    return JSON.parse(sessionStorage.getItem(UI_KEY) || '{}') as UiState;
+  } catch {
+    return {};
+  }
+};
+const writeUi = (patch: UiState) => {
+  try {
+    sessionStorage.setItem(UI_KEY, JSON.stringify({ ...readUi(), ...patch }));
+  } catch {
+    /* sessionStorage unavailable — non-fatal */
+  }
+};
+
 /**
  * Album Blueprints — grouped by album size (Section 2). Each size has at most one Default (⭐, used
  * by Auto Create). Cards show the thumbnail, capacity, recommended, layout breakdown, badges, and
@@ -46,6 +65,23 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [editing, setEditing] = useState<BlueprintRow | null>(null);
+
+  // Restore search/filter/scroll on mount (e.g. returning from the builder after a Save).
+  useEffect(() => {
+    const s = readUi();
+    if (typeof s.q === 'string') setQ(s.q);
+    if (typeof s.statusFilter === 'string') setStatusFilter(s.statusFilter);
+    if (typeof s.scrollY === 'number' && s.scrollY > 0) {
+      const y = s.scrollY;
+      const t = setTimeout(() => window.scrollTo({ top: y }), 60);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  // Persist filters as they change so the round-trip to the builder keeps them.
+  useEffect(() => {
+    writeUi({ q, statusFilter });
+  }, [q, statusFilter]);
 
   const query = q.trim().toLowerCase();
   const filtered = useMemo(
@@ -78,6 +114,7 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
   };
 
   // Edit the blueprint's LAYOUT in the existing builder (0046): open a draft, then navigate to it.
+  // Save the current scroll + filters so returning from the builder restores this exact view.
   const editInBuilder = async (id: string) => {
     setBusy(id);
     const res = await openBlueprintForEditing({ id });
@@ -85,6 +122,7 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
       setBusy(null);
       return alert(res.error);
     }
+    writeUi({ q, statusFilter, scrollY: window.scrollY });
     router.push(`/albums/${res.albumId}/build`);
   };
 
@@ -94,7 +132,7 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
         <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-secondary text-muted-foreground"><LayoutGrid className="h-6 w-6" /></div>
         <p className="mt-3 font-medium">No album blueprints yet</p>
         <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-          Build an album in the builder, then use <span className="font-medium">Save as Blueprint</span>. Assign one default per size so Auto Create is predictable.
+          Click <span className="font-medium">+ New Blueprint</span> to design a complete album in the builder. Assign one default per size so Auto Create is predictable.
         </p>
       </div>
     );
@@ -105,9 +143,15 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search blueprints…" className="h-9 w-full rounded-lg border bg-background pl-8 pr-3 text-sm outline-none focus:border-ring" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search blueprints…"
+            aria-label="Search blueprints by name or category"
+            className="h-9 w-full rounded-lg border bg-background pl-8 pr-3 text-sm outline-none transition-colors focus:border-ring focus-visible:ring-2 focus-visible:ring-studio-bright"
+          />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="h-9 rounded-lg border bg-background px-2.5 text-sm outline-none">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter blueprints by status" className="h-9 rounded-lg border bg-background px-2.5 text-sm outline-none">
           <option value="all">Any status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
@@ -158,13 +202,25 @@ function BlueprintCard({
   run: (id: string, fn: () => Promise<{ ok: boolean; error?: string }>) => Promise<void>;
 }) {
   const active = r.status === 'active';
+  const [thumbFailed, setThumbFailed] = useState(false);
   return (
-    <div className={`flex flex-col overflow-hidden rounded-2xl border bg-card shadow-xs transition-shadow hover:shadow-card ${r.isDefault ? 'ring-2 ring-gold/50' : ''}`}>
-      <div className="relative aspect-[4/3] w-full bg-muted">
-        {r.thumbUrl ? (
+    <div
+      className={`group flex flex-col overflow-hidden rounded-2xl border bg-card shadow-xs transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:border-studio/30 hover:shadow-card ${
+        r.isDefault ? 'ring-2 ring-gold/50' : ''
+      }`}
+    >
+      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+        {r.thumbUrl && !thumbFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={r.thumbUrl} alt={r.name} loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+          <img
+            src={r.thumbUrl}
+            alt={`${r.name} preview`}
+            loading="lazy"
+            onError={() => setThumbFailed(true)}
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 ease-glide group-hover:scale-[1.03]"
+          />
         ) : (
+          // No thumbnail yet, or the presigned URL expired/failed — show a calm placeholder, never a broken image.
           <span className="absolute inset-0 grid place-items-center text-muted-foreground/40"><LayoutGrid className="h-6 w-6" /></span>
         )}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
@@ -194,7 +250,7 @@ function BlueprintCard({
         {/* Edit the layout in the builder (0046) + rename metadata */}
         <div className="mt-3 grid grid-cols-2 gap-1.5">
           <Button size="sm" disabled={busy} onClick={onEditLayout} className="h-7 text-[12px]">
-            {busy ? <Loader2 className="animate-spin" /> : <PencilRuler className="h-3.5 w-3.5" />} Edit layout
+            {busy ? <Loader2 className="animate-spin" /> : <PencilRuler className="h-3.5 w-3.5" />} Edit Blueprint
           </Button>
           <Button size="sm" variant="outline" disabled={busy} onClick={onEdit} className="h-7 text-[12px]">
             <Pencil className="h-3.5 w-3.5" /> Rename
@@ -268,7 +324,7 @@ function EditMeta({ row, busy, onClose, onSave }: { row: BlueprintRow; busy: boo
               ))}
             </select>
           </div>
-          <p className="text-[11px] text-muted-foreground">To change the layout itself, rebuild it in an album and use “Save as Blueprint”.</p>
+          <p className="text-[11px] text-muted-foreground">To change the layout itself, use <span className="font-medium">Edit Blueprint</span> on the card.</p>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>

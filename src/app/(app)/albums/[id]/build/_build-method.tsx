@@ -26,8 +26,8 @@ export type BuilderBlueprint = {
 
 /**
  * Builder "Build it for me" — the SAME three-option Blueprint workflow as the creation wizard (Full
- * Auto · Choose Blueprint · Custom). Replaces the legacy Smart Layout assistant. Presentational: it
- * calls back into the builder, which applies via the existing engine/apply path (api.replaceAll).
+ * Auto · Choose Blueprint · Custom). Presentational: it calls back into the builder, which applies
+ * via the existing engine/apply path (api.replaceAll).
  */
 export default function BuildMethod({
   albumSize,

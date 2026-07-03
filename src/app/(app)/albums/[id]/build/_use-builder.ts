@@ -365,9 +365,15 @@ export function useBlocks(initial: Block[]) {
       (id) => id && !seen.has(id) && (seen.add(id), true),
     );
 
-    const newOverlays: Overlay[] = preset.overlays
-      .slice(0, pool.length)
-      .map((slot, i) => ({ photoId: pool[i], x: slot.x, y: slot.y, w: slot.w, h: slot.h }));
+    // Keep EVERY preset overlay slot — filled from the pool, else an empty placeholder (photoId=null)
+    // so the layout's containers stay visible and fillable when photos are insufficient.
+    const newOverlays: Overlay[] = preset.overlays.map((slot, i) => ({
+      photoId: pool[i] ?? null,
+      x: slot.x,
+      y: slot.y,
+      w: slot.w,
+      h: slot.h,
+    }));
 
     // Stamp the preset id so blueprint breakdowns are accurate + the choice survives round-trips.
     patchBlock(key, { template: preset.base, photoIds: keptBase, overlays: newOverlays, preset: preset.key });

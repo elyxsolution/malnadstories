@@ -58,8 +58,13 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
 
   // Every referenced photo (base AND overlays) must belong to THIS album. RLS
   // already scopes to the user, so the album_id match also pins it to the same user.
+  // Empty overlay placeholders (photoId=null) reference no photo → excluded from the check.
   const referenced = Array.from(
-    new Set(blocks.flatMap((b) => [...b.photoIds, ...b.overlays.map((o) => o.photoId)])),
+    new Set(
+      blocks
+        .flatMap((b) => [...b.photoIds, ...b.overlays.map((o) => o.photoId)])
+        .filter((id): id is string => !!id),
+    ),
   );
   if (referenced.length > 0) {
     const { data: owned } = await supabase
@@ -418,7 +423,10 @@ async function applyBlueprintById(
   });
   if (!res.ok) return { ok: false, error: res.error };
 
-  const placed = blocks.reduce((s, b) => s + b.photoIds.filter(Boolean).length + b.overlays.length, 0);
+  const placed = blocks.reduce(
+    (s, b) => s + b.photoIds.filter(Boolean).length + b.overlays.filter((o) => o.photoId).length,
+    0,
+  );
   return { ok: true, blueprintId, capacity: bp.slotCount, placed, unused: Math.max(0, ready.length - placed) };
 }
 

@@ -70,7 +70,7 @@ export default async function BlueprintPreviewPage({
             className="overflow-hidden rounded-md ring-1 ring-black/10"
             style={{ aspectRatio: '3 / 2', containerType: 'inline-size' }}
           >
-            <PairContent block={b} photoFor={() => undefined} stickerUrlFor={stickerUrlFor} />
+            <PairContent block={b} photoFor={() => undefined} stickerUrlFor={stickerUrlFor} showPlaceholders />
           </div>
         ))}
       </div>

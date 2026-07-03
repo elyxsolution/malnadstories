@@ -122,9 +122,14 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       template: r.layout_template as LayoutTemplate,
       photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
       caption: r.caption ?? '',
-      // Drop overlays whose photo was since deleted; text/QR/background carry no photo
-      // refs, so they hydrate verbatim (default to empty / null for legacy rows).
-      overlays: (r.layout_config?.overlays ?? []).filter((o) => photoIdSet.has(o.photoId)),
+      // Keep every overlay CONTAINER; only its photo assignment is provisional. A slot that is
+      // an intentional placeholder (photoId=null) OR whose photo was since deleted hydrates as an
+      // EMPTY overlay (photoId=null) — the geometry is preserved, never dropped. This is what
+      // makes a blueprint's overlay slots survive edit-open, and a deleted-photo overlay stay
+      // refillable instead of vanishing. Text/QR/background carry no photo refs (verbatim).
+      overlays: (r.layout_config?.overlays ?? []).map((o) =>
+        o.photoId && photoIdSet.has(o.photoId) ? o : { ...o, photoId: null },
+      ),
       texts: r.layout_config?.texts ?? [],
       qrs: r.layout_config?.qrs ?? [],
       stickers: r.layout_config?.stickers ?? [],
@@ -143,23 +148,48 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   // Active cover-DESIGN templates (Task 2) — the in-builder "Cover Templates" panel. Only the
   // fields the panel needs; applying one copies its config into cover_config (no link kept).
-  // Admin capability: content/super_admin may "Save as Blueprint" from the builder (Phase B) —
-  // this reuses the builder for blueprint authoring. Best-effort; a non-admin is simply false.
-  let canSaveBlueprint = false;
+  // Admin capability gate (content/super_admin): decides whether to check for Blueprint Mode below.
+  // Only an admin can ever open a blueprint-draft album, so a non-admin simply never enters it.
+  let canEditBlueprint = false;
   try {
     const ctx = await getAdminContext();
-    canSaveBlueprint = roleHasCapability(ctx.role, 'template:edit');
+    canEditBlueprint = roleHasCapability(ctx.role, 'template:edit');
   } catch {
-    canSaveBlueprint = false;
+    canEditBlueprint = false;
   }
 
   // Blueprint EDIT mode (0046): if this album is a blueprint draft, the builder "Save" updates the
   // SAME blueprint. Resilient best-effort read — a not-yet-migrated column returns an error (not a
   // throw), so the builder still loads normally for every other album.
   let blueprintDraftOf: string | null = null;
-  if (canSaveBlueprint) {
+  let blueprintMeta: { name: string; isDefault: boolean; featured: boolean; pinned: boolean; status: string; updatedAt: string } | null = null;
+  if (canEditBlueprint) {
     const { data: draftRow } = await supabase.from('albums').select('blueprint_draft_of').eq('id', album.id).maybeSingle();
     blueprintDraftOf = (draftRow as { blueprint_draft_of?: string | null } | null)?.blueprint_draft_of ?? null;
+    // In blueprint-edit mode, load the blueprint's identity for the builder's "Blueprint Mode" badge.
+    // Service role: the draft is inactive (not RLS-readable by the authenticated client) and this
+    // branch is already admin-gated (canEditBlueprint).
+    if (blueprintDraftOf) {
+      const svc = createServiceClient();
+      const { data: bpRow } = await svc
+        .from('layout_templates')
+        .select('name, is_default, featured, pinned, status, updated_at')
+        .eq('id', blueprintDraftOf)
+        .maybeSingle();
+      const b = bpRow as
+        | { name: string; is_default: boolean; featured: boolean; pinned: boolean; status: string; updated_at: string }
+        | null;
+      if (b) {
+        blueprintMeta = {
+          name: b.name,
+          isDefault: b.is_default,
+          featured: b.featured,
+          pinned: b.pinned,
+          status: b.status,
+          updatedAt: b.updated_at,
+        };
+      }
+    }
   }
 
   // Active whole-album Blueprints for THIS album size — the builder's "Build it for me" now offers
@@ -317,8 +347,8 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         layoutTemplates={layoutTemplates}
         coverTemplates={coverTemplates}
         blueprints={blueprints}
-        canSaveBlueprint={canSaveBlueprint}
         blueprintDraftOf={blueprintDraftOf}
+        blueprintMeta={blueprintMeta}
         stickerCatalog={stickerCatalog}
         stickerUrls={stickerUrls}
       />

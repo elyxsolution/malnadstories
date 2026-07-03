@@ -40,8 +40,8 @@ export async function getAlbumReadiness(albumId: string): Promise<AlbumReadiness
     consumed += PAGE_COST[t];
     const filled = (p.photoIds ?? []).filter(Boolean);
     filled.forEach((id) => placedIds.add(id));
-    const overlays = (p.layoutConfig as { overlays?: { photoId: string }[] } | null)?.overlays ?? [];
-    overlays.forEach((o) => placedIds.add(o.photoId));
+    const overlays = (p.layoutConfig as { overlays?: { photoId: string | null }[] } | null)?.overlays ?? [];
+    overlays.forEach((o) => o.photoId && placedIds.add(o.photoId));
     emptyFrames += Math.max(0, requiredBaseCount(t) - filled.length);
   }
 

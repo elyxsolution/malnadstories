@@ -153,9 +153,13 @@ export function shuffleIds(ids: string[], seed: number): string[] {
 
 /**
  * Apply a blueprint to a set of photos → album Block[]. Fills base slots then overlay slots in
- * page order, each photo used at most once; slots beyond the supplied photos stay empty (a valid
- * draft). Extra photos beyond capacity are ignored. Decorative elements copy verbatim. The result
- * is ordinary Block[] — persisted via the existing saveLayout, rendered by the existing pipeline.
+ * page order, each photo used at most once. Slots beyond the supplied photos stay EMPTY but the
+ * container is preserved: a base slot as a missing `photoIds` index, an overlay slot as a
+ * PLACEHOLDER overlay (`photoId: null`). This is the architectural fix — an overlay slot is
+ * geometry that exists independently of a photo, so applying a blueprint with 0 photos (the
+ * edit-open + thumbnail paths) rebuilds the FULL overlay geometry instead of dropping it. Extra
+ * photos beyond capacity are ignored. Decorative elements copy verbatim. The result is ordinary
+ * Block[] — persisted via the existing saveLayout, rendered by the existing pipeline.
  */
 export function applyBlueprint(bp: Blueprint, photoIds: string[]): Block[] {
   const queue = [...photoIds];
@@ -167,12 +171,15 @@ export function applyBlueprint(bp: Blueprint, photoIds: string[]): Block[] {
       const id = next();
       if (id) photoIdsForBase.push(id);
     }
-    const overlays = [];
-    for (const slot of b.overlaySlots) {
-      const id = next();
-      if (!id) break; // out of photos → remaining overlay slots stay empty
-      overlays.push({ photoId: id, x: slot.x, y: slot.y, w: slot.w, h: slot.h });
-    }
+    // EVERY overlay slot becomes an overlay — filled if a photo remains, else a null placeholder.
+    // Never `break`: the geometry is the point of a blueprint, with or without photos.
+    const overlays = b.overlaySlots.map((slot) => ({
+      photoId: next(),
+      x: slot.x,
+      y: slot.y,
+      w: slot.w,
+      h: slot.h,
+    }));
     return {
       key: `bp-${i}`,
       template: b.template,

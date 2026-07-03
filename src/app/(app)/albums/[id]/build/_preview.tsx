@@ -23,7 +23,7 @@ export default function Preview({
   cover: { url: string; name: string } | null;
   stickerUrlFor?: (stickerId: string) => string | undefined;
 }) {
-  const photoFor = (id: string | undefined) => {
+  const photoFor = (id: string | null | undefined) => {
     const p = id ? photoMap.get(id) : undefined;
     return p ? { url: p.url, edit: p.edit } : undefined;
   };

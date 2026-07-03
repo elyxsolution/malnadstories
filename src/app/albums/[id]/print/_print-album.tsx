@@ -62,7 +62,7 @@ export default function PrintAlbum({
 }) {
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const photoFor = useCallback(
-    (id: string | undefined) => {
+    (id: string | null | undefined) => {
       const p = id ? photoMap.get(id) : undefined;
       return p ? { url: p.url, edit: p.edit } : undefined;
     },
@@ -84,7 +84,8 @@ export default function PrintAlbum({
       }
       for (const o of b.overlays) {
         const onHalf = half === 'left' ? o.x < 0.5 : o.x + o.w > 0.5;
-        if (onHalf && photoMap.has(o.photoId)) n += 1;
+        // Empty placeholder overlays (photoId=null) render nothing in print → not counted.
+        if (onHalf && o.photoId && photoMap.has(o.photoId)) n += 1;
       }
       return n;
     };
@@ -182,7 +183,7 @@ function PhysicalPage({
 }: {
   side: 'left' | 'right';
   block: Block;
-  photoFor: (id: string | undefined) => { url: string; edit?: EditConfig | null } | undefined;
+  photoFor: (id: string | null | undefined) => { url: string; edit?: EditConfig | null } | undefined;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   onFrameReady: () => void;
 }) {

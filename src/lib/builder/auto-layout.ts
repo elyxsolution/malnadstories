@@ -192,13 +192,17 @@ function distributeOverlays(
 }
 
 /**
- * Fill empty BASE slots in the EXISTING blocks from `available` (unplaced ready photos),
- * left-to-right. Keeps each photo placed at most once and never touches overlays or the
- * block order — so it composes with manual edits.
+ * Fill empty photo CONTAINERS in the EXISTING blocks from `available` (unplaced ready photos),
+ * left-to-right: first every empty BASE slot, then every empty OVERLAY PLACEHOLDER (photoId=null).
+ * Overlay geometry and block order are untouched — only unassigned containers receive a photo — so
+ * it composes with manual edits and turns a freshly-applied blueprint (placeholders) into a filled
+ * album while leaving surplus placeholders visibly empty when photos run short. Placed-once holds
+ * (one shared queue). This is the "Auto Fill" action.
  */
 export function fillEmptyFrames(blocks: Block[], available: EnginePhoto[]): Block[] {
   const queue = [...available];
-  return blocks.map((b) => {
+  // Pass 1 — base slots across all blocks (preserves the original left-to-right base priority).
+  const withBases = blocks.map((b) => {
     const need = requiredBaseCount(b.template);
     const ids = [...b.photoIds];
     for (let i = 0; i < need; i++) {
@@ -206,6 +210,11 @@ export function fillEmptyFrames(blocks: Block[], available: EnginePhoto[]): Bloc
     }
     return { ...b, photoIds: ids.filter(Boolean) };
   });
+  // Pass 2 — empty overlay placeholders, in page/overlay order, from whatever photos remain.
+  return withBases.map((b) => ({
+    ...b,
+    overlays: b.overlays.map((o) => (o.photoId || !queue.length ? o : { ...o, photoId: queue.shift()!.id })),
+  }));
 }
 
 /**
@@ -216,7 +225,7 @@ export function fillEmptyFrames(blocks: Block[], available: EnginePhoto[]): Bloc
 export function orderByDate(blocks: Block[], photos: EnginePhoto[]): Block[] {
   const time = new Map(photos.map((p) => [p.id, p.takenAt ? Date.parse(p.takenAt) : NaN]));
   const keyTime = (b: Block): number => {
-    const ids = [...b.photoIds, ...b.overlays.map((o) => o.photoId)].filter(Boolean);
+    const ids = [...b.photoIds, ...b.overlays.map((o) => o.photoId)].filter((id): id is string => !!id);
     const ts = ids.map((id) => time.get(id)).filter((t): t is number => typeof t === 'number' && !Number.isNaN(t));
     return ts.length ? Math.min(...ts) : Number.POSITIVE_INFINITY;
   };

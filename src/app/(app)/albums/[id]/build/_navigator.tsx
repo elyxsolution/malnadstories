@@ -38,7 +38,7 @@ export default function Navigator({
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
 
-  const photoFor = (id: string | undefined) => {
+  const photoFor = (id: string | null | undefined) => {
     const p = id ? photoMap.get(id) : undefined;
     return p ? { url: p.url, edit: p.edit } : undefined;
   };

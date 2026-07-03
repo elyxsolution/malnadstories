@@ -13,7 +13,7 @@ import {
   TemplateStatusSchema,
   TemplateDuplicateSchema,
   LayoutPresetIdSchema,
-  SaveAlbumAsBlueprintSchema,
+  CreateBlankBlueprintSchema,
   UpdateBlueprintMetaSchema,
   BlueprintFeatureSchema,
   BlueprintReorderSchema,
@@ -344,94 +344,67 @@ const bustTemplates = () => revalidateTag(CACHE_TAGS.templatesActive);
 const isTpl = (t: string | null): t is LayoutTemplate => !!t && (LAYOUT_TEMPLATES as readonly string[]).includes(t);
 
 /**
- * Save an existing album's layout as a reusable Blueprint (reuses the builder for authoring — an
- * admin arranges a normal album, then saves it). Distills the album's Block[] into a blueprint
- * (photos stripped → empty slots), computes stats, inserts an INACTIVE blueprint row. The album
- * must belong to the acting admin.
+ * New Blueprint (empty) → open in the builder. Creates a BLANK blueprint row (no blocks) for the
+ * chosen album size, plus a linked draft album (blueprint_draft_of), and returns the album id so
+ * the caller opens `/albums/[id]/build` in blueprint-edit mode. On Save, `updateBlueprintFromAlbum`
+ * distils the designed pages back into THIS same blueprint — one unified authoring path, no "Save
+ * As". The size is validated against active products (data-driven; never a hardcoded literal).
  */
-export async function saveAlbumAsBlueprint(input: unknown): Promise<TemplateActionResult> {
+export type CreateBlueprintResult = { ok: true; albumId: string; blueprintId: string } | { ok: false; error: string };
+export async function createBlankBlueprint(input: unknown): Promise<CreateBlueprintResult> {
   let actor: { userId: string };
   try {
     actor = await requireTemplateCapability('template:edit');
   } catch {
     return { ok: false, error: 'Forbidden' };
   }
-  const parsed = SaveAlbumAsBlueprintSchema.safeParse(input);
+  const parsed = CreateBlankBlueprintSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const d = parsed.data;
 
   const svc = createServiceClient();
-  const { data: album } = await svc.from('albums').select('id, user_id').eq('id', d.albumId).maybeSingle();
-  const a = album as { id: string; user_id: string } | null;
-  if (!a) return { ok: false, error: 'Album not found.' };
-  if (a.user_id !== actor.userId) return { ok: false, error: 'You can only blueprint your own album.' };
 
-  const { data: pageData } = await svc
-    .from('album_pages')
-    .select('page_number, layout_template, caption, photo_ids, layout_config')
-    .eq('album_id', d.albumId)
-    .order('page_number', { ascending: true });
+  // Data-driven size gate: the size must be a real, active product page count.
+  const { data: sizeRows } = await svc.from('products').select('pages').eq('is_active', true);
+  const validSizes = new Set(((sizeRows ?? []) as { pages: number }[]).map((r) => r.pages));
+  if (!validSizes.has(d.size)) return { ok: false, error: 'Choose a valid album size.' };
 
-  type PageRow = {
-    layout_template: string | null;
-    caption: string | null;
-    photo_ids: string[] | null;
-    layout_config: { overlays?: unknown[]; texts?: unknown[]; qrs?: unknown[]; stickers?: unknown[]; background?: unknown; preset?: string } | null;
-  };
-  const blocks = ((pageData ?? []) as PageRow[])
-    .filter((r) => isTpl(r.layout_template))
-    .map(
-      (r) =>
-        ({
-          key: '',
-          template: r.layout_template as LayoutTemplate,
-          photoIds: r.photo_ids ?? [],
-          caption: r.caption ?? '',
-          overlays: (r.layout_config?.overlays ?? []) as Block['overlays'],
-          texts: (r.layout_config?.texts ?? []) as Block['texts'],
-          qrs: (r.layout_config?.qrs ?? []) as Block['qrs'],
-          stickers: (r.layout_config?.stickers ?? []) as Block['stickers'],
-          background: (r.layout_config?.background ?? null) as Block['background'],
-          preset: r.layout_config?.preset,
-        }) satisfies Block,
-    );
-  if (blocks.length === 0) return { ok: false, error: 'This album has no pages to blueprint yet.' };
-
-  const bp = blueprintFromBlocks(blocks);
-  const check = BlueprintSchema.safeParse(bp);
-  if (!check.success) return { ok: false, error: 'Album layout could not be converted to a valid blueprint.' };
-  const stats = blueprintStats(bp);
-
-  const id = randomUUID();
+  const blueprintId = randomUUID();
   const slug = await uniqueSlug(svc, slugify(d.name));
-  const { error } = await svc.from('layout_templates').insert({
-    id,
+  const emptyBlueprint = { version: 1 as const, blocks: [] as never[] };
+  const { error: bpErr } = await svc.from('layout_templates').insert({
+    id: blueprintId,
     name: d.name,
     slug,
-    description: d.description ?? null,
+    description: null,
     category: d.category,
     status: 'inactive',
-    geometry: { base: bp.blocks[0]?.template ?? 'single-pair', overlays: [] }, // valid default (NOT NULL)
-    blueprint: bp,
-    page_count: stats.pageCount,
-    slot_count: stats.slotCount,
-    recommended_photos: stats.recommendedPhotos,
-    featured: d.featured,
-    popular: d.popular,
-    pinned: d.pinned,
+    geometry: { base: 'single-pair', overlays: [] }, // valid default (NOT NULL); real geometry lives in blueprint
+    blueprint: emptyBlueprint,
+    page_count: 0,
+    slot_count: 0,
+    recommended_photos: 0,
     created_by: actor.userId,
     updated_by: actor.userId,
   });
-  if (error) {
-    console.error('[admin] saveAlbumAsBlueprint error', error);
-    return { ok: false, error: 'Could not save the blueprint.' };
+  if (bpErr) {
+    console.error('[admin] createBlankBlueprint blueprint insert error', bpErr);
+    return { ok: false, error: 'Could not create the blueprint.' };
   }
-  await audit(svc, actor.userId, 'blueprint.created', id, { name: d.name, pageCount: stats.pageCount, slotCount: stats.slotCount });
-  // Content-changing event → (re)generate the cached thumbnail. Best-effort; never blocks the save.
-  await startBlueprintThumbnail(id);
-  revalidatePath('/admin/templates');
-  bustTemplates();
-  return { ok: true, id };
+
+  const { data: albumRow, error: albErr } = await svc
+    .from('albums')
+    .insert({ user_id: actor.userId, title: `Blueprint: ${d.name}`, size: d.size, blueprint_draft_of: blueprintId })
+    .select('id')
+    .single();
+  if (albErr || !albumRow) {
+    console.error('[admin] createBlankBlueprint album insert error', albErr);
+    await svc.from('layout_templates').delete().eq('id', blueprintId); // roll back the orphan blueprint
+    return { ok: false, error: 'Could not create the blueprint.' };
+  }
+
+  await audit(svc, actor.userId, 'blueprint.created', blueprintId, { name: d.name, size: d.size, blank: true });
+  return { ok: true, albumId: (albumRow as { id: string }).id, blueprintId };
 }
 
 // Turn Block[] into album_pages rows (mirrors saveLayout's persistence shape, incl. preset).
@@ -591,14 +564,52 @@ export async function updateBlueprintFromAlbum(input: unknown): Promise<Template
     return { ok: false, error: 'Could not save the blueprint.' };
   }
 
-  // Regenerate the thumbnail for the new layout, then remove the draft album (cascade removes pages).
+  // Regenerate the thumbnail for the new layout. The draft album is kept IN PLACE so the admin can
+  // keep editing after a save — it's cleaned up on Exit (exitBlueprintDraft) or on the next open.
   await startBlueprintThumbnail(blueprintId);
-  await svc.from('albums').delete().eq('id', albumId);
 
   await audit(svc, actor.userId, 'blueprint.updated_from_builder', blueprintId, { pageCount: stats.pageCount, slotCount: stats.slotCount });
   revalidatePath('/admin/templates');
   bustTemplates();
   return { ok: true, id: blueprintId };
+}
+
+/**
+ * Leave Blueprint Mode — deletes the transient draft album (cascade removes its pages). If the
+ * linked blueprint was never actually designed (empty blocks = an abandoned "New Blueprint"), the
+ * blueprint row is removed too so the catalog isn't littered with empty drafts. Called on Exit
+ * (after a save, or on discard). Best-effort; the builder navigates regardless.
+ */
+export async function exitBlueprintDraft(input: unknown): Promise<TemplateSimpleResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireTemplateCapability('template:edit');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = UpdateBlueprintFromAlbumSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data: album } = await svc.from('albums').select('id, user_id, blueprint_draft_of').eq('id', albumId).maybeSingle();
+  const a = album as { id: string; user_id: string; blueprint_draft_of: string | null } | null;
+  if (!a || !a.blueprint_draft_of) return { ok: false, error: 'This album is not a blueprint draft.' };
+  if (a.user_id !== actor.userId) return { ok: false, error: 'You can only exit your own blueprint draft.' };
+  const blueprintId = a.blueprint_draft_of;
+
+  // Was the blueprint ever saved? An empty blocks array = a never-designed New Blueprint.
+  const { data: bpRow } = await svc.from('layout_templates').select('blueprint').eq('id', blueprintId).maybeSingle();
+  const blocks = (bpRow as { blueprint: { blocks?: unknown[] } | null } | null)?.blueprint?.blocks ?? [];
+
+  await svc.from('albums').delete().eq('id', albumId); // cascade removes album_pages
+  if (Array.isArray(blocks) && blocks.length === 0) {
+    await svc.from('layout_templates').delete().eq('id', blueprintId).not('blueprint', 'is', null);
+    await audit(svc, actor.userId, 'blueprint.discarded', blueprintId, { reason: 'empty_draft' });
+  }
+  revalidatePath('/admin/templates');
+  bustTemplates();
+  return { ok: true };
 }
 
 /** Edit a blueprint's metadata (name/description/category). Geometry edits = re-save from an album. */

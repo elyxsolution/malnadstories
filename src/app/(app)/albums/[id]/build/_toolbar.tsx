@@ -17,6 +17,8 @@ import {
   CheckCircle2,
   Keyboard,
   AlignCenterHorizontal,
+  Sparkles,
+  LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
@@ -46,12 +48,17 @@ export default function CanvasToolbar({
   onActualSize,
   onAutoAlign,
   canAutoAlign,
+  onBuildForMe,
   onPreview,
   onSave,
   saving,
   onSubmit,
   submitting,
   albumId,
+  blueprintMode = false,
+  onSaveBlueprint,
+  onExitBlueprint,
+  blueprintSaving = false,
 }: {
   title: string;
   status: string;
@@ -72,16 +79,24 @@ export default function CanvasToolbar({
   onActualSize: () => void;
   onAutoAlign: () => void;
   canAutoAlign: boolean;
+  onBuildForMe: () => void;
   onPreview: () => void;
   onSave: () => void;
   saving: boolean;
   onSubmit: () => void;
   submitting: boolean;
   albumId: string;
+  /** Blueprint-edit mode (0046): swaps the customer actions for Save Blueprint / Exit Blueprint. */
+  blueprintMode?: boolean;
+  onSaveBlueprint?: () => void;
+  onExitBlueprint?: () => void;
+  blueprintSaving?: boolean;
 }) {
   return (
     <div className="flex h-14 flex-none items-center gap-2 border-b border-border/70 bg-card/60 px-3 sm:px-4">
-      {/* Identity + status */}
+      {/* Identity + status — customer mode only. In Blueprint Mode the dedicated header carries
+          identity + save state, so the toolbar is tools-only. */}
+      {!blueprintMode && (
       <div className="flex min-w-0 items-center gap-2">
         <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-foreground">{title}</h1>
         {status === 'submitted' && (
@@ -103,6 +118,7 @@ export default function CanvasToolbar({
           {dirty ? 'Unsaved' : 'Saved'}
         </span>
       </div>
+      )}
 
       {/* Right cluster — editing tools (shared across the cover + content pages). */}
       <div className="ml-auto flex items-center gap-2">
@@ -146,31 +162,62 @@ export default function CanvasToolbar({
             </Button>
           </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onAutoAlign}
-          disabled={!canAutoAlign}
-          title="Auto Align — tidy this page's text & stickers"
-          className="border-studio/30 text-studio hover:border-studio/50 hover:bg-studio-soft hover:text-studio focus-visible:ring-studio-bright [&_svg]:text-studio"
-        >
-          <AlignCenterHorizontal /> <span className="hidden sm:inline">Auto Align</span>
-        </Button>
-        <Button variant="outline" size="sm" onClick={onPreview}>
-          <Eye /> <span className="hidden sm:inline">Preview</span>
-        </Button>
-        <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />} <span className="hidden sm:inline">Save</span>
-        </Button>
-        {status === 'submitted' ? (
-          <Button size="sm" render={<Link href={`/checkout/${albumId}`} />} className={STUDIO_PRIMARY}>
-            <ShoppingCart /> Checkout
-          </Button>
+        {blueprintMode ? (
+          /* BLUEPRINT MODE — no customer actions (no Auto Align, Build-for-me, Submit or Checkout).
+             Just Preview the template, Save the blueprint, or Exit back to the admin catalog. */
+          <>
+            <Button variant="outline" size="sm" onClick={onPreview}>
+              <Eye /> <span className="hidden sm:inline">Preview</span>
+            </Button>
+            <Button size="sm" onClick={onSaveBlueprint} disabled={blueprintSaving || !dirty} className={STUDIO_PRIMARY}>
+              {blueprintSaving ? <Loader2 className="animate-spin" /> : <Save />} <span className="hidden sm:inline">Save Blueprint</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={onExitBlueprint} disabled={blueprintSaving}>
+              <LogOut /> <span className="hidden sm:inline">Exit Blueprint</span>
+            </Button>
+          </>
         ) : (
-          <Button size="sm" onClick={onSubmit} disabled={!complete || submitting} className={STUDIO_PRIMARY}>
-            {submitting ? <Loader2 className="animate-spin" /> : <Send />}
-            {review?.status === 'changes_requested' ? 'Resubmit' : 'Submit'}
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onAutoAlign}
+              disabled={!canAutoAlign}
+              title="Auto Align — tidy this page's text & stickers"
+              className="border-studio/30 text-studio hover:border-studio/50 hover:bg-studio-soft hover:text-studio focus-visible:ring-studio-bright [&_svg]:text-studio"
+            >
+              <AlignCenterHorizontal /> <span className="hidden sm:inline">Auto Align</span>
+            </Button>
+
+            {/* Build it for me — the hero shortcut into the Blueprint workflow. Emphasized (filled
+                studio tint + sparkle) so it reads as the standout tool, without competing with the
+                terminal Submit/Checkout CTA. */}
+            <Button
+              size="sm"
+              onClick={onBuildForMe}
+              title="Build it for me — auto-arrange your photos from a blueprint"
+              className="gap-1.5 border border-studio/25 bg-studio-soft font-semibold text-studio shadow-xs ring-1 ring-inset ring-studio/10 transition-all hover:bg-studio/15 hover:text-studio active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-studio-bright [&_svg]:text-studio"
+            >
+              <Sparkles /> <span className="hidden sm:inline">Build it for me</span>
+            </Button>
+
+            <Button variant="outline" size="sm" onClick={onPreview}>
+              <Eye /> <span className="hidden sm:inline">Preview</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
+              {saving ? <Loader2 className="animate-spin" /> : <Save />} <span className="hidden sm:inline">Save</span>
+            </Button>
+            {status === 'submitted' ? (
+              <Button size="sm" render={<Link href={`/checkout/${albumId}`} />} className={STUDIO_PRIMARY}>
+                <ShoppingCart /> Checkout
+              </Button>
+            ) : (
+              <Button size="sm" onClick={onSubmit} disabled={!complete || submitting} className={STUDIO_PRIMARY}>
+                {submitting ? <Loader2 className="animate-spin" /> : <Send />}
+                {review?.status === 'changes_requested' ? 'Resubmit' : 'Submit'}
+              </Button>
+            )}
+          </>
         )}
       </div>
     </div>

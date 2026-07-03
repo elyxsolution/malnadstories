@@ -132,7 +132,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   const pages = (pageRows ?? []) as {
     layout_template: LayoutTemplate | null;
     photo_ids: string[] | null;
-    layout_config: { overlays?: { photoId: string }[] } | null;
+    layout_config: { overlays?: { photoId: string | null }[] } | null;
   }[];
   const photos = (photoRows ?? []) as { id: string; width: number | null; height: number | null; status: string }[];
 
@@ -144,7 +144,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     consumed += PAGE_COST[p.layout_template];
     const filled = (p.photo_ids ?? []).filter(Boolean);
     filled.forEach((id) => placedIds.add(id));
-    (p.layout_config?.overlays ?? []).forEach((o) => placedIds.add(o.photoId));
+    (p.layout_config?.overlays ?? []).forEach((o) => o.photoId && placedIds.add(o.photoId));
     emptyFrames += Math.max(0, requiredBaseCount(p.layout_template) - filled.length);
   }
   const lowResCount = photos.filter(

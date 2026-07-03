@@ -155,9 +155,9 @@ export default function BlockCard({
           </>
         )}
 
-        {/* Overlays (floating framed photos) */}
+        {/* Overlays (floating framed photos — or empty placeholder containers) */}
         {block.overlays.map((o, i) => {
-          const photo = photoMap.get(o.photoId);
+          const photo = o.photoId ? photoMap.get(o.photoId) : undefined;
           return (
             <Movable
               key={`ov-${i}`}
@@ -182,8 +182,8 @@ export default function BlockCard({
                       <CtlBtn label="Replace photo" onClick={() => setPicking({ kind: 'replace', index: i })}>
                         <Replace />
                       </CtlBtn>
-                      {photo && (
-                        <CtlBtn label="Edit photo" onClick={() => onEditPhoto(o.photoId)}>
+                      {photo && o.photoId && (
+                        <CtlBtn label="Edit photo" onClick={() => onEditPhoto(o.photoId!)}>
                           <SlidersHorizontal />
                         </CtlBtn>
                       )}
@@ -201,7 +201,10 @@ export default function BlockCard({
                 />
               }
             >
-              {photo ? <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" /> : <div className="h-full w-full bg-muted" />}
+              <OverlayContent
+                photo={photo}
+                onDropPhoto={(id) => api.replaceOverlay(block.key, i, id)}
+              />
             </Movable>
           );
         })}
@@ -383,6 +386,44 @@ export default function BlockCard({
           onClose={() => setPicking(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ── Overlay content ─────────────────────────────────────────────────────────────────
+/**
+ * The inside of one overlay container. Renders the assigned photo, or — when empty — a dashed
+ * placeholder that reads as a real drop zone. Accepts a dragged tray photo (`text/photo-id`)
+ * exactly like a base slot, so a user fills a placeholder overlay by dragging onto it. Dropping
+ * onto a filled overlay replaces its photo. The parent Movable still handles select/drag/resize.
+ */
+function OverlayContent({ photo, onDropPhoto }: { photo?: Photo; onDropPhoto: (photoId: string) => void }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!over) setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setOver(false);
+        const id = e.dataTransfer.getData('text/photo-id');
+        if (id) onDropPhoto(id);
+      }}
+      className="relative h-full w-full"
+    >
+      {photo ? (
+        <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" />
+      ) : (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 border border-dashed border-studio/40 bg-studio-soft/60 text-center">
+          <ImagePlus className="h-4 w-4 text-studio/70" />
+          <span className="px-1 text-[10px] font-medium leading-tight text-studio/80">Empty overlay — drop a photo</span>
+        </div>
+      )}
+      {over && <div className="pointer-events-none absolute inset-0 bg-studio/15 ring-2 ring-inset ring-studio-bright" />}
     </div>
   );
 }

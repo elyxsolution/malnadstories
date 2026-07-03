@@ -75,7 +75,7 @@ function HalfPage({
   );
 }
 
-type PhotoFor = (id: string | undefined) => { url: string; edit?: Photo['edit'] } | undefined;
+type PhotoFor = (id: string | null | undefined) => { url: string; edit?: Photo['edit'] } | undefined;
 
 export default function Flipbook({
   blocks,
