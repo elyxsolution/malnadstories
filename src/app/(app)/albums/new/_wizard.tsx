@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -22,6 +23,7 @@ import { photoCap } from '@/lib/builder/model';
 import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
 import Book from '@/components/book';
 import Uploader, { type Photo } from '../[id]/build/_uploader';
+import LocationAutocomplete from '../[id]/build/_location-autocomplete';
 import BlueprintPicker from './_blueprint-picker';
 import { LayoutTemplate, Sparkles, Dices } from 'lucide-react';
 import type { CoverOption } from '@/lib/covers';
@@ -363,15 +365,20 @@ export default function CreateWizard({
   const continueLabel = ['Continue', 'Continue', 'Continue', 'Open the builder'][step];
 
   return (
-    <div className="brand-surface flex min-h-[calc(100vh-3.5rem)] flex-col">
-      {/* PROGRESS HEADER — sticks just below the global app header (h-14). */}
-      <header className="sticky top-14 z-20 flex h-16 items-center justify-between border-b bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
-        <span className="inline-flex items-center gap-2">
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">
+    <div className="brand-surface flex min-h-screen flex-col">
+      {/* THE ONE WIZARD NAVBAR — the global app header is suppressed on this route
+          (see app-header-gate), so this unified bar is the only chrome above the wizard. */}
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
+        <Link
+          href="/dashboard"
+          aria-label="Malnad Stories — back to dashboard"
+          className="group inline-flex items-center gap-2 rounded-lg tracking-tight transition-transform duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]"
+        >
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15 transition-transform duration-200 group-hover:scale-105">
             <Sprig className="h-[15px] w-[15px]" />
           </span>
           <span className="font-display text-[15px] font-semibold">Malnad Stories</span>
-        </span>
+        </Link>
         <ol className="hidden items-center gap-5 md:flex">
           {STEPS.map((label, i) => {
             const done = i < step;
@@ -426,13 +433,24 @@ export default function CreateWizard({
                   onChange={(e) => setTitle(e.target.value)}
                   disabled={locked}
                   placeholder="Name your story…"
-                  className="h-auto border-0 border-b border-input bg-transparent px-0 py-2 font-display text-2xl font-medium shadow-none focus-visible:border-primary focus-visible:ring-0"
+                  className="h-auto border-0 border-b border-input bg-transparent px-0 py-2.5 font-display text-4xl font-medium leading-tight tracking-tight shadow-none focus-visible:border-primary focus-visible:ring-0 sm:text-5xl"
                 />
               </Field>
               {showDetails ? (
                 <>
                   <Field label="Destination · optional" icon={<MapPin className="h-4 w-4 text-primary/70" />}>
-                    <Input value={destination} onChange={(e) => setDestination(e.target.value)} disabled={locked} placeholder="Where to?" maxLength={120} />
+                    {/* Reuses the Album Builder's location autocomplete (over lib/builder/locations),
+                        scaled up to match the title's display typography. */}
+                    <LocationAutocomplete
+                      id="destination"
+                      value={destination}
+                      onChange={setDestination}
+                      disabled={locked}
+                      placeholder="Where to?"
+                      maxLength={120}
+                      iconClassName="hidden"
+                      inputClassName="h-auto rounded-none border-0 border-b border-input bg-transparent px-0 py-2.5 font-display text-2xl font-medium leading-tight tracking-tight text-foreground shadow-none focus-visible:border-primary focus-visible:ring-0 sm:text-3xl"
+                    />
                   </Field>
                   {/* Album Period — native date pickers (both optional; From ≤ To). */}
                   <Field label="Album period · optional" icon={<Calendar className="h-4 w-4 text-primary/70" />}>

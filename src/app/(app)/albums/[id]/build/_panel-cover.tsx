@@ -19,7 +19,7 @@ import CoverDesign from './_cover-render';
 import FontPicker from './_font-picker';
 import { ColorField } from './_color-picker';
 import LocationAutocomplete from './_location-autocomplete';
-import { BACKGROUNDS } from '@/lib/builder/elements';
+import { BACKGROUNDS, backgroundStyle } from '@/lib/builder/elements';
 import { COVER_LAYOUTS, COVER_LAYOUT_LABEL, type CoverConfig, type CoverLayout } from '@/lib/builder/cover';
 import type { Background, TextAlign } from '@/lib/builder/model';
 import type { CoverSide } from './_cover-canvas';
@@ -104,6 +104,11 @@ export default function CoverPanel({
     if (s === 'colour' && !sideBackground)
       pickBackground({ kind: 'gradient', value: 'gradient-forest' });
   };
+
+  // The custom-colour picker reflects the active SOLID colour. Gradient/texture presets have no
+  // single hex, so it falls back to the studio green — the picker still lets you choose any colour.
+  const currentSolidHex =
+    sideBackground?.kind === 'color' ? String(backgroundStyle(sideBackground).background ?? '#1e3a2f') : '#1e3a2f';
 
   return (
     <div className="ms-scroll flex-1 overflow-y-auto">
@@ -248,23 +253,42 @@ export default function CoverPanel({
         )}
 
         {source === 'colour' && (
-          <div className="flex flex-wrap gap-2">
-            {BACKGROUNDS.map((b) => {
-              const active = sideBackground?.value === b.key;
-              return (
-                <button
-                  key={b.key}
-                  type="button"
-                  onClick={() => pickBackground({ kind: b.kind, value: b.key })}
-                  aria-pressed={active}
-                  title={b.label}
-                  style={b.swatch}
-                  className={`h-9 w-9 rounded-lg ring-1 ring-inset ring-black/10 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
-                    active ? 'ring-2 ring-studio ring-offset-2 ring-offset-card' : ''
-                  }`}
-                />
-              );
-            })}
+          <div className="space-y-3.5">
+            {/* Any colour — a full HSV picker (with its own recent + saved swatches). Stored exactly
+                like a preset: a { kind:'color', value } Background, so the live preview, the print PDF
+                and previously-created albums all stay fully compatible. */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-col">
+                <span className="text-[12px] font-medium text-foreground">Custom colour</span>
+                <span className="text-[11px] text-muted-foreground">Choose any shade for the cover</span>
+              </div>
+              <ColorField value={currentSolidHex} onChange={(hex) => pickBackground({ kind: 'color', value: hex })} />
+            </div>
+
+            {/* Curated presets — solids, gradients and a paper texture, for one-tap selection. */}
+            <div className="space-y-1.5">
+              <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Presets
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {BACKGROUNDS.map((b) => {
+                  const active = sideBackground?.value === b.key;
+                  return (
+                    <button
+                      key={b.key}
+                      type="button"
+                      onClick={() => pickBackground({ kind: b.kind, value: b.key })}
+                      aria-pressed={active}
+                      title={b.label}
+                      style={b.swatch}
+                      className={`h-9 w-9 rounded-lg ring-1 ring-inset ring-black/10 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+                        active ? 'ring-2 ring-studio ring-offset-2 ring-offset-card' : ''
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
       </Section>

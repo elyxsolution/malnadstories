@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MapPin } from 'lucide-react';
 import { LOCATIONS } from '@/lib/builder/locations';
+import { cn } from '@/lib/utils';
 
 /**
  * Cover title / location autocomplete — a Google-suggest-style dropdown over a predefined dataset
@@ -28,11 +29,22 @@ export default function LocationAutocomplete({
   onChange,
   placeholder,
   maxLength = 100,
+  disabled = false,
+  id,
+  inputClassName,
+  iconClassName,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   maxLength?: number;
+  /** Read-only presentation (e.g. once the album is locked) — the dropdown never opens. */
+  disabled?: boolean;
+  id?: string;
+  /** Extend/override the input styling (cn-merged) — lets callers scale typography. */
+  inputClassName?: string;
+  /** Extend/override the leading pin styling (cn-merged); pass "hidden" to drop it. */
+  iconClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -92,29 +104,39 @@ export default function LocationAutocomplete({
     }
   };
 
-  const showList = open && matches.length > 0;
+  const showList = open && matches.length > 0 && !disabled;
 
   return (
     <div ref={ref} className="relative">
       <div className="relative">
-        <MapPin className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <MapPin
+          className={cn(
+            'pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground',
+            iconClassName,
+          )}
+        />
         <input
+          id={id}
           type="text"
           value={value}
           maxLength={maxLength}
           placeholder={placeholder}
+          disabled={disabled}
           onChange={(e) => {
             onChange(e.target.value);
-            setOpen(true);
+            if (!disabled) setOpen(true);
             setActive(-1);
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => !disabled && setOpen(true)}
           onKeyDown={onKeyDown}
           role="combobox"
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
-          className="h-9 w-full rounded-lg border border-input bg-card pl-8 pr-3 text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-muted-foreground focus-visible:border-studio-bright focus-visible:ring-2 focus-visible:ring-studio-bright/40"
+          className={cn(
+            'h-9 w-full rounded-lg border border-input bg-card pl-8 pr-3 text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-muted-foreground focus-visible:border-studio-bright focus-visible:ring-2 focus-visible:ring-studio-bright/40 disabled:cursor-not-allowed disabled:opacity-60',
+            inputClassName,
+          )}
         />
       </div>
 

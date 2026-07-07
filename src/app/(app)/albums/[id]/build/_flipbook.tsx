@@ -129,12 +129,13 @@ export default function Flipbook({
     };
   }, [photoMap]);
 
-  // Size a portrait page (3:4) to the viewport — two pages form an open spread.
+  // Size ONE portrait page (3:4) so the full open spread (two pages = 3:2) always fits the
+  // viewport — width is the binding constraint, so we fit the whole spread, never a single page.
   useEffect(() => {
     const measure = () => {
-      const maxW = Math.min(window.innerWidth * 0.46, 520);
-      const maxH = window.innerHeight * 0.78;
-      let w = maxW;
+      const maxSpread = Math.min(window.innerWidth * 0.94, 1080); // full open-book width
+      const maxH = window.innerHeight * 0.74;
+      let w = maxSpread / 2; // per-page width
       let h = w * (4 / 3);
       if (h > maxH) {
         h = maxH;
@@ -255,15 +256,15 @@ export default function Flipbook({
               width={dims.w}
               height={dims.h}
               size="fixed"
-              minWidth={280}
+              minWidth={150}
               maxWidth={620}
-              minHeight={360}
+              minHeight={200}
               maxHeight={900}
               showCover
               drawShadow
               flippingTime={700}
               maxShadowOpacity={0.55}
-              usePortrait
+              usePortrait={false}
               mobileScrollSupport
               onFlip={(e: { data: number }) => setPage(e.data)}
               className="ms-flipbook relative z-[1]"
