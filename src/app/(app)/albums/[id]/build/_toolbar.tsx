@@ -201,9 +201,7 @@ export default function CanvasToolbar({
               <Sparkles /> <span className="hidden sm:inline">Build it for me</span>
             </Button>
 
-            <Button variant="outline" size="sm" onClick={onPreview}>
-              <Eye /> <span className="hidden sm:inline">Preview</span>
-            </Button>
+            {/* Preview moved to the bottom Pages bar (see _builder.tsx) — kept out of this row. */}
             <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
               {saving ? <Loader2 className="animate-spin" /> : <Save />} <span className="hidden sm:inline">Save</span>
             </Button>

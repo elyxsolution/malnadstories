@@ -22,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   BookImage,
+  Eye,
 } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
@@ -1242,6 +1243,24 @@ export default function Builder({
             onDelete={api.removeBlock}
           />
         </div>
+
+        {/* Preview — sits beside the Pages bar (Change 2). Same flipbook trigger; customer mode
+            only (Blueprint mode keeps its Preview in the top toolbar). Styled as a prominent,
+            slightly-darker brand-green CTA so the preview action is immediately noticeable. */}
+        {!blueprintMode && (
+          <>
+            <span className="h-9 w-px flex-none bg-border/70" />
+            <Button
+              size="lg"
+              onClick={() => setFlipbookOpen(true)}
+              aria-label="Preview album"
+              title="Preview album"
+              className="flex-none gap-2 rounded-lg border-transparent bg-[hsl(150_48%_29%)] px-4 font-semibold text-studio-foreground shadow-[0_1px_2px_rgb(16_24_20/0.14),0_8px_20px_-8px_hsl(150_46%_22%/0.55)] transition-all duration-200 ease-glide hover:-translate-y-px hover:bg-[hsl(150_50%_25%)] hover:shadow-[0_3px_10px_rgb(16_24_20/0.18),0_16px_30px_-10px_hsl(150_46%_20%/0.6)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-2"
+            >
+              <Eye /> Preview
+            </Button>
+          </>
+        )}
       </div>
 
       {/* Modals */}

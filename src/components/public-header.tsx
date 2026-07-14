@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import Image from 'next/image';
 import { Menu, X } from 'lucide-react';
-import { Sprig } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -30,9 +30,15 @@ export function PublicHeader() {
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
         <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Malnad Stories — home">
-          <span className="grid h-8 w-8 place-items-center border border-gold-light text-gold">
-            <Sprig className="h-4 w-4" />
-          </span>
+          <Image
+            src="/logo.png"
+            alt=""
+            width={447}
+            height={558}
+            priority
+            unoptimized
+            className="h-8 w-auto"
+          />
           <span className="font-display text-lg font-semibold leading-none text-primary">
             Malnad{' '}
             <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>

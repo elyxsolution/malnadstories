@@ -1,6 +1,6 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import type { ReactNode } from 'react';
-import { Sprig } from '@/components/brand';
 
 /**
  * Shared frame for the auth surfaces (login / signup / reset) — a premium two-column layout.
@@ -9,7 +9,7 @@ import { Sprig } from '@/components/brand';
  *   Oscar Wilde quote + studio branding at the bottom. The image is a same-origin asset
  *   (`/auth/forest.jpg`) layered over a forest-green gradient FALLBACK, so it looks finished
  *   even before the photo is dropped in. On mobile it becomes a short top band.
- * RIGHT: a minimal, vertically-centred form column (the Sprig mark, heading, subheading,
+ * RIGHT: a minimal, vertically-centred form column (the brand logo, heading, subheading,
  *   and the page's own form) on the warm off-white surface, with lots of whitespace.
  *
  * Pure presentation; each page owns its form + actions. Motion is CSS-only and motion-safe.
@@ -67,9 +67,15 @@ export default function AuthShell({
             aria-label="Malnad Stories home"
             className="mb-8 flex w-fit items-center gap-2 text-sm font-semibold tracking-tight text-foreground"
           >
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">
-              <Sprig className="h-5 w-5" />
-            </span>
+            <Image
+              src="/logo.png"
+              alt=""
+              width={447}
+              height={558}
+              priority
+              unoptimized
+              className="h-9 w-auto"
+            />
           </Link>
 
           {eyebrow && (

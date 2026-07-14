@@ -1,6 +1,6 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { signOut } from '@/lib/actions/auth';
-import { Sprig } from '@/components/brand';
 import { brandFontVars } from '@/lib/fonts';
 
 export default function AppHeader({ email }: { email: string }) {
@@ -9,9 +9,15 @@ export default function AppHeader({ email }: { email: string }) {
       className={`${brandFontVars} sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-6 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8`}
     >
       <Link href="/dashboard" className="inline-flex items-center gap-2 tracking-tight">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15">
-          <Sprig className="h-[15px] w-[15px]" />
-        </span>
+        <Image
+          src="/logo.png"
+          alt=""
+          width={447}
+          height={558}
+          priority
+          unoptimized
+          className="h-7 w-auto"
+        />
         <span className="font-display text-[15px] font-semibold">Malnad Stories</span>
       </Link>
       <div className="flex items-center gap-3">

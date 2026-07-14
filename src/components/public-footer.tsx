@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Sprig } from '@/components/brand';
+import Image from 'next/image';
 
 /**
  * Shared public/marketing footer (Claude Design). Editorial brand block + grouped link
@@ -37,10 +37,15 @@ export function PublicFooter() {
       <div className="mx-auto max-w-6xl px-5 py-14 sm:px-8">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div className="max-w-xs">
-            <Link href="/" className="inline-flex items-center gap-2.5">
-              <span className="grid h-8 w-8 place-items-center border border-gold-light text-gold">
-                <Sprig className="h-4 w-4" />
-              </span>
+            <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Malnad Stories — home">
+              <Image
+                src="/logo.png"
+                alt=""
+                width={447}
+                height={558}
+                unoptimized
+                className="h-8 w-auto"
+              />
               <span className="font-display text-lg font-semibold leading-none text-primary">
                 Malnad{' '}
                 <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>

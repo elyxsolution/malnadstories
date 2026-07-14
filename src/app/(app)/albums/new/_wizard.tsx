@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import NextImage from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -16,14 +17,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { LUX_PRIMARY, Sprig } from '@/components/brand';
+import { LUX_PRIMARY } from '@/components/brand';
 import { createAlbumDraft } from '@/lib/actions/albums';
 import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
 import { photoCap } from '@/lib/builder/model';
 import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
 import Book from '@/components/book';
 import Uploader, { type Photo } from '../[id]/build/_uploader';
-import LocationAutocomplete from '../[id]/build/_location-autocomplete';
+import SmartTitleInput from './_smart-title-input';
 import BlueprintPicker from './_blueprint-picker';
 import { LayoutTemplate, Sparkles, Dices } from 'lucide-react';
 import type { CoverOption } from '@/lib/covers';
@@ -123,7 +124,17 @@ export default function CreateWizard({
   const pickArtwork = (id: string) => { setCoverId(id); setDesignId(null); setCustomCover(false); };
   const pickDesign = (id: string) => { setDesignId(id); setCoverId(null); setCustomCover(false); };
   const pickCustom = () => { setCustomCover(true); setCoverId(null); setDesignId(null); };
-  const [showDetails, setShowDetails] = useState(!!destination || !!fromDate || !!toDate || !!description);
+  // Destination is now captured inside the single smart title input, so the collapsible
+  // "trip details" section only gates the album period + description.
+  const [showDetails, setShowDetails] = useState(!!fromDate || !!toDate || !!description);
+
+  // The title is one smart field: as the user types, location suggestions surface and, on
+  // selection, `destination` is recorded (see SmartTitleInput). Keep `destination` consistent
+  // with the text — drop it if the user edits the location back out of the title.
+  const applyTitle = useCallback((v: string) => {
+    setTitle(v);
+    setDestination((d) => (d && v.toLowerCase().includes(d.toLowerCase()) ? d : ''));
+  }, []);
 
   // Created album + photos
   const [albumId, setAlbumId] = useState<string | null>(null);
@@ -374,9 +385,15 @@ export default function CreateWizard({
           aria-label="Malnad Stories — back to dashboard"
           className="group inline-flex items-center gap-2 rounded-lg tracking-tight transition-transform duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]"
         >
-          <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/[0.07] text-primary ring-1 ring-primary/15 transition-transform duration-200 group-hover:scale-105">
-            <Sprig className="h-[15px] w-[15px]" />
-          </span>
+          <NextImage
+            src="/logo.png"
+            alt=""
+            width={447}
+            height={558}
+            priority
+            unoptimized
+            className="h-7 w-auto transition-transform duration-200 group-hover:scale-105"
+          />
           <span className="font-display text-[15px] font-semibold">Malnad Stories</span>
         </Link>
         <ol className="hidden items-center gap-5 md:flex">
@@ -427,31 +444,23 @@ export default function CreateWizard({
                 Every album starts with a few words. Tell us where you went and what to call it — you can change any of
                 this later.
               </p>
-              <Field label="The title">
-                <Input
+              {/* Album Title — ONE smart field (Change 1). The user types the album name naturally;
+                  when the text they are typing looks like a known destination, location suggestions
+                  surface below and, when chosen, complete inline + record the destination. There is
+                  no separate destination field, yet selection still flows through `destination`. */}
+              <Field label="Album Title">
+                <SmartTitleInput
+                  id="title"
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={applyTitle}
+                  onSelectLocation={setDestination}
                   disabled={locked}
                   placeholder="Name your story…"
-                  className="h-auto border-0 border-b border-input bg-transparent px-0 py-2.5 font-display text-4xl font-medium leading-tight tracking-tight shadow-none focus-visible:border-primary focus-visible:ring-0 sm:text-5xl"
+                  maxLength={120}
                 />
               </Field>
               {showDetails ? (
                 <>
-                  <Field label="Destination · optional" icon={<MapPin className="h-4 w-4 text-primary/70" />}>
-                    {/* Reuses the Album Builder's location autocomplete (over lib/builder/locations),
-                        scaled up to match the title's display typography. */}
-                    <LocationAutocomplete
-                      id="destination"
-                      value={destination}
-                      onChange={setDestination}
-                      disabled={locked}
-                      placeholder="Where to?"
-                      maxLength={120}
-                      iconClassName="hidden"
-                      inputClassName="h-auto rounded-none border-0 border-b border-input bg-transparent px-0 py-2.5 font-display text-2xl font-medium leading-tight tracking-tight text-foreground shadow-none focus-visible:border-primary focus-visible:ring-0 sm:text-3xl"
-                    />
-                  </Field>
                   {/* Album Period — native date pickers (both optional; From ≤ To). */}
                   <Field label="Album period · optional" icon={<Calendar className="h-4 w-4 text-primary/70" />}>
                     <div className="grid gap-3 sm:grid-cols-2">

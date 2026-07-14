@@ -1,0 +1,265 @@
+﻿S.No,State / UT,Zone,Place / Destination
+1,Jammu & Kashmir,North,Srinagar & Dal Lake
+2,Jammu & Kashmir,North,Gulmarg
+3,Jammu & Kashmir,North,Pahalgam
+4,Jammu & Kashmir,North,Sonmarg
+5,Jammu & Kashmir,North,Amarnath Cave
+6,Jammu & Kashmir,North,Vaishno Devi
+7,Jammu & Kashmir,North,Yusmarg
+8,Jammu & Kashmir,North,Doodhpathri
+9,Jammu & Kashmir,North,Kashmir Great Lakes Trek
+10,Jammu & Kashmir,North,Tarsar Marsar Trek
+11,Jammu & Kashmir,North,Jammu (Raghunath Temple)
+12,Jammu & Kashmir,North,Patnitop
+13,Ladakh,North,Leh
+14,Ladakh,North,Pangong Tso
+15,Ladakh,North,Nubra Valley
+16,Ladakh,North,Tso Moriri
+17,Ladakh,North,Khardung La
+18,Ladakh,North,Chadar Trek (Zanskar)
+19,Ladakh,North,Markha Valley Trek
+20,Ladakh,North,Magnetic Hill
+21,Ladakh,North,Hemis Monastery
+22,Ladakh,North,Zanskar Valley
+23,Ladakh,North,Kargil
+24,Himachal Pradesh,North,Shimla
+25,Himachal Pradesh,North,Manali
+26,Himachal Pradesh,North,Dharamshala & McLeod Ganj
+27,Himachal Pradesh,North,Spiti Valley
+28,Himachal Pradesh,North,Kasol & Parvati Valley
+29,Himachal Pradesh,North,Triund Trek
+30,Himachal Pradesh,North,Hampta Pass Trek
+31,Himachal Pradesh,North,Chandratal Lake
+32,Himachal Pradesh,North,Kullu Valley
+33,Himachal Pradesh,North,Dalhousie & Khajjiar
+34,Himachal Pradesh,North,Kinnaur Valley
+35,Himachal Pradesh,North,Bir Billing
+36,Himachal Pradesh,North,Solang Valley
+37,Himachal Pradesh,North,Jibhi & Tirthan Valley
+38,Uttarakhand,North,Rishikesh
+39,Uttarakhand,North,Haridwar
+40,Uttarakhand,North,Nainital
+41,Uttarakhand,North,Mussoorie
+42,Uttarakhand,North,Auli
+43,Uttarakhand,North,Valley of Flowers
+44,Uttarakhand,North,Kedarnath
+45,Uttarakhand,North,Badrinath
+46,Uttarakhand,North,Gangotri & Gaumukh
+47,Uttarakhand,North,Yamunotri
+48,Uttarakhand,North,Jim Corbett National Park
+49,Uttarakhand,North,Roopkund Trek
+50,Uttarakhand,North,Kausani
+51,Uttarakhand,North,Chopta & Tungnath
+52,Uttarakhand,North,Ranikhet
+53,Punjab,North,Amritsar (Golden Temple)
+54,Punjab,North,Wagah Border
+55,Punjab,North,Chandigarh
+56,Punjab,North,Anandpur Sahib
+57,Punjab,North,Patiala
+58,Haryana,North,Kurukshetra
+59,Haryana,North,Sultanpur National Park
+60,Haryana,North,Surajkund
+61,Haryana,North,Pinjore Gardens
+62,Delhi,North,Red Fort
+63,Delhi,North,Qutub Minar
+64,Delhi,North,India Gate
+65,Delhi,North,Humayun's Tomb
+66,Delhi,North,Lotus Temple
+67,Delhi,North,Akshardham Temple
+68,Delhi,North,Chandni Chowk
+69,Rajasthan,West,Jaipur (Pink City)
+70,Rajasthan,West,Udaipur
+71,Rajasthan,West,Jodhpur
+72,Rajasthan,West,Jaisalmer
+73,Rajasthan,West,Pushkar
+74,Rajasthan,West,Mount Abu
+75,Rajasthan,West,Ranthambore National Park
+76,Rajasthan,West,Bikaner
+77,Rajasthan,West,Chittorgarh Fort
+78,Rajasthan,West,Thar Desert Safari (Sam Dunes)
+79,Rajasthan,West,Bundi
+80,Rajasthan,West,Keoladeo National Park (Bharatpur)
+81,Gujarat,West,Rann of Kutch
+82,Gujarat,West,Gir National Park
+83,Gujarat,West,Somnath Temple
+84,Gujarat,West,Dwarka
+85,Gujarat,West,Statue of Unity
+86,Gujarat,West,Diu
+87,Gujarat,West,Champaner-Pavagadh
+88,Gujarat,West,Ahmedabad (Old City)
+89,Gujarat,West,Saputara
+90,Maharashtra,West,Mumbai
+91,Maharashtra,West,Ajanta & Ellora Caves
+92,Maharashtra,West,Lonavala & Khandala
+93,Maharashtra,West,Mahabaleshwar
+94,Maharashtra,West,Alibaug
+95,Maharashtra,West,Tadoba National Park
+96,Maharashtra,West,Harishchandragad Trek
+97,Maharashtra,West,Kalsubai Peak Trek
+98,Maharashtra,West,Sinhagad Fort Trek
+99,Maharashtra,West,Shirdi
+100,Maharashtra,West,Ganpatipule
+101,Maharashtra,West,Tarkarli
+102,Maharashtra,West,Raigad Fort
+103,Goa,West,Baga & Calangute Beach
+104,Goa,West,Anjuna & Vagator Beach
+105,Goa,West,Palolem Beach
+106,Goa,West,Old Goa Churches
+107,Goa,West,Dudhsagar Falls
+108,Goa,West,Fort Aguada
+109,Goa,West,Butterfly Beach & Grand Island
+110,Madhya Pradesh,Central,Khajuraho Temples
+111,Madhya Pradesh,Central,Kanha National Park
+112,Madhya Pradesh,Central,Bandhavgarh National Park
+113,Madhya Pradesh,Central,Pachmarhi
+114,Madhya Pradesh,Central,Sanchi Stupa
+115,Madhya Pradesh,Central,Bhimbetka Caves
+116,Madhya Pradesh,Central,Ujjain (Mahakaleshwar)
+117,Madhya Pradesh,Central,Orchha
+118,Madhya Pradesh,Central,Gwalior Fort
+119,Madhya Pradesh,Central,Panna National Park
+120,Chhattisgarh,Central,Chitrakote Falls
+121,Chhattisgarh,Central,Kanger Valley National Park
+122,Chhattisgarh,Central,Bastar
+123,Chhattisgarh,Central,Sirpur
+124,Uttar Pradesh,North,"Taj Mahal, Agra"
+125,Uttar Pradesh,North,Agra Fort
+126,Uttar Pradesh,North,Varanasi
+127,Uttar Pradesh,North,Fatehpur Sikri
+128,Uttar Pradesh,North,Mathura & Vrindavan
+129,Uttar Pradesh,North,Ayodhya
+130,Uttar Pradesh,North,Lucknow
+131,Uttar Pradesh,North,Prayagraj (Allahabad)
+132,Uttar Pradesh,North,Sarnath
+133,Bihar,East,Bodh Gaya
+134,Bihar,East,Nalanda
+135,Bihar,East,Rajgir
+136,Bihar,East,Patna (Golghar & Patna Sahib)
+137,Bihar,East,Vaishali
+138,Jharkhand,East,Netarhat
+139,Jharkhand,East,Betla National Park
+140,Jharkhand,East,Hundru Falls
+141,Jharkhand,East,Deoghar (Baidyanath Temple)
+142,Jharkhand,East,Patratu Valley
+143,West Bengal,East,Darjeeling
+144,West Bengal,East,Sundarbans National Park
+145,West Bengal,East,Kolkata
+146,West Bengal,East,Kalimpong
+147,West Bengal,East,Sandakphu Trek
+148,West Bengal,East,Digha
+149,West Bengal,East,Mirik
+150,West Bengal,East,Murshidabad
+151,Odisha,East,Puri
+152,Odisha,East,Konark Sun Temple
+153,Odisha,East,Chilika Lake
+154,Odisha,East,Bhitarkanika National Park
+155,Odisha,East,Bhubaneswar
+156,Odisha,East,Daringbadi
+157,Sikkim,East,Gangtok
+158,Sikkim,East,Tsomgo (Changu) Lake
+159,Sikkim,East,Nathu La Pass
+160,Sikkim,East,Yumthang Valley
+161,Sikkim,East,Goecha La Trek
+162,Sikkim,East,Lachung & Lachen
+163,Sikkim,East,Gurudongmar Lake
+164,Sikkim,East,Pelling
+165,Karnataka,South,Coorg (Kodagu)
+166,Karnataka,South,Hampi
+167,Karnataka,South,Mysuru
+168,Karnataka,South,Chikmagalur
+169,Karnataka,South,Gokarna
+170,Karnataka,South,Jog Falls
+171,Karnataka,South,Bandipur National Park
+172,Karnataka,South,Nagarhole National Park
+173,Karnataka,South,Kudremukh Trek
+174,Karnataka,South,Badami Caves
+175,Karnataka,South,Bengaluru
+176,Kerala,South,Munnar
+177,Kerala,South,Alleppey (Alappuzha) Backwaters
+178,Kerala,South,Kumarakom
+179,Kerala,South,Kovalam Beach
+180,Kerala,South,Varkala
+181,Kerala,South,Thekkady (Periyar)
+182,Kerala,South,Wayanad
+183,Kerala,South,Kochi (Fort Kochi)
+184,Kerala,South,Athirappilly Falls
+185,Kerala,South,Vagamon
+186,Tamil Nadu,South,Ooty (Udhagamandalam)
+187,Tamil Nadu,South,Kodaikanal
+188,Tamil Nadu,South,Meghamalai
+189,Tamil Nadu,South,Rameswaram
+190,Tamil Nadu,South,Madurai (Meenakshi Temple)
+191,Tamil Nadu,South,Mahabalipuram
+192,Tamil Nadu,South,Kanyakumari
+193,Tamil Nadu,South,Coonoor
+194,Tamil Nadu,South,Mudumalai National Park
+195,Tamil Nadu,South,Chennai (Marina Beach)
+196,Tamil Nadu,South,Thanjavur (Brihadeeswarar Temple)
+197,Andhra Pradesh,South,Araku Valley
+198,Andhra Pradesh,South,Tirupati (Tirumala)
+199,Andhra Pradesh,South,Visakhapatnam (Vizag)
+200,Andhra Pradesh,South,Borra Caves
+201,Andhra Pradesh,South,Lepakshi
+202,Telangana,South,Hyderabad (Charminar & Golconda Fort)
+203,Telangana,South,Ramoji Film City
+204,Telangana,South,Warangal Fort
+205,Telangana,South,Nagarjuna Sagar
+206,Puducherry,South,Puducherry (White Town)
+207,Puducherry,South,Auroville
+208,Puducherry,South,Paradise Beach
+209,Lakshadweep,South,Agatti Island
+210,Lakshadweep,South,Bangaram Island
+211,Lakshadweep,South,Kavaratti
+212,Assam,Northeast,Kaziranga National Park
+213,Assam,Northeast,Majuli Island
+214,Assam,Northeast,Guwahati (Kamakhya Temple)
+215,Assam,Northeast,Manas National Park
+216,Assam,Northeast,Sivasagar
+217,Meghalaya,Northeast,Cherrapunji (Sohra)
+218,Meghalaya,Northeast,Living Root Bridges (Nongriat)
+219,Meghalaya,Northeast,Shillong
+220,Meghalaya,Northeast,Dawki (Umngot River)
+221,Meghalaya,Northeast,Mawlynnong
+222,Arunachal Pradesh,Northeast,Tawang
+223,Arunachal Pradesh,Northeast,Ziro Valley
+224,Arunachal Pradesh,Northeast,Bomdila
+225,Arunachal Pradesh,Northeast,Sela Pass
+226,Nagaland,Northeast,Kohima
+227,Nagaland,Northeast,Dzukou Valley
+228,Nagaland,Northeast,Mon (Konyak Villages)
+229,Manipur,Northeast,Loktak Lake
+230,Manipur,Northeast,Imphal
+231,Mizoram,Northeast,Aizawl
+232,Mizoram,Northeast,Vantawng Falls
+233,Tripura,Northeast,Ujjayanta Palace
+234,Tripura,Northeast,Neermahal
+235,Tripura,Northeast,Unakoti
+236,Chandigarh,North,Rock Garden
+237,Chandigarh,North,Sukhna Lake
+238,Andaman & Nicobar Islands,Islands,Havelock Island (Swaraj Dweep)
+239,Andaman & Nicobar Islands,Islands,Neil Island (Shaheed Dweep)
+240,Andaman & Nicobar Islands,Islands,Port Blair (Cellular Jail)
+241,Andaman & Nicobar Islands,Islands,Ross Island (Netaji Subhas Chandra Bose Dweep)
+242,Andaman & Nicobar Islands,Islands,Baratang Island
+243,Dadra and Nagar Haveli and Daman and Diu,West,Daman Beach
+244,Dadra and Nagar Haveli and Daman and Diu,West,Silvassa
+245,Nepal,,Kathmandu Valley
+246,Nepal,,Everest Base Camp Trek
+247,Nepal,,Annapurna Base Camp Trek
+248,Nepal,,Annapurna Circuit Trek
+249,Nepal,,Pokhara & Phewa Lake
+250,Nepal,,Chitwan National Park
+251,Nepal,,Langtang Valley Trek
+252,Nepal,,Lumbini
+253,Nepal,,Mustang (Upper Mustang)
+254,Nepal,,Gosaikunda Lake Trek
+255,Nepal,,Manaslu Circuit Trek
+256,Nepal,,Nagarkot
+257,Nepal,,Bhaktapur
+258,Nepal,,Patan (Lalitpur)
+259,Nepal,,Rara Lake
+260,Nepal,,Ghandruk & Poon Hill
+261,Nepal,,Bandipur
+262,Nepal,,Bardia National Park
+263,Nepal,,Kanchenjunga Base Camp Trek
+264,Nepal,,Ilam

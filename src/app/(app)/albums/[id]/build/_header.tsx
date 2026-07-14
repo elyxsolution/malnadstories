@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { Check, Loader2, LogOut } from 'lucide-react';
 import { signOut } from '@/lib/actions/auth';
-import { Sprig } from '@/components/brand';
 
 /**
  * The ONE builder navbar (Part 1) — merges the old global app header and the builder's
@@ -41,9 +41,15 @@ export default function BuilderHeader({
         href="/dashboard"
         className="group flex flex-none items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
       >
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-studio/[0.08] text-studio ring-1 ring-studio/15 transition-transform duration-200 ease-glide group-hover:scale-105">
-          <Sprig className="h-[17px] w-[17px]" />
-        </span>
+        <Image
+          src="/logo.png"
+          alt=""
+          width={447}
+          height={558}
+          priority
+          unoptimized
+          className="h-8 w-auto transition-transform duration-200 ease-glide group-hover:scale-105"
+        />
         <span className="hidden flex-col leading-none sm:flex">
           <span className="font-display text-[15px] font-semibold tracking-tight text-foreground">Malnad Stories</span>
           <span className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Album studio</span>

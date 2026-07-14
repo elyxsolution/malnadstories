@@ -1,76 +1,345 @@
 /**
- * Popular travel destinations — a curated, predefined dataset (~300 entries) powering the cover
- * title/location autocomplete. PURE data, no I/O. Indian destinations first (the primary market —
- * cities, hill stations, beaches, heritage, wildlife, incl. the Malnad/Karnataka region), then
- * popular international destinations. Suggestions are advisory; the cover title stays free text.
+ * Travel destinations powering the cover title/location autocomplete. PURE data, no I/O.
+ * Sourced from location.csv (India states/UTs + Nepal), grouped by State/UT (zone in the
+ * comment). The autocomplete matches and displays each place name exactly as listed here;
+ * suggestions are advisory — the cover title stays free text.
  */
 export const LOCATIONS: string[] = [
-  // ── India — major cities ──────────────────────────────────────────────────
-  'Bangalore', 'Bengaluru', 'Mumbai', 'Delhi', 'New Delhi', 'Chennai', 'Kolkata', 'Hyderabad',
-  'Pune', 'Ahmedabad', 'Jaipur', 'Surat', 'Lucknow', 'Kanpur', 'Nagpur', 'Indore', 'Bhopal',
-  'Visakhapatnam', 'Patna', 'Vadodara', 'Coimbatore', 'Kochi', 'Thiruvananthapuram', 'Chandigarh',
-  'Guwahati', 'Bhubaneswar', 'Mysore', 'Mysuru', 'Mangalore', 'Mangaluru', 'Hubli', 'Belgaum',
-  // ── India — Karnataka / Malnad region ───────────────────────────────────────
-  'Chikkamagaluru', 'Chikmagalur', 'Sakleshpur', 'Kemmanagundi', 'Kudremukh', 'Mullayanagiri',
-  'Baba Budangiri', 'Agumbe', 'Kalasa', 'Horanadu', 'Sringeri', 'Kollur', 'Jog Falls', 'Sirsi',
-  'Yellapur', 'Dandeli', 'Coorg', 'Kodagu', 'Madikeri', 'Talakaveri', 'Hampi', 'Badami', 'Aihole',
-  'Pattadakal', 'Bijapur', 'Vijayapura', 'Gokarna', 'Murudeshwar', 'Karwar', 'Udupi', 'Shivamogga',
-  'Shimoga', 'Chitradurga', 'Hassan', 'Belur', 'Halebidu', 'Shravanabelagola', 'Nandi Hills',
-  'Bandipur', 'Nagarhole', 'BR Hills', 'Kabini', 'Bheemeshwari',
-  // ── India — hill stations ───────────────────────────────────────────────────
-  'Ooty', 'Kodaikanal', 'Munnar', 'Wayanad', 'Coonoor', 'Yercaud', 'Vagamon', 'Ponmudi',
-  'Shimla', 'Manali', 'Dharamshala', 'McLeod Ganj', 'Dalhousie', 'Kasauli', 'Kufri', 'Kasol',
-  'Spiti Valley', 'Kinnaur', 'Mussoorie', 'Nainital', 'Mukteshwar', 'Ranikhet', 'Almora', 'Auli',
-  'Lansdowne', 'Chopta', 'Darjeeling', 'Kalimpong', 'Gangtok', 'Pelling', 'Lachung', 'Tawang',
-  'Shillong', 'Cherrapunji', 'Mount Abu', 'Lonavala', 'Mahabaleshwar', 'Panchgani', 'Matheran',
-  'Saputara', 'Araku Valley',
-  // ── India — beaches & coast ─────────────────────────────────────────────────
-  'Goa', 'North Goa', 'South Goa', 'Panaji', 'Calangute', 'Baga', 'Anjuna', 'Palolem', 'Vagator',
-  'Varkala', 'Kovalam', 'Alleppey', 'Alappuzha', 'Kumarakom', 'Marari', 'Pondicherry', 'Puducherry',
-  'Mahabalipuram', 'Rameswaram', 'Kanyakumari', 'Tarkarli', 'Diu', 'Andaman Islands', 'Havelock Island',
-  'Neil Island', 'Port Blair', 'Lakshadweep',
-  // ── India — heritage & landmarks ────────────────────────────────────────────
-  'Agra', 'Taj Mahal', 'Fatehpur Sikri', 'Varanasi', 'Banaras', 'Kashi', 'Sarnath', 'Bodh Gaya',
-  'Khajuraho', 'Orchha', 'Gwalior', 'Ujjain', 'Konark', 'Puri', 'Amritsar', 'Golden Temple',
-  'Rishikesh', 'Haridwar', 'Udaipur', 'Jodhpur', 'Jaisalmer', 'Bikaner', 'Pushkar', 'Ajmer',
-  'Mount Girnar', 'Somnath', 'Dwarka', 'Rann of Kutch', 'Bhuj', 'Hampi Bazaar', 'Mahabalipuram Shore Temple',
-  // ── India — nature, wildlife & valleys ──────────────────────────────────────
-  'Jim Corbett', 'Ranthambore', 'Kaziranga', 'Sundarbans', 'Gir National Park', 'Periyar', 'Thekkady',
-  'Valley of Flowers', 'Hemkund Sahib', 'Kedarnath', 'Badrinath', 'Gangotri', 'Yamunotri', 'Leh',
-  'Ladakh', 'Nubra Valley', 'Pangong Lake', 'Tso Moriri', 'Zanskar', 'Srinagar', 'Gulmarg',
-  'Pahalgam', 'Sonamarg', 'Dal Lake', 'Kasol Parvati Valley', 'Ziro Valley', 'Majuli',
-  // ── India — states & regions ────────────────────────────────────────────────
-  'Karnataka', 'Kerala', 'Tamil Nadu', 'Rajasthan', 'Himachal Pradesh', 'Uttarakhand', 'Sikkim',
-  'Meghalaya', 'Assam', 'Arunachal Pradesh', 'Maharashtra', 'Gujarat', 'Madhya Pradesh', 'Odisha',
-  'Punjab', 'Andhra Pradesh', 'Telangana', 'West Bengal', 'Jammu and Kashmir', 'Northeast India',
-  'Western Ghats', 'Himalayas',
+  // -- Jammu & Kashmir (North) --
+  'Srinagar & Dal Lake',
+  'Gulmarg',
+  'Pahalgam',
+  'Sonmarg',
+  'Amarnath Cave',
+  'Vaishno Devi',
+  'Yusmarg',
+  'Doodhpathri',
+  'Kashmir Great Lakes Trek',
+  'Tarsar Marsar Trek',
+  'Jammu (Raghunath Temple)',
+  'Patnitop',
 
-  // ── International — Asia ─────────────────────────────────────────────────────
-  'Bali', 'Ubud', 'Jakarta', 'Bangkok', 'Phuket', 'Krabi', 'Chiang Mai', 'Pattaya', 'Singapore',
-  'Kuala Lumpur', 'Langkawi', 'Penang', 'Hanoi', 'Ho Chi Minh City', 'Ha Long Bay', 'Da Nang',
-  'Siem Reap', 'Angkor Wat', 'Phnom Penh', 'Luang Prabang', 'Yangon', 'Bagan', 'Tokyo', 'Kyoto',
-  'Osaka', 'Hokkaido', 'Mount Fuji', 'Seoul', 'Busan', 'Jeju Island', 'Beijing', 'Shanghai',
-  'Hong Kong', 'Macau', 'Taipei', 'Colombo', 'Kandy', 'Galle', 'Sigiriya', 'Ella', 'Nuwara Eliya',
-  'Kathmandu', 'Pokhara', 'Everest Base Camp', 'Thimphu', 'Paro', 'Malé', 'Maldives', 'Dubai',
-  'Abu Dhabi', 'Doha', 'Muscat', 'Istanbul', 'Cappadocia', 'Antalya', 'Petra', 'Jerusalem',
-  'Tel Aviv', 'Tashkent', 'Samarkand', 'Baku',
-  // ── International — Europe ───────────────────────────────────────────────────
-  'Paris', 'Eiffel Tower', 'Nice', 'French Riviera', 'London', 'Edinburgh', 'Amsterdam', 'Rome',
-  'Venice', 'Florence', 'Milan', 'Naples', 'Amalfi Coast', 'Tuscany', 'Cinque Terre', 'Barcelona',
-  'Madrid', 'Seville', 'Granada', 'Lisbon', 'Porto', 'Berlin', 'Munich', 'Hamburg', 'Vienna',
-  'Salzburg', 'Hallstatt', 'Prague', 'Budapest', 'Zurich', 'Geneva', 'Interlaken', 'Zermatt',
-  'Lucerne', 'Santorini', 'Mykonos', 'Athens', 'Dubrovnik', 'Split', 'Reykjavik', 'Oslo', 'Bergen',
-  'Stockholm', 'Copenhagen', 'Helsinki', 'Brussels', 'Bruges', 'Dublin', 'Moscow', 'Saint Petersburg',
-  'Krakow', 'Warsaw', 'Lapland',
-  // ── International — Americas ─────────────────────────────────────────────────
-  'New York', 'New York City', 'Los Angeles', 'San Francisco', 'Las Vegas', 'Miami', 'Chicago',
-  'Washington DC', 'Boston', 'Seattle', 'Orlando', 'Grand Canyon', 'Yellowstone', 'Hawaii', 'Honolulu',
-  'Toronto', 'Vancouver', 'Montreal', 'Banff', 'Niagara Falls', 'Mexico City', 'Cancun', 'Tulum',
-  'Havana', 'Rio de Janeiro', 'São Paulo', 'Buenos Aires', 'Patagonia', 'Machu Picchu', 'Cusco',
-  'Lima', 'Cartagena', 'Galápagos Islands',
-  // ── International — Africa & Oceania ─────────────────────────────────────────
-  'Cape Town', 'Johannesburg', 'Kruger National Park', 'Serengeti', 'Maasai Mara', 'Nairobi',
-  'Zanzibar', 'Marrakech', 'Casablanca', 'Cairo', 'Giza Pyramids', 'Luxor', 'Victoria Falls',
-  'Mauritius', 'Seychelles', 'Sydney', 'Melbourne', 'Gold Coast', 'Great Barrier Reef', 'Cairns',
-  'Auckland', 'Queenstown', 'Wellington', 'Fiji', 'Bora Bora', 'Tahiti',
+  // -- Ladakh (North) --
+  'Leh',
+  'Pangong Tso',
+  'Nubra Valley',
+  'Tso Moriri',
+  'Khardung La',
+  'Chadar Trek (Zanskar)',
+  'Markha Valley Trek',
+  'Magnetic Hill',
+  'Hemis Monastery',
+  'Zanskar Valley',
+  'Kargil',
+
+  // -- Himachal Pradesh (North) --
+  'Shimla',
+  'Manali',
+  'Dharamshala & McLeod Ganj',
+  'Spiti Valley',
+  'Kasol & Parvati Valley',
+  'Triund Trek',
+  'Hampta Pass Trek',
+  'Chandratal Lake',
+  'Kullu Valley',
+  'Dalhousie & Khajjiar',
+  'Kinnaur Valley',
+  'Bir Billing',
+  'Solang Valley',
+  'Jibhi & Tirthan Valley',
+
+  // -- Uttarakhand (North) --
+  'Rishikesh',
+  'Haridwar',
+  'Nainital',
+  'Mussoorie',
+  'Auli',
+  'Valley of Flowers',
+  'Kedarnath',
+  'Badrinath',
+  'Gangotri & Gaumukh',
+  'Yamunotri',
+  'Jim Corbett National Park',
+  'Roopkund Trek',
+  'Kausani',
+  'Chopta & Tungnath',
+  'Ranikhet',
+
+  // -- Punjab (North) --
+  'Amritsar (Golden Temple)',
+  'Wagah Border',
+  'Chandigarh',
+  'Anandpur Sahib',
+  'Patiala',
+
+  // -- Haryana (North) --
+  'Kurukshetra',
+  'Sultanpur National Park',
+  'Surajkund',
+  'Pinjore Gardens',
+
+  // -- Delhi (North) --
+  'Red Fort',
+  'Qutub Minar',
+  'India Gate',
+  'Humayun\'s Tomb',
+  'Lotus Temple',
+  'Akshardham Temple',
+  'Chandni Chowk',
+
+  // -- Rajasthan (West) --
+  'Jaipur (Pink City)',
+  'Udaipur',
+  'Jodhpur',
+  'Jaisalmer',
+  'Pushkar',
+  'Mount Abu',
+  'Ranthambore National Park',
+  'Bikaner',
+  'Chittorgarh Fort',
+  'Thar Desert Safari (Sam Dunes)',
+  'Bundi',
+  'Keoladeo National Park (Bharatpur)',
+
+  // -- Gujarat (West) --
+  'Rann of Kutch',
+  'Gir National Park',
+  'Somnath Temple',
+  'Dwarka',
+  'Statue of Unity',
+  'Diu',
+  'Champaner-Pavagadh',
+  'Ahmedabad (Old City)',
+  'Saputara',
+
+  // -- Maharashtra (West) --
+  'Mumbai',
+  'Ajanta & Ellora Caves',
+  'Lonavala & Khandala',
+  'Mahabaleshwar',
+  'Alibaug',
+  'Tadoba National Park',
+  'Harishchandragad Trek',
+  'Kalsubai Peak Trek',
+  'Sinhagad Fort Trek',
+  'Shirdi',
+  'Ganpatipule',
+  'Tarkarli',
+  'Raigad Fort',
+
+  // -- Goa (West) --
+  'Baga & Calangute Beach',
+  'Anjuna & Vagator Beach',
+  'Palolem Beach',
+  'Old Goa Churches',
+  'Dudhsagar Falls',
+  'Fort Aguada',
+  'Butterfly Beach & Grand Island',
+
+  // -- Madhya Pradesh (Central) --
+  'Khajuraho Temples',
+  'Kanha National Park',
+  'Bandhavgarh National Park',
+  'Pachmarhi',
+  'Sanchi Stupa',
+  'Bhimbetka Caves',
+  'Ujjain (Mahakaleshwar)',
+  'Orchha',
+  'Gwalior Fort',
+  'Panna National Park',
+
+  // -- Chhattisgarh (Central) --
+  'Chitrakote Falls',
+  'Kanger Valley National Park',
+  'Bastar',
+  'Sirpur',
+
+  // -- Uttar Pradesh (North) --
+  'Taj Mahal, Agra',
+  'Agra Fort',
+  'Varanasi',
+  'Fatehpur Sikri',
+  'Mathura & Vrindavan',
+  'Ayodhya',
+  'Lucknow',
+  'Prayagraj (Allahabad)',
+  'Sarnath',
+
+  // -- Bihar (East) --
+  'Bodh Gaya',
+  'Nalanda',
+  'Rajgir',
+  'Patna (Golghar & Patna Sahib)',
+  'Vaishali',
+
+  // -- Jharkhand (East) --
+  'Netarhat',
+  'Betla National Park',
+  'Hundru Falls',
+  'Deoghar (Baidyanath Temple)',
+  'Patratu Valley',
+
+  // -- West Bengal (East) --
+  'Darjeeling',
+  'Sundarbans National Park',
+  'Kolkata',
+  'Kalimpong',
+  'Sandakphu Trek',
+  'Digha',
+  'Mirik',
+  'Murshidabad',
+
+  // -- Odisha (East) --
+  'Puri',
+  'Konark Sun Temple',
+  'Chilika Lake',
+  'Bhitarkanika National Park',
+  'Bhubaneswar',
+  'Daringbadi',
+
+  // -- Sikkim (East) --
+  'Gangtok',
+  'Tsomgo (Changu) Lake',
+  'Nathu La Pass',
+  'Yumthang Valley',
+  'Goecha La Trek',
+  'Lachung & Lachen',
+  'Gurudongmar Lake',
+  'Pelling',
+
+  // -- Karnataka (South) --
+  'Coorg (Kodagu)',
+  'Hampi',
+  'Mysuru',
+  'Chikmagalur',
+  'Gokarna',
+  'Jog Falls',
+  'Bandipur National Park',
+  'Nagarhole National Park',
+  'Kudremukh Trek',
+  'Badami Caves',
+  'Bengaluru',
+
+  // -- Kerala (South) --
+  'Munnar',
+  'Alleppey (Alappuzha) Backwaters',
+  'Kumarakom',
+  'Kovalam Beach',
+  'Varkala',
+  'Thekkady (Periyar)',
+  'Wayanad',
+  'Kochi (Fort Kochi)',
+  'Athirappilly Falls',
+  'Vagamon',
+
+  // -- Tamil Nadu (South) --
+  'Ooty (Udhagamandalam)',
+  'Kodaikanal',
+  'Meghamalai',
+  'Rameswaram',
+  'Madurai (Meenakshi Temple)',
+  'Mahabalipuram',
+  'Kanyakumari',
+  'Coonoor',
+  'Mudumalai National Park',
+  'Chennai (Marina Beach)',
+  'Thanjavur (Brihadeeswarar Temple)',
+
+  // -- Andhra Pradesh (South) --
+  'Araku Valley',
+  'Tirupati (Tirumala)',
+  'Visakhapatnam (Vizag)',
+  'Borra Caves',
+  'Lepakshi',
+
+  // -- Telangana (South) --
+  'Hyderabad (Charminar & Golconda Fort)',
+  'Ramoji Film City',
+  'Warangal Fort',
+  'Nagarjuna Sagar',
+
+  // -- Puducherry (South) --
+  'Puducherry (White Town)',
+  'Auroville',
+  'Paradise Beach',
+
+  // -- Lakshadweep (South) --
+  'Agatti Island',
+  'Bangaram Island',
+  'Kavaratti',
+
+  // -- Assam (Northeast) --
+  'Kaziranga National Park',
+  'Majuli Island',
+  'Guwahati (Kamakhya Temple)',
+  'Manas National Park',
+  'Sivasagar',
+
+  // -- Meghalaya (Northeast) --
+  'Cherrapunji (Sohra)',
+  'Living Root Bridges (Nongriat)',
+  'Shillong',
+  'Dawki (Umngot River)',
+  'Mawlynnong',
+
+  // -- Arunachal Pradesh (Northeast) --
+  'Tawang',
+  'Ziro Valley',
+  'Bomdila',
+  'Sela Pass',
+
+  // -- Nagaland (Northeast) --
+  'Kohima',
+  'Dzukou Valley',
+  'Mon (Konyak Villages)',
+
+  // -- Manipur (Northeast) --
+  'Loktak Lake',
+  'Imphal',
+
+  // -- Mizoram (Northeast) --
+  'Aizawl',
+  'Vantawng Falls',
+
+  // -- Tripura (Northeast) --
+  'Ujjayanta Palace',
+  'Neermahal',
+  'Unakoti',
+
+  // -- Chandigarh (North) --
+  'Rock Garden',
+  'Sukhna Lake',
+
+  // -- Andaman & Nicobar Islands (Islands) --
+  'Havelock Island (Swaraj Dweep)',
+  'Neil Island (Shaheed Dweep)',
+  'Port Blair (Cellular Jail)',
+  'Ross Island (Netaji Subhas Chandra Bose Dweep)',
+  'Baratang Island',
+
+  // -- Dadra and Nagar Haveli and Daman and Diu (West) --
+  'Daman Beach',
+  'Silvassa',
+
+  // -- Nepal --
+  'Kathmandu Valley',
+  'Everest Base Camp Trek',
+  'Annapurna Base Camp Trek',
+  'Annapurna Circuit Trek',
+  'Pokhara & Phewa Lake',
+  'Chitwan National Park',
+  'Langtang Valley Trek',
+  'Lumbini',
+  'Mustang (Upper Mustang)',
+  'Gosaikunda Lake Trek',
+  'Manaslu Circuit Trek',
+  'Nagarkot',
+  'Bhaktapur',
+  'Patan (Lalitpur)',
+  'Rara Lake',
+  'Ghandruk & Poon Hill',
+  'Bandipur',
+  'Bardia National Park',
+  'Kanchenjunga Base Camp Trek',
+  'Ilam',
 ];
