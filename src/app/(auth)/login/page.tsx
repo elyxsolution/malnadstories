@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY } from '@/components/brand';
 import { brandFontVars } from '@/lib/fonts';
 import AuthShell from '../_auth-shell';
+import GoogleAuth from '../_google-auth';
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -31,7 +32,9 @@ export default function LoginPage() {
   return (
     <div className={`${brandFontVars} font-ui`}>
       <AuthShell title="Welcome Back" subtitle="Enter your credentials to access your memory workspace.">
-        <form action={formAction} className="space-y-4">
+        <GoogleAuth />
+
+        <form action={formAction} className="mt-4 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input

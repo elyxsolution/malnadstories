@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { LUX_PRIMARY } from '@/components/brand';
 import { brandFontVars } from '@/lib/fonts';
 import AuthShell from '../_auth-shell';
+import GoogleAuth from '../_google-auth';
 
 export default function SignupPage() {
   const [fields, setFields] = useState({ name: '', email: '', password: '', confirm: '' });
@@ -87,7 +88,9 @@ export default function SignupPage() {
         title="Create Your Memory Workspace"
         subtitle="Start preserving your travels, bound beautifully."
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <GoogleAuth />
+
+        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Full name</Label>
             <Input
