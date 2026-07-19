@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { ConfirmUploadSchema } from '@/lib/validations';
 import { enqueueImageHardening } from '@/lib/queue';
-import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { isEditingLocked } from '@/lib/orders/album-lock';
 import { checkLimit, sanitizeFilename } from '@/lib/security/guard';
 
 /**
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   }
 
   // Edit lock: can't add photos to an album that's part of a paid order.
-  if (await hasPaidOrder(supabase, albumId)) {
+  if (await isEditingLocked(supabase, albumId)) {
     return NextResponse.json(
       { error: 'This album is part of a paid order and can no longer be changed.' },
       { status: 409 },

@@ -28,6 +28,10 @@ import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
 import TrayToolbar, { type TrayFilter } from './_tray-toolbar';
 import BlockCard from './_block';
+import SubmitValidationDialog from './_submit-validation-dialog';
+import ConfirmSubmitDialog from './_confirm-submit-dialog';
+import { evaluateAlbum, type AlbumValidationReport, type IssueAction } from '@/lib/albums/validation';
+import { LoadingOverlay } from '@/components/loading';
 import PairContent from './_pair-frame';
 import Navigator from './_navigator';
 import Inspector from './_inspector';
@@ -62,7 +66,6 @@ import {
   photoCap,
   pagesConsumed,
   canAdd,
-  isAlbumComplete,
   placedPhotoIds,
   requiredBaseCount,
   cryptoId,
@@ -214,6 +217,11 @@ export default function Builder({
 
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Submission validation (advisory, non-blocking): `checking` shows the "Checking your album…"
+  // overlay while saves flush; `validation` holds the report that drives the informational dialog.
+  const [checking, setChecking] = useState(false);
+  const [validation, setValidation] = useState<AlbumValidationReport | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
@@ -237,9 +245,6 @@ export default function Builder({
 
   const consumed = pagesConsumed(blocks);
   const remaining = size - consumed;
-  // A cover is satisfied by a base template OR a custom cover (photo / background).
-  const hasCover = !!coverId || !!coverConfig.photoId || !!coverConfig.background;
-  const complete = isAlbumComplete(blocks, size) && hasCover;
   const cur = Math.min(current, Math.max(0, blocks.length - 1));
   const block = blocks[cur];
   const canAddMore = remaining >= 2;
@@ -712,22 +717,66 @@ export default function Builder({
     else void doExitBlueprint();
   };
 
-  const submit = async () => {
-    setSubmitting(true);
+  // Phase 1 — user clicks Submit: flush pending saves, then run the CENTRAL validation service on
+  // the current state. If ANY issue (error or warning) → show the informational dialog. If clean →
+  // submit directly. Validation never blocks; it informs (the dialog offers "Continue Anyway").
+  const onSubmitClick = async () => {
+    setChecking(true);
     setMessage(null);
-    // Flush any pending (debounced) cover design so the server's submit gate reads the
-    // current cover — not a stale row — when checking for a template/photo/background.
+    // Flush the debounced cover design + layout so validation reads the CURRENT state, not a stale row.
     if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
     if (albumTitle.trim()) {
       await saveCoverDesign({ albumId, title: albumTitle, coverTemplateId: coverId, config: coverConfig });
     }
     const saved = await saveLayout({ albumId, blocks: api.serialize() });
+    setChecking(false);
     if (!saved.ok) {
-      setSubmitting(false);
       setMessage({ kind: 'err', text: saved.error });
       return;
     }
     api.setDirty(false);
+    // Same central service the server + PDF use; `activeTemplate` = a selected active cover id.
+    const report = evaluateAlbum({
+      size,
+      blocks,
+      cover: { activeTemplate: !!coverId, config: coverConfig, title: albumTitle },
+    });
+    if (report.issues.length > 0) {
+      setValidation(report); // show the grouped review dialog — user decides
+      return;
+    }
+    await doSubmit();
+  };
+
+  // Jump straight to the place an issue points at (one-click fix navigation).
+  const navigateToIssue = (action: IssueAction) => {
+    setValidation(null);
+    if (!action) return;
+    if (action.type === 'goto-front-cover') {
+      setCoverFocused(true);
+      setActiveSide('front');
+    } else if (action.type === 'goto-back-cover') {
+      setCoverFocused(true);
+      setActiveSide('back');
+    } else {
+      // goto-page / goto-layout / goto-photo — focus that content spread.
+      setCoverFocused(false);
+      setEditLayout('focus');
+      setCurrent(Math.max(0, Math.min(blocks.length - 1, action.page - 1)));
+    }
+  };
+
+  // Dialog "Submit"/"Submit Anyway": print-ready → submit; otherwise confirm first (CHANGE 7).
+  const onDialogContinue = () => {
+    if (validation?.printReady) void doSubmit();
+    else setConfirmOpen(true);
+  };
+
+  // Phase 2 — actual submission (direct when clean, via the dialog, or after confirmation).
+  const doSubmit = async () => {
+    setValidation(null);
+    setConfirmOpen(false);
+    setSubmitting(true);
     const wasChanges = review?.status === 'changes_requested';
     const res = await submitAlbum(albumId);
     setSubmitting(false);
@@ -816,7 +865,6 @@ export default function Builder({
         status={status}
         review={review}
         dirty={api.dirty}
-        complete={complete}
         canUndo={api.canUndo}
         canRedo={api.canRedo}
         onUndo={api.undo}
@@ -835,7 +883,7 @@ export default function Builder({
         onPreview={() => setFlipbookOpen(true)}
         onSave={save}
         saving={saving}
-        onSubmit={submit}
+        onSubmit={onSubmitClick}
         submitting={submitting}
         albumId={albumId}
         blueprintMode={blueprintMode}
@@ -1329,6 +1377,21 @@ export default function Builder({
         />
       )}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+
+      {/* Submission validation (advisory) — checking overlay while saves flush, then the dialog. */}
+      <LoadingOverlay open={checking} message="Checking your album…" />
+      {validation && !confirmOpen && (
+        <SubmitValidationDialog
+          report={validation}
+          submitting={submitting}
+          onGoBack={() => setValidation(null)}
+          onNavigate={navigateToIssue}
+          onContinue={onDialogContinue}
+        />
+      )}
+      {confirmOpen && (
+        <ConfirmSubmitDialog submitting={submitting} onCancel={() => setConfirmOpen(false)} onConfirm={doSubmit} />
+      )}
       {/* "Build it for me" — the SAME Auto Create / Choose Blueprint / Custom workflow as the wizard. */}
       {buildMethodOpen && (
         <BuildMethod

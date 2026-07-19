@@ -135,9 +135,18 @@ export async function POST(request: Request) {
       // Auto-generate the album PDF (backend workflow). Best-effort + idempotent; the
       // webhook path does the same, and startAlbumPdfGeneration no-ops if already done.
       try {
-        await startAlbumPdfGeneration(orderAlbumId, { validate: false, nudge: true });
+        await startAlbumPdfGeneration(orderAlbumId, { validate: true, nudge: true });
       } catch (e) {
         console.error('[payments/verify] album-pdf auto-start error', { orderId: order.id, error: String(e) });
+      }
+
+      // Enter the admin review queue on the first paid transition (CHANGE 4). Idempotent with
+      // the webhook path — `submit_album_for_review` resets to 'pending_review' and audits it.
+      // Best-effort: the customer owns this order (RLS above), so user.id is the album owner.
+      try {
+        await admin.rpc('submit_album_for_review', { p_album_id: orderAlbumId, p_customer_id: user.id });
+      } catch (e) {
+        console.error('[payments/verify] review-queue enqueue error', { orderId: order.id, error: String(e) });
       }
     }
     // result 'duplicate' | 'amount_mismatch' | 'order_not_found' → leave to webhook; ok below.

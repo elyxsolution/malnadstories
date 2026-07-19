@@ -288,51 +288,11 @@ export function isAlbumComplete(blocks: Block[], size: number): boolean {
   return blocks.length > 0 && pagesConsumed(blocks) === size && blocks.every(isBlockComplete);
 }
 
-/**
- * Pure pre-flight validation for PDF generation. Used by BOTH the builder (to gate the
- * Generate button + show errors) and the server action (re-checked against the DB so a
- * forged client can't bypass it). Mirrors the physical-book rules in REQUIREMENT 7.
- */
-export function validateAlbumForPdf(
-  blocks: Block[],
-  size: number,
-  hasActiveCover: boolean,
-): { ok: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  // 1. Cover exists.
-  if (!hasActiveCover) errors.push('Choose a cover design before generating the PDF.');
-
-  // 2. Page structure valid + 3/4. no orphan / incomplete pair.
-  let consumed = 0;
-  blocks.forEach((b, i) => {
-    const label = `${TEMPLATE_LABEL[b.template] ?? 'Page'} #${i + 1}`;
-    if (!(LAYOUT_TEMPLATES as readonly string[]).includes(b.template)) {
-      errors.push(`${label}: unknown layout.`);
-      return;
-    }
-    consumed += PAGE_COST[b.template];
-    if (!isBlockComplete(b)) {
-      errors.push(
-        b.template === 'single-pair'
-          ? `${label}: add a photo to BOTH the left and right pages.`
-          : `${label}: add the image for the double-page spread.`,
-      );
-    }
-  });
-
-  if (blocks.length === 0) errors.push('Add at least one content page.');
-
-  // 6. Spread pages exist in pairs → every unit costs 2, so content is always even.
-  if (consumed % 2 !== 0) errors.push('Content must be an even number of pages (each unit is a pair).');
-
-  // 5. Page-count alignment.
-  if (consumed !== size) {
-    errors.push(`Album must fill exactly ${size} content pages (currently ${consumed}).`);
-  }
-
-  return { ok: errors.length === 0, errors };
-}
+// NOTE: The former `validateAlbumForPdf()` lived here. It has been REMOVED as part of the
+// validation unification — album completeness + cover + PDF-integrity now live in the single
+// central service `@/lib/albums/validation` (which reuses the pure primitives below:
+// PAGE_COST, requiredBaseCount, isBlockComplete, LAYOUT_TEMPLATES). There must be exactly one
+// validator; do not re-add a parallel one here.
 
 /** Every placed photo id — base slots ∪ overlays (a photo appears at most once). */
 export function placedPhotoIds(blocks: Block[]): Set<string> {

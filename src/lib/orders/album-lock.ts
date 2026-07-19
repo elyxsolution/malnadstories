@@ -75,3 +75,28 @@ export async function getPaidOrder(
 export function hasActiveOrder(supabase: SupabaseServerClient, albumId: string): Promise<boolean> {
   return existsOrderWithStatus(supabase, albumId, [...PAID_STATES, 'pending']);
 }
+
+/**
+ * EDIT lock WITH the post-payment review exception (admin review workflow, CHANGE 6/7).
+ *
+ * A paid album is frozen — EXCEPT when an admin has requested changes on it. When the
+ * album's review status is `changes_requested`, editing is REOPENED so the customer can
+ * fix the flagged issues and resubmit; every other review status (or no review) keeps a
+ * paid album frozen exactly as before. Resubmitting (`submitAlbum`) resets the review to
+ * `pending_review`, which re-locks the album automatically on the next write.
+ *
+ * This is the ONE intentional relaxation of the "paid ⇒ frozen" invariant. Money is still
+ * guarded independently by service-role-only writes; this only governs album CONTENT, and
+ * only reopens it while an admin is actively asking for changes. Uses the AUTHENTICATED
+ * client so RLS scopes both the order check and the album_reviews read to the owner.
+ */
+export async function isEditingLocked(supabase: SupabaseServerClient, albumId: string): Promise<boolean> {
+  if (!(await hasPaidOrder(supabase, albumId))) return false; // not paid → freely editable
+  const { data } = await supabase
+    .from('album_reviews')
+    .select('status')
+    .eq('album_id', albumId)
+    .maybeSingle();
+  const reviewStatus = (data as { status: string } | null)?.status ?? null;
+  return reviewStatus !== 'changes_requested'; // paid: locked unless changes were requested
+}

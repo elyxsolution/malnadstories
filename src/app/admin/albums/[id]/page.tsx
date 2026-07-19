@@ -4,9 +4,11 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { albums, profiles, orders } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
+import { createServiceClient } from '@/lib/supabase/service';
 import { adminUserEmail } from '@/lib/admin/users';
 import { loadAlbumForAdmin } from '@/lib/admin/album-view';
 import { getAlbumReadiness } from '@/lib/admin/readiness';
+import { loadAlbumValidation } from '@/lib/albums/validation';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
 import { Check, AlertTriangle } from 'lucide-react';
 import AdminPdfControls from './_pdf-controls';
@@ -43,6 +45,11 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
     getAlbumReadiness(album.id),
   ]);
 
+  // Central validation report (CHANGE 13) — the SAME report the builder/PDF/checkout use, so the
+  // admin sees blocking issues, warnings, completion and print-readiness at a glance.
+  const validation = await loadAlbumValidation(createServiceClient(), album.id);
+  const submitted = album.status !== 'draft';
+
   return (
     <div className="mx-auto max-w-5xl p-6">
       <p className="text-sm text-muted-foreground">
@@ -64,8 +71,40 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <AdminPdfControls albumId={album.id} />
+        <AdminPdfControls
+          albumId={album.id}
+          printReady={validation?.printReady ?? true}
+          blockingIssues={validation ? [...validation.critical, ...validation.warnings].map((i) => i.title) : []}
+        />
       </div>
+
+      {/* Validation summary — reuses the centralized Album Validation report (CHANGE 13). */}
+      {validation && (
+        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
+          <div className="flex items-baseline gap-1.5">
+            <span
+              className={`font-display text-2xl font-semibold tabular-nums ${
+                validation.statistics.score >= 100 ? 'text-green-600' : validation.statistics.score >= 50 ? 'text-amber-600' : 'text-destructive'
+              }`}
+            >
+              {validation.statistics.score}%
+            </span>
+            <span className="text-xs text-muted-foreground">ready</span>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${validation.printReady ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}`}
+          >
+            {validation.printReady ? 'Print ready' : 'Not print-ready'}
+          </span>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${submitted ? 'bg-studio/10 text-studio' : 'bg-muted text-muted-foreground'}`}>
+            {submitted ? 'Customer submitted' : 'Draft'}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {validation.critical.length} blocking · {validation.warnings.length} warning{validation.warnings.length === 1 ? '' : 's'} · {validation.info.length} note
+            {validation.info.length === 1 ? '' : 's'} · {validation.statistics.placedPhotos}/{validation.statistics.expectedPhotos} photos
+          </span>
+        </div>
+      )}
 
       {/* Print readiness (advisory; read-only — same checks as customer checkout) */}
       {readiness && (

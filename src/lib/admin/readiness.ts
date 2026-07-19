@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { albums, albumPages, photos } from '@/db/schema';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
+import { hasFrontCover } from '@/lib/albums/cover';
+import { normalizeCoverConfig } from '@/lib/builder/cover';
 
 /**
  * Admin print-readiness — the SAME advisory checks the customer sees at checkout, read
@@ -17,7 +19,7 @@ export type AlbumReadiness = { items: ReadinessItem[]; score: number; warnings: 
 
 export async function getAlbumReadiness(albumId: string): Promise<AlbumReadiness> {
   const [album] = await db
-    .select({ title: albums.title, size: albums.size, coverTemplateId: albums.coverTemplateId })
+    .select({ title: albums.title, size: albums.size, coverTemplateId: albums.coverTemplateId, coverConfig: albums.coverConfig })
     .from(albums)
     .where(eq(albums.id, albumId))
     .limit(1);
@@ -50,7 +52,14 @@ export async function getAlbumReadiness(albumId: string): Promise<AlbumReadiness
   ).length;
 
   const structureOk = consumed === album.size;
-  const coverOk = !!album.coverTemplateId;
+  // Canonical cover check — recognises legacy templates, design templates, photo/background, and
+  // typography covers (the single source of truth in lib/albums/cover). For this advisory panel
+  // `activeTemplate` = a selected template id (no extra active/image_key round-trip needed).
+  const coverOk = hasFrontCover({
+    activeTemplate: !!album.coverTemplateId,
+    config: normalizeCoverConfig(album.coverConfig as Parameters<typeof normalizeCoverConfig>[0]),
+    title: album.title,
+  });
   const titleOk = !!album.title.trim();
   const framesOk = emptyFrames === 0;
   const resOk = lowResCount === 0;

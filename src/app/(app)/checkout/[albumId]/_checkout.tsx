@@ -65,6 +65,8 @@ export default function Checkout({
   initialCouponCode,
   initialShippingMethod,
   readiness,
+  printReady = true,
+  blockingIssues = [],
 }: {
   albumId: string;
   albumTitle: string;
@@ -73,6 +75,8 @@ export default function Checkout({
   photoCount: number;
   formatName: string;
   formatDimensions?: string;
+  printReady?: boolean;
+  blockingIssues?: string[];
   coverUrl: string | null;
   coverName: string | null;
   amount: AmountBreakdown;
@@ -326,6 +330,9 @@ export default function Checkout({
     return `Pay ${inr(breakdown.totalInr)}`;
   })();
   const nextDisabled = (() => {
+    // CHANGE 2/3: validation warnings NEVER block payment. The customer is informed of any
+    // print-readiness issues (PrintNotReadyBanner) but may always continue to pay; the album is
+    // reviewed by an admin after payment and, if needed, editing is reopened.
     if (step === 'shipping' && !selectedId) return true;
     if (step === 'review') return busyControls || !selectedId || !scriptReady;
     return false;
@@ -355,6 +362,7 @@ export default function Checkout({
         <div className={`mx-auto w-full ${showRail ? 'max-w-5xl' : 'max-w-2xl'}`}>
           <div className={showRail ? 'grid items-start gap-8 lg:grid-cols-[1fr_340px]' : ''}>
             <div className="animate-rise min-w-0">
+              {!printReady && <PrintNotReadyBanner albumId={albumId} issues={blockingIssues} />}
               {step === 'summary' && (
                 <div className="space-y-6">
                   <ReadinessBanner items={readiness} warnings={readyWarnings} />
@@ -511,6 +519,40 @@ function ReadinessBanner({ items, warnings }: { items: ReadinessItem[]; warnings
             ))}
           </div>
         </details>
+      </div>
+    </div>
+  );
+}
+
+/** Pre-payment print-readiness notice (CHANGE 2) — the album is SUBMITTED but not yet printable. */
+function PrintNotReadyBanner({ albumId, issues }: { albumId: string; issues: string[] }) {
+  return (
+    <div className="mb-6 rounded-2xl border border-warning/40 bg-warning/[0.06] p-5">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+        <div className="min-w-0">
+          <p className="font-semibold text-foreground">A few things to review before printing.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your album is submitted. We noticed the following — <span className="font-medium text-foreground">you may still continue with
+            payment</span>, and our team will review your album before it goes to print:
+          </p>
+          {issues.length > 0 && (
+            <ul className="mt-2 space-y-1 text-sm text-foreground">
+              {issues.map((t, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-warning" />
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <a
+            href={`/albums/${albumId}/build`}
+            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-primary underline-offset-2 hover:underline"
+          >
+            <ArrowLeft className="h-4 w-4" /> Return to the editor to fix these now
+          </a>
+        </div>
       </div>
     </div>
   );

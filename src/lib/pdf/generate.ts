@@ -6,13 +6,7 @@ import { enqueueAlbumPdf } from '@/lib/queue';
 import { checkWorker, probeWorker } from '@/lib/worker/health';
 import { captureException } from '@/lib/observability/capture';
 import { getRequestId } from '@/lib/observability/request-id';
-import {
-  LAYOUT_TEMPLATES,
-  validateAlbumForPdf,
-  type Block,
-  type LayoutTemplate,
-  type Overlay,
-} from '@/lib/builder/model';
+import { loadAlbumValidation } from '@/lib/albums/validation';
 
 /**
  * Internal album-PDF generation service (service-role; NO per-user auth here — callers
@@ -32,16 +26,6 @@ const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // non-forced request is a no-op (don't pile on duplicate jobs).
 const IN_PROGRESS_MS = 90 * 1000;
 
-type PageRow = {
-  page_number: number;
-  layout_template: string | null;
-  caption: string | null;
-  photo_ids: string[] | null;
-  layout_config: { overlays?: Overlay[] } | null;
-};
-
-const isTemplate = (t: string | null): t is LayoutTemplate =>
-  !!t && (LAYOUT_TEMPLATES as readonly string[]).includes(t);
 
 /**
  * Drive album-PDF generation.
@@ -61,13 +45,8 @@ export async function startAlbumPdfGeneration(
 
   const svc = createServiceClient();
 
-  const { data: albumRow } = await svc
-    .from('albums')
-    .select('id, size, cover_template_id')
-    .eq('id', albumId)
-    .maybeSingle();
+  const { data: albumRow } = await svc.from('albums').select('id').eq('id', albumId).maybeSingle();
   if (!albumRow) return { ok: false, error: 'Album not found' };
-  const album = albumRow as { id: string; size: number; cover_template_id: string | null };
 
   // Idempotency: don't duplicate work for a non-forced caller.
   const { data: existing } = await svc
@@ -95,41 +74,22 @@ export async function startAlbumPdfGeneration(
     return { ok: false, error: 'PDF generation is temporarily unavailable. Please try again later.' };
   }
 
+  // PDF integrity gate (CHANGE 6): users may submit an incomplete album, but the generator must
+  // NEVER produce a broken book. Re-run the SAME central Album Validation Service and refuse with
+  // a detailed reason if any CRITICAL error remains. Runs on every path (admin AND payment), since
+  // submission no longer validates. Back-cover-blank is a warning, so it never blocks generation.
+  // PDF integrity gate (CHANGE 6/9): re-validate the LATEST state via the central service and
+  // refuse — with a STRUCTURED, customer-safe blocking report — if the album isn't print-ready.
+  // Runs on every path (admin AND payment). Blank back cover is INFO, so it never blocks.
   if (doValidate) {
-    let hasActiveCover = false;
-    if (album.cover_template_id) {
-      const { data: cover } = await svc
-        .from('cover_templates')
-        .select('id, image_key')
-        .eq('id', album.cover_template_id)
-        .maybeSingle();
-      const c = cover as { id: string; image_key: string | null } | null;
-      hasActiveCover = !!(c && c.image_key);
+    const report = await loadAlbumValidation(svc, albumId);
+    if (report && !report.printReady) {
+      const blocking = [...report.critical, ...report.warnings].map((i) => `• ${i.title}`).join('\n');
+      return {
+        ok: false,
+        error: `Print validation failed. Resolve these to enable printing:\n${blocking}`,
+      };
     }
-
-    const { data: pageData } = await svc
-      .from('album_pages')
-      .select('page_number, layout_template, caption, photo_ids, layout_config')
-      .eq('album_id', albumId)
-      .order('page_number', { ascending: true });
-
-    const blocks: Block[] = ((pageData ?? []) as PageRow[])
-      .filter((r) => isTemplate(r.layout_template))
-      .map((r) => ({
-        key: `${r.page_number}`,
-        template: r.layout_template as LayoutTemplate,
-        photoIds: (r.photo_ids ?? []).filter(Boolean),
-        caption: r.caption ?? '',
-        overlays: r.layout_config?.overlays ?? [],
-        // Rich elements don't affect PDF completeness validation; defaults suffice here.
-        texts: [],
-        qrs: [],
-        stickers: [],
-        background: null,
-      }));
-
-    const check = validateAlbumForPdf(blocks, album.size, hasActiveCover);
-    if (!check.ok) return { ok: false, error: check.errors[0] };
   }
 
   const token = randomBytes(32).toString('hex');

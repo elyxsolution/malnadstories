@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { InlineLoader } from '@/components/loading';
-import { FileDown, RefreshCw, FileText, AlertTriangle } from 'lucide-react';
+import { FileDown, RefreshCw, FileText, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { adminGenerateAlbumPdf } from '@/lib/actions/admin/pdf';
+import { adminGenerateAlbumPdf, adminForceGeneratePdf } from '@/lib/actions/admin/pdf';
 
 type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
 
@@ -14,11 +14,22 @@ type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
  * Reads status from the admin-gated route and polls while generating; the generate /
  * regenerate action is the `requireAdmin()`-gated server action.
  */
-export default function AdminPdfControls({ albumId }: { albumId: string }) {
+export default function AdminPdfControls({
+  albumId,
+  printReady = true,
+  blockingIssues = [],
+}: {
+  albumId: string;
+  printReady?: boolean;
+  blockingIssues?: string[];
+}) {
   const [status, setStatus] = useState<PdfStatus>('idle');
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [forceOpen, setForceOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [forcing, setForcing] = useState(false);
 
   const [failReason, setFailReason] = useState<string | null>(null);
 
@@ -51,6 +62,20 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
     setBusy(false);
     if (res.ok) setStatus('generating');
     else setErr(res.error);
+  };
+
+  const forceGenerate = async () => {
+    setForcing(true);
+    setErr(null);
+    const res = await adminForceGeneratePdf({ albumId, reason: reason.trim() });
+    setForcing(false);
+    if (res.ok) {
+      setForceOpen(false);
+      setReason('');
+      setStatus('generating');
+    } else {
+      setErr(res.error);
+    }
   };
 
   const download = async () => {
@@ -108,8 +133,69 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
             Last generation failed{failReason ? `: ${failReason}` : '.'}
           </span>
         )}
+
+        {/* Force generate — the explicit, audited override that bypasses the validation gate.
+            Shown when the album isn't print-ready (the only time an override is meaningful). */}
+        {!printReady && status !== 'generating' && (
+          <Button variant="ghost" size="sm" className="text-warning hover:bg-warning/10 hover:text-warning" onClick={() => setForceOpen(true)} disabled={busy}>
+            <ShieldAlert className="h-4 w-4" /> Force generate (override)
+          </Button>
+        )}
       </div>
       {err && <p className="text-xs text-destructive">{err}</p>}
+
+      {forceOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-foreground/50 p-4 backdrop-blur-sm" onClick={() => !forcing && setForceOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl border bg-background p-5 shadow-elevated" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 flex-none place-items-center rounded-full bg-warning/10 text-warning">
+                <ShieldAlert className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-semibold text-foreground">Force-generate this PDF?</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  This album is <strong className="text-foreground">not print-ready</strong>. Forcing generation overrides
+                  the validation gate — the printed book may contain these issues:
+                </p>
+              </div>
+            </div>
+            {blockingIssues.length > 0 && (
+              <ul className="mt-3 max-h-32 space-y-1 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm text-foreground">
+                {blockingIssues.map((t, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none text-warning" /> {t}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label className="mt-4 block text-sm font-medium text-foreground">
+              Reason for override <span className="text-destructive">*</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="e.g. Customer approved printing despite the blank page 8."
+              className="mt-1.5 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">Recorded in the audit log with your name, the time, and the validation report.</p>
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" size="sm" onClick={() => setForceOpen(false)} disabled={forcing}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-warning text-warning-foreground hover:bg-warning/90"
+                onClick={forceGenerate}
+                disabled={forcing || reason.trim().length < 8}
+              >
+                {forcing ? <InlineLoader /> : <ShieldAlert className="h-4 w-4" />} Confirm &amp; force-generate
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -151,25 +151,40 @@ export async function POST(request: Request) {
   // the razorpay order id, so resolve it via the service client.
   if (event === 'payment.captured' && result === 'processed') {
     let albumId: string | null = null;
+    let customerId: string | null = null;
     try {
       const { data: orderRow } = await admin
         .from('orders')
-        .select('id, album_id')
+        .select('id, album_id, user_id')
         .eq('razorpay_order_id', razorpayOrderId)
         .maybeSingle();
-      const row = orderRow as { id: string; album_id: string } | null;
+      const row = orderRow as { id: string; album_id: string; user_id: string } | null;
       albumId = row?.album_id ?? null;
+      customerId = row?.user_id ?? null;
       if (row?.id) await sendOrderConfirmationEmail(row.id);
     } catch (e) {
       console.error('[razorpay-webhook] confirmation email error', { eventId, error: String(e) });
     }
 
+    // Enter the admin review queue on the FIRST paid transition (CHANGE 4): every paid album
+    // must be reviewed before print. `submit_album_for_review` creates/refreshes the
+    // album_reviews row to 'pending_review' and audits it (single source of the review state;
+    // the central validation service is untouched). Best-effort — must never fail the webhook.
+    if (albumId && customerId) {
+      try {
+        await admin.rpc('submit_album_for_review', { p_album_id: albumId, p_customer_id: customerId });
+      } catch (e) {
+        console.error('[razorpay-webhook] review-queue enqueue error', { eventId, albumId, error: String(e) });
+      }
+    }
+
     // Auto-generate the album PDF on the FIRST transition to paid (backend workflow —
-    // the customer never triggers this). Best-effort + idempotent: validate:false (a
-    // paid album was already completeness-checked at submit), nudge wakes the worker.
+    // the customer never triggers this). Best-effort + idempotent: validate:true — submission is
+    // now non-blocking, so the PDF generator runs the central integrity gate itself and simply
+    // won't produce a broken book for an incomplete album (admin follows up). Nudge wakes the worker.
     if (albumId) {
       try {
-        const r = await startAlbumPdfGeneration(albumId, { validate: false, nudge: true });
+        const r = await startAlbumPdfGeneration(albumId, { validate: true, nudge: true });
         console.log('[razorpay-webhook] album-pdf auto-start', { eventId, albumId, result: r });
       } catch (e) {
         console.error('[razorpay-webhook] album-pdf auto-start error', { eventId, albumId, error: String(e) });

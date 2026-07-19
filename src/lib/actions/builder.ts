@@ -3,11 +3,10 @@
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema, CoverDesignSchema, ApplyBlueprintSchema } from '@/lib/validations';
-import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
-import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
 import { applyBlueprint, shuffleIds } from '@/lib/builder/blueprint';
 import { getActiveBlueprint, listActiveBlueprints } from '@/lib/templates/catalog';
-import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { isEditingLocked } from '@/lib/orders/album-lock';
 import { sendReviewStatusEmail, sendReviewAdminSubmittedEmail } from '@/lib/email/review-events';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -48,7 +47,7 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
   const size = (album as { size: number }).size;
 
   // Edit lock: a paid album's pages must not change under a placed order.
-  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+  if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   // Accounting: leaves consumed must not exceed the album size.
   const consumed = blocks.reduce((s, b) => s + PAGE_COST[b.template as LayoutTemplate], 0);
@@ -143,7 +142,7 @@ export async function savePhotoEdit(input: unknown): Promise<ActionResult> {
     .maybeSingle();
   const albumId = (photoRow as { album_id: string | null } | null)?.album_id ?? null;
   if (!photoRow) return { ok: false, error: 'Photo not found' };
-  if (albumId && (await hasPaidOrder(supabase, albumId))) {
+  if (albumId && (await isEditingLocked(supabase, albumId))) {
     return { ok: false, error: LOCKED_MSG };
   }
 
@@ -179,63 +178,20 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
 
   const { data: album } = await supabase
     .from('albums')
-    .select('id, size, status, cover_template_id, cover_config')
+    .select('id, status')
     .eq('id', albumId)
     .maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
-  const { size, cover_template_id, cover_config } = album as {
-    size: number;
-    cover_template_id: string | null;
-    cover_config: unknown;
-  };
 
-  // A paid album is frozen — no re-submitting changed content.
-  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+  // A paid album is frozen — the ONLY hard gate that remains at submit (lifecycle/security).
+  if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
-  // Cover is mandatory (physical page 1). It's satisfied by an active base template OR a
-  // custom cover (an uploaded photo / a background) — the custom designer can stand alone.
-  const cfg = normalizeCoverConfig(cover_config as Parameters<typeof normalizeCoverConfig>[0]);
-  const hasCustomCover = !!cfg.photoId || !!cfg.background;
-  let hasActiveTemplate = false;
-  if (cover_template_id) {
-    const { data: cover } = await supabase
-      .from('cover_templates')
-      .select('id')
-      .eq('id', cover_template_id)
-      .eq('active', true)
-      .maybeSingle();
-    hasActiveTemplate = !!cover;
-  }
-  if (!hasActiveTemplate && !hasCustomCover) {
-    return { ok: false, error: 'Add a cover design before submitting (a template, a photo, or a background).' };
-  }
-
-  const { data: pages } = await supabase
-    .from('album_pages')
-    .select('layout_template, photo_ids')
-    .eq('album_id', albumId);
-
-  const rows = (pages ?? []) as { layout_template: LayoutTemplate | null; photo_ids: string[] }[];
-
-  let consumed = 0;
-  for (const r of rows) {
-    if (!r.layout_template) return { ok: false, error: 'A page is missing its layout.' };
-    consumed += PAGE_COST[r.layout_template];
-    // single-pair needs BOTH pages filled; double-spread needs its one image.
-    const filled = (r.photo_ids ?? []).filter(Boolean).length;
-    if (filled < requiredBaseCount(r.layout_template)) {
-      return {
-        ok: false,
-        error:
-          r.layout_template === 'single-pair'
-            ? 'Every single page needs a photo on both the left and right.'
-            : 'Every double-page spread needs its image.',
-      };
-    }
-  }
-  if (consumed !== size) {
-    return { ok: false, error: `Album must fill exactly ${size} content pages (currently ${consumed}).` };
-  }
+  // Completeness + cover validation is now ADVISORY. It is surfaced to the user in the builder's
+  // submit dialog (via the central Album Validation Service, lib/albums/validation) BEFORE this
+  // call; the user may knowingly "Continue Anyway". Submission therefore never blocks on
+  // completeness — the album simply enters review. PDF generation (lib/pdf/generate) runs the SAME
+  // central validation as its own integrity gate, so an incomplete album can be submitted but can
+  // never produce a broken PDF.
 
   // status='submitted' is a SERVER-CONTROLLED transition (0021): `authenticated` no
   // longer holds an UPDATE grant on albums.status, so this write goes through the
@@ -291,7 +247,7 @@ export async function selectCover(input: unknown): Promise<ActionResult> {
   // Ownership gate (RLS).
   const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
-  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+  if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   // The cover must be a real, active template (active rows are SELECT-visible via RLS).
   const { data: cover } = await supabase
@@ -334,7 +290,7 @@ export async function saveCoverDesign(input: unknown): Promise<ActionResult> {
   // Ownership gate (RLS).
   const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
-  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+  if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   // A chosen base template must be a real, active cover.
   if (coverTemplateId) {
@@ -444,7 +400,7 @@ export async function applyBlueprintToAlbum(input: unknown): Promise<ApplyBluepr
 
   const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
   if (!album) return { ok: false, error: 'Album not found' };
-  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+  if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   return applyBlueprintById(supabase, albumId, blueprintId, autoPlace, seed);
 }
@@ -472,7 +428,7 @@ export async function autoSelectAndApplyBlueprint(input: unknown): Promise<AutoS
   const { data: album } = await supabase.from('albums').select('id, size').eq('id', albumId).maybeSingle();
   const a = album as { id: string; size: number } | null;
   if (!a) return { ok: false, error: 'Album not found' };
-  if (await hasPaidOrder(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
+  if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   const all = await listActiveBlueprints();
   const matching = all.filter((b) => b.pageCount === a.size);

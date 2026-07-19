@@ -17,7 +17,6 @@ export default function CanvasToolbar({
   status,
   review,
   dirty,
-  complete,
   canUndo,
   canRedo,
   onUndo,
@@ -48,7 +47,6 @@ export default function CanvasToolbar({
   status: string;
   review: { status: string } | null;
   dirty: boolean;
-  complete: boolean;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -194,7 +192,8 @@ export default function CanvasToolbar({
                 <ShoppingCart /> Checkout
               </Button>
             ) : (
-              <Button size="sm" onClick={onSubmit} disabled={!complete || submitting} className={STUDIO_PRIMARY}>
+              // Always clickable — validation now INFORMS via a dialog instead of blocking.
+              <Button size="sm" onClick={onSubmit} disabled={submitting} className={STUDIO_PRIMARY}>
                 {submitting ? <InlineLoader /> : <Send />}
                 {review?.status === 'changes_requested' ? 'Resubmit' : 'Submit'}
               </Button>

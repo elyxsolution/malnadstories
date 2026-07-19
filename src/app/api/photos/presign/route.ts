@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { PresignUploadSchema } from '@/lib/validations';
 import { presignPut, ALLOWED_CONTENT_TYPES, type AllowedContentType } from '@/lib/r2';
 import { photoCap } from '@/lib/builder/model';
-import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { isEditingLocked } from '@/lib/orders/album-lock';
 import { workerConfigOk } from '@/lib/worker/health';
 import { checkLimit } from '@/lib/security/guard';
 
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
   // Edit lock: a purchased album is frozen. The state-changing step (confirm) already
   // enforces this; we also reject at presign so a paid album can't even mint upload
   // URLs (no orphaned R2 objects, no wasted work). Same paid signal everywhere.
-  if (await hasPaidOrder(supabase, albumId)) {
+  if (await isEditingLocked(supabase, albumId)) {
     return NextResponse.json(
       { error: 'This album is part of a paid order and can no longer be changed.' },
       { status: 403 },

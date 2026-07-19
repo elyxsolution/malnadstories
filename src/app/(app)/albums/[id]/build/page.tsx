@@ -315,7 +315,14 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     }
   }
 
-  if (paidOrder) {
+  // A paid album is normally READ-ONLY (PurchasedAlbum) — UNLESS an admin has requested
+  // changes, which reopens editing (CHANGE 6/7). This mirrors `isEditingLocked` exactly:
+  // paid + review 'changes_requested' ⇒ editable; every other paid state ⇒ frozen. When
+  // reopened we fall through to the editable Builder, which shows the requested-changes
+  // banner (initialReview) so the customer knows what to fix before resubmitting.
+  const reopenedForChanges = initialReview?.status === 'changes_requested';
+
+  if (paidOrder && !reopenedForChanges) {
     return (
       <div className={`${builderFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-10">

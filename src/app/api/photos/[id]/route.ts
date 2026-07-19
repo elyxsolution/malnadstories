@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { deleteObject } from '@/lib/r2';
-import { hasPaidOrder } from '@/lib/orders/album-lock';
+import { isEditingLocked } from '@/lib/orders/album-lock';
 
 /**
  * DELETE /api/photos/:id
@@ -49,7 +49,7 @@ export async function DELETE(
   };
 
   // Edit lock: can't remove photos from an album that's part of a paid order.
-  if (album_id && (await hasPaidOrder(supabase, album_id))) {
+  if (album_id && (await isEditingLocked(supabase, album_id))) {
     return NextResponse.json(
       { error: 'This album is part of a paid order and can no longer be changed.' },
       { status: 409 },

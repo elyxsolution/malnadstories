@@ -8,6 +8,9 @@ import { isPaidStatus } from '@/lib/orders/status';
 import { presignGet } from '@/lib/r2';
 import { listActiveCoverOptions } from '@/lib/covers';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
+import { hasFrontCover } from '@/lib/albums/cover';
+import { loadAlbumValidation } from '@/lib/albums/validation';
+import { normalizeCoverConfig } from '@/lib/builder/cover';
 import Checkout from './_checkout';
 import { type ReadinessItem } from './_readiness';
 import { type Address } from './_address-picker';
@@ -21,7 +24,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // Album must exist + belong to the user (RLS). Must be submitted to check out.
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, title, size, status, cover_template_id, destination, travel_dates, product_id')
+    .select('id, title, size, status, cover_template_id, cover_config, destination, travel_dates, product_id')
     .eq('id', params.albumId)
     .maybeSingle();
   const album = albumRow as {
@@ -30,6 +33,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     size: number;
     status: string;
     cover_template_id: string | null;
+    cover_config: unknown;
     destination: string | null;
     travel_dates: string | null;
     product_id: string | null;
@@ -158,6 +162,21 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
       Math.max(ph.width, ph.height) < LOWRES_MIN_EDGE,
   ).length;
 
+  // Canonical cover check (single source of truth) — recognises every cover type, not just a
+  // legacy template id. Advisory: `activeTemplate` = a selected template id (no extra round-trip).
+  const coverOk = hasFrontCover({
+    activeTemplate: !!album.cover_template_id,
+    config: normalizeCoverConfig(album.cover_config as Parameters<typeof normalizeCoverConfig>[0]),
+    title: album.title,
+  });
+
+  // Print-readiness (CHANGE 2) — the SAME central report the builder + PDF use. Surfaced before
+  // payment so a customer never pays for an album that can't yet be printed. Blank back cover is
+  // INFO, so it never blocks checkout.
+  const printReport = await loadAlbumValidation(supabase, album.id);
+  const printReady = printReport?.printReady ?? true;
+  const blockingIssues = printReport ? [...printReport.critical, ...printReport.warnings].map((i) => i.title) : [];
+
   const readiness: ReadinessItem[] = [
     {
       ok: consumed === album.size,
@@ -176,9 +195,9 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
           : 'Empty frames print as blank paper — add photos in the builder.',
     },
     {
-      ok: !!album.cover_template_id,
-      title: album.cover_template_id ? 'Cover design chosen' : 'No cover design',
-      detail: album.cover_template_id
+      ok: coverOk,
+      title: coverOk ? 'Cover design chosen' : 'No cover design',
+      detail: coverOk
         ? 'Your selected cover will be printed on page one.'
         : 'Choose a cover design in the builder.',
     },
@@ -250,6 +269,8 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
         initialCouponCode={initialCouponCode}
         initialShippingMethod={initialShippingMethod}
         readiness={readiness}
+        printReady={printReady}
+        blockingIssues={blockingIssues}
       />
     </div>
   );
