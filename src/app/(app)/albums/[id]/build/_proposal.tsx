@@ -1,6 +1,8 @@
 'use client';
 
-import { Check, RefreshCw, X, Loader2, Wand2 } from 'lucide-react';
+import { Check, RefreshCw, X, Wand2 } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import Preview from './_preview';
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
@@ -102,7 +104,7 @@ export default function Proposal({
               </Button>
             )}
             <Button onClick={onAccept} disabled={busy} className={STUDIO_PRIMARY}>
-              {busy ? <Loader2 className="animate-spin" /> : <Check />} {acceptLabel}
+              {busy ? <InlineLoader /> : <Check />} {acceptLabel}
             </Button>
           </div>
         </div>

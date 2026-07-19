@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { RotateCw, FlipHorizontal, FlipVertical, Loader2, X, SlidersHorizontal, Maximize, Minimize } from 'lucide-react';
+import { RotateCw, FlipHorizontal, FlipVertical, X, SlidersHorizontal, Maximize, Minimize } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { FULL_CROP, type EditConfig, type Rect } from '@/lib/builder/model';
 
 // Aspect-ratio presets for the crop rect. `null` = free. The ratio is the desired
@@ -356,7 +358,7 @@ export default function PhotoEditor({
               Cancel
             </Button>
             <Button size="sm" onClick={apply} disabled={saving} className={STUDIO_PRIMARY}>
-              {saving && <Loader2 className="animate-spin" />} Apply
+              {saving && <InlineLoader />} Apply
             </Button>
           </div>
         </div>

@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Search, X, Star, Sparkles, Pin, Clock, LayoutGrid, Eye, Check, Wand2, Loader2, ImageOff, Crown } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+import { Search, X, Star, Sparkles, Pin, Clock, LayoutGrid, Eye, Check, Wand2, ImageOff, Crown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { blueprintMatch, type BlueprintMatchTone } from '@/lib/builder/blueprint';
 import { categoryLabel } from '@/lib/templates/model';
@@ -103,7 +104,7 @@ export default function BlueprintPicker({
           <p className="mt-0.5 text-[11px] text-muted-foreground">{categoryLabel(b.category)} · {b.pageCount} pages · holds {b.slotCount}</p>
           <div className="mt-auto grid grid-cols-2 gap-1.5 pt-3">
             <Button size="sm" onClick={() => onApply(b.id, true)} disabled={busy || uploaded === 0} className="w-full">
-              {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Auto place
+              {busy ? <InlineLoader /> : <Wand2 />} Auto place
             </Button>
             <Button size="sm" variant="outline" onClick={() => onApply(b.id, false)} disabled={busy} className="w-full">Use</Button>
           </div>
@@ -235,7 +236,7 @@ export default function BlueprintPicker({
               )}
               <div className="mt-auto flex flex-col gap-2 pt-5">
                 <Button onClick={() => onApply(preview.id, true)} disabled={busy || uploaded === 0}>
-                  {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Use + auto place my {uploaded} photo{uploaded === 1 ? '' : 's'}
+                  {busy ? <InlineLoader /> : <Wand2 />} Use + auto place my {uploaded} photo{uploaded === 1 ? '' : 's'}
                 </Button>
                 <Button variant="outline" onClick={() => onApply(preview.id, false)} disabled={busy}>
                   <Check /> Use blueprint (place photos myself)

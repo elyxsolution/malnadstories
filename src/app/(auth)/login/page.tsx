@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useFormState, useFormStatus } from 'react-dom';
 import Link from 'next/link';
-import { Loader2 } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
 import { signIn, type SignInState } from '@/lib/actions/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,7 @@ function SubmitButton() {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={pending}>
-      {pending && <Loader2 className="animate-spin" />}
+      {pending && <InlineLoader />}
       {pending ? 'Signing in…' : 'Sign In'}
     </Button>
   );

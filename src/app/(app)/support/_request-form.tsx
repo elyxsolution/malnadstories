@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, Send } from 'lucide-react';
+import { ArrowLeft, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { createRefundRequest, createReprintRequest } from '@/lib/actions/resolutions';
 
@@ -147,7 +148,7 @@ export default function RequestForm({
                 Cancel
               </Button>
               <Button type="submit" disabled={busy || !orderId}>
-                {busy ? <Loader2 className="animate-spin" /> : <Send />} Submit request
+                {busy ? <InlineLoader /> : <Send />} Submit request
               </Button>
             </div>
           </form>

@@ -5,6 +5,7 @@ import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { CoverConfig } from '@/lib/builder/cover';
+import { printPageCss, type ProductDimensions } from '@/lib/products/model';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
 /** The custom cover design: front rendered on page 1, back on the final physical page. */
@@ -25,15 +26,20 @@ export type PrintCover = { imageUrl: string | null; backImageUrl: string | null;
  * PDF == preview. Every page is the same portrait size; there are NO landscape pages.
  */
 
-// Uniform portrait page. Two of these side by side form one open pair (the 2-wide
-// coordinate space PairContent draws into). Parameterized for the print partner later.
-const PAGE = { w: '6in', h: '8in', margin: '0' };
-
-const PRINT_CSS = `
-  @page { size: ${PAGE.w} ${PAGE.h}; margin: ${PAGE.margin}; }
+/**
+ * Uniform portrait page. Two side by side form one open pair (the 2-wide coordinate space
+ * PairContent draws into). Dimensions come from the selected Album Product (0047) — NOT a
+ * hardcoded constant — so every product prints at its own physical size (CSS supports `cm`).
+ * The layout math below is percentage-based (200%-wide pair, ±100% clip), so it scales to
+ * any page size without change.
+ */
+function buildPrintCss(dimensions: ProductDimensions): string {
+  const page = printPageCss(dimensions); // e.g. { w: '21cm', h: '29.7cm' }
+  return `
+  @page { size: ${page.w} ${page.h}; margin: 0; }
   html, body { margin: 0; padding: 0; background: #fff; }
   .pdf-page {
-    position: relative; width: ${PAGE.w}; height: ${PAGE.h};
+    position: relative; width: ${page.w}; height: ${page.h};
     overflow: hidden; background: #fff;
     break-after: page; page-break-after: always;
   }
@@ -42,6 +48,7 @@ const PRINT_CSS = `
   .pair-clip { position: absolute; top: 0; height: 100%; width: 200%; }
   .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 `;
+}
 
 declare global {
   interface Window {
@@ -53,11 +60,14 @@ export default function PrintAlbum({
   blocks,
   photos,
   cover,
+  dimensions,
   stickerUrls = {},
 }: {
   blocks: Block[];
   photos: PrintPhoto[];
   cover: PrintCover;
+  /** Physical page dimensions of the album's product (0047). Drives the @page + page CSS. */
+  dimensions: ProductDimensions;
   stickerUrls?: Record<string, string>;
 }) {
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
@@ -131,7 +141,7 @@ export default function PrintAlbum({
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: PRINT_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: buildPrintCss(dimensions) }} />
 
       {/* Page 1 — Cover (the customer's custom design: image/background + title/tagline) */}
       <div className="pdf-page">

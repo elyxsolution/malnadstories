@@ -1,6 +1,8 @@
 'use client';
 
-import { Search, Trash2, Loader2 } from 'lucide-react';
+import { Search, Trash2 } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 
 export type TrayFilter = 'all' | 'unplaced' | 'placed' | 'processing';
 
@@ -67,7 +69,7 @@ export default function TrayToolbar({
             disabled={removing}
             className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-destructive hover:underline disabled:opacity-50"
           >
-            {removing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />} Remove unused ({removableCount})
+            {removing ? <InlineLoader /> : <Trash2 className="h-3 w-3" />} Remove unused ({removableCount})
           </button>
         )}
       </div>

@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { assignRole } from '@/lib/actions/admin/roles';
 import { ADMIN_ROLES, roleLabel, type AdminRole } from '@/lib/auth/capabilities';
 
@@ -63,7 +63,7 @@ export default function RoleSelect({
           </option>
         ))}
       </select>
-      {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      {busy && <InlineLoader />}
       {msg && <span className="text-xs text-destructive">{msg}</span>}
     </div>
   );

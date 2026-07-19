@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, Send } from 'lucide-react';
+import { ArrowLeft, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createTicket } from '@/lib/actions/support';
@@ -161,7 +162,7 @@ export default function NewTicketForm({
               Cancel
             </Button>
             <Button type="submit" disabled={busy}>
-              {busy ? <Loader2 className="animate-spin" /> : <Send />} Send request
+              {busy ? <InlineLoader /> : <Send />} Send request
             </Button>
           </div>
         </form>

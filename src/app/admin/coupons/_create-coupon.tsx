@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -122,7 +123,7 @@ export default function CreateCoupon() {
         </label>
         <div className="flex items-center gap-3 sm:col-span-2">
           <Button type="submit" disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <Plus />} Create coupon
+            {busy ? <InlineLoader /> : <Plus />} Create coupon
           </Button>
           {msg && (
             <span className={`text-sm ${msg.kind === 'ok' ? 'text-primary' : 'text-destructive'}`}>

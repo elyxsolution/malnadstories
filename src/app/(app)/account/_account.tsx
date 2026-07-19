@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, MapPin, Plus, Check, CreditCard, Bell, ShieldCheck, X } from 'lucide-react';
+import { MapPin, Plus, Check, CreditCard, Bell, ShieldCheck, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -126,7 +127,7 @@ function ProfileCard({
       </div>
       <div className="mt-4 flex items-center gap-3">
         <Button size="sm" onClick={save} disabled={busy || !dirty} className={LUX_PRIMARY}>
-          {busy ? <Loader2 className="animate-spin" /> : null} Save changes
+          {busy ? <InlineLoader /> : null} Save changes
         </Button>
         {msg && <span className={`text-xs ${msg.ok ? 'text-primary' : 'text-destructive'}`}>{msg.text}</span>}
       </div>
@@ -224,7 +225,7 @@ function AddAddressForm({ onDone, onSaved }: { onDone: () => void; onSaved: () =
       </label>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button type="submit" size="sm" disabled={busy} className={LUX_PRIMARY}>
-        {busy ? <Loader2 className="animate-spin" /> : null} Save address
+        {busy ? <InlineLoader /> : null} Save address
       </Button>
     </form>
   );

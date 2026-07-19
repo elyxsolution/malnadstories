@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, Send, Lock, UserCheck, UserX } from 'lucide-react';
+import { Send, Lock, UserCheck, UserX } from 'lucide-react';
 import { adminReplyTicket, setTicketStatus, assignTicket } from '@/lib/actions/admin/support';
 import { SUPPORT_STATUSES, adminStatusLabel, type SupportStatus } from '@/lib/support/model';
 
@@ -67,7 +68,7 @@ export default function SupportActions({
           disabled={busy !== null || !body.trim()}
           className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {busy === 'reply' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {busy === 'reply' ? <InlineLoader /> : <Send className="h-4 w-4" />}
           {internal ? 'Add internal note' : 'Send reply'}
         </button>
       </div>
@@ -108,7 +109,7 @@ export default function SupportActions({
           className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
           {busy === 'assign' ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <InlineLoader />
           ) : assignedToMe ? (
             <UserX className="h-4 w-4" />
           ) : (

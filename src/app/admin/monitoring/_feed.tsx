@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, RefreshCw, Check } from 'lucide-react';
+import { RefreshCw, Check } from 'lucide-react';
 import { runHealthChecks, resolveAlert } from '@/lib/actions/admin/monitoring';
 import { severityChip } from '@/lib/monitoring/model';
 import type { AlertRow } from '@/lib/monitoring/engine';
@@ -40,7 +41,7 @@ export default function AlertsFeed({ alerts, canManage }: { alerts: AlertRow[]; 
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'refresh' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {busy === 'refresh' ? <InlineLoader /> : <RefreshCw className="h-3.5 w-3.5" />}
             Run checks now
           </button>
         )}
@@ -72,7 +73,7 @@ export default function AlertsFeed({ alerts, canManage }: { alerts: AlertRow[]; 
                   disabled={busy !== null}
                   className="inline-flex flex-none items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
                 >
-                  {busy === `resolve-${a.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  {busy === `resolve-${a.id}` ? <InlineLoader /> : <Check className="h-3.5 w-3.5" />}
                   Resolve
                 </button>
               )}

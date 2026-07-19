@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, ArrowRight, Trash2, Loader2, X, AlertTriangle, SearchX } from 'lucide-react';
+import { Search, Plus, ArrowRight, Trash2, X, AlertTriangle, SearchX } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import Book, { paletteFor } from '@/components/book';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -271,7 +273,7 @@ function ShelfBook({ album }: { album: LibraryAlbum }) {
                 Cancel
               </Button>
               <Button variant="destructive" size="sm" onClick={onConfirm} disabled={deleting}>
-                {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete
+                {deleting ? <InlineLoader /> : <Trash2 />} Delete
               </Button>
             </div>
           </div>

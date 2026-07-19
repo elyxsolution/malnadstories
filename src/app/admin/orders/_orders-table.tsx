@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, ArrowRight, Download, Check } from 'lucide-react';
+import { ArrowRight, Download, Check } from 'lucide-react';
 import { updateOrderStatus } from '@/lib/actions/admin/orders';
 import { adminStatusLabel } from '@/lib/orders/status';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
@@ -110,7 +111,7 @@ export default function OrdersTable({ rows }: { rows: OrderRow[] }) {
               disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />} Advance
+              {busy ? <InlineLoader /> : <ArrowRight className="h-3 w-3" />} Advance
             </button>
             <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted-foreground hover:text-foreground">
               Clear

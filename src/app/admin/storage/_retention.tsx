@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, Trash2, FileX, ImageOff, Eye, X, AlertTriangle } from 'lucide-react';
+import { Trash2, FileX, ImageOff, Eye, X, AlertTriangle } from 'lucide-react';
 import { purgeAlbumAssets } from '@/lib/actions/admin/storage';
 import { formatBytes, PRIORITY_CHIP } from '@/lib/storage/model';
 import type { RetentionRow } from '@/lib/storage/metrics';
@@ -182,7 +183,7 @@ export default function RetentionQueue({ rows, canManage }: { rows: RetentionRow
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setPending(null)} disabled={busy} className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50">Cancel</button>
               <button type="button" onClick={confirmPurge} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50">
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+                {busy ? <InlineLoader /> : <Trash2 className="h-4 w-4" />} Delete
               </button>
             </div>
           </div>

@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, X, ZoomIn, ZoomOut, Move } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, Move } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { MAX_ZOOM, frameOverflow, type EditConfig } from '@/lib/builder/model';
 import { savePhotoEdit } from '@/lib/actions/builder';
 import PhotoFrame from './_photo-frame';
@@ -183,7 +185,7 @@ export default function QuickCrop({
               Cancel
             </Button>
             <Button size="sm" onClick={apply} disabled={saving} className={STUDIO_PRIMARY}>
-              {saving && <Loader2 className="animate-spin" />} Apply
+              {saving && <InlineLoader />} Apply
             </Button>
           </div>
         </div>

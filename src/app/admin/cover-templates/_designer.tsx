@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, Save, ArrowLeft, Type as TypeIcon, Sticker as StickerIcon, Palette, QrCode } from 'lucide-react';
+import { Save, ArrowLeft, Type as TypeIcon, Sticker as StickerIcon, Palette, QrCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import CoverCanvas, { COVER_NO_SELECTION, type CoverSelection, type CoverSide } from '@/app/(app)/albums/[id]/build/_cover-canvas';
@@ -238,7 +239,7 @@ export default function CoverTemplateDesigner({
         <div className="ml-auto flex items-center gap-3">
           {error && <span className="text-sm text-destructive">{error}</span>}
           <Button size="sm" onClick={save} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />} Save template
+            {saving ? <InlineLoader /> : <Save />} Save template
           </Button>
         </div>
       </div>

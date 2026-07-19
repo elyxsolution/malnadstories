@@ -75,7 +75,8 @@ import {
   type TextElement,
   type TextVariant,
 } from '@/lib/builder/model';
-import { PAIR_ASPECT, makeText, makeSticker, makeQr, type LayoutPreset } from '@/lib/builder/elements';
+import { makeText, makeSticker, makeQr, type LayoutPreset } from '@/lib/builder/elements';
+import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
@@ -152,8 +153,12 @@ export default function Builder({
   stickerUrls?: Record<string, string>;
 }) {
   const router = useRouter();
+  // Product geometry (Phase B) — provided by the parent DimensionsProvider. pageA = one page's
+  // aspect (w/h), pairA = the open pair (2 × pageA). Every hardcoded 3:4 / 3:2 below now derives
+  // from these, so the builder renders at the SAME proportions the print route prints at.
+  const { page: pageA, pair: pairA } = useBuilderDimensions();
   const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
-  const api = useBlocks(initialBlocks);
+  const api = useBlocks(initialBlocks, pairA);
   const { blocks } = api;
 
   const [status, setStatus] = useState(initialStatus);
@@ -244,17 +249,18 @@ export default function Builder({
 
   // The fixed crop frame for the editing photo matches WHERE it is placed (WYSIWYG).
   const editPlacement = useMemo(() => {
-    const fallback = { aspect: 3 / 4, gutter: false };
+    const fallback = { aspect: pageA, gutter: false };
     if (!editingPhoto) return fallback;
     for (const b of blocks) {
       if (b.photoIds[0] === editingPhoto.id || b.photoIds[1] === editingPhoto.id) {
-        return b.template === 'double-spread' ? { aspect: PAIR_ASPECT, gutter: true } : { aspect: 3 / 4, gutter: false };
+        return b.template === 'double-spread' ? { aspect: pairA, gutter: true } : { aspect: pageA, gutter: false };
       }
       const ov = b.overlays.find((o) => o.photoId === editingPhoto.id);
-      if (ov && ov.h > 0) return { aspect: (ov.w * 3) / (ov.h * 2), gutter: false };
+      // Overlay pixel aspect = (ov.w / ov.h) × pair aspect (the pair is pairA× wider than tall).
+      if (ov && ov.h > 0) return { aspect: (ov.w * pairA) / ov.h, gutter: false };
     }
     return fallback;
-  }, [editingPhoto, blocks]);
+  }, [editingPhoto, blocks, pageA, pairA]);
 
   // Warn before leaving with unsaved changes.
   useEffect(() => {
@@ -472,10 +478,10 @@ export default function Builder({
     if (next) writeSide(side, { texts: next });
   };
 
-  // Stickers (3:4 cover → square default via makeSticker)
+  // Stickers (cover page → square default via makeSticker at the product's page aspect)
   const addCoverSticker = (stickerId: string) => {
     const side = activeSide;
-    const el = makeSticker(stickerId, 3 / 4);
+    const el = makeSticker(stickerId, pageA);
     writeSide(side, { stickers: [...sideArrays(side).stickers, el] });
     setCoverSel({ kind: 'sticker', side, id: el.id });
   };
@@ -495,10 +501,10 @@ export default function Builder({
     if (next) writeSide(side, { stickers: next });
   };
 
-  // QR (square on the 3:4 cover page)
+  // QR (square on the cover page — the product's page aspect)
   const addCoverQr = (data: string) => {
     const side = activeSide;
-    const el = makeQr(data, { h: Math.min(1, 0.14 * (3 / 4)) });
+    const el = makeQr(data, { h: Math.min(1, 0.14 * pageA) }, pageA);
     writeSide(side, { qrs: [...sideArrays(side).qrs, el] });
     setCoverSel({ kind: 'qr', side, id: el.id });
   };
@@ -1045,7 +1051,7 @@ export default function Builder({
                     className={`group relative overflow-hidden rounded-xl bg-white shadow-[0_2px_4px_rgb(16_24_20/0.06),0_18px_44px_-24px_rgb(16_24_20/0.4)] ring-1 transition-all duration-200 hover:-translate-y-1 ${i === cur ? 'ring-2 ring-studio' : 'ring-black/[0.04] hover:ring-studio-bright/50'}`}
                     style={{ containerType: 'inline-size' }}
                   >
-                    <div className="relative aspect-[3/2] w-full">
+                    <div className="relative w-full" style={{ aspectRatio: pairA }}>
                       <PairContent block={b} photoFor={photoForOverview} stickerUrlFor={stickerUrlFor} />
                       <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/10" />
                     </div>
@@ -1213,6 +1219,7 @@ export default function Builder({
               frontImageUrl={coverImageUrl}
               backImageUrl={backCoverImageUrl}
               size={size}
+              pageAspect={pageA}
               stickerUrlFor={stickerUrlFor}
             />
           </div>
@@ -1289,7 +1296,7 @@ export default function Builder({
               url={photo.url}
               filename={photo.filename}
               initial={initial}
-              frameAspect={3 / 4}
+              frameAspect={pageA}
               showGutter={false}
               onClose={() => setCoverImageEditor(null)}
               onSaved={(edit) =>

@@ -7,6 +7,7 @@ import { fontStack } from '@/lib/builder/elements';
 import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { TextContent, StickerContent, QrContent } from './_elements-render';
 import { ElementControls, CtlBtn, InlineTextEditor } from './_element-bits';
+import { useBuilderDimensions } from './_dimensions';
 import type { CoverConfig } from '@/lib/builder/cover';
 import type { QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
@@ -22,8 +23,8 @@ export type CoverSelection =
   | { kind: 'qr'; side: CoverSide; id: string };
 export const COVER_NO_SELECTION: CoverSelection = { kind: 'none' };
 
-/** Square pixels for a QR/sticker box on a 3:4 cover page (page is taller than wide). */
-const coverSquare = (w: number) => Math.min(1, w * (3 / 4));
+/** Square pixels for a QR/sticker box on a cover page of aspect `ratio` (width/height). */
+const coverSquare = (w: number, ratio: number) => Math.min(1, w * ratio);
 
 export type CoverCanvasProps = {
   title: string;
@@ -61,7 +62,8 @@ export type CoverCanvasProps = {
  */
 export default function CoverCanvas(props: CoverCanvasProps) {
   const { title, config, size, zoomPct = 100, selection, onSelect } = props;
-  const { pagePct, spinePct, aspect } = coverSpreadMetrics(size);
+  const { page } = useBuilderDimensions();
+  const { pagePct, spinePct, aspect } = coverSpreadMetrics(size, page);
   const spineSelected = selection.kind === 'spine';
 
   return (
@@ -163,6 +165,7 @@ function SidePane({
   onDeleteQr,
   onDuplicateQr,
 }: CoverCanvasProps & { side: CoverSide; widthPct: number; label: string }) {
+  const { page } = useBuilderDimensions();
   const ref = useRef<HTMLDivElement>(null);
   const [snap, setSnap] = useState<SnapLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
@@ -267,13 +270,13 @@ function SidePane({
         <Movable
           key={q.id}
           rect={q}
-          squareRatio={3 / 4}
+          squareRatio={page}
           minW={0.06}
           selected={selOf('qr', q.id)}
           containerRef={ref}
           ariaLabel="QR code"
           onSelect={() => pick({ kind: 'qr', side, id: q.id })}
-          onChange={(r) => onChangeQr(side, q.id, { ...r, h: coverSquare(r.w) })}
+          onChange={(r) => onChangeQr(side, q.id, { ...r, h: coverSquare(r.w, page) })}
           onSnap={setSnap}
           controls={
             <ElementControls

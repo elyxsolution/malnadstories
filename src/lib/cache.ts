@@ -22,6 +22,9 @@ export const CACHE_TAGS = {
   cmsPublic: 'cms-public',
   templatesActive: 'templates-active',
   coverTemplatesActive: 'cover-templates-active',
+  // Album Product catalog (0047) — global, slowly-changing, read on every create-album +
+  // pricing-preview path. Busted by admin/products.ts on any product/price/preview write.
+  productsActive: 'album-products-active',
 } as const;
 
 /** Time-based backstop TTLs in SECONDS (tag invalidation is the primary path). */
@@ -29,4 +32,5 @@ export const CACHE_TTL = {
   cmsPublic: 300, // public marketing/help content changes rarely
   templatesActive: 300, // the curated preset catalog changes rarely
   coverTemplatesActive: 300, // the curated cover-design catalog changes rarely
+  productsActive: 300, // the physical product catalog changes rarely
 } as const;

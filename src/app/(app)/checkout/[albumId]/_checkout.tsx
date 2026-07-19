@@ -3,18 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
-import {
-  Loader2,
-  Lock,
-  ArrowLeft,
-  ArrowRight,
-  Minus,
-  Plus,
-  Tag,
-  Truck,
-  AlertTriangle,
-  Pencil,
-} from 'lucide-react';
+import { Lock, ArrowLeft, ArrowRight, Minus, Plus, Tag, Truck, AlertTriangle, Pencil } from 'lucide-react';
+import { InlineLoader, MalnadLoader, useRotatingMessage, LOADING_MESSAGES } from '@/components/loading';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { createOrder, cancelOrder, previewCoupon, previewOrderAmount } from '@/lib/actions/orders';
@@ -64,6 +55,7 @@ export default function Checkout({
   albumSize,
   photoCount,
   formatName,
+  formatDimensions,
   coverUrl,
   coverName,
   amount,
@@ -80,6 +72,7 @@ export default function Checkout({
   albumSize: number;
   photoCount: number;
   formatName: string;
+  formatDimensions?: string;
   coverUrl: string | null;
   coverName: string | null;
   amount: AmountBreakdown;
@@ -369,6 +362,7 @@ export default function Checkout({
                     albumTitle={albumTitle}
                     albumSub={albumSub}
                     formatName={formatName}
+                    formatDimensions={formatDimensions}
                     albumSize={albumSize}
                     photoCount={photoCount}
                     estDelivery={estDelivery}
@@ -443,7 +437,7 @@ export default function Checkout({
         <div className="flex flex-col items-center leading-none sm:hidden">
           <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Total</span>
           <span className="font-display text-lg font-semibold tabular-nums text-primary">
-            {pricingBusy ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : inr(breakdown.totalInr)}
+            {pricingBusy ? <InlineLoader /> : inr(breakdown.totalInr)}
           </span>
         </div>
 
@@ -453,11 +447,11 @@ export default function Checkout({
         <div className="flex min-w-[100px] sm:min-w-[120px] items-center justify-end gap-2">
           {step === 'review' && (orderStatus === null || orderStatus === 'pending') && (
             <Button variant="ghost" size="sm" onClick={cancelCheckout} disabled={cancelling || paying} className="text-muted-foreground px-2 sm:px-3">
-              {cancelling ? <Loader2 className="animate-spin" /> : null} Cancel
+              {cancelling ? <InlineLoader /> : null} Cancel
             </Button>
           )}
           <Button onClick={next} disabled={nextDisabled} className={`${LUX_PRIMARY} px-3 sm:px-4`} size="sm">
-            {step === 'review' ? (paying || !scriptReady ? <Loader2 className="animate-spin" /> : <Lock />) : null}
+            {step === 'review' ? (paying || !scriptReady ? <InlineLoader /> : <Lock />) : null}
             {nextLabel}
             {step !== 'review' && <ArrowRight className="ml-1 h-4 w-4" />}
           </Button>
@@ -467,8 +461,7 @@ export default function Checkout({
       {/* Processing overlay (verifying after payment) */}
       {(finalizing || (paying && step === 'review')) && !success && (
         <div className="animate-fade-in fixed inset-0 z-[9000] flex flex-col items-center justify-center bg-background/95">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="mt-5 font-display text-xl italic text-muted-foreground">Placing your order…</p>
+          <FinalizingLoader />
         </div>
       )}
 
@@ -527,6 +520,7 @@ function SummaryStep({
   albumTitle,
   albumSub,
   formatName,
+  formatDimensions,
   albumSize,
   photoCount,
   estDelivery,
@@ -538,6 +532,7 @@ function SummaryStep({
   albumTitle: string;
   albumSub: string | null;
   formatName: string;
+  formatDimensions?: string;
   albumSize: number;
   photoCount: number;
   estDelivery: string;
@@ -553,6 +548,7 @@ function SummaryStep({
         {albumSub && <p className="mt-0.5 font-display text-sm italic text-muted-foreground">{albumSub}</p>}
         <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
           <Detail label="Format" value={formatName} />
+          <Detail label="Dimensions" value={formatDimensions ?? '—'} />
           <Detail label="Pages" value={`${albumSize} pages`} />
           <Detail label="Photographs" value={`${photoCount} placed`} />
           <Detail label="Paper" value="Archival matte" />
@@ -709,6 +705,12 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Post-payment overlay loader — rotating, centralized checkout copy (no hardcoded string). */
+function FinalizingLoader() {
+  const label = useRotatingMessage(LOADING_MESSAGES.checkout);
+  return <MalnadLoader size={120} label={label} className="[&_p]:mt-5 [&_p]:font-display [&_p]:text-xl [&_p]:italic" />;
+}
+
 // ── Persistent order rail ─────────────────────────────────────────────────────────
 function OrderRail({
   coverUrl,
@@ -777,7 +779,7 @@ function OrderRail({
           <div className="flex gap-2">
             <Input value={couponInput} onChange={(e) => onCouponInput(e.target.value.toUpperCase())} placeholder="Coupon code" disabled={couponBusy} className="font-mono" />
             <Button variant="outline" onClick={onApplyCoupon} disabled={couponBusy || !couponInput.trim()}>
-              {couponBusy ? <Loader2 className="animate-spin" /> : null} Apply
+              {couponBusy ? <InlineLoader /> : null} Apply
             </Button>
           </div>
         )}
@@ -805,7 +807,7 @@ function OrderRail({
       <div className="flex items-baseline justify-between p-5">
         <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Total</span>
         <span className="font-display text-3xl font-semibold tabular-nums text-primary">
-          {pricingBusy ? <Loader2 className="inline h-5 w-5 animate-spin" /> : inr(breakdown.totalInr)}
+          {pricingBusy ? <InlineLoader /> : inr(breakdown.totalInr)}
         </span>
       </div>
       <p className="flex items-center gap-2 border-t bg-secondary/30 px-5 py-3 text-[11.5px] text-muted-foreground">

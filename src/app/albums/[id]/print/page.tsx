@@ -17,6 +17,8 @@ import {
 import { normalizeCoverConfig } from '@/lib/builder/cover';
 import { resolveStickerUrls } from '@/lib/stickers';
 import { builderFontVars } from '@/lib/fonts';
+import { getProductDimensions } from '@/lib/products/catalog';
+import { FALLBACK_DIMENSIONS } from '@/lib/products/model';
 
 // No caching: this route is token-gated and renders live album data for the worker.
 // `force-dynamic` forces dynamic RENDERING, but the per-fetch Data Cache can still
@@ -140,11 +142,15 @@ export default async function PrintPage({
 
   const { data: albumData } = await supabase
     .from('albums')
-    .select('id, title, cover_template_id')
+    .select('id, title, cover_template_id, product_id')
     .eq('id', params.id)
     .maybeSingle();
   if (!albumData) notFound();
-  const albumRow = albumData as { id: string; title: string; cover_template_id: string | null };
+  const albumRow = albumData as { id: string; title: string; cover_template_id: string | null; product_id: string | null };
+
+  // Physical page dimensions from the album's product (0047). Never hardcoded — a null/legacy
+  // album (no product_id) falls back to the Standard-equivalent defaults so the PDF still renders.
+  const dimensions = (await getProductDimensions(albumRow.product_id)) ?? FALLBACK_DIMENSIONS;
 
   // Custom cover design (0038). Best-effort: a not-yet-migrated `cover_config` column
   // returns an error (not a throw) → we keep defaults, so the PDF still renders.
@@ -259,7 +265,7 @@ export default async function PrintPage({
   // (this route is outside the (app) group; the root layout only carries the brand fonts).
   return (
     <div className={builderFontVars}>
-      <PrintAlbum blocks={blocks} photos={photos} cover={cover} stickerUrls={stickerUrls} />
+      <PrintAlbum blocks={blocks} photos={photos} cover={cover} dimensions={dimensions} stickerUrls={stickerUrls} />
     </div>
   );
 }

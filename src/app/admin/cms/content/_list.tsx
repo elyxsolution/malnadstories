@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, CheckCircle2, Archive } from 'lucide-react';
+import { CheckCircle2, Archive } from 'lucide-react';
 import { bulkSetContentStatus } from '@/lib/actions/admin/cms';
 import { typeLabel, statusLabel, statusChip } from '@/lib/cms/model';
 import { fmtDateTime, shortId } from '@/lib/admin/format';
@@ -76,7 +77,7 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {busy === 'published' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            {busy === 'published' ? <InlineLoader /> : <CheckCircle2 className="h-3.5 w-3.5" />}
             Publish
           </button>
           <button
@@ -85,7 +86,7 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'archived' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+            {busy === 'archived' ? <InlineLoader /> : <Archive className="h-3.5 w-3.5" />}
             Archive
           </button>
           {msg && <span className="text-destructive">{msg}</span>}

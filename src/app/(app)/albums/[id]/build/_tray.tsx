@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Pencil, Trash2, Loader2, Check, AlertTriangle, Image as ImageIcon } from 'lucide-react';
+import { Pencil, Trash2, Check, AlertTriangle, Image as ImageIcon } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import PhotoFrame from './_photo-frame';
 import type { Photo } from './_uploader';
 
@@ -92,7 +94,7 @@ export default function Tray({
               </div>
             ) : photo.status === 'pending' ? (
               <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gradient-to-b from-secondary/60 to-muted text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
+                <InlineLoader />
                 <span className="text-[10px] font-medium">Processing…</span>
               </div>
             ) : (
@@ -137,7 +139,7 @@ export default function Tray({
                 aria-label={`Delete ${photo.filename}`}
                 className="rounded-lg bg-background/90 p-1.5 text-destructive shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
               >
-                {deleting === photo.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                {deleting === photo.id ? <InlineLoader /> : <Trash2 className="h-3.5 w-3.5" />}
               </button>
             </div>
           </div>

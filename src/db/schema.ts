@@ -42,6 +42,57 @@ export const products = pgTable('products', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ── Album Product catalog (0047) ─────────────────────────────────────────────
+// Physical album products (Standard / Premium / Signature). The single source of truth
+// for dimensions/aspect/print-size (the builder + print route + worker read these — never
+// hardcoded). Public-read active rows; service-role writes (mirrors cover_templates/stickers).
+export const albumProducts = pgTable('album_products', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  description: text('description'),
+  widthCm: numeric('width_cm', { precision: 6, scale: 2 }).notNull(),
+  heightCm: numeric('height_cm', { precision: 6, scale: 2 }).notNull(),
+  builderAspectRatio: numeric('builder_aspect_ratio', { precision: 8, scale: 5 }).notNull(),
+  printWidthCm: numeric('print_width_cm', { precision: 6, scale: 2 }).notNull(),
+  printHeightCm: numeric('print_height_cm', { precision: 6, scale: 2 }).notNull(),
+  coverPreviewKey: text('cover_preview_key'),
+  // Demo album for the interactive Flipbook preview (0048). Null → gallery-image preview.
+  demoAlbumId: uuid('demo_album_id'),
+  // Marketing tags for the preview info panel (0048), e.g. {Travel,Wedding,Family}.
+  bestFor: text('best_for').array().notNull().default(sql`'{}'::text[]`),
+  displayOrder: integer('display_order').notNull().default(0),
+  isDefault: boolean('is_default').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
+  updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),
+});
+
+// Ordered gallery of preview images per product (R2 keys; presigned GET like photos/covers).
+export const albumProductPreviews = pgTable('album_product_previews', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  productId: uuid('product_id')
+    .notNull()
+    .references(() => albumProducts.id, { onDelete: 'cascade' }),
+  imageKey: text('image_key').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Price per (product, page_count). Pricing now varies by PRODUCT + page count, not page count alone.
+export const albumProductPrices = pgTable('album_product_prices', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  productId: uuid('product_id')
+    .notNull()
+    .references(() => albumProducts.id, { onDelete: 'cascade' }),
+  pageCount: integer('page_count').notNull(),
+  price: numeric('price', { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const albums = pgTable('albums', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   userId: uuid('user_id')
@@ -49,12 +100,23 @@ export const albums = pgTable('albums', {
     .references(() => profiles.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   size: integer('size').notNull(),
+  // Chosen physical product (0047). Nullable only for pre-migration rows; backfilled to Standard.
+  // Page count remains `size`; product_id carries dimensions/pricing identity.
+  productId: uuid('product_id').references(() => albumProducts.id, { onDelete: 'restrict' }),
   status: text('status').notNull().default('draft'),
   // Optional customer-authored metadata (0026). Free text; authored at creation,
   // editable later. Never gates anything — display only.
   destination: text('destination'),
   travelDates: text('travel_dates'),
   description: text('description'),
+  // Product snapshot at creation (0049) — historical record; rendering still uses live product
+  // dimensions (0047). All nullable (pre-migration albums stay null).
+  productName: text('product_name'),
+  productWidthCm: numeric('product_width_cm', { precision: 6, scale: 2 }),
+  productHeightCm: numeric('product_height_cm', { precision: 6, scale: 2 }),
+  productAspectRatio: numeric('product_aspect_ratio', { precision: 8, scale: 5 }),
+  productPrintWidthCm: numeric('product_print_width_cm', { precision: 6, scale: 2 }),
+  productPrintHeightCm: numeric('product_print_height_cm', { precision: 6, scale: 2 }),
   // Selected cover design (admin-managed template). Null until chosen; required to
   // submit / generate the PDF. ON DELETE SET NULL handled in 0023.
   coverTemplateId: uuid('cover_template_id'),
@@ -165,6 +227,12 @@ export const orders = pgTable('orders', {
   discountAmount: numeric('discount_amount', { precision: 10, scale: 2 }).notNull().default('0'),
   totalAmount: numeric('total_amount', { precision: 10, scale: 2 }).notNull(),
   couponId: uuid('coupon_id'), // FK → coupons (0015); kept loose here (hand-written SQL owns the FK)
+  // Product snapshot at purchase time (0047) — historical accuracy independent of later
+  // catalog edits. product_id is a soft ref (SET NULL on product delete); name/dimensions
+  // are frozen copies.
+  productId: uuid('product_id').references(() => albumProducts.id, { onDelete: 'set null' }),
+  productName: text('product_name'),
+  productDimensions: jsonb('product_dimensions'),
   // Fulfillment (0014)
   trackingNumber: text('tracking_number'),
   carrier: text('carrier'),

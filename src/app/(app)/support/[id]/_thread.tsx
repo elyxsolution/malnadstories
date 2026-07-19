@@ -3,7 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2, Send, BookImage, Package, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Send, BookImage, Package, CheckCircle2 } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { Button } from '@/components/ui/button';
 import { replyToTicket } from '@/lib/actions/support';
 import { categoryLabel, statusLabel, statusChip } from '@/lib/support/model';
@@ -140,7 +142,7 @@ export default function Thread({ ticket, messages }: { ticket: Ticket; messages:
               {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
               <div className="mt-3 flex justify-end">
                 <Button type="submit" disabled={busy || !body.trim()}>
-                  {busy ? <Loader2 className="animate-spin" /> : <Send />} Send reply
+                  {busy ? <InlineLoader /> : <Send />} Send reply
                 </Button>
               </div>
             </form>

@@ -24,6 +24,7 @@ import {
   BlueprintSchema,
 } from '@/lib/validations';
 import { blueprintFromBlocks, blueprintStats, applyBlueprint, normalizeBlueprint } from '@/lib/builder/blueprint';
+import { getValidAlbumPageCounts } from '@/lib/products/catalog';
 import { LAYOUT_TEMPLATES, type Block, type LayoutTemplate } from '@/lib/builder/model';
 import { startBlueprintThumbnail } from '@/lib/blueprints/thumbnail';
 
@@ -364,9 +365,8 @@ export async function createBlankBlueprint(input: unknown): Promise<CreateBluepr
 
   const svc = createServiceClient();
 
-  // Data-driven size gate: the size must be a real, active product page count.
-  const { data: sizeRows } = await svc.from('products').select('pages').eq('is_active', true);
-  const validSizes = new Set(((sizeRows ?? []) as { pages: number }[]).map((r) => r.pages));
+  // Data-driven size gate: the size must be a page count offered by an active ALBUM PRODUCT (0047).
+  const validSizes = new Set(await getValidAlbumPageCounts());
   if (!validSizes.has(d.size)) return { ok: false, error: 'Choose a valid album size.' };
 
   const blueprintId = randomUUID();

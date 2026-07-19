@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Check, Loader2 } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { resolveError } from '@/lib/actions/admin/observability';
 
 /** Single mutation on the Error Center: mark an error resolved (observability:manage). */
@@ -28,7 +29,7 @@ export default function ResolveButton({ id }: { id: string }) {
         disabled={busy}
         className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 active:scale-[0.97]"
       >
-        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        {busy ? <InlineLoader /> : <Check className="h-4 w-4" />}
         Mark resolved
       </button>
       {error && <span className="text-xs text-destructive">{error}</span>}

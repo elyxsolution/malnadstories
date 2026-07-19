@@ -1,25 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import {
-  Undo2,
-  Redo2,
-  Frame,
-  Eye,
-  Save,
-  Send,
-  Loader2,
-  ShoppingCart,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  MoveHorizontal,
-  CheckCircle2,
-  Keyboard,
-  AlignCenterHorizontal,
-  Sparkles,
-  LogOut,
-} from 'lucide-react';
+import { Undo2, Redo2, Frame, Eye, Save, Send, ShoppingCart, ZoomIn, ZoomOut, Maximize2, MoveHorizontal, CheckCircle2, Keyboard, AlignCenterHorizontal, Sparkles, LogOut } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
 import { reviewStatusLabel, reviewStatusChip } from '@/lib/reviews/model';
@@ -170,7 +154,7 @@ export default function CanvasToolbar({
               <Eye /> <span className="hidden sm:inline">Preview</span>
             </Button>
             <Button size="sm" onClick={onSaveBlueprint} disabled={blueprintSaving || !dirty} className={STUDIO_PRIMARY}>
-              {blueprintSaving ? <Loader2 className="animate-spin" /> : <Save />} <span className="hidden sm:inline">Save Blueprint</span>
+              {blueprintSaving ? <InlineLoader /> : <Save />} <span className="hidden sm:inline">Save Blueprint</span>
             </Button>
             <Button variant="outline" size="sm" onClick={onExitBlueprint} disabled={blueprintSaving}>
               <LogOut /> <span className="hidden sm:inline">Exit Blueprint</span>
@@ -203,7 +187,7 @@ export default function CanvasToolbar({
 
             {/* Preview moved to the bottom Pages bar (see _builder.tsx) — kept out of this row. */}
             <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
-              {saving ? <Loader2 className="animate-spin" /> : <Save />} <span className="hidden sm:inline">Save</span>
+              {saving ? <InlineLoader /> : <Save />} <span className="hidden sm:inline">Save</span>
             </Button>
             {status === 'submitted' ? (
               <Button size="sm" render={<Link href={`/checkout/${albumId}`} />} className={STUDIO_PRIMARY}>
@@ -211,7 +195,7 @@ export default function CanvasToolbar({
               </Button>
             ) : (
               <Button size="sm" onClick={onSubmit} disabled={!complete || submitting} className={STUDIO_PRIMARY}>
-                {submitting ? <Loader2 className="animate-spin" /> : <Send />}
+                {submitting ? <InlineLoader /> : <Send />}
                 {review?.status === 'changes_requested' ? 'Resubmit' : 'Submit'}
               </Button>
             )}

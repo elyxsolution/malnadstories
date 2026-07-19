@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { Check, Loader2, LogOut } from 'lucide-react';
+import { Check, LogOut } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { signOut } from '@/lib/actions/auth';
 
 /**
@@ -67,7 +69,7 @@ export default function BuilderHeader({
           disabled={saving || exiting}
           className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-[13px] font-medium text-foreground shadow-xs transition-all duration-150 ease-glide hover:bg-secondary active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-60"
         >
-          {exiting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          {exiting ? <InlineLoader /> : null}
           Save &amp; exit
         </button>
         <span className="hidden max-w-[180px] truncate text-[13px] text-muted-foreground lg:inline" title={email}>

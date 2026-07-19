@@ -15,8 +15,9 @@ import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
 import { ElementControls, CtlBtn, InlineTextEditor } from './_element-bits';
 import type { Photo } from './_uploader';
-import { backgroundStyle, squareQrHeight, PAIR_ASPECT } from '@/lib/builder/elements';
+import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
+import { useBuilderDimensions } from './_dimensions';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
 
 /**
@@ -57,6 +58,7 @@ export default function BlockCard({
   onTapPlaceBase?: (slot: BaseSlot) => void;
   showGuides?: boolean;
 }) {
+  const { page, pair } = useBuilderDimensions();
   const pageRef = useRef<HTMLDivElement>(null);
   const [snap, setSnap] = useState<SnapLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
@@ -95,8 +97,8 @@ export default function BlockCard({
       <div
         ref={pageRef}
         onPointerDown={() => onSelect({ kind: 'none' })}
-        className="album-page relative aspect-[3/2] w-full select-none overflow-hidden rounded-[14px]"
-        style={{ containerType: 'inline-size' }}
+        className="album-page relative w-full select-none overflow-hidden rounded-[14px]"
+        style={{ aspectRatio: pair, containerType: 'inline-size' }}
       >
         {/* Background layer */}
         {block.background ? (
@@ -117,7 +119,7 @@ export default function BlockCard({
             onPick={() => setPicking({ kind: 'base', slot: 'image' })}
             onDrop={(id) => api.assignBaseSlot(block.key, 'image', id)}
             onClear={() => api.clearBaseSlot(block.key, 'image')}
-            onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], PAIR_ASPECT, true) : undefined}
+            onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], pair, true) : undefined}
             onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
           />
         ) : (
@@ -133,7 +135,7 @@ export default function BlockCard({
                 onPick={() => setPicking({ kind: 'base', slot: 'left' })}
                 onDrop={(id) => api.assignBaseSlot(block.key, 'left', id)}
                 onClear={() => api.clearBaseSlot(block.key, 'left')}
-                onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], 3 / 4, false) : undefined}
+                onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], page, false) : undefined}
                 onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
               />
             </div>
@@ -148,7 +150,7 @@ export default function BlockCard({
                 onPick={() => setPicking({ kind: 'base', slot: 'right' })}
                 onDrop={(id) => api.assignBaseSlot(block.key, 'right', id)}
                 onClear={() => api.clearBaseSlot(block.key, 'right')}
-                onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], 3 / 4, false) : undefined}
+                onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], page, false) : undefined}
                 onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
               />
             </div>
@@ -268,13 +270,13 @@ export default function BlockCard({
             key={q.id}
             rect={q}
             keepSquare
-            squareRatio={PAIR_ASPECT}
+            squareRatio={pair}
             minW={0.06}
             selected={sel({ kind: 'qr', id: q.id })}
             containerRef={pageRef}
             ariaLabel="QR code"
             onSelect={() => onSelect({ kind: 'qr', id: q.id })}
-            onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w) })}
+            onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w, pair) })}
             onSnap={setSnap}
             controls={
               <ElementControls

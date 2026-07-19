@@ -7,6 +7,7 @@ import HTMLFlipBook from 'react-pageflip';
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Minimize2 } from 'lucide-react';
 import PairContent from './_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from './_cover-render';
+import { useBuilderDimensions } from './_dimensions';
 import type { Photo } from './_uploader';
 import type { Block } from '@/lib/builder/model';
 import type { CoverConfig } from '@/lib/builder/cover';
@@ -83,12 +84,18 @@ export default function Flipbook({
   stickerUrlFor,
   cover,
   onClose,
+  infoPanel,
+  primaryAction,
 }: {
   blocks: Block[];
   photoMap: Map<string, Photo>;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   cover: FlipCover;
   onClose: () => void;
+  /** Optional right-docked panel (product info in the preview). Overlay — never changes the book. */
+  infoPanel?: ReactNode;
+  /** Optional persistent CTA (e.g. "Start Designing") pinned bottom-centre. */
+  primaryAction?: ReactNode;
 }) {
   const bookRef = useRef<{ pageFlip: () => { flipNext: () => void; flipPrev: () => void } } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -129,24 +136,26 @@ export default function Flipbook({
     };
   }, [photoMap]);
 
-  // Size ONE portrait page (3:4) so the full open spread (two pages = 3:2) always fits the
-  // viewport — width is the binding constraint, so we fit the whole spread, never a single page.
+  // Size ONE portrait page (aspect from the product) so the full open spread (two pages) always
+  // fits the viewport — width is the binding constraint, so we fit the whole spread. `page` =
+  // width/height, so height = width / page and width = height * page (no hardcoded 3:4 / 4:3).
+  const { page: pageRatio } = useBuilderDimensions();
   useEffect(() => {
     const measure = () => {
       const maxSpread = Math.min(window.innerWidth * 0.94, 1080); // full open-book width
       const maxH = window.innerHeight * 0.74;
       let w = maxSpread / 2; // per-page width
-      let h = w * (4 / 3);
+      let h = w / pageRatio;
       if (h > maxH) {
         h = maxH;
-        w = h * (3 / 4);
+        w = h * pageRatio;
       }
       setDims({ w: Math.round(w), h: Math.round(h) });
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, []);
+  }, [pageRatio]);
 
   // Build the physical-page list: FRONT COVER (hard) → each block's left+right page, so the
   // book opens cover → continuous content spreads (no empty inside-cover flip to leaf past).
@@ -208,6 +217,17 @@ export default function Flipbook({
 
   return (
     <div ref={rootRef} className="animate-fade-in fixed inset-0 z-[100] flex flex-col bg-[rgb(10_15_12/0.88)] backdrop-blur-md">
+      {/* Optional preview overlays — additive, never touch the book layout/geometry. */}
+      {infoPanel && (
+        <aside className="pointer-events-auto absolute right-0 top-0 z-[30] hidden h-full w-[320px] overflow-y-auto border-l border-white/10 bg-[rgb(12_18_14/0.72)] backdrop-blur-xl lg:block">
+          {infoPanel}
+        </aside>
+      )}
+      {primaryAction && (
+        <div className="pointer-events-none absolute bottom-6 left-0 z-[30] flex w-full justify-center lg:w-[calc(100%-320px)]">
+          <div className="pointer-events-auto">{primaryAction}</div>
+        </div>
+      )}
       {/* Studio stage — a soft top light + edge vignette so the book reads as a lit object. */}
       <div
         aria-hidden
@@ -307,15 +327,16 @@ function StaticSpreads({
   stickerUrlFor?: (stickerId: string) => string | undefined;
   width: number;
 }) {
+  const { page: pageRatio, pair: pairRatio } = useBuilderDimensions();
   return (
     <div className="flex max-h-full flex-col items-center gap-6 overflow-y-auto py-4">
       {cover && (
-        <div className="overflow-hidden rounded-md shadow-elevated" style={{ width, aspectRatio: '3 / 4' }}>
+        <div className="overflow-hidden rounded-md shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
           <CoverDesignFromConfig config={cover.config} title={cover.title} imageUrl={cover.imageUrl} stickerUrlFor={stickerUrlFor} />
         </div>
       )}
       {blocks.map((b) => (
-        <div key={b.key} className="relative overflow-hidden rounded-md bg-white shadow-elevated" style={{ width: width * 2, aspectRatio: '3 / 2', containerType: 'inline-size' as const }}>
+        <div key={b.key} className="relative overflow-hidden rounded-md bg-white shadow-elevated" style={{ width: width * 2, aspectRatio: pairRatio, containerType: 'inline-size' as const }}>
           <PairContent block={b} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
           {/* Center-fold shading — both pages darken toward the spine. */}
           <div className="pointer-events-none absolute inset-y-0 right-1/2 z-[2] w-[7%]" style={{ background: 'linear-gradient(to right, transparent, rgba(18,28,22,0.16))' }} />
@@ -324,7 +345,7 @@ function StaticSpreads({
         </div>
       ))}
       {cover && (
-        <div className="overflow-hidden rounded-md shadow-elevated" style={{ width, aspectRatio: '3 / 4' }}>
+        <div className="overflow-hidden rounded-md shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
           <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
         </div>
       )}

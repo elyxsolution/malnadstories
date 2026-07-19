@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { and, asc, count, desc, eq, ilike, isNull, isNotNull, or } from 'drizzle-orm';
 import { Plus, BookImage } from 'lucide-react';
 import { db } from '@/db';
-import { layoutTemplates, products } from '@/db/schema';
+import { layoutTemplates } from '@/db/schema';
+import { getValidAlbumPageCounts } from '@/lib/products/catalog';
 import { requireTemplateCapability } from '@/lib/templates/access';
 import NewBlueprintButton from './_new-blueprint';
 import { presignGet } from '@/lib/r2';
@@ -104,9 +105,9 @@ export default async function AdminTemplatesPage({
     }),
   );
 
-  // Data-driven album sizes for the New Blueprint picker (active products, distinct, ascending).
-  const sizeRows = await db.select({ pages: products.pages }).from(products).where(eq(products.isActive, true));
-  const blueprintSizes = Array.from(new Set(sizeRows.map((r) => r.pages))).sort((a, b) => a - b);
+  // Data-driven album sizes for the New Blueprint picker — the page counts offered by active
+  // ALBUM PRODUCTS (0047), replacing the legacy products.pages enumeration.
+  const blueprintSizes = await getValidAlbumPageCounts();
 
   const total = totalRes[0]?.c ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

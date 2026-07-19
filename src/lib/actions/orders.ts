@@ -10,6 +10,7 @@ import {
   PreviewOrderSchema,
 } from '@/lib/validations';
 import { computeOrderAmount } from '@/lib/pricing';
+import { priceFor, getAlbumProductSnapshot } from '@/lib/products/catalog';
 import { shippingFeeInr } from '@/lib/shipping';
 import { isPaidStatus } from '@/lib/orders/status';
 import { validateCoupon } from '@/lib/coupons';
@@ -79,10 +80,10 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
   // Album must exist, belong to the user (RLS), and be submitted.
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, size, status')
+    .select('id, size, status, product_id')
     .eq('id', albumId)
     .maybeSingle();
-  const album = albumRow as { id: string; size: number; status: string } | null;
+  const album = albumRow as { id: string; size: number; status: string; product_id: string | null } | null;
   if (!album) return { ok: false, error: 'Album not found' };
   if (album.status !== 'submitted') {
     return { ok: false, error: 'Finish and submit the album before checking out.' };
@@ -97,16 +98,11 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
   const address = addrRow as { id: string; full_name: string } | null;
   if (!address) return { ok: false, error: 'Please select a valid delivery address.' };
 
-  // Server-side price from the album's product (RLS allows active-product SELECT).
-  const { data: products } = await supabase
-    .from('products')
-    .select('base_price')
-    .eq('pages', album.size)
-    .eq('is_active', true)
-    .limit(1);
-  const product = ((products ?? []) as { base_price: string }[])[0];
-  if (!product) return { ok: false, error: 'Pricing for this album size is unavailable.' };
-  const basePrice = Number(product.base_price);
+  // Server-side price by (product, page count) — 0047. priceFor falls back to the legacy
+  // products-by-page-count lookup when the album has no product_id, so pre-migration albums
+  // price EXACTLY as before. Deactivating a product later never changes an existing album's price.
+  const basePrice = await priceFor(album.product_id, album.size);
+  if (basePrice == null) return { ok: false, error: 'Pricing for this album is unavailable.' };
 
   // Coupon (optional): validated server-side against the SUBTOTAL. NOT consumed here
   // — consumption is on payment success (webhook). Invalid → reject so the user fixes
@@ -218,6 +214,9 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
     return { ok: false, error: 'Could not start payment. Please try again.' };
   }
 
+  // Product snapshot for historical accuracy (0047): frozen name + dimensions at purchase time.
+  const snapshot = await getAlbumProductSnapshot(album.product_id);
+
   const { data: orderRow, error: insErr } = await admin
     .from('orders')
     .insert({
@@ -233,6 +232,9 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
       total_amount: amount.totalInr,
       coupon_id: couponId,
       razorpay_order_id: rzpOrderId,
+      product_id: snapshot.productId,
+      product_name: snapshot.productName,
+      product_dimensions: snapshot.dimensions,
     })
     .select('id')
     .single();
@@ -312,24 +314,17 @@ export async function previewCoupon(input: unknown): Promise<PreviewCouponResult
   const { albumId, copies, shippingMethod, code } = parsed.data;
   const shippingInr = shippingFeeInr(shippingMethod);
 
-  // Ownership (RLS) + product price by size.
+  // Ownership (RLS) + product price by (product, page count) — 0047, legacy fallback inside priceFor.
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, size')
+    .select('id, size, product_id')
     .eq('id', albumId)
     .maybeSingle();
-  const album = albumRow as { id: string; size: number } | null;
+  const album = albumRow as { id: string; size: number; product_id: string | null } | null;
   if (!album) return { ok: false, error: 'Album not found' };
 
-  const { data: products } = await supabase
-    .from('products')
-    .select('base_price')
-    .eq('pages', album.size)
-    .eq('is_active', true)
-    .limit(1);
-  const product = ((products ?? []) as { base_price: string }[])[0];
-  if (!product) return { ok: false, error: 'Pricing for this album size is unavailable.' };
-  const basePrice = Number(product.base_price);
+  const basePrice = await priceFor(album.product_id, album.size);
+  if (basePrice == null) return { ok: false, error: 'Pricing for this album is unavailable.' };
 
   const subtotalInr = Math.round(basePrice * copies * 100) / 100;
   const result = await validateCoupon(code, subtotalInr);
@@ -373,22 +368,16 @@ export async function previewOrderAmount(input: unknown): Promise<PreviewOrderRe
 
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, size')
+    .select('id, size, product_id')
     .eq('id', albumId)
     .maybeSingle();
-  const album = albumRow as { id: string; size: number } | null;
+  const album = albumRow as { id: string; size: number; product_id: string | null } | null;
   if (!album) return { ok: false, error: 'Album not found' };
 
-  const { data: products } = await supabase
-    .from('products')
-    .select('base_price')
-    .eq('pages', album.size)
-    .eq('is_active', true)
-    .limit(1);
-  const product = ((products ?? []) as { base_price: string }[])[0];
-  if (!product) return { ok: false, error: 'Pricing for this album size is unavailable.' };
+  const basePrice = await priceFor(album.product_id, album.size);
+  if (basePrice == null) return { ok: false, error: 'Pricing for this album is unavailable.' };
 
-  const amount = computeOrderAmount(Number(product.base_price), copies, 0, shippingInr);
+  const amount = computeOrderAmount(basePrice, copies, 0, shippingInr);
   return {
     ok: true,
     subtotalInr: amount.subtotalInr,

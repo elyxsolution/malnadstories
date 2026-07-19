@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useRef, useState, type ReactNode } from 'react';
-import { Loader2, CheckCircle2, AlertTriangle, ServerCog } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+import { CheckCircle2, AlertTriangle, ServerCog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -205,7 +206,7 @@ function WorkerWakeModal({
             <p className="mt-1 text-sm text-muted-foreground">Starting image processor…</p>
 
             <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <InlineLoader />
               <span className="font-mono tabular-nums">{fmt(elapsed)}</span>
             </div>
             <div className="mt-3 h-1.5 w-full overflow-hidden rounded bg-muted">

@@ -1,6 +1,7 @@
 'use client';
 
-import { Puzzle, Crown, Star, Pin, Loader2, BookImage } from 'lucide-react';
+import { Puzzle, Crown, Star, Pin, BookImage } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
 import { statusChip, statusLabel } from '@/lib/templates/model';
@@ -148,7 +149,7 @@ export function ExitBlueprintDialog({
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>Cancel</Button>
             <Button size="sm" onClick={onSave} disabled={saving} className={STUDIO_PRIMARY}>
-              {saving ? <Loader2 className="animate-spin" /> : <BookImage />} Save blueprint
+              {saving ? <InlineLoader /> : <BookImage />} Save blueprint
             </Button>
           </div>
         </div>

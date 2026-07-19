@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, Save, CheckCircle2, PauseCircle, Archive, Copy, Plus, Trash2, ArrowLeft } from 'lucide-react';
+import { Save, CheckCircle2, PauseCircle, Archive, Copy, Plus, Trash2, ArrowLeft } from 'lucide-react';
 import { saveTemplate, setTemplateStatus, duplicateTemplate } from '@/lib/actions/admin/templates';
 import {
   TEMPLATE_CATEGORIES,
@@ -311,7 +312,7 @@ export default function TemplateEditor({ initial }: { initial: TemplateEditorIni
           disabled={busy !== null || nameMissing || !validation.ok}
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
-          {busy === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
+          {busy === 'save' ? <InlineLoader /> : <Save className="h-4 w-4" />} Save
         </button>
 
         {status !== 'active' && (
@@ -322,7 +323,7 @@ export default function TemplateEditor({ initial }: { initial: TemplateEditorIni
             title={!validation.ok ? 'Fix geometry before activating' : undefined}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {busy === 'active' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Activate
+            {busy === 'active' ? <InlineLoader /> : <CheckCircle2 className="h-4 w-4" />} Activate
           </button>
         )}
 
@@ -333,7 +334,7 @@ export default function TemplateEditor({ initial }: { initial: TemplateEditorIni
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'inactive' ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />} Deactivate
+            {busy === 'inactive' ? <InlineLoader /> : <PauseCircle className="h-4 w-4" />} Deactivate
           </button>
         )}
 
@@ -344,7 +345,7 @@ export default function TemplateEditor({ initial }: { initial: TemplateEditorIni
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
           >
-            {busy === 'archived' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Archive
+            {busy === 'archived' ? <InlineLoader /> : <Archive className="h-4 w-4" />} Archive
           </button>
         )}
 
@@ -355,7 +356,7 @@ export default function TemplateEditor({ initial }: { initial: TemplateEditorIni
             disabled={busy !== null}
             className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'dup' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Duplicate
+            {busy === 'dup' ? <InlineLoader /> : <Copy className="h-4 w-4" />} Duplicate
           </button>
         )}
       </div>

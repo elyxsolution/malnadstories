@@ -10,6 +10,7 @@ import { enqueueR2Cleanup } from '@/lib/queue';
 import { hasActiveOrder } from '@/lib/orders/album-lock';
 import { getActiveCoverTemplateConfig } from '@/lib/cover-templates/catalog';
 import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
+import { getActiveProduct, getDefaultProduct } from '@/lib/products/catalog';
 import type { CoverConfig } from '@/lib/builder/cover';
 
 export type AlbumActionState = { error: string } | null;
@@ -43,13 +44,47 @@ async function insertAlbumForUser(
   userId: string,
   data: ParsedAlbum,
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  // RLS policy "public_read_active_products" already filters inactive products.
-  const { data: product } = await supabase
-    .from('products')
-    .select('pages')
-    .eq('id', data.productId)
-    .maybeSingle();
-  if (!product) return { ok: false, error: 'Invalid size selected. Please try again.' };
+  // Resolve the effective (product, page count). NEW path = a physical album_products row +
+  // a supported page count (0047). LEGACY path = the old `products` row (encodes the page count)
+  // → mapped onto the DEFAULT product (Standard), so the current wizard keeps working unchanged.
+  let pageCount: number;
+  let albumProductId: string | null = null;
+  // Snapshot of the resolved product's metadata, frozen onto the album at creation (0049).
+  type SnapProduct = { name: string; widthCm: number; heightCm: number; printWidthCm: number; printHeightCm: number; builderAspectRatio: number };
+  let snap: SnapProduct | null = null;
+  const toSnap = (p: SnapProduct): SnapProduct => ({
+    name: p.name,
+    widthCm: p.widthCm,
+    heightCm: p.heightCm,
+    printWidthCm: p.printWidthCm,
+    printHeightCm: p.printHeightCm,
+    builderAspectRatio: p.builderAspectRatio,
+  });
+
+  if (data.albumProductId && data.pageCount) {
+    const product = await getActiveProduct(data.albumProductId);
+    if (!product) return { ok: false, error: 'That album is unavailable. Please choose another.' };
+    if (!product.pageCounts.includes(data.pageCount)) {
+      return { ok: false, error: 'That page count isn’t available for this album.' };
+    }
+    pageCount = data.pageCount;
+    albumProductId = product.id;
+    snap = toSnap(product);
+  } else if (data.productId) {
+    // RLS policy "public_read_active_products" already filters inactive products.
+    const { data: legacy } = await supabase
+      .from('products')
+      .select('pages')
+      .eq('id', data.productId)
+      .maybeSingle();
+    if (!legacy) return { ok: false, error: 'Invalid size selected. Please try again.' };
+    pageCount = (legacy as { pages: number }).pages;
+    const def = await getDefaultProduct();
+    albumProductId = def?.id ?? null;
+    if (def) snap = toSnap(def);
+  } else {
+    return { ok: false, error: 'Please choose an album and page count.' };
+  }
 
   // Cover source resolution (Phase 3). Three mutually-exclusive paths:
   //   1. coverDesignTemplateId → copy the builder-JSON template's CoverConfig into the album
@@ -81,7 +116,15 @@ async function insertAlbumForUser(
     .insert({
       user_id: userId,
       title: data.title,
-      size: (product as { pages: number }).pages,
+      size: pageCount, // page count remains albums.size (backward-compatible)
+      product_id: albumProductId, // physical product (0047)
+      // Product snapshot at creation (0049) — historical record; rendering uses live dimensions.
+      product_name: snap?.name ?? null,
+      product_width_cm: snap?.widthCm ?? null,
+      product_height_cm: snap?.heightCm ?? null,
+      product_aspect_ratio: snap?.builderAspectRatio ?? null,
+      product_print_width_cm: snap?.printWidthCm ?? null,
+      product_print_height_cm: snap?.printHeightCm ?? null,
       cover_template_id: data.coverTemplateId ?? null,
       destination: data.destination ?? null,
       travel_dates: data.travelDates ?? null,

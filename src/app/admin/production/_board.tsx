@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { updateOrderStatus } from '@/lib/actions/admin/orders';
 import { adminStatusLabel } from '@/lib/orders/status';
 import { fmtDate, shortId } from '@/lib/admin/format';
@@ -71,7 +72,7 @@ export default function ProductionBoard({ columns }: { columns: Column[] }) {
                           disabled={busy === c.id}
                           className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-primary/40 px-2 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/[0.06] disabled:opacity-50"
                         >
-                          {busy === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
+                          {busy === c.id ? <InlineLoader /> : <ArrowRight className="h-3 w-3" />}
                           Move to {adminStatusLabel(next)}
                         </button>
                       )}

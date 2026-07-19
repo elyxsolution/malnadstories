@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, Check, Quote, Upload, LayoutTemplate, BookOpen } from 'lucide-react';
-import { db } from '@/db';
-import { products } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { listActiveProducts, type ProductOption } from '@/lib/products/catalog';
 import { Button } from '@/components/ui/button';
 import Book from '@/components/book';
 import { Sprig } from '@/components/brand';
@@ -15,6 +13,9 @@ export const metadata = {
   description:
     'Upload your travel photos, arrange them into beautiful pages, and we print and deliver a premium hardcover album across India.',
 };
+
+// Re-presign the product cover images periodically (they're short-lived) + refresh the catalogue.
+export const revalidate = 300;
 
 const inr = (v: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(v);
@@ -44,20 +45,12 @@ const DESTINATIONS = [
 ];
 
 export default async function HomePage() {
-  // Real catalogue for the pricing teaser — products are anon-SELECTable (no auth needed).
-  let catalogue: { id: string; name: string; pages: number; basePrice: string }[] = [];
+  // Real Album Product catalogue for the teaser (0047) — active products are anon-SELECTable.
+  let catalogue: ProductOption[] = [];
   try {
-    catalogue = await db
-      .select({ id: products.id, name: products.name, pages: products.pages, basePrice: products.basePrice })
-      .from(products)
-      .where(eq(products.isActive, true))
-      .orderBy(products.pages);
+    catalogue = await listActiveProducts();
   } catch {
-    catalogue = [
-      { id: 'p24', name: 'Standard Chapter', pages: 24, basePrice: '3200' },
-      { id: 'p36', name: 'Classic Journey', pages: 36, basePrice: '4200' },
-      { id: 'p48', name: 'Heirloom Chronicle', pages: 48, basePrice: '5200' },
-    ];
+    catalogue = [];
   }
 
   const testimonials = await listPublished('testimonial');
@@ -172,9 +165,9 @@ export default async function HomePage() {
         <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">Choose your length</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">Choose your album</p>
               <h2 className="mt-3 font-display text-4xl font-normal tracking-tight text-primary">
-                One price, everything included
+                Real books, everything included
               </h2>
             </div>
             <Link
@@ -184,43 +177,55 @@ export default async function HomePage() {
               Full pricing <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
-          <div className="mt-12 grid gap-6 sm:grid-cols-3">
-            {catalogue.map((p) => {
-              const featured = p.pages === 36;
-              return (
-                <div
-                  key={p.id}
-                  className={`flex flex-col border p-6 transition-all duration-300 ${
-                    featured
-                      ? 'border-transparent bg-primary text-primary-foreground shadow-elevated'
-                      : 'border-border bg-card shadow-xs hover:-translate-y-0.5 hover:shadow-card'
-                  }`}
-                >
-                  {featured && (
-                    <span className="mb-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-gold-pale">
-                      Most popular
-                    </span>
-                  )}
-                  <h3
-                    className={`font-display text-2xl font-medium ${featured ? 'text-primary-foreground' : 'text-primary'}`}
+          {catalogue.length === 0 ? (
+            <p className="mt-12 border border-dashed border-border bg-card/40 px-4 py-12 text-center text-sm text-muted-foreground">
+              Our albums are being updated — please check back shortly.
+            </p>
+          ) : (
+            <div className="mt-12 grid gap-6 sm:grid-cols-3">
+              {catalogue.map((p) => {
+                const featured = p.isDefault;
+                return (
+                  <div
+                    key={p.id}
+                    className={`flex flex-col overflow-hidden border transition-all duration-300 ${
+                      featured
+                        ? 'border-transparent bg-primary text-primary-foreground shadow-elevated'
+                        : 'border-border bg-card shadow-xs hover:-translate-y-0.5 hover:shadow-card'
+                    }`}
                   >
-                    {p.name}
-                  </h3>
-                  <p className={`mt-1 text-xs ${featured ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                    {p.pages} pages · layflat binding
-                  </p>
-                  <p className="mt-5 font-display text-4xl tabular-nums">{inr(Number(p.basePrice))}</p>
-                  <Button
-                    render={<Link href="/signup" />}
-                    variant={featured ? 'secondary' : 'outline'}
-                    className="mt-6 w-full"
-                  >
-                    Select {p.pages} pages
-                  </Button>
-                </div>
-              );
-            })}
-          </div>
+                    {p.coverPreviewUrl && (
+                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.coverPreviewUrl} alt={p.name} className="h-full w-full object-cover" />
+                        {featured && (
+                          <span className="absolute left-3 top-3 rounded-full bg-gold px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary shadow-sm">
+                            Most popular
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex flex-1 flex-col p-6">
+                      <h3 className={`font-display text-2xl font-medium ${featured ? 'text-primary-foreground' : 'text-primary'}`}>{p.name}</h3>
+                      <p className={`mt-1 text-xs tabular-nums ${featured ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                        {p.widthCm} × {p.heightCm} cm · {p.pageCounts.join(' / ')} pages
+                      </p>
+                      {p.description && (
+                        <p className={`mt-3 text-sm leading-relaxed ${featured ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>{p.description}</p>
+                      )}
+                      <p className="mt-5">
+                        <span className={`text-xs ${featured ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}>From </span>
+                        <span className="font-display text-4xl tabular-nums">{p.startingPrice != null ? inr(p.startingPrice) : '—'}</span>
+                      </p>
+                      <Button render={<Link href="/signup" />} variant={featured ? 'secondary' : 'outline'} className="mt-6 w-full">
+                        Create this album
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* ── Testimonial ─────────────────────────────────────────────────── */}

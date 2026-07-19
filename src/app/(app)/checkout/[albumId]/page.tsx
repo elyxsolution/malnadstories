@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { computeOrderAmount } from '@/lib/pricing';
+import { priceFor, getAlbumProductSnapshot } from '@/lib/products/catalog';
 import { DEFAULT_SHIPPING_METHOD, isShippingMethod, type ShippingMethod } from '@/lib/shipping';
 import { isPaidStatus } from '@/lib/orders/status';
 import { presignGet } from '@/lib/r2';
@@ -20,7 +21,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // Album must exist + belong to the user (RLS). Must be submitted to check out.
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, title, size, status, cover_template_id, destination, travel_dates')
+    .select('id, title, size, status, cover_template_id, destination, travel_dates, product_id')
     .eq('id', params.albumId)
     .maybeSingle();
   const album = albumRow as {
@@ -31,6 +32,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     cover_template_id: string | null;
     destination: string | null;
     travel_dates: string | null;
+    product_id: string | null;
   } | null;
   if (!album) notFound();
 
@@ -61,21 +63,21 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
 
   const pending = orders.find((o) => o.status === 'pending') ?? null;
 
-  // Server-side price from the album's product (RLS allows active-product SELECT).
-  const { data: products } = await supabase
-    .from('products')
-    .select('base_price, name')
-    .eq('pages', album.size)
-    .eq('is_active', true)
-    .limit(1);
-  const product = ((products ?? []) as { base_price: string; name: string }[])[0];
-  if (!product) {
+  // Server-side price by ALBUM PRODUCT + page count (0047) — never page count alone. priceFor
+  // falls back to the legacy products lookup only for a pre-migration null-product album, so the
+  // first server-rendered total always matches the selected Album Product.
+  const basePrice = await priceFor(album.product_id, album.size);
+  if (basePrice == null) {
     return (
       <div className="mx-auto max-w-md p-8 text-sm text-destructive">
-        Pricing for this album size is currently unavailable. Please contact support.
+        Pricing for this album is currently unavailable. Please contact support.
       </div>
     );
   }
+  // Product name + dimensions from the Album Product (matches what the customer chose).
+  const snapshot = await getAlbumProductSnapshot(album.product_id);
+  const formatName = snapshot.productName ?? `${album.size}-page album`;
+  const formatDimensions = `${snapshot.dimensions.widthCm} × ${snapshot.dimensions.heightCm} cm`;
 
   // Initial breakdown/copies/coupon: resume a pending order's stored figures, else the
   // default single-copy, no-coupon price. All server-computed.
@@ -105,7 +107,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
       initialCouponCode = (c as { code: string } | null)?.code ?? null;
     }
   } else {
-    const a = computeOrderAmount(Number(product.base_price));
+    const a = computeOrderAmount(basePrice);
     amount = {
       subtotalInr: a.subtotalInr,
       shippingInr: a.shippingInr,
@@ -237,7 +239,8 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
         albumSub={albumSub}
         albumSize={album.size}
         photoCount={placedIds.size}
-        formatName={product.name}
+        formatName={formatName}
+        formatDimensions={formatDimensions}
         coverUrl={coverUrl}
         coverName={coverName}
         amount={amount}

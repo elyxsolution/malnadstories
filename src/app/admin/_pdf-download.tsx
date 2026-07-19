@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, FileDown } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+import { FileDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 /** Admin preview-PDF download. Fetches a fresh short-lived signed URL from the
@@ -28,7 +29,7 @@ export default function AdminPdfDownload({ albumId }: { albumId: string }) {
   return (
     <div className="space-y-1">
       <Button variant="outline" size="sm" onClick={download} disabled={busy}>
-        {busy ? <Loader2 className="animate-spin" /> : <FileDown />} Download PDF
+        {busy ? <InlineLoader /> : <FileDown />} Download PDF
       </Button>
       {err && <p className="text-xs text-destructive">{err}</p>}
     </div>

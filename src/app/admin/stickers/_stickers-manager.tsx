@@ -1,11 +1,9 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import {
-  Loader2, Upload, Trash2, Eye, EyeOff, Pencil, FolderPlus, Search, Repeat2,
-  ChevronUp, ChevronDown, X, GripVertical, Check,
-} from 'lucide-react';
+import { Upload, Trash2, Eye, EyeOff, Pencil, FolderPlus, Search, Repeat2, ChevronUp, ChevronDown, X, GripVertical, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -203,7 +201,7 @@ export default function StickersManager({
             <input ref={fileRef} type="file" accept={ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
           </div>
           <Button size="sm" onClick={upload} disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <Upload />} Upload
+            {busy ? <InlineLoader /> : <Upload />} Upload
           </Button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">Transparent PNGs render best. Add tags after upload via Edit. Stickers can be placed on the cover and any album page.</p>
@@ -385,7 +383,7 @@ export default function StickersManager({
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setToDelete(null)} disabled={busy}>Cancel</Button>
               <Button variant="destructive" size="sm" onClick={() => run(() => deleteSticker({ stickerId: toDelete.id })).then(() => setToDelete(null))} disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete
+                {busy ? <InlineLoader /> : <Trash2 />} Delete
               </Button>
             </div>
           </div>
@@ -483,7 +481,7 @@ function EditDialog({
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
           <Button size="sm" onClick={() => onSave({ name: name.trim(), categoryId: categoryId || null, tags: tags.split(',').map((t) => t.trim()).filter(Boolean) })} disabled={busy || !name.trim()}>
-            {busy ? <Loader2 className="animate-spin" /> : <Pencil />} Save
+            {busy ? <InlineLoader /> : <Pencil />} Save
           </Button>
         </div>
       </div>

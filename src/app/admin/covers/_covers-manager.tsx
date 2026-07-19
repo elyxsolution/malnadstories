@@ -1,8 +1,9 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, Upload, Trash2, Eye, EyeOff, AlertTriangle } from 'lucide-react';
+import { Upload, Trash2, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { presignCoverUpload, createCover, setCoverActive, deleteCover } from '@/lib/actions/admin/covers';
@@ -88,7 +89,7 @@ export default function CoversManager({ covers }: { covers: AdminCover[] }) {
             <input ref={fileRef} type="file" accept={ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="text-sm" />
           </div>
           <Button size="sm" onClick={upload} disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <Upload />} Upload
+            {busy ? <InlineLoader /> : <Upload />} Upload
           </Button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
@@ -158,7 +159,7 @@ export default function CoversManager({ covers }: { covers: AdminCover[] }) {
                 Cancel
               </Button>
               <Button variant="destructive" size="sm" onClick={confirmDelete} disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <Trash2 />}{' '}
+                {busy ? <InlineLoader /> : <Trash2 />}{' '}
                 {toDelete.usedBy > 0 ? 'Deactivate' : 'Delete'}
               </Button>
             </div>

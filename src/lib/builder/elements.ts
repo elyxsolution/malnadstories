@@ -103,13 +103,16 @@ export function textStyle(el: TextElement): CSSProperties {
 }
 
 // ── QR factory ─────────────────────────────────────────────────────────────────
-// On a 3:2 open pair, a square box needs h = 1.5·w (the pair is 1.5× wider than tall).
+// A square box on a container of aspect `ratio` (width/height) needs h = ratio·w so the
+// pixels are square. `ratio` defaults to PAIR_ASPECT (legacy 3:2 open pair) for back-compat,
+// but the builder passes the ACTIVE product's pairAspect (Phase B) so squares stay square at
+// any album size.
 export const PAIR_ASPECT = 3 / 2;
-export function squareQrHeight(w: number): number {
-  return Math.min(1, w * PAIR_ASPECT);
+export function squareQrHeight(w: number, ratio: number = PAIR_ASPECT): number {
+  return Math.min(1, w * ratio);
 }
 
-export function makeQr(data = '', overrides: Partial<QrElement> = {}): QrElement {
+export function makeQr(data = '', overrides: Partial<QrElement> = {}, pairRatio: number = PAIR_ASPECT): QrElement {
   const w = 0.14;
   return {
     id: cryptoId(),
@@ -117,7 +120,7 @@ export function makeQr(data = '', overrides: Partial<QrElement> = {}): QrElement
     x: 0.76,
     y: 0.62,
     w,
-    h: squareQrHeight(w), // square pixels on the 3:2 pair
+    h: squareQrHeight(w, pairRatio), // square pixels on the container's aspect
     fg: '#1e3a2f',
     bg: '#ffffff',
     padding: 0.12,

@@ -1,21 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-  XCircle,
-  Loader2,
-  LayoutDashboard,
-  Image as ImageIcon,
-  Check,
-  CheckCircle2,
-  Package,
-  Printer,
-  Box,
-  Truck,
-  Home,
-} from 'lucide-react';
+import { XCircle, LayoutDashboard, Image as ImageIcon, Check, CheckCircle2, Package, Printer, Box, Truck, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cancelOrder } from '@/lib/actions/orders';
 import { SealMedallion, LUX_PRIMARY } from '@/components/brand';
@@ -214,7 +203,7 @@ export default function OrderStatus({
     <div className="rounded-2xl border bg-card p-6 shadow-panel">
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-secondary">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          <InlineLoader />
         </span>
         <div>
           <p className="font-display text-base font-semibold tracking-tight">Confirming your payment…</p>
@@ -226,7 +215,7 @@ export default function OrderStatus({
       <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3">
         <p className="text-xs text-muted-foreground">Closed the payment window?</p>
         <Button variant="ghost" size="sm" onClick={abandon} disabled={cancelling}>
-          {cancelling ? <Loader2 className="animate-spin" /> : null} Cancel order
+          {cancelling ? <InlineLoader /> : null} Cancel order
         </Button>
       </div>
     </div>

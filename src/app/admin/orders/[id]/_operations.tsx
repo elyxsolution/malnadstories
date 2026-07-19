@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, ArrowRight, Truck, PackageCheck, RefreshCw, XCircle, Check, Circle } from 'lucide-react';
+import { ArrowRight, Truck, PackageCheck, RefreshCw, XCircle, Check, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -145,7 +146,7 @@ export default function Operations({
           {next && orderEditable ? (
             <>
               <Button onClick={() => run('status', () => updateOrderStatus({ orderId, status: next }), `Moved to ${next}.`)} disabled={busy !== null || needsTracking}>
-                {busy === 'status' ? <Loader2 className="animate-spin" /> : <ArrowRight />} Advance to {adminStatusLabel(next)}
+                {busy === 'status' ? <InlineLoader /> : <ArrowRight />} Advance to {adminStatusLabel(next)}
               </Button>
               {needsTracking && <span className="text-xs text-muted-foreground">Save a tracking number + courier below first.</span>}
             </>
@@ -180,7 +181,7 @@ export default function Operations({
           </div>
         </div>
         <Button variant="outline" size="sm" className="mt-3" disabled={busy !== null || tracking.trim().length < 3 || !courier} onClick={saveTracking}>
-          {busy === 'track' ? <Loader2 className="animate-spin" /> : <Truck />} Save tracking
+          {busy === 'track' ? <InlineLoader /> : <Truck />} Save tracking
         </Button>
         <p className="mt-2 text-[11px] text-muted-foreground">
           Saved once — applied to both the order and the courier shipment.
@@ -224,7 +225,7 @@ export default function Operations({
                       s === 'delivered' ? 'bg-success/15 text-success hover:bg-success/25' : s === 'failed' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'border hover:bg-muted'
                     }`}
                   >
-                    {busy === `ship-${s}` ? <Loader2 className="h-4 w-4 animate-spin" /> : shipIcon(s)}
+                    {busy === `ship-${s}` ? <InlineLoader /> : shipIcon(s)}
                     {s === 'picked_up' ? 'Mark dispatched' : shipmentStatusLabel(s)}
                   </button>
                 ))}
@@ -238,7 +239,7 @@ export default function Operations({
                 disabled={busy !== null}
                 className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
               >
-                {busy === 'sync' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Sync shipment
+                {busy === 'sync' ? <InlineLoader /> : <RefreshCw className="h-4 w-4" />} Sync shipment
               </button>
               {!shipClosed && (
                 <button
@@ -247,7 +248,7 @@ export default function Operations({
                   disabled={busy !== null}
                   className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
                 >
-                  {busy === 'cancel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />} Cancel shipment
+                  {busy === 'cancel' ? <InlineLoader /> : <XCircle className="h-4 w-4" />} Cancel shipment
                 </button>
               )}
             </div>

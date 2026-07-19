@@ -4,16 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import NextImage from 'next/image';
 import { useRouter } from 'next/navigation';
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  MapPin,
-  Calendar,
-  Loader2,
-  Image as ImageIcon,
-  CheckCircle2,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, MapPin, Calendar, Image as ImageIcon, CheckCircle2 } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,14 +15,14 @@ import { createAlbumDraft } from '@/lib/actions/albums';
 import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
 import { photoCap } from '@/lib/builder/model';
 import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
-import Book from '@/components/book';
 import Uploader, { type Photo } from '../[id]/build/_uploader';
 import SmartTitleInput from './_smart-title-input';
+import ProductSelect from './_product-select';
+import type { ProductOption } from '@/lib/products/catalog';
 import BlueprintPicker from './_blueprint-picker';
 import { LayoutTemplate, Sparkles, Dices } from 'lucide-react';
-import type { CoverOption } from '@/lib/covers';
 
-type Product = { id: string; name: string; pages: number; basePrice: string };
+import type { CoverOption } from '@/lib/covers';
 
 const STEPS = ['Begin', 'Format', 'Memories', 'Create'] as const;
 
@@ -45,7 +38,6 @@ const AUTO_STAGES = [
 const ROMAN = ['I', 'II', 'III', 'IV'];
 const LAST_STEP = STEPS.length - 1; // 3 (Review)
 
-const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 const PHOTOS_PER_PAGE = 2; // rough estimate for "≈ pages"
 
 // ── Album period (Task: date UX) ────────────────────────────────────────────
@@ -90,13 +82,13 @@ export type WizardBlueprint = {
 };
 
 export default function CreateWizard({
-  products,
+  albumProducts,
   covers,
   coverTemplates = [],
   templates = [],
   blueprints = [],
 }: {
-  products: Product[];
+  albumProducts: ProductOption[];
   covers: CoverOption[];
   /** Active builder-JSON cover DESIGN templates (0040) — a fully-editable starting point. */
   coverTemplates?: CoverTemplateOption[];
@@ -115,7 +107,11 @@ export default function CreateWizard({
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [description, setDescription] = useState('');
-  const [productId, setProductId] = useState(products[0]?.id ?? '');
+  // Physical product + page count (0047). Default to the flagged default product.
+  const [albumProductId, setAlbumProductId] = useState(
+    albumProducts.find((p) => p.isDefault)?.id ?? albumProducts[0]?.id ?? '',
+  );
+  const [pageCount, setPageCount] = useState<number | null>(null);
   // Cover choice is one of three, mutually exclusive:
   //   coverId    → legacy PNG artwork · designId → builder-JSON design template · customCover → blank
   const [coverId, setCoverId] = useState<string | null>(null);
@@ -153,8 +149,8 @@ export default function CreateWizard({
   const [autoStage, setAutoStage] = useState(0);
   const [autoConfirm, setAutoConfirm] = useState<WizardBlueprint | null>(null); // "not enough photos" pre-confirm
 
-  const product = products.find((p) => p.id === productId);
-  const cap = product ? photoCap(product.pages) : 100;
+  const selectedProduct = albumProducts.find((p) => p.id === albumProductId);
+  const cap = pageCount ? photoCap(pageCount) : 100;
 
   // From <= To validation (both optional; only an explicit inverted range is an error).
   const dateError = !!fromDate && !!toDate && fromDate > toDate;
@@ -227,7 +223,8 @@ export default function CreateWizard({
     setError(null);
     const res = await createAlbumDraft({
       title: title.trim(),
-      productId,
+      albumProductId,
+      pageCount: pageCount ?? undefined,
       // Exactly one cover source (or neither, for a blank custom cover).
       coverTemplateId: coverId ?? undefined,
       coverDesignTemplateId: designId ?? undefined,
@@ -265,7 +262,7 @@ export default function CreateWizard({
   const hasCoverChoice = !!coverId || !!designId || customCover;
   const canContinue = (() => {
     if (step === 0) return title.trim().length > 0 && !dateError;
-    if (step === 1) return !!productId && hasCoverChoice;
+    if (step === 1) return !!albumProductId && !!pageCount && hasCoverChoice;
     return true;
   })();
 
@@ -281,7 +278,7 @@ export default function CreateWizard({
 
   // ── Blueprint strategies (Options 1 & 2) ─────────────────────────────────────
   const matchingBlueprints = blueprints
-    .filter((b) => !!product && b.pageCount === product.pages)
+    .filter((b) => !!pageCount && b.pageCount === pageCount)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.featured) - Number(a.featured) || Number(b.popular) - Number(a.popular));
 
   const launchBuilder = () => {
@@ -319,7 +316,7 @@ export default function CreateWizard({
 
   // Auto Create entry (Step 5) — gate on "not enough photos" (uploaded < capacity), then proceed.
   const runAutoCreate = () => {
-    if (!albumId || !product) return;
+    if (!albumId || !pageCount) return;
     if (autoTarget && ready.length < autoTarget.slotCount) {
       setAutoConfirm(autoTarget); // show Upload More / Continue Anyway
       return;
@@ -330,7 +327,7 @@ export default function CreateWizard({
   // ── Auto Create (Step 5) — staged "beautiful loading", then blueprint auto-select (or, if no
   // matching blueprints exist, the deterministic auto-layout). Always ends in the builder. ───────
   const proceedAutoCreate = async () => {
-    if (!albumId || !product) return;
+    if (!albumId || !pageCount) return;
     setBpError(null);
     setAutoConfirm(null);
     setAutoStage(0);
@@ -348,7 +345,7 @@ export default function CreateWizard({
         if (!res.ok) errMsg = res.error;
       } else {
         // Graceful fallback: no blueprint for this size → deterministic auto-layout.
-        const blocks = autoLayout(enginePhotos, product.pages, 0, templates);
+        const blocks = autoLayout(enginePhotos, pageCount, 0, templates);
         const res = await saveLayout({ albumId, blocks: serializeBlocks(blocks) });
         ok = res.ok;
         if (!res.ok) errMsg = res.error;
@@ -520,50 +517,27 @@ export default function CreateWizard({
             <div className="space-y-7">
               <Eyebrow chapter="II" label="Format" center />
               <div className="text-center">
-                <h1 className="font-display text-[2.4rem] font-semibold leading-none tracking-tight">Choose its form.</h1>
+                <h1 className="font-display text-[2.4rem] font-semibold leading-none tracking-tight">Choose your album.</h1>
                 <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-                  Three sizes, each a real book you’ll hold. Pick how much of the journey you want to keep.
+                  Each a real, beautifully bound book you’ll hold. Pick the size, preview it, then choose how many pages.
                 </p>
               </div>
-              <div className="flex flex-wrap items-end justify-center gap-6 sm:gap-10">
-                {products.map((p) => {
-                  const selected = productId === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => !locked && setProductId(p.id)}
-                      disabled={locked}
-                      className={`group flex flex-col items-center ${locked ? 'opacity-60' : ''}`}
-                    >
-                      <span className="relative flex h-[230px] items-end">
-                        <Book
-                          title={title || 'Your story'}
-                          size="md"
-                          tilt={false}
-                          thickness={Math.max(10, Math.round(p.pages / 1.6))}
-                        />
-                        {selected && (
-                          <span className="absolute -top-2 right-4 grid h-7 w-7 place-items-center rounded-full bg-gold text-background shadow-[0_6px_16px_rgb(160_129_63/0.4)]">
-                            <Check className="h-4 w-4" />
-                          </span>
-                        )}
-                      </span>
-                      <span className="mt-5 font-display text-2xl font-medium text-primary">{p.name}</span>
-                      <span
-                        className={`mt-1 text-xs uppercase tracking-[0.1em] ${selected ? 'text-gold' : 'text-muted-foreground'}`}
-                      >
-                        {p.pages} pages
-                      </span>
-                      <span className="mt-3 border-t border-border pt-3 font-display text-lg text-primary">
-                        {inr(Number(p.basePrice))}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              <ProductSelect
+                products={albumProducts}
+                selectedProductId={albumProductId}
+                pageCount={pageCount}
+                disabled={locked}
+                onSelectProduct={(id) => {
+                  if (locked) return;
+                  setAlbumProductId(id);
+                  const np = albumProducts.find((p) => p.id === id);
+                  // Keep the count only if the newly-chosen product still offers it.
+                  if (np && pageCount != null && !np.pageCounts.includes(pageCount)) setPageCount(null);
+                }}
+                onSelectPageCount={(n) => !locked && setPageCount(n)}
+              />
               <p className="text-center font-display text-sm italic text-muted-foreground">
-                Pages and cover are bound in this size. Layouts and photos remain fully flexible while building.
+                Dimensions and cover are bound to this product. Layouts and photos remain fully flexible while building.
               </p>
               {/* Cover templates — full designs, fully editable after you pick one. */}
               {coverTemplates.length > 0 && (
@@ -674,7 +648,7 @@ export default function CreateWizard({
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     {pending.length > 0 ? (
                       <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing {pending.length} of {photos.length}…
+                        <InlineLoader /> Processing {pending.length} of {photos.length}…
                       </>
                     ) : (
                       <>
@@ -690,7 +664,7 @@ export default function CreateWizard({
                           <img src={p.thumbUrl} alt={p.filename} className="absolute inset-0 h-full w-full object-cover" />
                         ) : (
                           <span className="absolute inset-0 grid place-items-center text-muted-foreground/40">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <InlineLoader />
                           </span>
                         )}
                       </div>
@@ -741,7 +715,7 @@ export default function CreateWizard({
                   <div className="mt-4 space-y-3">
                     <Stat label="Photographs" value={photos.length} />
                     <Stat label="Estimated pages" value={`≈ ${estPages}`} />
-                    <Stat label="Format" value={`${product?.pages ?? ''} pages`} />
+                    <Stat label="Format" value={`${selectedProduct?.name ?? ''} · ${pageCount ?? ''} pages`} />
                   </div>
                 </div>
               </div>
@@ -766,7 +740,7 @@ export default function CreateWizard({
                           { label: 'Your photos', value: `${ready.length}` },
                         ]
                       : [
-                          { label: 'Pages', value: `${product?.pages ?? ''}` },
+                          { label: 'Pages', value: `${pageCount ?? ''}` },
                           { label: 'Photos', value: `${ready.length}` },
                           { label: 'Ready in', value: '~ seconds' },
                         ]
@@ -831,7 +805,7 @@ export default function CreateWizard({
           {/* The final "Create" step's actions live in the three method cards — no competing footer CTA. */}
           {step < LAST_STEP && (
             <Button onClick={next} disabled={!canContinue || creating} className={LUX_PRIMARY}>
-              {creating ? <Loader2 className="animate-spin" /> : null}
+              {creating ? <InlineLoader /> : null}
               {continueLabel}
               {!creating && <ArrowRight />}
             </Button>
@@ -924,7 +898,7 @@ export default function CreateWizard({
             {AUTO_STAGES.map((s, i) => (
               <li key={s} className={`flex items-center gap-3 text-[15px] transition-all duration-300 ${i <= autoStage ? 'text-primary-foreground' : 'text-primary-foreground/30'}`}>
                 <span className={`grid h-5 w-5 flex-none place-items-center rounded-full transition-colors ${i < autoStage ? 'bg-gold text-background' : i === autoStage ? 'bg-white/15 text-gold' : 'bg-white/5'}`}>
-                  {i < autoStage ? <Check className="h-3 w-3" /> : i === autoStage ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                  {i < autoStage ? <Check className="h-3 w-3" /> : i === autoStage ? <InlineLoader /> : null}
                 </span>
                 {s}
               </li>
@@ -945,7 +919,7 @@ export default function CreateWizard({
           </h2>
           <span className="mt-7 h-px w-60 bg-[linear-gradient(90deg,transparent,hsl(var(--gold)/0.6),transparent)]" />
           <div className="mt-8 flex items-center gap-3 text-sm text-primary-foreground/70">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-gold/80" /> Preparing your spreads…
+            <InlineLoader /> Preparing your spreads…
           </div>
           <p className="absolute bottom-6 text-[10px] uppercase tracking-widest text-primary-foreground/30">Click anywhere to skip</p>
         </div>

@@ -29,7 +29,6 @@ export const CreateAlbumSchema = z
       .string()
       .min(1, 'Album title is required')
       .max(100, 'Title must be 100 characters or less'),
-    productId: z.string().uuid('Please select an album size'),
     // Cover source (Phase 3). Exactly one path (or neither = blank custom cover):
     //   coverTemplateId       → legacy uploaded-PNG cover artwork (0023), kept for back-compat.
     //   coverDesignTemplateId → a full builder-JSON cover DESIGN template (0040); its CoverConfig
@@ -37,6 +36,13 @@ export const CreateAlbumSchema = z
     // Both optional so "Custom Cover" (blank) is also valid; they are mutually exclusive.
     coverTemplateId: z.string().uuid('Please choose a cover design').optional(),
     coverDesignTemplateId: z.string().uuid('Invalid cover template').optional(),
+    // NEW product model (0047): the chosen physical product + page count. Both optional so the
+    // LEGACY path (productId → old products table, which encodes the page count) keeps working
+    // until the wizard UI is migrated. When present, albumProductId wins and pageCount is used.
+    albumProductId: z.string().uuid('Please choose an album').optional(),
+    pageCount: z.coerce.number().int().positive().optional(),
+    // Legacy: old products.id (page-count/price lookup). Kept for backward compatibility.
+    productId: z.string().uuid('Please select an album size').optional(),
     // Optional metadata (Phase 2A) — never gates creation.
     destination: optionalText(120, 'Destination must be 120 characters or less'),
     travelDates: optionalText(60, 'Travel dates must be 60 characters or less'),
@@ -45,6 +51,11 @@ export const CreateAlbumSchema = z
   .refine((d) => !(d.coverTemplateId && d.coverDesignTemplateId), {
     message: 'Choose either a cover artwork or a cover template, not both.',
     path: ['coverDesignTemplateId'],
+  })
+  // Must resolve a size: the NEW path needs albumProductId + pageCount; the LEGACY path needs productId.
+  .refine((d) => (d.albumProductId && d.pageCount) || d.productId, {
+    message: 'Please choose an album and page count.',
+    path: ['albumProductId'],
   });
 
 // Photo upload — presign + confirm. Mirrors the server-side limits in src/lib/r2.ts.
@@ -946,3 +957,52 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 export type CreateAlbumInput = z.infer<typeof CreateAlbumSchema>;
 export type PresignUploadInput = z.infer<typeof PresignUploadSchema>;
 export type ConfirmUploadInput = z.infer<typeof ConfirmUploadSchema>;
+
+// ── Album Product admin (Dimensions section, 0047) ────────────────────────────
+// Positive dimensions/prices + non-empty name enforced here (mirrored by the pure model
+// validators). page_counts + prices are edited together as an array of {pageCount, price}.
+const ProductPriceRowSchema = z.object({
+  pageCount: z.coerce.number().int().positive('Page count must be positive'),
+  price: z.coerce.number().nonnegative('Price cannot be negative'),
+});
+
+export const ProductSaveSchema = z.object({
+  id: z.string().uuid().optional(), // present = update, absent = create
+  name: z.string().min(1, 'Name is required').max(60, 'Name must be 60 characters or less'),
+  description: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined),
+    z.string().max(500).optional(),
+  ),
+  widthCm: z.coerce.number().positive('Width must be positive'),
+  heightCm: z.coerce.number().positive('Height must be positive'),
+  printWidthCm: z.coerce.number().positive('Print width must be positive'),
+  printHeightCm: z.coerce.number().positive('Print height must be positive'),
+  displayOrder: z.coerce.number().int().nonnegative().optional(),
+  prices: z.array(ProductPriceRowSchema).min(1, 'Add at least one page count + price'),
+  // Marketing "Best for" tags shown in the preview info panel (0048). Optional.
+  bestFor: z.array(z.string().min(1).max(40)).max(8).optional(),
+});
+
+export const ProductDemoAlbumSchema = z.object({
+  productId: z.string().uuid('Invalid product'),
+  albumId: z.string().uuid('Invalid album'),
+});
+
+export const ProductStatusSchema = z.object({
+  id: z.string().uuid('Invalid product'),
+  isActive: z.boolean(),
+});
+
+export const ProductIdSchema = z.object({ id: z.string().uuid('Invalid product') });
+
+export const ProductPreviewReorderSchema = z.object({
+  productId: z.string().uuid('Invalid product'),
+  ids: z.array(z.string().uuid()).min(1),
+});
+
+export const ProductPreviewKeySchema = z.object({
+  productId: z.string().uuid('Invalid product'),
+  imageKey: z.string().min(1).max(512),
+});
+
+export type ProductSaveInput = z.infer<typeof ProductSaveSchema>;

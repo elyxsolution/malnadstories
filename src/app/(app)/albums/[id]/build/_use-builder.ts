@@ -54,7 +54,7 @@ function stripPhoto(list: Block[], id: string): Block[] {
  * stay presentational. Persistence is unchanged: the orchestrator serializes + calls the
  * existing `saveLayout`. No new persistence path is introduced here.
  */
-export function useBlocks(initial: Block[]) {
+export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
   const hist = useHistoryState<Block[]>(initial);
   const blocks = hist.value;
   const [dirty, setDirty] = useState(false);
@@ -282,7 +282,7 @@ export function useBlocks(initial: Block[]) {
 
   // ── QR ───────────────────────────────────────────────────────────────────────
   const addQr = (key: string, data: string, overrides: Partial<QrElement> = {}) => {
-    const el = makeQr(data, overrides);
+    const el = makeQr(data, overrides, pairRatio);
     mutate((prev) => prev.map((b) => (b.key === key ? { ...b, qrs: [...b.qrs, el] } : b)));
     return el.id;
   };
@@ -297,7 +297,7 @@ export function useBlocks(initial: Block[]) {
 
   // ── stickers ───────────────────────────────────────────────────────────────────
   const addSticker = (key: string, stickerId: string, overrides: Partial<StickerElement> = {}) => {
-    const el = makeSticker(stickerId, PAIR_ASPECT, overrides);
+    const el = makeSticker(stickerId, pairRatio, overrides);
     mutate((prev) => prev.map((b) => (b.key === key ? { ...b, stickers: [...b.stickers, el] } : b)));
     return el.id;
   };

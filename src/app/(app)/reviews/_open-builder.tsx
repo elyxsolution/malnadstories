@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, PencilRuler } from 'lucide-react';
+import { PencilRuler } from 'lucide-react';
 import { markRevisionInProgress } from '@/lib/actions/reviews';
 
 /**
@@ -31,7 +32,7 @@ export default function OpenBuilderButton({ albumId }: { albumId: string }) {
       disabled={busy}
       className="inline-flex items-center justify-center gap-2 bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
     >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilRuler className="h-4 w-4" />}
+      {busy ? <InlineLoader /> : <PencilRuler className="h-4 w-4" />}
       Open builder to make changes
     </button>
   );

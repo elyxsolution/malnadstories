@@ -37,14 +37,19 @@ import type {
  * renders at any size with no measurement.
  */
 
-/** Geometry of the cover spread for a given album leaf count (shared by canvas + preview). */
-export function coverSpreadMetrics(size: number) {
+/**
+ * Geometry of the cover spread for a given album leaf count (shared by canvas + preview).
+ * `pageAspectRatio` (width/height of ONE cover page) defaults to the legacy 0.75 (3:4) so
+ * existing callers are unchanged; the builder passes the ACTIVE product's page aspect (Phase B)
+ * so the cover spread matches the printed page proportions.
+ */
+export function coverSpreadMetrics(size: number, pageAspectRatio: number = 0.75) {
   const spineFrac = spineWidthFor(size);
   const totalUnits = 2 + spineFrac;
   return {
     pagePct: (1 / totalUnits) * 100, // each cover page's width as % of the spread
     spinePct: (spineFrac / totalUnits) * 100, // the spine's width as % of the spread
-    aspect: 0.75 * totalUnits, // spread width / height (each page is 3:4)
+    aspect: pageAspectRatio * totalUnits, // spread width / height (each page = pageAspectRatio)
   };
 }
 
@@ -321,6 +326,7 @@ export function CoverSpread({
   frontImageUrl,
   backImageUrl,
   size,
+  pageAspect,
   stickerUrlFor,
   onReady,
   rounded = false,
@@ -330,11 +336,13 @@ export function CoverSpread({
   frontImageUrl: string | null;
   backImageUrl: string | null;
   size: number;
+  /** One cover page's width/height (from ProductDimensions). Omitted → legacy 0.75. */
+  pageAspect?: number;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   onReady?: () => void;
   rounded?: boolean;
 }) {
-  const { pagePct, spinePct, aspect } = coverSpreadMetrics(size);
+  const { pagePct, spinePct, aspect } = coverSpreadMetrics(size, pageAspect);
   return (
     <div
       className={`relative w-full overflow-hidden ${rounded ? 'rounded-[14px] ring-1 ring-black/10' : ''}`}

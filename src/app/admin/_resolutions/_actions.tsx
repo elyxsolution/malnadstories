@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, StickyNote } from 'lucide-react';
+import { StickyNote } from 'lucide-react';
 import { setRefundStatus, setReprintStatus, addRefundNote, addReprintNote } from '@/lib/actions/admin/resolutions';
 import { allowedNextStatuses, type RequestStatus } from '@/lib/resolutions/model';
 
@@ -78,7 +79,7 @@ export default function RequestActions({
           disabled={busy !== null || !note.trim()}
           className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
-          {busy === 'note' ? <Loader2 className="h-4 w-4 animate-spin" /> : <StickyNote className="h-4 w-4" />} Save note
+          {busy === 'note' ? <InlineLoader /> : <StickyNote className="h-4 w-4" />} Save note
         </button>
       </div>
 
@@ -98,7 +99,7 @@ export default function RequestActions({
                   ACTION_STYLE[s] ?? 'border hover:bg-muted'
                 }`}
               >
-                {busy === `status-${s}` && <Loader2 className="h-4 w-4 animate-spin" />}
+                {busy === `status-${s}` && <InlineLoader />}
                 {ACTION_LABEL[s]}
               </button>
             ))}

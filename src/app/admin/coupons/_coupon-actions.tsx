@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { setCouponActive } from '@/lib/actions/admin/coupons';
 
@@ -19,7 +19,7 @@ export default function CouponToggle({ couponId, active }: { couponId: string; a
 
   return (
     <Button variant="ghost" size="sm" onClick={toggle} disabled={busy}>
-      {busy ? <Loader2 className="animate-spin" /> : null} {active ? 'Disable' : 'Enable'}
+      {busy ? <InlineLoader /> : null} {active ? 'Disable' : 'Enable'}
     </Button>
   );
 }

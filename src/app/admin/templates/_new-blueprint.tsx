@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Plus, Loader2, X, BookImage, ArrowRight } from 'lucide-react';
+import { Plus, X, BookImage, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { categoryLabel } from '@/lib/templates/model';
 import { createBlankBlueprint } from '@/lib/actions/admin/templates';
@@ -148,7 +149,7 @@ export default function NewBlueprintButton({ sizes }: { sizes: number[] }) {
             <footer className="flex items-center justify-end gap-2 border-t px-5 py-4">
               <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
               <Button size="sm" onClick={create} disabled={busy || !name.trim() || !size} className="bg-primary text-primary-foreground hover:bg-primary/90">
-                {busy ? <Loader2 className="animate-spin" /> : <ArrowRight />} Open builder
+                {busy ? <InlineLoader /> : <ArrowRight />} Open builder
               </Button>
             </footer>
           </div>

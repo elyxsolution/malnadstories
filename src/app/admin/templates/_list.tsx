@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, CheckCircle2, PauseCircle, Archive, Copy, Trash2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, PauseCircle, Archive, Copy, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { setTemplateStatus, duplicateTemplate, checkLayoutPresetDependencies, deleteLayoutPreset, type PresetDeps } from '@/lib/actions/admin/templates';
 import { categoryLabel, statusLabel, statusChip, type TemplateGeometry } from '@/lib/templates/model';
@@ -129,7 +130,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                   disabled={busy !== null}
                   className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {busy === `act-${r.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                  {busy === `act-${r.id}` ? <InlineLoader /> : <CheckCircle2 className="h-3.5 w-3.5" />}
                   Activate
                 </button>
               )}
@@ -140,7 +141,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                   disabled={busy !== null}
                   className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
                 >
-                  {busy === `deact-${r.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PauseCircle className="h-3.5 w-3.5" />}
+                  {busy === `deact-${r.id}` ? <InlineLoader /> : <PauseCircle className="h-3.5 w-3.5" />}
                   Deactivate
                 </button>
               )}
@@ -151,7 +152,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                   disabled={busy !== null}
                   className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
                 >
-                  {busy === `arch-${r.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+                  {busy === `arch-${r.id}` ? <InlineLoader /> : <Archive className="h-3.5 w-3.5" />}
                   Archive
                 </button>
               )}
@@ -161,7 +162,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                 disabled={busy !== null}
                 className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-50"
               >
-                {busy === `dup-${r.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+                {busy === `dup-${r.id}` ? <InlineLoader /> : <Copy className="h-3.5 w-3.5" />}
                 Duplicate
               </button>
               <button
@@ -191,7 +192,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
 
             {checking ? (
               <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Checking where this preset is used…
+                <InlineLoader /> Checking where this preset is used…
               </p>
             ) : blocked && deps ? (
               <>
@@ -204,7 +205,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                 <div className="mt-4 flex justify-end gap-2">
                   <Button variant="ghost" size="sm" onClick={() => setDel(null)} disabled={working}>Cancel</Button>
                   <Button variant="outline" size="sm" onClick={archiveInstead} disabled={working} className="text-amber-600">
-                    {working ? <Loader2 className="animate-spin" /> : <Archive />} Archive instead
+                    {working ? <InlineLoader /> : <Archive />} Archive instead
                   </Button>
                 </div>
               </>
@@ -216,7 +217,7 @@ export default function TemplateList({ rows }: { rows: TemplateRow[] }) {
                 <div className="mt-4 flex justify-end gap-2">
                   <Button variant="ghost" size="sm" onClick={() => setDel(null)} disabled={working}>Cancel</Button>
                   <Button variant="destructive" size="sm" onClick={confirmDelete} disabled={working}>
-                    {working ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete permanently
+                    {working ? <InlineLoader /> : <Trash2 />} Delete permanently
                   </Button>
                 </div>
               </>

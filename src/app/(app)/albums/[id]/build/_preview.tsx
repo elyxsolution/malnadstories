@@ -3,6 +3,7 @@
 import PairContent from './_pair-frame';
 import type { Photo } from './_uploader';
 import { physicalStart, type Block } from '@/lib/builder/model';
+import { useBuilderDimensions } from './_dimensions';
 
 /**
  * In-app full-album preview that mirrors the PHYSICAL printed book exactly:
@@ -23,6 +24,7 @@ export default function Preview({
   cover: { url: string; name: string } | null;
   stickerUrlFor?: (stickerId: string) => string | undefined;
 }) {
+  const { page, pair } = useBuilderDimensions();
   const photoFor = (id: string | null | undefined) => {
     const p = id ? photoMap.get(id) : undefined;
     return p ? { url: p.url, edit: p.edit } : undefined;
@@ -32,7 +34,10 @@ export default function Preview({
     <div className="space-y-8">
       {/* Front matter — fixed, not editable. */}
       <figure className="mx-auto w-full max-w-md">
-        <div className="relative mx-auto aspect-[3/4] w-full overflow-hidden rounded-lg border bg-muted shadow-sm">
+        <div
+          className="relative mx-auto w-full overflow-hidden rounded-lg border bg-muted shadow-sm"
+          style={{ aspectRatio: page }}
+        >
           {cover ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={cover.url} alt={cover.name} className="absolute inset-0 h-full w-full object-cover" />
@@ -48,7 +53,7 @@ export default function Preview({
       <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-4">
         {[2, 3].map((p) => (
           <figure key={p}>
-            <div className="relative aspect-[3/4] w-full rounded-lg border border-dashed bg-white shadow-sm" />
+            <div className="relative w-full rounded-lg border border-dashed bg-white shadow-sm" style={{ aspectRatio: page }} />
             <figcaption className="mt-2 text-xs text-muted-foreground">Page {p} · Blank</figcaption>
           </figure>
         ))}
@@ -62,8 +67,11 @@ export default function Preview({
           const isDouble = block.template === 'double-spread';
           return (
             <figure key={block.key} className="mx-auto w-full max-w-2xl">
-              {/* Open pair: two 3:4 pages side by side = 3:2, with a centre gutter. */}
-              <div className="relative mx-auto aspect-[3/2] w-full overflow-hidden rounded-lg border bg-muted shadow-sm">
+              {/* Open pair: two pages side by side (pair aspect from the product), centre gutter. */}
+              <div
+                className="relative mx-auto w-full overflow-hidden rounded-lg border bg-muted shadow-sm"
+                style={{ aspectRatio: pair }}
+              >
                 <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
                 <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/70 mix-blend-difference" />
               </div>

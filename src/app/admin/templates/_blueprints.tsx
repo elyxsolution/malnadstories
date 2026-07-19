@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
-import { Loader2, Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, Search, X, Check, RefreshCw, LayoutGrid, Crown, PencilRuler } from 'lucide-react';
+import { Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, Search, X, Check, RefreshCw, LayoutGrid, Crown, PencilRuler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { categoryLabel, statusChip, statusLabel } from '@/lib/templates/model';
 import {
@@ -250,7 +251,7 @@ function BlueprintCard({
         {/* Edit the layout in the builder (0046) + rename metadata */}
         <div className="mt-3 grid grid-cols-2 gap-1.5">
           <Button size="sm" disabled={busy} onClick={onEditLayout} className="h-7 text-[12px]">
-            {busy ? <Loader2 className="animate-spin" /> : <PencilRuler className="h-3.5 w-3.5" />} Edit Blueprint
+            {busy ? <InlineLoader /> : <PencilRuler className="h-3.5 w-3.5" />} Edit Blueprint
           </Button>
           <Button size="sm" variant="outline" disabled={busy} onClick={onEdit} className="h-7 text-[12px]">
             <Pencil className="h-3.5 w-3.5" /> Rename
@@ -263,7 +264,7 @@ function BlueprintCard({
             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gold"><Crown className="h-3.5 w-3.5" /> Default for {r.pageCount} pages</span>
           ) : (
             <Button size="sm" variant="outline" disabled={busy || !active} onClick={() => run(r.id, () => setDefaultBlueprint({ id: r.id }))} className="h-7 w-full text-[12px]">
-              {busy ? <Loader2 className="animate-spin" /> : <Crown className="h-3.5 w-3.5" />} Set as default
+              {busy ? <InlineLoader /> : <Crown className="h-3.5 w-3.5" />} Set as default
             </Button>
           )}
           {!active && !r.isDefault && <p className="mt-1 text-[10px] text-muted-foreground">Activate to make it selectable as default.</p>}
@@ -296,7 +297,7 @@ function Badge({ className, children }: { className: string; children: React.Rea
 function IconBtn({ label, onClick, busy, className, children }: { label: string; onClick: () => void; busy?: boolean; className?: string; children: React.ReactNode }) {
   return (
     <Button variant="ghost" size="icon-sm" aria-label={label} title={label} disabled={busy} onClick={onClick} className={className}>
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : children}
+      {busy ? <InlineLoader /> : children}
     </Button>
   );
 }
@@ -329,7 +330,7 @@ function EditMeta({ row, busy, onClose, onSave }: { row: BlueprintRow; busy: boo
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button size="sm" onClick={() => onSave({ name: name.trim(), category })} disabled={busy || !name.trim()}>
-            {busy ? <Loader2 className="animate-spin" /> : <Check />} Save
+            {busy ? <InlineLoader /> : <Check />} Save
           </Button>
         </div>
       </div>

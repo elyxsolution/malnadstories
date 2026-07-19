@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -122,7 +124,7 @@ export default function AddressPicker({
           {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={saving}>
-              {saving ? <Loader2 className="animate-spin" /> : null} Save address
+              {saving ? <InlineLoader /> : null} Save address
             </Button>
             {addresses.length > 0 && (
               <Button type="button" variant="ghost" size="sm" onClick={() => setAdding(false)} disabled={saving}>

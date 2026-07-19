@@ -1,9 +1,10 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, Star, Copy, Eye, EyeOff, Archive, Pencil, Download, Upload, X } from 'lucide-react';
+import { Star, Copy, Eye, EyeOff, Archive, Pencil, Download, Upload, X } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { CoverDesignFromConfig } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { CoverConfig } from '@/lib/builder/cover';
@@ -157,7 +158,7 @@ export default function CoverTemplatesList({
                       disabled={busy === t.id}
                       onClick={() => run(t.id, () => setCoverTemplateStatus({ id: t.id, status: active ? 'inactive' : 'active' }))}
                     >
-                      {busy === t.id ? <Loader2 className="h-4 w-4 animate-spin" /> : active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {busy === t.id ? <InlineLoader /> : active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
                     <Button
                       variant="ghost"
@@ -234,7 +235,7 @@ export default function CoverTemplatesList({
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setPending(null)} disabled={importing}>Cancel</Button>
               <Button size="sm" onClick={confirmImport} disabled={importing}>
-                {importing ? <Loader2 className="animate-spin" /> : <Upload />} {overwriteId ? 'Overwrite' : 'Create'}
+                {importing ? <InlineLoader /> : <Upload />} {overwriteId ? 'Overwrite' : 'Create'}
               </Button>
             </div>
           </div>

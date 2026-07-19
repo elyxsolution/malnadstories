@@ -7,6 +7,9 @@ import { getAdminContext } from '@/lib/auth/require-admin';
 import { roleHasCapability } from '@/lib/auth/capabilities';
 import Builder from './_builder';
 import PurchasedAlbum from './_purchased';
+import { DimensionsProvider } from './_dimensions';
+import { getProductDimensions } from '@/lib/products/catalog';
+import { FALLBACK_DIMENSIONS } from '@/lib/products/model';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import { type Photo } from './_uploader';
 import {
@@ -27,7 +30,7 @@ import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
 import { builderFontVars } from '@/lib/fonts';
 
-type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null };
+type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null; product_id: string | null };
 type PhotoRow = {
   id: string;
   original_filename: string;
@@ -64,12 +67,17 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   const { data } = await supabase
     .from('albums')
-    .select('id, title, size, status, cover_template_id')
+    .select('id, title, size, status, cover_template_id, product_id')
     .eq('id', params.id)
     .maybeSingle();
 
   const album = data as AlbumRow | null;
   if (!album) notFound();
+
+  // Physical dimensions of the album's product (Phase B) — the single geometry source for the
+  // whole builder tree. Null/legacy albums fall back to the legacy 6×8in, unchanged. Provided
+  // via DimensionsProvider so every builder/preview/flipbook/cover component reads the same values.
+  const dimensions = (await getProductDimensions(album.product_id)) ?? FALLBACK_DIMENSIONS;
 
   // Authoritative purchase check (orders.status ∈ PAID_STATES, RLS-scoped). When the
   // album is purchased we render a READ-ONLY experience instead of the editable
@@ -311,6 +319,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     return (
       <div className={`${builderFontVars} brand-surface min-h-[calc(100vh-3.5rem)] font-ui`}>
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-10">
+        <DimensionsProvider dimensions={dimensions}>
         <PurchasedAlbum
           albumId={album.id}
           title={album.title}
@@ -322,6 +331,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
           stickerUrls={stickerUrls}
           initialPdfStatus={initialPdfStatus}
         />
+        </DimensionsProvider>
         </div>
       </div>
     );
@@ -332,6 +342,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       {/* Opportunistic worker pre-warm (≤ once / 10 min): the user is in the builder
           and will likely upload or generate a PDF soon, so wake the worker early. */}
       <WorkerPrewarm />
+      <DimensionsProvider dimensions={dimensions}>
       <Builder
         albumId={album.id}
         title={album.title}
@@ -352,6 +363,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         stickerCatalog={stickerCatalog}
         stickerUrls={stickerUrls}
       />
+      </DimensionsProvider>
     </div>
   );
 }

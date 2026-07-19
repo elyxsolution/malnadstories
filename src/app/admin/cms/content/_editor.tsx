@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, Save, CheckCircle2, Archive, Copy, Undo2, ArrowLeft } from 'lucide-react';
+import { Save, CheckCircle2, Archive, Copy, Undo2, ArrowLeft } from 'lucide-react';
 import { saveContent, setContentStatus, duplicateContent } from '@/lib/actions/admin/cms';
 import {
   CONTENT_TYPES,
@@ -250,7 +251,7 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
           disabled={busy !== null || titleMissing}
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
         >
-          {busy === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save draft
+          {busy === 'save' ? <InlineLoader /> : <Save className="h-4 w-4" />} Save draft
         </button>
 
         {status !== 'published' && (
@@ -260,7 +261,7 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
             disabled={busy !== null || titleMissing}
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {busy === 'publish' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Publish
+            {busy === 'publish' ? <InlineLoader /> : <CheckCircle2 className="h-4 w-4" />} Publish
           </button>
         )}
 
@@ -271,7 +272,7 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'draft' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Move to draft
+            {busy === 'draft' ? <InlineLoader /> : <Undo2 className="h-4 w-4" />} Move to draft
           </button>
         )}
 
@@ -282,7 +283,7 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium text-amber-600 hover:bg-amber-500/10 disabled:opacity-50"
           >
-            {busy === 'archive' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Archive
+            {busy === 'archive' ? <InlineLoader /> : <Archive className="h-4 w-4" />} Archive
           </button>
         )}
 
@@ -293,7 +294,7 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
             disabled={busy !== null}
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'restore' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Restore to draft
+            {busy === 'restore' ? <InlineLoader /> : <Undo2 className="h-4 w-4" />} Restore to draft
           </button>
         )}
 
@@ -304,7 +305,7 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
             disabled={busy !== null}
             className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy === 'duplicate' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />} Duplicate
+            {busy === 'duplicate' ? <InlineLoader /> : <Copy className="h-4 w-4" />} Duplicate
           </button>
         )}
       </div>

@@ -16,6 +16,7 @@ import {
   LayoutTemplate,
   BookImage,
   Sticker,
+  Package,
   Ticket,
   BarChart3,
   Server,
@@ -53,6 +54,7 @@ const GROUPS: { label: string; items: Item[] }[] = [
   {
     label: 'Catalog',
     items: [
+      { href: '/admin/dimensions', label: 'Album Products', icon: Package },
       { href: '/admin/albums', label: 'Albums', icon: ImageIcon },
       { href: '/admin/reviews', label: 'Album Reviews', icon: ClipboardCheck },
       { href: '/admin/templates', label: 'Layouts', icon: LayoutTemplate },

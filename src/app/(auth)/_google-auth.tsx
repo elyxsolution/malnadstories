@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 
@@ -51,7 +51,7 @@ export default function GoogleAuth() {
         onClick={continueWithGoogle}
         disabled={loading}
       >
-        {loading ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+        {loading ? <InlineLoader /> : <GoogleIcon />}
         Continue with Google
       </Button>
 

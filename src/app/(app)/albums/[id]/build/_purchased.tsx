@@ -2,22 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import {
-  CheckCircle2,
-  Package,
-  Printer,
-  Box,
-  Truck,
-  PackageCheck,
-  Eye,
-  FileDown,
-  FileText,
-  BookOpen,
-  Loader2,
-  ReceiptText,
-  LayoutDashboard,
-  Clock,
-} from 'lucide-react';
+import { CheckCircle2, Package, Printer, Box, Truck, PackageCheck, Eye, FileDown, FileText, BookOpen, ReceiptText, LayoutDashboard, Clock } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+
 import { Button } from '@/components/ui/button';
 import Preview from './_preview';
 import { type Photo } from './_uploader';
@@ -178,7 +165,7 @@ export default function PurchasedAlbum({
             </p>
           </div>
           <Button onClick={downloadPdf} disabled={downloading} className={`w-full sm:w-auto ${LUX_PRIMARY}`}>
-            {downloading ? <Loader2 className="animate-spin" /> : <FileDown />} Download album
+            {downloading ? <InlineLoader /> : <FileDown />} Download album
           </Button>
         </section>
       ) : pdfStatus === 'failed' ? (
@@ -205,7 +192,7 @@ export default function PurchasedAlbum({
                 This usually takes a minute or two. Feel free to leave — we’ll keep it safe and ready here.
               </p>
             </div>
-            <Loader2 className="ml-auto h-5 w-5 shrink-0 animate-spin text-muted-foreground" />
+            <InlineLoader />
           </div>
           {/* Honest skeleton of an album being composed — not a fake percentage. */}
           <div className="grid grid-cols-3 gap-3 p-5 sm:grid-cols-4">

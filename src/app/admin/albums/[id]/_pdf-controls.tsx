@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, FileDown, RefreshCw, FileText, AlertTriangle } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
+import { FileDown, RefreshCw, FileText, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { adminGenerateAlbumPdf } from '@/lib/actions/admin/pdf';
 
@@ -75,31 +76,31 @@ export default function AdminPdfControls({ albumId }: { albumId: string }) {
         {status === 'generating' ? (
           <>
             <Button variant="outline" size="sm" disabled>
-              <Loader2 className="animate-spin" /> Generating PDF…
+              <InlineLoader /> Generating PDF…
             </Button>
             {/* Manual escape from a permanently-stuck 'generating' row (e.g. the worker
                 died before the recovery sweep ran). Force-restarts via the same gated
                 action; the worker sweep is the automatic backstop. */}
             <Button variant="ghost" size="sm" onClick={generate} disabled={busy} title="Restart if this has been generating too long">
-              {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />} Restart
+              {busy ? <InlineLoader /> : <RefreshCw />} Restart
             </Button>
           </>
         ) : status === 'ready' ? (
           <>
             <Button variant="outline" size="sm" onClick={download} disabled={downloading}>
-              {downloading ? <Loader2 className="animate-spin" /> : <FileDown />} Download PDF
+              {downloading ? <InlineLoader /> : <FileDown />} Download PDF
             </Button>
             <Button variant="ghost" size="sm" onClick={generate} disabled={busy}>
-              {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />} Regenerate
+              {busy ? <InlineLoader /> : <RefreshCw />} Regenerate
             </Button>
           </>
         ) : status === 'failed' ? (
           <Button variant="outline" size="sm" onClick={generate} disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <AlertTriangle className="text-destructive" />} Retry PDF
+            {busy ? <InlineLoader /> : <AlertTriangle className="text-destructive" />} Retry PDF
           </Button>
         ) : (
           <Button variant="outline" size="sm" onClick={generate} disabled={busy}>
-            {busy ? <Loader2 className="animate-spin" /> : <FileText />} Generate PDF
+            {busy ? <InlineLoader /> : <FileText />} Generate PDF
           </Button>
         )}
         {status === 'failed' && (

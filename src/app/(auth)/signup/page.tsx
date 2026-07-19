@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { MailCheck, Loader2 } from 'lucide-react';
+import { MailCheck } from 'lucide-react';
+import { InlineLoader } from '@/components/loading';
 import { createClient } from '@/lib/supabase/client';
 import { SignupSchema } from '@/lib/validations';
 import { NAME_MAX, PASSWORD_MAX, PASSWORD_MIN } from '@/lib/auth/policy';
@@ -141,7 +142,7 @@ export default function SignupPage() {
             </p>
           )}
           <Button type="submit" size="lg" className={`w-full ${LUX_PRIMARY}`} disabled={loading}>
-            {loading && <Loader2 className="animate-spin" />}
+            {loading && <InlineLoader />}
             {loading ? 'Creating account…' : 'Create Account'}
           </Button>
         </form>

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { InlineLoader } from '@/components/loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Loader2, ImageIcon, StickyNote, ScrollText, Mail, ArrowRight } from 'lucide-react';
+import { ImageIcon, StickyNote, ScrollText, Mail, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { inr, shortId, fmtDateTime, statusChip } from '@/lib/admin/format';
 import { adminStatusLabel } from '@/lib/orders/status';
@@ -267,7 +268,7 @@ function NotesBlock({ orderId, notes }: { orderId: string; notes: ConsoleNote[] 
         />
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" disabled={busy || !note.trim()} onClick={add}>
-            {busy ? <Loader2 className="animate-spin" /> : <StickyNote />} Add note
+            {busy ? <InlineLoader /> : <StickyNote />} Add note
           </Button>
           {err && <span className="text-xs text-destructive">{err}</span>}
         </div>
