@@ -5,6 +5,7 @@ import { InlineLoader } from '@/components/loading';
 import { FileDown, RefreshCw, FileText, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { adminGenerateAlbumPdf, adminForceGeneratePdf } from '@/lib/actions/admin/pdf';
+import { pdfStageLabel, pdfFailureLabel } from '@/lib/pdf/status';
 
 type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
 
@@ -32,13 +33,17 @@ export default function AdminPdfControls({
   const [forcing, setForcing] = useState(false);
 
   const [failReason, setFailReason] = useState<string | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
+  const [failureCode, setFailureCode] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/albums/${albumId}/pdf`, { cache: 'no-store' });
       if (!res.ok) return;
-      const body = (await res.json()) as { status: PdfStatus; error?: string | null };
+      const body = (await res.json()) as { status: PdfStatus; error?: string | null; stage?: string | null; failureCode?: string | null };
       setStatus(body.status);
+      setStage(body.stage ?? null);
+      setFailureCode(body.status === 'failed' ? body.failureCode ?? null : null);
       setFailReason(body.status === 'failed' ? body.error ?? null : null);
     } catch {
       /* transient */
@@ -100,8 +105,8 @@ export default function AdminPdfControls({
       <div className="flex flex-wrap items-center gap-2">
         {status === 'generating' ? (
           <>
-            <Button variant="outline" size="sm" disabled>
-              <InlineLoader /> Generating PDF…
+            <Button variant="outline" size="sm" disabled title={`Stage: ${pdfStageLabel(stage)}`}>
+              <InlineLoader /> {pdfStageLabel(stage)}…
             </Button>
             {/* Manual escape from a permanently-stuck 'generating' row (e.g. the worker
                 died before the recovery sweep ran). Force-restarts via the same gated
@@ -129,8 +134,12 @@ export default function AdminPdfControls({
           </Button>
         )}
         {status === 'failed' && (
-          <span className="text-xs text-destructive">
-            Last generation failed{failReason ? `: ${failReason}` : '.'}
+          <span className="inline-flex flex-wrap items-center gap-1.5 text-xs text-destructive">
+            {/* Typed reason first (Section 8), raw detail as a tooltip for deeper diagnosis. */}
+            <span className="rounded-full bg-destructive/10 px-2 py-0.5 font-medium" title={failReason ?? undefined}>
+              {pdfFailureLabel(failureCode)}
+            </span>
+            {failReason && <span className="text-muted-foreground">— {failReason}</span>}
           </span>
         )}
 

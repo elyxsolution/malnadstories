@@ -7,6 +7,7 @@ import { checkWorker, probeWorker } from '@/lib/worker/health';
 import { captureException } from '@/lib/observability/capture';
 import { getRequestId } from '@/lib/observability/request-id';
 import { loadAlbumValidation } from '@/lib/albums/validation';
+import { loadRenderReadiness, summarizeRenderIssues } from '@/lib/albums/render-readiness';
 
 /**
  * Internal album-PDF generation service (service-role; NO per-user auth here — callers
@@ -31,15 +32,18 @@ const IN_PROGRESS_MS = 90 * 1000;
  * Drive album-PDF generation.
  *
  * @param opts.force      regenerate even if a PDF already exists / is in progress (admin Regenerate).
- * @param opts.validate   re-run the completeness validator before generating (default true). Payment
- *                        hooks pass false — a paid album was already validated at submit.
+ * @param opts.validate   re-run the CONTENT completeness validator (default true). Payment hooks pass
+ *                        false — a paid album was already content-validated at submit.
+ * @param opts.override   ADMIN OVERRIDE ONLY (adminForceGeneratePdf, audited): bypass BOTH the content
+ *                        validator AND the render-readiness gate. Never set on the payment path.
  * @param opts.nudge      best-effort wake of the sleeping worker after enqueue (default true).
  */
 export async function startAlbumPdfGeneration(
   albumId: string,
-  opts?: { force?: boolean; validate?: boolean; nudge?: boolean },
+  opts?: { force?: boolean; validate?: boolean; override?: boolean; nudge?: boolean },
 ): Promise<StartResult> {
   const force = opts?.force ?? false;
+  const override = opts?.override ?? false;
   const doValidate = opts?.validate ?? true;
   const doNudge = opts?.nudge ?? true;
 
@@ -81,13 +85,30 @@ export async function startAlbumPdfGeneration(
   // PDF integrity gate (CHANGE 6/9): re-validate the LATEST state via the central service and
   // refuse — with a STRUCTURED, customer-safe blocking report — if the album isn't print-ready.
   // Runs on every path (admin AND payment). Blank back cover is INFO, so it never blocks.
-  if (doValidate) {
+  if (doValidate && !override) {
     const report = await loadAlbumValidation(svc, albumId);
     if (report && !report.printReady) {
       const blocking = [...report.critical, ...report.warnings].map((i) => `• ${i.title}`).join('\n');
       return {
         ok: false,
         error: `Print validation failed. Resolve these to enable printing:\n${blocking}`,
+      };
+    }
+  }
+
+  // RENDER READINESS gate (new layer): even when CONTENT validation is skipped (payment path), the
+  // renderer must never be handed a broken reference. This confirms every referenced photo is
+  // processed + available and every cover asset resolves — the exact assets the print route reads —
+  // so a started job can't silently drop a photo to a blank slot or hang on a missing asset. The
+  // ADMIN OVERRIDE (adminForceGeneratePdf, audited) is the only bypass. Not renderable → refuse
+  // WITHOUT flipping the row, so the paid-heal sweep retries once the assets finish processing.
+  if (!override) {
+    const rr = await loadRenderReadiness(svc, albumId);
+    if (rr && !rr.renderable) {
+      console.warn('[pdf] render-readiness refused', { albumId, issues: rr.issues.map((i) => i.code) });
+      return {
+        ok: false,
+        error: `The album isn’t ready to render yet:\n${summarizeRenderIssues(rr)}`,
       };
     }
   }
@@ -103,6 +124,8 @@ export async function startAlbumPdfGeneration(
     {
       album_id: albumId,
       status: 'generating',
+      stage: 'queued', // worker advances: queued → preparing → rendering → uploading → finalizing
+      failure_code: null,
       error: null,
       token_hash: tokenHash,
       token_expires_at: tokenExpiresAt,

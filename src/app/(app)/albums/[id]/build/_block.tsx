@@ -425,7 +425,15 @@ function OverlayContent({ photo, onDropPhoto }: { photo?: Photo; onDropPhoto: (p
           <span className="px-1 text-[10px] font-medium leading-tight text-studio/80">Empty overlay — drop a photo</span>
         </div>
       )}
-      {over && <div className="pointer-events-none absolute inset-0 bg-studio/15 ring-2 ring-inset ring-studio-bright" />}
+      {/* Drop feedback (CHANGE 10): a filled overlay shows a clear "Replace" affordance so the user
+          knows the drop will swap the existing photo; an empty one just glows as a valid target. */}
+      {over && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-studio/15 ring-2 ring-inset ring-studio-bright">
+          {photo && (
+            <span className="rounded-full bg-studio px-2 py-0.5 text-[10px] font-semibold text-studio-foreground shadow-sm">Replace</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -494,7 +502,12 @@ function BaseSlotView({
         <>
           <PhotoFrame url={photo.url} edit={photo.edit} alt={photo.filename} />
           <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/25 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
-          {over && <div className="pointer-events-none absolute inset-0 z-[6] bg-studio/15 ring-2 ring-inset ring-studio-bright" />}
+          {/* Filled base slot: dropping REPLACES the current photo — say so (CHANGE 10). */}
+          {over && (
+            <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center bg-studio/20 ring-2 ring-inset ring-studio-bright">
+              <span className="rounded-full bg-studio px-2.5 py-0.5 text-[11px] font-semibold text-studio-foreground shadow-sm">Replace photo</span>
+            </div>
+          )}
           <div className="absolute right-1.5 top-1.5 z-[7] flex gap-1 opacity-0 transition-all duration-200 group-hover/base:opacity-100">
             {onEdit && (
               <SlotBtn label="Edit photo" onClick={onEdit}>

@@ -12,13 +12,13 @@ import { signOut } from '@/lib/actions/auth';
  * identity/action row into a single sticky bar. The global AppHeader is suppressed on the
  * builder route (see app-header-gate), so this is the only chrome above the editor.
  *
- *   Logo · Begin — Format — Memories — Review (progress) · Save & Exit · email · Logout
+ *   Logo · Format — Begin — Memories — Review (progress) · Save & Exit · email · Logout
  *
  * The four steps mirror the album-creation wizard (`albums/new/_wizard.tsx`). In the
  * builder you are at Memories (draft) → Review (submitted); earlier steps are complete.
  */
 
-const STEPS = ['Begin', 'Format', 'Memories', 'Review'] as const;
+const STEPS = ['Format', 'Begin', 'Memories', 'Review'] as const;
 
 export default function BuilderHeader({
   email,

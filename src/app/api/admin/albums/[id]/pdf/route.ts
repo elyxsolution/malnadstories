@@ -26,22 +26,22 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   const svc = createServiceClient();
   const { data } = await svc
     .from('album_pdfs')
-    .select('status, r2_key, generated_at, error')
+    .select('status, r2_key, generated_at, error, stage, failure_code')
     .eq('album_id', params.id)
     .maybeSingle();
 
   const row = (data ?? null) as
-    | { status: string; r2_key: string | null; generated_at: string | null; error: string | null }
+    | { status: string; r2_key: string | null; generated_at: string | null; error: string | null; stage: string | null; failure_code: string | null }
     | null;
   if (!row) return NextResponse.json({ status: 'idle', url: null });
 
-  const url =
-    row.status === 'ready' && row.r2_key
-      ? await presignGet(row.r2_key, 120, { downloadFilename: 'album-preview.pdf' })
-      : null;
+  // Gate on the FILE existing, not status (audit H-2) — a regen keeps the prior PDF downloadable.
+  const url = row.r2_key
+    ? await presignGet(row.r2_key, 120, { downloadFilename: 'album-preview.pdf' })
+    : null;
 
   // Surface the worker-stored failure reason to the admin UI (admin-only — never sent to
   // customers). This is what makes an `APP_URL`/print-route/render failure diagnosable
   // instead of a generic dead-end.
-  return NextResponse.json({ status: row.status, generatedAt: row.generated_at, url, error: row.error });
+  return NextResponse.json({ status: row.status, stage: row.stage, failureCode: row.failure_code, generatedAt: row.generated_at, url, downloadReady: !!url, error: row.error });
 }

@@ -15,6 +15,7 @@ import {
   type TextElement,
 } from '@/lib/builder/model';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { resolveCoverImageKeys } from '@/lib/albums/cover';
 import { resolveStickerUrls } from '@/lib/stickers';
 import { builderFontVars } from '@/lib/fonts';
 import { getProductDimensions } from '@/lib/products/catalog';
@@ -159,44 +160,18 @@ export default async function PrintPage({
     (cfgRow as { cover_config?: unknown } | null)?.cover_config as Parameters<typeof normalizeCoverConfig>[0],
   );
 
-  // Resolve the cover IMAGE (page 1): chosen photo → admin template artwork → none (the
-  // renderer then uses the CSS background). The composition (title/tagline/typography/
-  // layout) comes from coverConfig, so the printed cover matches the builder exactly.
-  let coverImageUrl: string | null = null;
-  if (coverConfig.photoId) {
-    const { data: cp } = await supabase
-      .from('photos')
-      .select('sanitized_key')
-      .eq('id', coverConfig.photoId)
-      .eq('album_id', params.id)
-      .eq('status', 'ready')
-      .maybeSingle();
-    const key = (cp as { sanitized_key: string | null } | null)?.sanitized_key ?? null;
-    if (key) coverImageUrl = await presignGet(key, 900);
-  }
-  if (!coverImageUrl && !coverConfig.background && albumRow.cover_template_id) {
-    const { data: coverRow } = await supabase
-      .from('cover_templates')
-      .select('image_key')
-      .eq('id', albumRow.cover_template_id)
-      .maybeSingle();
-    const key = (coverRow as { image_key: string } | null)?.image_key;
-    if (key) coverImageUrl = await presignGet(key, 900);
-  }
-
-  // Back cover image — its own uploaded photo (no admin artwork on the back).
-  let backCoverImageUrl: string | null = null;
-  if (coverConfig.back.photoId) {
-    const { data: bp } = await supabase
-      .from('photos')
-      .select('sanitized_key')
-      .eq('id', coverConfig.back.photoId)
-      .eq('album_id', params.id)
-      .eq('status', 'ready')
-      .maybeSingle();
-    const key = (bp as { sanitized_key: string | null } | null)?.sanitized_key ?? null;
-    if (key) backCoverImageUrl = await presignGet(key, 900);
-  }
+  // Resolve the cover IMAGE via the CANONICAL resolver (Section 3) — the SAME priority chain
+  // (photo → template → design/default) that validation, checkout and the builder use, so the
+  // printed cover can never disagree with what those layers reported. The composition
+  // (title/tagline/typography/layout) comes from coverConfig; a design/default cover has no image
+  // key and the renderer draws the CSS/brand-green backdrop. Presign TTL is local to this route.
+  const coverKeys = await resolveCoverImageKeys(supabase, {
+    id: params.id,
+    cover_template_id: albumRow.cover_template_id,
+    cover_config: coverConfig,
+  });
+  const coverImageUrl = coverKeys.front.key ? await presignGet(coverKeys.front.key, 900) : null;
+  const backCoverImageUrl = coverKeys.back.key ? await presignGet(coverKeys.back.key, 900) : null;
 
   const cover: PrintCover = { imageUrl: coverImageUrl, backImageUrl: backCoverImageUrl, config: coverConfig, title: albumRow.title };
 

@@ -99,20 +99,12 @@ export function evaluateAlbum(input: AlbumEvalInput, rules: ValidationRules = {}
   const r = { ...DEFAULT_RULES, ...rules };
   const issues: ValidationIssue[] = [];
 
-  // ── Cover (canonical predicates) ─────────────────────────────────────────────────
+  // ── Cover (canonical resolver) ───────────────────────────────────────────────────
+  // `hasFrontCover` is now ALWAYS true (Section 3): the default green product cover is a first-class,
+  // printable cover, so there is never a "front cover missing" print-blocker — every album has at
+  // least the default. The only cover advisory left is the (optional) title and the blank back cover.
   const front = hasFrontCover(input.cover);
   const back = hasBackCover(input.cover);
-  if (!front) {
-    issues.push({
-      id: 'front_cover_missing',
-      severity: 'warning',
-      category: 'cover',
-      title: 'Front cover not created',
-      description: 'Choose a cover design, add a photo or background, or design the title.',
-      cover: 'front',
-      action: { type: 'goto-front-cover' },
-    });
-  }
   if (!back) {
     issues.push({
       id: 'back_cover_missing',

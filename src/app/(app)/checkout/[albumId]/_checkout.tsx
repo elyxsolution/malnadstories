@@ -17,6 +17,9 @@ import AddressPicker, { type Address } from './_address-picker';
 import CheckoutProgress, { STEP_ORDER, type CheckoutStep } from './_progress';
 import SuccessScreen from './_success';
 import { type ReadinessItem } from './_readiness';
+import PrintDiagnostics from '@/components/print-diagnostics';
+import { type AlbumValidationReport } from '@/lib/albums/validation';
+import { type RenderReadinessReport } from '@/lib/albums/render-readiness';
 
 type AmountBreakdown = { subtotalInr: number; shippingInr: number; discountInr: number; totalInr: number };
 
@@ -66,7 +69,8 @@ export default function Checkout({
   initialShippingMethod,
   readiness,
   printReady = true,
-  blockingIssues = [],
+  validationReport = null,
+  renderReport = null,
 }: {
   albumId: string;
   albumTitle: string;
@@ -77,6 +81,8 @@ export default function Checkout({
   formatDimensions?: string;
   printReady?: boolean;
   blockingIssues?: string[];
+  validationReport?: AlbumValidationReport | null;
+  renderReport?: RenderReadinessReport | null;
   coverUrl: string | null;
   coverName: string | null;
   amount: AmountBreakdown;
@@ -362,7 +368,19 @@ export default function Checkout({
         <div className={`mx-auto w-full ${showRail ? 'max-w-5xl' : 'max-w-2xl'}`}>
           <div className={showRail ? 'grid items-start gap-8 lg:grid-cols-[1fr_340px]' : ''}>
             <div className="animate-rise min-w-0">
-              {!printReady && <PrintNotReadyBanner albumId={albumId} issues={blockingIssues} />}
+              {/* Structured print diagnostics (Change 10) — the SAME central reports, shown only when
+                  something needs attention. Payment is never blocked (our team reviews before print). */}
+              {validationReport && (!printReady || (renderReport ? !renderReport.renderable : false)) && (
+                <div className="mb-6 space-y-2">
+                  <PrintDiagnostics audience="customer" validation={validationReport} render={renderReport} />
+                  <p className="px-1 text-[13px] text-muted-foreground">
+                    You can still continue with payment — our team reviews every album before it goes to print.{' '}
+                    <a href={`/albums/${albumId}/build`} className="font-medium text-primary underline-offset-2 hover:underline">
+                      Return to the editor to fix these now
+                    </a>
+                  </p>
+                </div>
+              )}
               {step === 'summary' && (
                 <div className="space-y-6">
                   <ReadinessBanner items={readiness} warnings={readyWarnings} />
@@ -524,39 +542,6 @@ function ReadinessBanner({ items, warnings }: { items: ReadinessItem[]; warnings
   );
 }
 
-/** Pre-payment print-readiness notice (CHANGE 2) — the album is SUBMITTED but not yet printable. */
-function PrintNotReadyBanner({ albumId, issues }: { albumId: string; issues: string[] }) {
-  return (
-    <div className="mb-6 rounded-2xl border border-warning/40 bg-warning/[0.06] p-5">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-        <div className="min-w-0">
-          <p className="font-semibold text-foreground">A few things to review before printing.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your album is submitted. We noticed the following — <span className="font-medium text-foreground">you may still continue with
-            payment</span>, and our team will review your album before it goes to print:
-          </p>
-          {issues.length > 0 && (
-            <ul className="mt-2 space-y-1 text-sm text-foreground">
-              {issues.map((t, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-warning" />
-                  <span>{t}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <a
-            href={`/albums/${albumId}/build`}
-            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-primary underline-offset-2 hover:underline"
-          >
-            <ArrowLeft className="h-4 w-4" /> Return to the editor to fix these now
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function SummaryStep({
   albumTitle,

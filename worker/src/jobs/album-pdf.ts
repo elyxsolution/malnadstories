@@ -8,9 +8,10 @@ import { env } from '../env.js';
 const JobSchema = z.object({ albumId: z.string().uuid(), token: z.string().min(1) });
 
 // ── Per-stage timeouts (ms). Every value is logged with its stage so a hang is
-// always attributable. Tuned so the WHOLE job self-terminates well under the
-// recovery sweep's 3-min stale window → a stuck job becomes status='failed' with a
-// precise stage, never an indefinite 'generating'.
+// always attributable. Each stage is watchdog-bounded, so the WHOLE job self-terminates within the
+// SUM of these budgets (~340s worst case). The recovery sweep's stale window (PDF_STALE_MS, 7 min in
+// pdf-recovery.ts) is deliberately set ABOVE that sum (audit C-1 fix), so the sweep can only ever
+// re-drive a job that has already terminated — it never races a still-rendering job.
 const QUERY_TIMEOUT_MS = 15_000; // each Supabase read/write
 const LAUNCH_TIMEOUT_MS = 45_000; // puppeteer.launch (ws connect)
 const PROTOCOL_TIMEOUT_MS = 90_000; // CDP ceiling for ALL page.* calls (newPage/evaluate/pdf)
@@ -43,6 +44,44 @@ function mem(): { rssMB: number; heapMB: number; extMB: number } {
     heapMB: Math.round(m.heapUsed / 1_048_576),
     extMB: Math.round((m.external ?? 0) / 1_048_576),
   };
+}
+
+/**
+ * Record coarse generation progress (Section 6). Best-effort + bounded + gated on status='generating'
+ * so a stage write can never fail the render, hang, or resurrect a superseded/failed row. The string
+ * values are the DB contract mirrored from src/lib/pdf/status.ts (PdfStage).
+ */
+async function setStage(albumId: string, stage: 'preparing' | 'rendering' | 'uploading' | 'finalizing'): Promise<void> {
+  try {
+    await withWatchdog('stage-write', QUERY_TIMEOUT_MS, async () => {
+      const { error } = await supabase.from('album_pdfs').update({ stage }).eq('album_id', albumId).eq('status', 'generating');
+      if (error) throw new Error(error.message);
+    });
+  } catch (e) {
+    console.warn('[worker] album-pdf stage-write failed (non-fatal)', { albumId, stage, error: String(e) });
+  }
+}
+
+/**
+ * Classify a render failure into a TYPED code (Section 8). Mirrors src/lib/pdf/status.ts
+ * PdfFailureCode (DB string contract — keep in sync). WatchdogTimeout carries its stage in the
+ * message ("watchdog: stage '<name>' …"), so a timeout is attributed to the phase it stalled in.
+ */
+function classifyFailure(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (error instanceof WatchdogTimeout) {
+    if (/browser-launch|page-create|viewport/.test(msg)) return 'render_engine_failed';
+    if (/r2-upload/.test(msg)) return 'upload_timeout';
+    if (/db-update|fail-db-update/.test(msg)) return 'db_update_failed';
+    return 'render_timeout'; // page-goto / readiness / pdf-render
+  }
+  if (/print route returned HTTP/i.test(msg)) return 'print_route_error';
+  if (/token expired/i.test(msg)) return 'token_expired';
+  if (/album not found/i.test(msg)) return 'album_missing';
+  if (/db update failed/i.test(msg)) return 'db_update_failed';
+  if (/0 bytes/i.test(msg)) return 'render_empty';
+  if (/putObject|upload|R2/i.test(msg)) return 'upload_failed';
+  return 'render_failed';
 }
 
 /**
@@ -148,8 +187,10 @@ async function resetBrowser(): Promise<void> {
  */
 async function fail(albumId: string, t0: number, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
+  const failureCode = classifyFailure(error);
   console.error('[worker] album-pdf failed', {
     albumId,
+    failureCode,
     elapsedMs: Date.now() - t0,
     mem: mem(),
     error,
@@ -160,7 +201,7 @@ async function fail(albumId: string, t0: number, error: unknown): Promise<void> 
     await withWatchdog('fail-db-update', QUERY_TIMEOUT_MS, async () => {
       const { error: e } = await supabase
         .from('album_pdfs')
-        .update({ status: 'failed', error: message.slice(0, 500) })
+        .update({ status: 'failed', error: message.slice(0, 500), failure_code: failureCode })
         .eq('album_id', albumId);
       if (e) throw new Error(`fail() update error: ${e.message}`);
     });
@@ -196,6 +237,7 @@ export async function generateAlbumPdf(rawInput: unknown): Promise<void> {
   } });
 
   // ── pre-flight reads (now bounded) ──────────────────────────────────────────
+  await setStage(albumId, 'preparing');
   let userId: string;
   let stored: { token_hash: string | null; token_expires_at: string | null } | null;
   try {
@@ -247,6 +289,7 @@ export async function generateAlbumPdf(rawInput: unknown): Promise<void> {
   let page: Page | null = null;
   let browserBroke = false;
   try {
+    await setStage(albumId, 'rendering');
     const browser = await stage('browser-launch', albumId, t0, LAUNCH_TIMEOUT_MS + 5_000, () => getBrowser());
 
     page = await stage('page-create', albumId, t0, NEWPAGE_TIMEOUT_MS, () => browser.newPage());
@@ -300,12 +343,14 @@ export async function generateAlbumPdf(rawInput: unknown): Promise<void> {
 
     const key = `${userId}/albums/${albumId}/preview.pdf`;
     const ac = new AbortController();
+    await setStage(albumId, 'uploading');
     await stage('r2-upload', albumId, t0, UPLOAD_TIMEOUT_MS, () => putObject(key, buf, 'application/pdf', ac.signal), () => ac.abort());
 
+    await setStage(albumId, 'finalizing');
     await stage('db-update', albumId, t0, QUERY_TIMEOUT_MS, async () => {
       const { error } = await supabase
         .from('album_pdfs')
-        .update({ status: 'ready', r2_key: key, generated_at: new Date().toISOString(), error: null })
+        .update({ status: 'ready', stage: 'completed', failure_code: null, r2_key: key, generated_at: new Date().toISOString(), error: null })
         .eq('album_id', albumId);
       if (error) throw new Error(`db update failed: ${error.message}`);
     });

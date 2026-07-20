@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Undo2, Redo2, Frame, Eye, Save, Send, ShoppingCart, ZoomIn, ZoomOut, Maximize2, MoveHorizontal, CheckCircle2, Keyboard, AlignCenterHorizontal, Sparkles, LogOut } from 'lucide-react';
+import { Undo2, Redo2, Frame, Eye, Save, Send, ShoppingCart, ZoomIn, ZoomOut, Maximize2, MoveHorizontal, CheckCircle2, Keyboard, AlignCenterHorizontal, Sparkles, LogOut, Settings2 } from 'lucide-react';
 import { InlineLoader } from '@/components/loading';
 
 import { Button } from '@/components/ui/button';
@@ -38,6 +38,9 @@ export default function CanvasToolbar({
   onSubmit,
   submitting,
   albumId,
+  onOpenSettings,
+  reviewMode = false,
+  revisionNumber = 1,
   blueprintMode = false,
   onSaveBlueprint,
   onExitBlueprint,
@@ -68,6 +71,12 @@ export default function CanvasToolbar({
   onSubmit: () => void;
   submitting: boolean;
   albumId: string;
+  /** Open the Album Settings hub (General / Format / Photos / Builder). Customer mode only. */
+  onOpenSettings?: () => void;
+  /** Review Revision Mode (CHANGE 2/3/7): paid album reopened for requested changes → no Checkout,
+   *  Resubmit is the primary action, and one consolidated workflow status chip. */
+  reviewMode?: boolean;
+  revisionNumber?: number;
   /** Blueprint-edit mode (0046): swaps the customer actions for Save Blueprint / Exit Blueprint. */
   blueprintMode?: boolean;
   onSaveBlueprint?: () => void;
@@ -81,23 +90,38 @@ export default function CanvasToolbar({
       {!blueprintMode && (
       <div className="flex min-w-0 items-center gap-2">
         <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-foreground">{title}</h1>
-        {status === 'submitted' && (
-          <span className="hidden items-center gap-1 rounded-full bg-studio-soft px-2 py-0.5 text-[11px] font-semibold text-studio ring-1 ring-studio/20 sm:inline-flex">
-            <CheckCircle2 className="h-3 w-3" /> Submitted
+        {reviewMode ? (
+          /* ONE consolidated workflow status chip (replaces competing Submitted + review pills). */
+          <span className="hidden items-center gap-1.5 rounded-full bg-warning/10 px-2.5 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/20 sm:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+            Changes requested · Review #{revisionNumber}
           </span>
+        ) : (
+          <>
+            {status === 'submitted' && (
+              <span className="hidden items-center gap-1 rounded-full bg-studio-soft px-2 py-0.5 text-[11px] font-semibold text-studio ring-1 ring-studio/20 sm:inline-flex">
+                <CheckCircle2 className="h-3 w-3" /> Submitted
+              </span>
+            )}
+            {review && (
+              <span className={`hidden rounded-full px-2 py-0.5 text-[11px] font-semibold lg:inline-flex ${reviewStatusChip(review.status)}`}>
+                {reviewStatusLabel(review.status)}
+              </span>
+            )}
+          </>
         )}
-        {review && (
-          <span className={`hidden rounded-full px-2 py-0.5 text-[11px] font-semibold lg:inline-flex ${reviewStatusChip(review.status)}`}>
-            {reviewStatusLabel(review.status)}
-          </span>
-        )}
+        {/* Save status (CHANGE 7) — never leave the user guessing: Saving… / Unsaved / All changes saved. */}
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-            dirty ? 'bg-warning/10 text-warning ring-1 ring-warning/20' : 'bg-secondary text-muted-foreground ring-1 ring-border/60'
+            saving
+              ? 'bg-studio/10 text-studio ring-1 ring-studio/20'
+              : dirty
+                ? 'bg-warning/10 text-warning ring-1 ring-warning/20'
+                : 'bg-secondary text-muted-foreground ring-1 ring-border/60'
           }`}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${dirty ? 'animate-pulse bg-warning' : 'bg-studio'}`} />
-          {dirty ? 'Unsaved' : 'Saved'}
+          <span className={`h-1.5 w-1.5 rounded-full ${saving ? 'animate-pulse bg-studio' : dirty ? 'animate-pulse bg-warning' : 'bg-studio'}`} />
+          {saving ? 'Saving…' : dirty ? 'Unsaved' : 'All changes saved'}
         </span>
       </div>
       )}
@@ -160,6 +184,17 @@ export default function CanvasToolbar({
           </>
         ) : (
           <>
+            {onOpenSettings && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onOpenSettings}
+                title="Album Settings — name, format, photos & build options"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Settings2 /> <span className="hidden lg:inline">Album Settings</span>
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -187,7 +222,13 @@ export default function CanvasToolbar({
             <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
               {saving ? <InlineLoader /> : <Save />} <span className="hidden sm:inline">Save</span>
             </Button>
-            {status === 'submitted' ? (
+            {reviewMode ? (
+              /* Review Revision Mode (CHANGE 2/3/7): the album is already paid — NO Checkout.
+                 Resubmit is the primary action; it runs the SAME central validation + dialog as Submit. */
+              <Button size="sm" onClick={onSubmit} disabled={submitting} className={STUDIO_PRIMARY}>
+                {submitting ? <InlineLoader /> : <Send />} <span className="hidden sm:inline">Resubmit album</span><span className="sm:hidden">Resubmit</span>
+              </Button>
+            ) : status === 'submitted' ? (
               <Button size="sm" render={<Link href={`/checkout/${albumId}`} />} className={STUDIO_PRIMARY}>
                 <ShoppingCart /> Checkout
               </Button>
@@ -195,7 +236,7 @@ export default function CanvasToolbar({
               // Always clickable — validation now INFORMS via a dialog instead of blocking.
               <Button size="sm" onClick={onSubmit} disabled={submitting} className={STUDIO_PRIMARY}>
                 {submitting ? <InlineLoader /> : <Send />}
-                {review?.status === 'changes_requested' ? 'Resubmit' : 'Submit'}
+                Submit
               </Button>
             )}
           </>

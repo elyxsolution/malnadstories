@@ -24,7 +24,7 @@ import { LayoutTemplate, Sparkles, Dices } from 'lucide-react';
 
 import type { CoverOption } from '@/lib/covers';
 
-const STEPS = ['Begin', 'Format', 'Memories', 'Create'] as const;
+const STEPS = ['Format', 'Begin', 'Memories', 'Create'] as const;
 
 // Auto Create staged loading copy (Step 5).
 const AUTO_STAGES = [
@@ -58,9 +58,9 @@ function composePeriod(from: string, to: string): string {
 
 /**
  * Album Creation wizard — a four-step narrative on top of the EXISTING backend:
- *   Begin → Format → Memories (upload) → Review.
- * Begin/Format collect the album; the draft is created via createAlbumDraft on entering
- * Memories so the existing Uploader can upload into it; Review opens the existing builder
+ *   Format → Begin → Memories (upload) → Create.
+ * Format/Begin collect the album; the draft is created via createAlbumDraft on entering
+ * Memories so the existing Uploader can upload into it; Create opens the existing builder
  * (optionally after a deterministic "Build it for me" auto-layout). No AI.
  */
 type CoverTemplateOption = { id: string; name: string; previewUrl: string | null };
@@ -216,7 +216,8 @@ export default function CreateWizard({
     if (typeof window !== 'undefined') window.scrollTo({ top: 0 });
   };
 
-  // Create the draft album when leaving Format → Memories (once).
+  // Create the draft album when leaving Begin → Memories (once) — by which point Format
+  // (product/size/pages/cover) and Begin (title/trip details) are both complete.
   const ensureAlbum = async (): Promise<boolean> => {
     if (albumId) return true;
     setCreating(true);
@@ -261,8 +262,8 @@ export default function CreateWizard({
   // A cover choice is required at Format: a PNG artwork, a design template, or an explicit blank.
   const hasCoverChoice = !!coverId || !!designId || customCover;
   const canContinue = (() => {
-    if (step === 0) return title.trim().length > 0 && !dateError;
-    if (step === 1) return !!albumProductId && !!pageCount && hasCoverChoice;
+    if (step === 0) return !!albumProductId && !!pageCount && hasCoverChoice; // Format is now first
+    if (step === 1) return title.trim().length > 0 && !dateError; // Begin is now second
     return true;
   })();
 
@@ -432,10 +433,10 @@ export default function CreateWizard({
       {/* MAIN */}
       <main className="flex-1 px-5 sm:px-8">
         <div className="animate-rise mx-auto w-full max-w-2xl py-12">
-          {/* STEP 0 — BEGIN */}
-          {step === 0 && (
+          {/* STEP 1 — BEGIN */}
+          {step === 1 && (
             <div className="space-y-7">
-              <Eyebrow chapter="I" label="Begin" />
+              <Eyebrow chapter="II" label="Begin" />
               <h1 className="font-display text-[2.6rem] font-semibold leading-none tracking-tight">Begin a new story.</h1>
               <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground">
                 Every album starts with a few words. Tell us where you went and what to call it — you can change any of
@@ -512,10 +513,10 @@ export default function CreateWizard({
             </div>
           )}
 
-          {/* STEP 1 — FORMAT */}
-          {step === 1 && (
+          {/* STEP 0 — FORMAT */}
+          {step === 0 && (
             <div className="space-y-7">
-              <Eyebrow chapter="II" label="Format" center />
+              <Eyebrow chapter="I" label="Format" center />
               <div className="text-center">
                 <h1 className="font-display text-[2.4rem] font-semibold leading-none tracking-tight">Choose your album.</h1>
                 <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted-foreground">

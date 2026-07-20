@@ -9,8 +9,11 @@ import { adminUserEmail } from '@/lib/admin/users';
 import { loadAlbumForAdmin } from '@/lib/admin/album-view';
 import { getAlbumReadiness } from '@/lib/admin/readiness';
 import { loadAlbumValidation } from '@/lib/albums/validation';
+import { loadRenderReadiness } from '@/lib/albums/render-readiness';
+import { checkWorker } from '@/lib/worker/health';
 import { inr, shortId, fmtDate, statusChip } from '@/lib/admin/format';
 import { Check, AlertTriangle } from 'lucide-react';
+import PrintDiagnostics from '@/components/print-diagnostics';
 import AdminPdfControls from './_pdf-controls';
 import AlbumPreview from './_album-preview';
 import { builderFontVars } from '@/lib/fonts';
@@ -47,8 +50,21 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
 
   // Central validation report (CHANGE 13) — the SAME report the builder/PDF/checkout use, so the
   // admin sees blocking issues, warnings, completion and print-readiness at a glance.
-  const validation = await loadAlbumValidation(createServiceClient(), album.id);
-  const submitted = album.status !== 'draft';
+  // Render readiness (Section 7) is a SECOND, independent indicator — validation answers "is the
+  // album data complete?", render readiness answers "can the renderer produce it right now?" — so
+  // the admin can tell a content problem from a pipeline/asset problem.
+  const svcClient = createServiceClient();
+  const [validation, renderReadiness, pdfRes, reviewRes, worker] = await Promise.all([
+    loadAlbumValidation(svcClient, album.id),
+    loadRenderReadiness(svcClient, album.id),
+    svcClient.from('album_pdfs').select('status, stage, failure_code, attempts, requested_at, generated_at').eq('album_id', album.id).maybeSingle(),
+    svcClient.from('album_reviews').select('status').eq('album_id', album.id).maybeSingle(),
+    checkWorker(),
+  ]);
+  const pdf = pdfRes.data as
+    | { status: string; stage: string | null; failure_code: string | null; attempts: number | null; requested_at: string | null; generated_at: string | null }
+    | null;
+  const reviewStatus = (reviewRes.data as { status: string } | null)?.status ?? null;
 
   return (
     <div className="mx-auto max-w-5xl p-6">
@@ -78,33 +94,22 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
         />
       </div>
 
-      {/* Validation summary — reuses the centralized Album Validation report (CHANGE 13). */}
-      {validation && (
-        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
-          <div className="flex items-baseline gap-1.5">
-            <span
-              className={`font-display text-2xl font-semibold tabular-nums ${
-                validation.statistics.score >= 100 ? 'text-green-600' : validation.statistics.score >= 50 ? 'text-amber-600' : 'text-destructive'
-              }`}
-            >
-              {validation.statistics.score}%
-            </span>
-            <span className="text-xs text-muted-foreground">ready</span>
-          </div>
-          <span
-            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${validation.printReady ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}`}
-          >
-            {validation.printReady ? 'Print ready' : 'Not print-ready'}
-          </span>
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${submitted ? 'bg-studio/10 text-studio' : 'bg-muted text-muted-foreground'}`}>
-            {submitted ? 'Customer submitted' : 'Draft'}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {validation.critical.length} blocking · {validation.warnings.length} warning{validation.warnings.length === 1 ? '' : 's'} · {validation.info.length} note
-            {validation.info.length === 1 ? '' : 's'} · {validation.statistics.placedPhotos}/{validation.statistics.expectedPhotos} photos
-          </span>
-        </div>
-      )}
+      {/* THE one debugging screen (Section 9) — all diagnostics from the centralized systems in one
+          shared component: validation · render readiness · PDF stage/failure · review · pipeline. */}
+      <PrintDiagnostics
+        audience="admin"
+        className="mt-6"
+        validation={validation}
+        render={renderReadiness}
+        pdf={pdf ? { status: pdf.status, stage: pdf.stage, failureCode: pdf.failure_code } : null}
+        review={reviewStatus ? { status: reviewStatus } : null}
+        admin={{
+          attempts: pdf?.attempts ?? null,
+          generatedAt: pdf?.generated_at ?? null,
+          requestedAt: pdf?.requested_at ?? null,
+          workerReady: worker.ready,
+        }}
+      />
 
       {/* Print readiness (advisory; read-only — same checks as customer checkout) */}
       {readiness && (

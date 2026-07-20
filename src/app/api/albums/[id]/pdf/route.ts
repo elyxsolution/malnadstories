@@ -36,11 +36,17 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   const admin = createServiceClient();
   const { data } = await admin
     .from('album_pdfs')
-    .select('status, r2_key, generated_at')
+    .select('status, r2_key, generated_at, stage, failure_code')
     .eq('album_id', params.id)
     .maybeSingle();
 
-  const row = (data ?? null) as { status: string; r2_key: string | null; generated_at: string | null } | null;
+  const row = (data ?? null) as {
+    status: string;
+    r2_key: string | null;
+    generated_at: string | null;
+    stage: string | null;
+    failure_code: string | null;
+  } | null;
 
   // While a PDF isn't ready, the customer is actively waiting — use the poll to NUDGE
   // the sleepable worker awake (best-effort). Waking it lets its sweep drain the queued
@@ -53,11 +59,21 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     return NextResponse.json({ status: 'idle' });
   }
 
-  // A short-lived download URL only when a generated file exists.
-  const url =
-    row.status === 'ready' && row.r2_key
-      ? await presignGet(row.r2_key, 120, { downloadFilename: 'album-preview.pdf' })
-      : null;
+  // Download URL is gated on the FILE existing (r2_key), NOT on status === 'ready' (audit H-2).
+  // A regeneration (admin regenerate, recovery redrive) flips status → 'generating' while the
+  // previously-generated r2_key stays valid; the generator/recovery never clear r2_key on a redrive.
+  // Gating on the key means an already-generated preview stays downloadable throughout a regen
+  // instead of vanishing. `downloadReady` tells the client a file is available regardless of status.
+  const url = row.r2_key
+    ? await presignGet(row.r2_key, 120, { downloadFilename: 'album-preview.pdf' })
+    : null;
 
-  return NextResponse.json({ status: row.status, generatedAt: row.generated_at, url });
+  return NextResponse.json({
+    status: row.status,
+    stage: row.stage,
+    failureCode: row.failure_code, // the UI maps this to a customer-safe note (never the raw cause)
+    generatedAt: row.generated_at,
+    url,
+    downloadReady: !!url,
+  });
 }

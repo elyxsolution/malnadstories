@@ -10,6 +10,7 @@ import { listActiveCoverOptions } from '@/lib/covers';
 import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
 import { hasFrontCover } from '@/lib/albums/cover';
 import { loadAlbumValidation } from '@/lib/albums/validation';
+import { loadRenderReadiness } from '@/lib/albums/render-readiness';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
 import Checkout from './_checkout';
 import { type ReadinessItem } from './_readiness';
@@ -173,7 +174,10 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
   // Print-readiness (CHANGE 2) — the SAME central report the builder + PDF use. Surfaced before
   // payment so a customer never pays for an album that can't yet be printed. Blank back cover is
   // INFO, so it never blocks checkout.
-  const printReport = await loadAlbumValidation(supabase, album.id);
+  const [printReport, renderReport] = await Promise.all([
+    loadAlbumValidation(supabase, album.id),
+    loadRenderReadiness(supabase, album.id),
+  ]);
   const printReady = printReport?.printReady ?? true;
   const blockingIssues = printReport ? [...printReport.critical, ...printReport.warnings].map((i) => i.title) : [];
 
@@ -271,6 +275,8 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
         readiness={readiness}
         printReady={printReady}
         blockingIssues={blockingIssues}
+        validationReport={printReport}
+        renderReport={renderReport}
       />
     </div>
   );

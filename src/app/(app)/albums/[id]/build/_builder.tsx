@@ -23,6 +23,8 @@ import {
   ChevronRight,
   BookImage,
   Eye,
+  Save,
+  CheckCircle2,
 } from 'lucide-react';
 import Uploader, { type Photo } from './_uploader';
 import Tray from './_tray';
@@ -31,12 +33,15 @@ import BlockCard from './_block';
 import SubmitValidationDialog from './_submit-validation-dialog';
 import ConfirmSubmitDialog from './_confirm-submit-dialog';
 import { evaluateAlbum, type AlbumValidationReport, type IssueAction } from '@/lib/albums/validation';
-import { LoadingOverlay } from '@/components/loading';
+import { type RenderReadinessReport } from '@/lib/albums/render-readiness';
+import { LoadingOverlay, InlineLoader } from '@/components/loading';
 import PairContent from './_pair-frame';
 import Navigator from './_navigator';
 import Inspector from './_inspector';
 import BuilderHeader from './_header';
 import CanvasToolbar from './_toolbar';
+import AlbumSettings from './_album-settings';
+import ReviewRevisionCard from './_review-revision';
 import { BlueprintHeader, ExitBlueprintDialog, type BlueprintMeta } from './_blueprint-chrome';
 import LayoutsPanel from './_panel-layouts';
 import BackgroundsPanel from './_panel-backgrounds';
@@ -68,6 +73,8 @@ import {
   canAdd,
   placedPhotoIds,
   requiredBaseCount,
+  isBlockComplete,
+  PAGE_COST,
   cryptoId,
   type Background,
   type Block,
@@ -117,6 +124,10 @@ export default function Builder({
   title,
   size,
   email,
+  productName = null,
+  destination = null,
+  travelDates = null,
+  description = null,
   initialStatus,
   initialPhotos,
   initialBlocks,
@@ -124,6 +135,7 @@ export default function Builder({
   initialCoverId,
   initialCoverConfig,
   initialReview,
+  initialRenderReadiness = null,
   layoutTemplates = [],
   coverTemplates = [],
   blueprints = [],
@@ -136,13 +148,25 @@ export default function Builder({
   title: string;
   size: number;
   email: string;
+  /** Album metadata for the Album Settings hub (General + Format summary). */
+  productName?: string | null;
+  destination?: string | null;
+  travelDates?: string | null;
+  description?: string | null;
   initialStatus: string;
   initialPhotos: Photo[];
   initialBlocks: Block[];
   covers: CoverOption[];
   initialCoverId: string | null;
   initialCoverConfig: CoverConfig;
-  initialReview: { status: string; requestedChanges: string | null } | null;
+  initialReview: {
+    status: string;
+    requestedChanges: string | null;
+    requestedAt?: string | null;
+    revisionNumber?: number;
+  } | null;
+  /** Render-readiness snapshot (review mode) — consumed by the shared PrintDiagnostics, never recomputed. */
+  initialRenderReadiness?: RenderReadinessReport | null;
   layoutTemplates?: ActiveTemplate[];
   /** Active cover-design templates (Task 2) — applied into cover_config, fully editable after. */
   coverTemplates?: BuilderCoverTemplate[];
@@ -189,11 +213,18 @@ export default function Builder({
 
   // ── Blueprint Mode (0046) — editing a reusable blueprint, not a customer album ──
   const blueprintMode = !!blueprintDraftOf;
+  // Review Revision Mode (CHANGE 1): the album was reopened because our review team requested
+  // changes (paid + review 'changes_requested'). Same builder engine, adapted chrome — a review
+  // summary card, Resubmit-not-Checkout, and review-specific exit copy.
+  const reviewMode = !blueprintMode && review?.status === 'changes_requested';
   const [blueprintSaving, setBlueprintSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<number | null>(blueprintMeta ? new Date(blueprintMeta.updatedAt).getTime() : null);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false); // customer unsaved-changes guard
+  const [resubmitted, setResubmitted] = useState(false); // review-mode resubmit confirmation
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [traySearch, setTraySearch] = useState('');
   const [trayFilter, setTrayFilter] = useState<TrayFilter>('all');
@@ -267,7 +298,7 @@ export default function Builder({
     return fallback;
   }, [editingPhoto, blocks, pageA, pairA]);
 
-  // Warn before leaving with unsaved changes.
+  // Warn before leaving with unsaved changes — browser refresh / tab-close / window-close (CHANGE 4).
   useEffect(() => {
     if (!api.dirty) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -277,6 +308,67 @@ export default function Builder({
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [api.dirty]);
+
+  // Back-button guard (CHANGE 4/15): trap the browser Back press while there are unsaved changes and
+  // open the guard dialog instead of navigating away. IMPROVED history hygiene — exactly ONE sentinel
+  // is ever pushed (a ref guards it), and the listener reads the LIVE dirty state via a ref, so
+  // editing→saving→editing cycles no longer stack extra history entries. Not used in Blueprint Mode.
+  const dirtyRef = useRef(api.dirty);
+  useEffect(() => {
+    dirtyRef.current = api.dirty;
+  }, [api.dirty]);
+  const sentinelPushed = useRef(false);
+  useEffect(() => {
+    if (blueprintMode) return;
+    if (!sentinelPushed.current) {
+      window.history.pushState(null, '', window.location.href);
+      sentinelPushed.current = true;
+    }
+    const onPop = () => {
+      if (!dirtyRef.current) return; // clean → let the back proceed
+      window.history.pushState(null, '', window.location.href); // re-arm the single sentinel
+      setMessage(null);
+      setExitConfirmOpen(true);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [blueprintMode]);
+
+  // ── Resume where the user left off (CHANGE 6) — persist the builder UI CONTEXT (current spread,
+  // open rail, cover focus) per album in localStorage and restore it on re-entry, so reopening an
+  // album lands the user exactly where they were. Content itself is already restored from the DB;
+  // this only restores the transient view state. Blueprint Mode is excluded (its own workflow). ──
+  const ctxKey = `ms-builder-ctx:${albumId}`;
+  useEffect(() => {
+    if (blueprintMode) return;
+    try {
+      const raw = localStorage.getItem(ctxKey);
+      if (!raw) return;
+      const s = JSON.parse(raw) as { current?: number; railTab?: RailTab; coverFocused?: boolean };
+      const cf = s.coverFocused === true;
+      setCoverFocused(cf);
+      let rt: RailTab = s.railTab && RAIL.some((r) => r.key === s.railTab) ? s.railTab : 'images';
+      if (cf && rt === 'layouts') rt = 'images'; // layouts is content-only
+      if (!cf && rt === 'templates') rt = 'images'; // templates is cover-only
+      setRailTab(rt);
+      if (typeof s.current === 'number' && Number.isFinite(s.current)) {
+        setCurrent(Math.min(Math.max(0, Math.floor(s.current)), Math.max(0, api.blocks.length - 1)));
+      }
+    } catch {
+      /* corrupt/unavailable storage — start fresh */
+    }
+    // Restore ONCE on mount for this album.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albumId, blueprintMode]);
+
+  useEffect(() => {
+    if (blueprintMode) return;
+    try {
+      localStorage.setItem(ctxKey, JSON.stringify({ current, railTab, coverFocused }));
+    } catch {
+      /* storage full/unavailable — non-fatal */
+    }
+  }, [ctxKey, current, railTab, coverFocused, blueprintMode]);
 
   // Poll processing photos.
   const hasPending = photos.some((p) => p.status === 'pending');
@@ -424,6 +516,51 @@ export default function Builder({
     if (patch.coverId !== undefined) setCoverId(patch.coverId);
     if (patch.config) setCoverConfig(nextConfig);
     persistCover({ title: nextTitle, coverId: nextCoverId, config: nextConfig });
+  };
+
+  // "Edit Cover" (CHANGE 1) — RESUME the user's cover work rather than restarting selection.
+  //   • A cover already exists (template chosen OR any custom content) → focus the cover canvas
+  //     and keep the current rail (swapping the content-only 'layouts' rail for 'images'), so the
+  //     user lands back where they were editing.
+  //   • No cover has ever been started → open the Cover Template gallery so they can pick one.
+  const coverStarted =
+    !!coverId ||
+    !!coverConfig.photoId ||
+    !!coverConfig.background ||
+    coverConfig.texts.length > 0 ||
+    coverConfig.stickers.length > 0 ||
+    !!coverConfig.back.photoId ||
+    !!coverConfig.back.background ||
+    coverConfig.back.texts.length > 0 ||
+    coverConfig.back.stickers.length > 0;
+  const focusCoverForEditing = () => {
+    setActiveSide('front');
+    setCoverFocused(true);
+    setRailTab((t) => (coverStarted ? (t === 'layouts' ? 'images' : t) : 'templates'));
+  };
+
+  // Review-card navigation (CHANGE 5) — reuse the builder's existing view state to guide the
+  // customer straight to the flagged area. Physical page → its spread; cover → the cover editor;
+  // "missing/empty" → the first incomplete spread.
+  const goToPhysicalPage = (physicalPage: number) => {
+    setCoverFocused(false);
+    setEditLayout('focus');
+    let acc = 0;
+    for (let i = 0; i < api.blocks.length; i++) {
+      acc += PAGE_COST[api.blocks[i].template];
+      if (physicalPage <= acc) {
+        setCurrent(i);
+        return;
+      }
+    }
+    setCurrent(Math.max(0, api.blocks.length - 1));
+  };
+  const goToFirstIncomplete = () => {
+    setCoverFocused(false);
+    setEditLayout('focus');
+    const idx = api.blocks.findIndex((b) => !isBlockComplete(b));
+    setCurrent(idx >= 0 ? idx : 0);
+    setRailTab('images'); // surface the photo tray so they can fill the gap
   };
 
   // The FRONT cover image actually shown (preview + flipbook + print): chosen photo → template → none.
@@ -652,31 +789,62 @@ export default function Builder({
   };
 
   // ── persist ───────────────────────────────────────────────────────────────────
+  // The ONE reliable customer save (CHANGE 5): flush the debounced cover design FIRST (so the
+  // latest cover/back-cover/title/text/stickers/QR/background is committed, not a stale row),
+  // then persist the layout (page structure + photo placement + crop/rotate/zoom via edit_config,
+  // overlays, text, stickers, QR, backgrounds are all inside the serialized blocks). Only resolves
+  // true when EVERY write succeeded; any failure surfaces the error and leaves `dirty` set so exit
+  // is blocked. Used by the Save button, ⌘S, and Save & Leave alike.
   const save = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     setMessage(null);
+    if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
+    if (albumTitle.trim()) {
+      const cov = await saveCoverDesign({ albumId, title: albumTitle, coverTemplateId: coverId, config: coverConfig });
+      if (!cov.ok) {
+        setSaving(false);
+        setMessage({ kind: 'err', text: cov.error });
+        return false;
+      }
+    }
     const res = await saveLayout({ albumId, blocks: api.serialize() });
     setSaving(false);
     if (res.ok) {
       api.setDirty(false);
-      setMessage({ kind: 'ok', text: 'Layout saved.' });
+      setLastSaved(Date.now());
+      setMessage({ kind: 'ok', text: 'All changes saved.' });
       return true;
     }
     setMessage({ kind: 'err', text: res.error });
     return false;
-  }, [albumId, api]);
+  }, [albumId, albumTitle, coverId, coverConfig, api]);
 
-  const saveAndExit = async () => {
-    setExiting(true);
+  // Save & exit (header) — never leave silently: with unsaved changes, open the guard dialog
+  // (CHANGE 4). Clean albums leave immediately.
+  const saveAndExit = () => {
     if (api.dirty) {
-      const ok = await saveLayout({ albumId, blocks: api.serialize() });
-      if (!ok.ok) {
-        setExiting(false);
-        setMessage({ kind: 'err', text: ok.error });
-        return;
-      }
-      api.setDirty(false);
+      setMessage(null); // dialog error area starts clean
+      setExitConfirmOpen(true);
+      return;
     }
+    router.push('/dashboard');
+  };
+
+  // Guard-dialog actions. Save & Leave runs the full reliable save and ONLY navigates on success
+  // (CHANGE 5 — a failed save prevents exit and shows the error); Leave discards.
+  const confirmSaveAndLeave = async () => {
+    setExiting(true);
+    const ok = await save();
+    if (!ok) {
+      setExiting(false);
+      return; // keep the dialog open; the error message is shown
+    }
+    setExitConfirmOpen(false);
+    router.push('/dashboard');
+  };
+  const confirmLeaveWithout = () => {
+    api.setDirty(false); // suppress the beforeunload/popstate guard for this intentional exit
+    setExitConfirmOpen(false);
     router.push('/dashboard');
   };
 
@@ -783,12 +951,18 @@ export default function Builder({
     if (res.ok) {
       setStatus('submitted');
       setReview({ status: 'pending_review', requestedChanges: null });
-      setMessage({
-        kind: 'ok',
-        text: wasChanges
-          ? 'Resubmitted for review. We’ll take another look and get back to you.'
-          : 'Album submitted for review! You can still edit it until you place an order.',
-      });
+      if (wasChanges) {
+        // CHANGE 3: review returns to Pending Review and the (paid) album is locked again. Rather
+        // than fall back to a Checkout button, show a clear confirmation. setDirty(false) so the
+        // exit guards don't fire on the way out.
+        api.setDirty(false);
+        setResubmitted(true);
+      } else {
+        setMessage({
+          kind: 'ok',
+          text: 'Album submitted for review! You can still edit it until you place an order.',
+        });
+      }
     } else {
       setMessage({ kind: 'err', text: res.error });
     }
@@ -886,22 +1060,30 @@ export default function Builder({
         onSubmit={onSubmitClick}
         submitting={submitting}
         albumId={albumId}
+        onOpenSettings={blueprintMode ? undefined : () => setSettingsOpen(true)}
+        reviewMode={reviewMode}
+        revisionNumber={review?.revisionNumber ?? 1}
         blueprintMode={blueprintMode}
         onSaveBlueprint={saveBlueprint}
         onExitBlueprint={requestExitBlueprint}
         blueprintSaving={blueprintSaving}
       />
 
-      {/* Review banner — customer-only (blueprints are never reviewed/ordered) */}
-      {!blueprintMode && review?.status === 'changes_requested' && (
-        <div className="flex items-start gap-2.5 border-b border-warning/30 bg-warning/5 px-4 py-2.5 sm:px-6">
-          <MessageSquareWarning className="mt-0.5 h-4 w-4 flex-none text-warning" />
-          <p className="text-[13px] text-foreground">
-            <span className="font-semibold">Changes requested.</span>{' '}
-            {review.requestedChanges || 'See the details in your review center.'}{' '}
-            <span className="text-muted-foreground">Make the edits, then Resubmit.</span>
-          </p>
-        </div>
+      {/* Review Revision Mode summary card (CHANGE 1/4/5/6/10) — replaces the plain banner with a
+          reassuring, actionable review card. Same builder engine below it. */}
+      {reviewMode && review && (
+        <ReviewRevisionCard
+          albumId={albumId}
+          requestedChanges={review.requestedChanges}
+          requestedAt={review.requestedAt ?? null}
+          revisionNumber={review.revisionNumber ?? 1}
+          onGoToPage={goToPhysicalPage}
+          onGoToCover={focusCoverForEditing}
+          onGoToIncomplete={goToFirstIncomplete}
+          validation={evaluateAlbum({ size, blocks, cover: { activeTemplate: !!coverId, config: coverConfig, title: albumTitle } })}
+          renderReadiness={initialRenderReadiness}
+          onIssueNav={navigateToIssue}
+        />
       )}
 
       {/* 3 columns — one continuous editor (the cover is page 0) */}
@@ -1392,6 +1574,96 @@ export default function Builder({
       {confirmOpen && (
         <ConfirmSubmitDialog submitting={submitting} onCancel={() => setConfirmOpen(false)} onConfirm={doSubmit} />
       )}
+      {/* Resubmit confirmation (CHANGE 3) — review returns to Pending Review; album is locked again. */}
+      {resubmitted && (
+        <div className="animate-fade-in fixed inset-0 z-[130] flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm">
+          <div className="animate-scale-in w-full max-w-md rounded-2xl border bg-background p-6 text-center shadow-elevated">
+            <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-studio/[0.1] text-studio ring-1 ring-studio/15">
+              <CheckCircle2 className="h-6 w-6" />
+            </span>
+            <h2 className="mt-3 font-display text-xl font-semibold tracking-tight">Resubmitted for review</h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              Thanks — your album is back with our review team. We’ll take another look and email you when it’s ready to
+              print. <span className="font-medium text-foreground">You won’t be charged again.</span>
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <Button className={STUDIO_PRIMARY} onClick={() => router.push('/reviews')}>
+                View review status
+              </Button>
+              <Button variant="ghost" onClick={() => router.push('/dashboard')}>
+                Back to dashboard
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Album Settings — the revisitable setup hub (General / Format / Photos / Builder). Reuses the
+          builder's own surfaces (cover rail, Photos rail, Build-it-for-me picker) — no duplicate UI. */}
+      {settingsOpen && (
+        <AlbumSettings
+          albumId={albumId}
+          title={albumTitle}
+          destination={destination}
+          travelDates={travelDates}
+          description={description}
+          productName={productName}
+          pageCount={size}
+          coverLabel={coverId ? covers.find((c) => c.id === coverId)?.name ?? 'Selected cover' : 'Custom cover'}
+          photoCount={photos.length}
+          lastSavedAt={lastSaved}
+          dirty={api.dirty}
+          validation={(() => {
+            // Live report from the SAME central service the submit gate + PDF use (never a new impl).
+            const r = evaluateAlbum({ size, blocks, cover: { activeTemplate: !!coverId, config: coverConfig, title: albumTitle } });
+            return { score: r.statistics.score, printReady: r.printReady };
+          })()}
+          onClose={() => setSettingsOpen(false)}
+          onTitleSaved={setAlbumTitle}
+          onEditCover={focusCoverForEditing}
+          onOpenPhotos={() => { setCoverFocused(false); setRailTab('images'); }}
+          onOpenBuildMethods={() => setBuildMethodOpen(true)}
+        />
+      )}
+
+      {/* Unsaved-changes exit guard (CHANGE 4/5) — Save & Leave (full flush) / Leave / Cancel. */}
+      {exitConfirmOpen && (
+        <div className="animate-fade-in fixed inset-0 z-[130] flex items-center justify-center bg-foreground/50 p-4 backdrop-blur-sm" onClick={() => !exiting && setExitConfirmOpen(false)}>
+          <div className="animate-scale-in w-full max-w-md rounded-2xl border bg-background p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-warning/10 text-warning">
+              <MessageSquareWarning className="h-5 w-5" />
+            </span>
+            <h3 className="mt-3 font-display text-lg font-semibold tracking-tight">
+              {reviewMode ? 'Leave the review for now?' : 'Leave the builder?'}
+            </h3>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              {reviewMode ? (
+                <>
+                  You still have requested changes to finish. Save your progress and you can pick up right where you left
+                  off — your album stays in review and <span className="font-medium text-foreground">you won’t pay again.</span>
+                </>
+              ) : (
+                'You have unsaved changes. Save your progress before leaving — if you leave now, your most recent changes may be lost.'
+              )}
+            </p>
+            {message?.kind === 'err' && <p className="mt-3 text-[13px] text-destructive">{message.text}</p>}
+            <div className="mt-5 flex flex-col gap-2">
+              <Button onClick={confirmSaveAndLeave} disabled={exiting} className={STUDIO_PRIMARY}>
+                {exiting ? <InlineLoader /> : <Save className="h-4 w-4" />} Save &amp; leave
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={confirmLeaveWithout} disabled={exiting}>
+                  Leave without saving
+                </Button>
+                <Button variant="ghost" className="flex-1" onClick={() => setExitConfirmOpen(false)} disabled={exiting}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* "Build it for me" — the SAME Auto Create / Choose Blueprint / Custom workflow as the wizard. */}
       {buildMethodOpen && (
         <BuildMethod

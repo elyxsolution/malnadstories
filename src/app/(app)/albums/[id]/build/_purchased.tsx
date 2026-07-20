@@ -10,6 +10,7 @@ import Preview from './_preview';
 import { type Photo } from './_uploader';
 import { type Block } from '@/lib/builder/model';
 import { orderStatusView, type PurchasedStatus } from '@/lib/orders/status';
+import { pdfStageLabel, pdfStageStep, pdfFailureCustomerNote, PDF_STAGE_ORDER } from '@/lib/pdf/status';
 import { LUX_PRIMARY } from '@/components/brand';
 
 type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
@@ -53,6 +54,11 @@ export default function PurchasedAlbum({
 }) {
   const [showPreview, setShowPreview] = useState(false);
   const [pdfStatus, setPdfStatus] = useState<PdfStatus>(initialPdfStatus);
+  // A file exists (r2_key) even if a regeneration is in flight (audit H-2) — the download must
+  // stay available throughout a regen rather than vanishing.
+  const [downloadReady, setDownloadReady] = useState(initialPdfStatus === 'ready');
+  const [stage, setStage] = useState<string | null>(null);
+  const [failureCode, setFailureCode] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -71,8 +77,13 @@ export default function PurchasedAlbum({
       try {
         const res = await fetch(`/api/albums/${albumId}/pdf`);
         if (!res.ok) return;
-        const body = (await res.json()) as { status: PdfStatus };
-        if (active) setPdfStatus(body.status);
+        const body = (await res.json()) as { status: PdfStatus; downloadReady?: boolean; stage?: string | null; failureCode?: string | null };
+        if (active) {
+          setPdfStatus(body.status);
+          setStage(body.stage ?? null);
+          setFailureCode(body.failureCode ?? null);
+          if (body.downloadReady) setDownloadReady(true);
+        }
       } catch {
         // transient — retry next tick
       }
@@ -89,8 +100,9 @@ export default function PurchasedAlbum({
     setMessage(null);
     try {
       const res = await fetch(`/api/albums/${albumId}/pdf`);
-      const body = (await res.json()) as { status: PdfStatus; url: string | null };
-      if (body.status === 'ready' && body.url) {
+      const body = (await res.json()) as { status: PdfStatus; url: string | null; downloadReady?: boolean };
+      if (body.url) {
+        // A file exists → download it, even if a fresh regen is generating (H-2).
         window.location.href = body.url;
       } else {
         setPdfStatus(body.status);
@@ -152,8 +164,9 @@ export default function PurchasedAlbum({
         </div>
       </section>
 
-      {/* Print-ready album (PDF) — honest states, no fake progress */}
-      {pdfStatus === 'ready' ? (
+      {/* Print-ready album (PDF) — honest states, no fake progress. Download shows whenever a file
+          exists (downloadReady), so an in-flight regen never hides an already-generated album (H-2). */}
+      {pdfStatus === 'ready' || downloadReady ? (
         <section className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/[0.04] p-5 shadow-panel sm:flex-row sm:items-center">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[linear-gradient(180deg,hsl(158_38%_27%),hsl(158_42%_19%))] text-primary-foreground shadow-[inset_0_1px_0_0_hsl(150_50%_62%/0.3)]">
             <FileDown className="h-5 w-5" />
@@ -176,7 +189,7 @@ export default function PurchasedAlbum({
           <div>
             <p className="font-display text-base font-semibold tracking-tight">Putting the finishing touches on it</p>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              We’re finalizing your print-ready album and will email it to you shortly.
+              {pdfFailureCustomerNote(failureCode)}
             </p>
           </div>
         </section>
@@ -187,10 +200,19 @@ export default function PurchasedAlbum({
               <FileText className="h-5 w-5" />
             </span>
             <div className="min-w-0">
-              <p className="font-display text-base font-semibold tracking-tight">Preparing your print-ready album</p>
+              {/* Honest stage — the real phase the worker is in (Section 6), not a fake percentage. */}
+              <p className="font-display text-base font-semibold tracking-tight">{pdfStageLabel(stage)}</p>
               <p className="mt-0.5 text-sm text-muted-foreground">
                 This usually takes a minute or two. Feel free to leave — we’ll keep it safe and ready here.
               </p>
+              <div className="mt-2.5 flex items-center gap-1.5" aria-hidden>
+                {PDF_STAGE_ORDER.slice(0, 5).map((s, i) => (
+                  <span
+                    key={s}
+                    className={`h-1 flex-1 rounded-full transition-colors duration-500 ${i < pdfStageStep(stage) ? 'bg-primary' : 'bg-border'}`}
+                  />
+                ))}
+              </div>
             </div>
             <InlineLoader />
           </div>

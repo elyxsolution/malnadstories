@@ -5,9 +5,9 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { redirect } from 'next/navigation';
-import { CreateAlbumSchema } from '@/lib/validations';
+import { CreateAlbumSchema, UpdateAlbumDetailsSchema } from '@/lib/validations';
 import { enqueueR2Cleanup } from '@/lib/queue';
-import { hasActiveOrder } from '@/lib/orders/album-lock';
+import { hasActiveOrder, isEditingLocked } from '@/lib/orders/album-lock';
 import { getActiveCoverTemplateConfig } from '@/lib/cover-templates/catalog';
 import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
 import { getActiveProduct, getDefaultProduct } from '@/lib/products/catalog';
@@ -192,6 +192,68 @@ export async function createAlbumDraft(input: unknown): Promise<CreateAlbumDraft
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
 
   return insertAlbumForUser(supabase, user.id, parsed.data);
+}
+
+export type UpdateAlbumDetailsResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Album Settings → General: update an EXISTING album's title + trip details (destination,
+ * travel dates, a few words) from inside the builder. This is the "Begin" step, revisitable.
+ *
+ * SAFETY / SCOPE:
+ *  - Metadata only. It never touches size / product / cover / status / pages / layout / photos,
+ *    so it cannot affect pricing, validation, PDF, or album-creation logic (all off-limits).
+ *  - Ownership is proven with the AUTHENTICATED client + RLS first; the write then goes through
+ *    the service role RE-PINNED to (id, user_id), because 0021's column-scoped UPDATE grant lets
+ *    `authenticated` write only (title, cover_template_id, cover_config, updated_at) — not
+ *    destination/travel_dates/description. This mirrors submitAlbum's service-role status write.
+ *  - Respects the edit lock: a paid album is frozen UNLESS an admin requested changes
+ *    (isEditingLocked). Title changes reflect everywhere the DB title is read (dashboard,
+ *    checkout, orders) after the caller refreshes.
+ */
+export async function updateAlbumDetails(input: unknown): Promise<UpdateAlbumDetailsResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const parsed = UpdateAlbumDetailsSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId, title, destination, travelDates, description } = parsed.data;
+
+  // Ownership gate (RLS): a foreign/nonexistent album resolves to null.
+  const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
+  if (!album) return { ok: false, error: 'Album not found' };
+
+  // Edit lock: a paid album's details are frozen (unless changes were requested).
+  if (await isEditingLocked(supabase, albumId)) {
+    return { ok: false, error: 'This album is part of a paid order and can no longer be changed.' };
+  }
+
+  // Service-role write re-pinned to the owner (see doc note on the 0021 grant). Empty optional
+  // fields are cleared to null so removing trip details actually removes them.
+  const admin = createServiceClient();
+  const { error } = await admin
+    .from('albums')
+    .update({
+      title,
+      destination: destination ?? null,
+      travel_dates: travelDates ?? null,
+      description: description ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', albumId)
+    .eq('user_id', user.id);
+  if (error) {
+    console.error('updateAlbumDetails error:', error);
+    return { ok: false, error: 'Could not save your changes.' };
+  }
+
+  // Reflect the new title/details on the pages that read them server-side.
+  revalidatePath(`/albums/${albumId}/build`);
+  revalidatePath('/dashboard');
+  return { ok: true };
 }
 
 /**

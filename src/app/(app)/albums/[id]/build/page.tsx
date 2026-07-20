@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
 import { getPaidOrder } from '@/lib/orders/album-lock';
+import { loadRenderReadiness } from '@/lib/albums/render-readiness';
 import { getAdminContext } from '@/lib/auth/require-admin';
 import { roleHasCapability } from '@/lib/auth/capabilities';
 import Builder from './_builder';
@@ -30,7 +31,18 @@ import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
 import { builderFontVars } from '@/lib/fonts';
 
-type AlbumRow = { id: string; title: string; size: number; status: string; cover_template_id: string | null; product_id: string | null };
+type AlbumRow = {
+  id: string;
+  title: string;
+  size: number;
+  status: string;
+  cover_template_id: string | null;
+  product_id: string | null;
+  product_name: string | null;
+  destination: string | null;
+  travel_dates: string | null;
+  description: string | null;
+};
 type PhotoRow = {
   id: string;
   original_filename: string;
@@ -67,7 +79,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
 
   const { data } = await supabase
     .from('albums')
-    .select('id, title, size, status, cover_template_id, product_id')
+    .select('id, title, size, status, cover_template_id, product_id, product_name, destination, travel_dates, description')
     .eq('id', params.id)
     .maybeSingle();
 
@@ -290,7 +302,12 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   // Phase 9C — current album review (advisory). album_reviews is service-only (ownership
   // already proven by the RLS-scoped album load above). The latest active revision's
   // requested-changes drives the builder banner. Never gates editing/checkout.
-  let initialReview: { status: string; requestedChanges: string | null } | null = null;
+  let initialReview: {
+    status: string;
+    requestedChanges: string | null;
+    requestedAt: string | null;
+    revisionNumber: number;
+  } | null = null;
   {
     const { data: reviewRow } = await admin
       .from('album_reviews')
@@ -300,18 +317,28 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     const rv = reviewRow as { id: string; status: string } | null;
     if (rv) {
       let requestedChanges: string | null = null;
+      let requestedAt: string | null = null;
+      let revisionNumber = 1;
       if (rv.status === 'changes_requested') {
         const { data: rev } = await admin
           .from('revision_requests')
-          .select('requested_changes')
+          .select('requested_changes, created_at')
           .eq('album_review_id', rv.id)
           .in('status', ['open', 'in_progress', 'resubmitted'])
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        requestedChanges = (rev as { requested_changes: string } | null)?.requested_changes ?? null;
+        const revRow = rev as { requested_changes: string; created_at: string } | null;
+        requestedChanges = revRow?.requested_changes ?? null;
+        requestedAt = revRow?.created_at ?? null;
+        // Revision number = how many change-request loops this album has been through.
+        const { count } = await admin
+          .from('revision_requests')
+          .select('id', { count: 'exact', head: true })
+          .eq('album_review_id', rv.id);
+        revisionNumber = count ?? 1;
       }
-      initialReview = { status: rv.status, requestedChanges };
+      initialReview = { status: rv.status, requestedChanges, requestedAt, revisionNumber };
     }
   }
 
@@ -321,6 +348,12 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
   // reopened we fall through to the editable Builder, which shows the requested-changes
   // banner (initialReview) so the customer knows what to fix before resubmitting.
   const reopenedForChanges = initialReview?.status === 'changes_requested';
+
+  // Render-readiness SNAPSHOT for the in-builder diagnostics (review mode only, to avoid the cost on
+  // ordinary edits). Consumed by the shared PrintDiagnostics — the Builder never recomputes render
+  // logic; it reuses the centralized loader. A snapshot at load is fine: the review card is the
+  // customer's entry point to fix the requested changes.
+  const initialRenderReadiness = reopenedForChanges ? await loadRenderReadiness(supabase, album.id) : null;
 
   if (paidOrder && !reopenedForChanges) {
     return (
@@ -355,6 +388,10 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         title={album.title}
         size={album.size}
         email={user?.email ?? ''}
+        productName={album.product_name}
+        destination={album.destination}
+        travelDates={album.travel_dates}
+        description={album.description}
         initialStatus={album.status}
         initialPhotos={photos}
         initialBlocks={initialBlocks}
@@ -362,6 +399,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialCoverId={album.cover_template_id}
         initialCoverConfig={initialCoverConfig}
         initialReview={initialReview}
+        initialRenderReadiness={initialRenderReadiness}
         layoutTemplates={layoutTemplates}
         coverTemplates={coverTemplates}
         blueprints={blueprints}

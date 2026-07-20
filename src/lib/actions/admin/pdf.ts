@@ -76,8 +76,9 @@ export async function adminForceGeneratePdf(input: unknown): Promise<AdminPdfRes
     },
   });
 
-  // Explicit override → generate WITHOUT the validation gate. `force:true` re-drives even a
-  // failed/idle row; the worker still renders from live album data.
-  const res = await startAlbumPdfGeneration(albumId, { force: true, validate: false, nudge: true });
+  // Explicit override → generate WITHOUT the content-validation OR render-readiness gate. `force:true`
+  // re-drives even a failed/idle row; `override:true` is the single audited bypass of both gates. The
+  // worker still renders from live album data (and only ever draws 'ready' photos).
+  const res = await startAlbumPdfGeneration(albumId, { force: true, override: true, nudge: true });
   return res.ok ? { ok: true } : { ok: false, error: res.error };
 }

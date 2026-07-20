@@ -22,7 +22,13 @@ import { ALBUM_PDF_QUEUE } from '../queue.js';
  *      self-healing even if the payment-time enqueue+nudge was lost.
  */
 
-const PDF_STALE_MS = 3 * 60 * 1000; // a generation in flight longer than this is stuck
+// A generation in flight longer than this is considered stuck. CRITICAL INVARIANT (audit C-1):
+// this MUST exceed the album-pdf job's worst-case self-terminating budget — the SUM of its per-stage
+// watchdogs (~340s, see album-pdf.ts). At the old 180s it was SMALLER than that budget, so the sweep
+// re-drove jobs that were still legitimately rendering → redundant re-renders + attempts inflation →
+// spurious 'failed'. At 7 min the sweep can only ever act AFTER a job has definitively terminated
+// (either succeeded, or hit its own watchdogs and called fail()), never racing a live render.
+const PDF_STALE_MS = 7 * 60 * 1000; // 420s > ~340s max job budget
 const MAX_ATTEMPTS = 5;
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 const BATCH = 200;
@@ -43,6 +49,8 @@ async function redrive(boss: PgBoss, albumId: string, attempts: number): Promise
     {
       album_id: albumId,
       status: 'generating',
+      stage: 'queued',
+      failure_code: null,
       error: null,
       token_hash: tokenHash,
       token_expires_at: new Date(now.getTime() + TOKEN_TTL_MS).toISOString(),

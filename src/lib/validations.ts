@@ -58,6 +58,17 @@ export const CreateAlbumSchema = z
     path: ['albumProductId'],
   });
 
+// Album Settings → General (album metadata edit from inside the builder). Same field limits
+// as CreateAlbumSchema's Begin step, but a standalone update of an EXISTING album — no cover /
+// product / size fields (those are immutable post-creation). Title required; trip details optional.
+export const UpdateAlbumDetailsSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  title: z.string().trim().min(1, 'Album title is required').max(100, 'Title must be 100 characters or less'),
+  destination: optionalText(120, 'Destination must be 120 characters or less'),
+  travelDates: optionalText(60, 'Travel dates must be 60 characters or less'),
+  description: optionalText(500, 'Description must be 500 characters or less'),
+});
+
 // Photo upload — presign + confirm. Mirrors the server-side limits in src/lib/r2.ts.
 const ALLOWED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/webp'] as const;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20 MB
