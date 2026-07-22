@@ -101,6 +101,36 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/runtime:
+    dependencies:
+      '@workerv2/build-info':
+        specifier: workspace:*
+        version: link:../build-info
+      '@workerv2/config':
+        specifier: workspace:*
+        version: link:../config
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/di':
+        specifier: workspace:*
+        version: link:../di
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/health':
+        specifier: workspace:*
+        version: link:../health
+      '@workerv2/logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/utils:
     dependencies:
       '@workerv2/contracts':

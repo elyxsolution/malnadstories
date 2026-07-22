@@ -28,6 +28,47 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-22 — Phase 2 · Worker Runtime Platform
+
+**Added:**
+- **`@workerv2/runtime`** — the generic hosting framework (no domain behavior, no jobs, no coordinator):
+  - **`Runtime`** — build with injected `now`/`nextId` (deterministic); `create()` validates the
+    dependency graph and fails fast; `start()`/`stop()` are **idempotent** and drive services in
+    deterministic dependency order.
+  - **Lifecycle** — `RUNTIME_MACHINE` (`created → starting → running → stopping → stopped`, `+ failed`).
+  - **Service registry + dependency graph** — `ServiceRegistry`, `orderServices` (Kahn's algorithm,
+    name-sorted tie-breaking; rejects missing deps + cycles).
+  - **Capability registry** — `CapabilityRegistry` (de-duplicated, name-sorted).
+  - **Plugin framework** — `Plugin`/`PluginContext`/`applyPlugins` (additive registration of
+    services + capabilities + DI bindings; no concrete plugins — those are Phase 16).
+  - **DI integration** — `createRuntimeContainer` + `LoggerToken`/`ConfigToken`/`MetadataToken`.
+  - **Runtime metadata** — immutable `RuntimeMetadata`; **config** — `readRuntimeConfig` (injected env).
+  - **Health integration** — `buildRuntimeHealth` over `@workerv2/health`.
+  - **Technical events** — `TechnicalEventBus` (sync, isolated listeners) + `RUNTIME_EVENTS` (INV-12).
+- Workspace wiring for the new package; **ADR-0003** (runtime dependency boundary + plugin-framework scope).
+
+**Changed:** `worker/tsconfig.json`, `worker/vitest.config.ts`, `worker/scripts/check-boundaries.mjs` extended for `runtime`.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** In-memory hosting; deterministic startup ordering; no perf-sensitive paths.
+
+**Security:** No secrets/PII; event payloads JSON-safe; runtime introduces no new external surface.
+
+**Documentation:** Package `README.md` + JSDoc on every public export; ADR-0003; `WORKER_V2_PROGRESS.md` updated (Phase 2 → Done, M4).
+
+**Testing:** **23 new tests** (config/metadata, lifecycle machine, dependency graph, registries, plugins, event bus, and end-to-end `Runtime` start/stop/idempotency/health/failure). `pnpm verify` green (**123 tests total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. The runtime hosts nothing yet (no services/plugins ship in-tree); it is the framework later phases plug into.
+
+**ADR References:** **ADR-0003** — Runtime dependency boundary & plugin framework scope. (Runtime depends on `control-plane` for generic contracts only; framework now, concrete plugins Phase 16.)
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-2-runtime`)._
+
+---
+
 ### v0.0.0 — 2026-07-22 — Phase 1 · Control Plane & Domain Lifecycles
 
 **Added:**

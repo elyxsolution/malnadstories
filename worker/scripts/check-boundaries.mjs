@@ -35,6 +35,20 @@ const ALLOWED = {
   // Control Plane DOMAIN (Phase 1): pure, framework-independent. Depends only on the
   // foundation leaves — never on runtime/infrastructure packages.
   'control-plane': ['contracts', 'utils', 'errors'],
+  // Worker Runtime (Phase 2): the hosting framework. Depends inward on the foundation
+  // packages and on control-plane for GENERIC contracts only (state-machine engine +
+  // technical-event model) — never on domain aggregates/lifecycles/policies.
+  runtime: [
+    'contracts',
+    'utils',
+    'errors',
+    'di',
+    'config',
+    'health',
+    'build-info',
+    'logger',
+    'control-plane',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */

@@ -18,6 +18,7 @@ const PACKAGES = [
   'di',
   'build-info',
   'control-plane',
+  'runtime',
 ] as const;
 
 const alias = Object.fromEntries(

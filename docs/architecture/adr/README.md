@@ -28,3 +28,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0000](0000-adr-template.md) | ADR template | N/A (template) |
 | [0001](0001-worker-v2-foundation-scope-and-layout.md) | Worker V2 foundation scope & repository layout | Accepted |
 | [0002](0002-control-plane-domain-first-persistence-deferred.md) | Control Plane: domain model first, persistence deferred | Accepted |
+| [0003](0003-runtime-dependency-boundary-and-plugin-framework.md) | Runtime dependency boundary & plugin framework scope | Accepted |
