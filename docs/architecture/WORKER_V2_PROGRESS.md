@@ -1,0 +1,137 @@
+# Worker V2 — Implementation Progress
+
+> **Living document.** Tracks the real-time implementation status of Worker V2.
+> Companion to the frozen planning suite: ADS · `WORKER_V2_IMPLEMENTATION_GUIDE.md` ·
+> `WORKER_V2_PHASES.md` · `WORKER_V2_WBS.md` · `WORKER_V2_ENGINEERING_PLAYBOOK.md`.
+> **Updated after every completed implementation phase** (and materially mid-phase).
+
+---
+
+## Overall Project Status
+
+| Stage | Status |
+|---|---|
+| Planning Phase | ✅ Complete |
+| Implementation Phase | 🔄 In Progress (1 / 18 phases) |
+| Testing Phase | ⬜ Not Started |
+| Production Readiness | ⬜ Not Started |
+| Deployment | ⬜ Not Started |
+
+**Overall Completion:** Planning 100% · **Implementation ≈6% (1 / 18 phases — Phase −1 complete)**
+
+| Field | Value |
+|---|---|
+| Current Active Phase | None (Phase −1 complete; Phase 0 not started) |
+| Current Milestone | M1 — Clean Slate |
+| Current Branch | `worker-v2/phase--1-worker-reset` |
+| Current Version | Worker V2 v0.0.0 |
+| Last Updated | 2026-07-22 |
+
+---
+
+## Roadmap
+
+| Phase | Name | Status | % | Started | Completed | Owner | Notes |
+|---|---|---|---|---|---|---|---|
+| −1 | Worker Reset | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | V1 `worker/` tree removed; rollback tag `worker-v1-final`; app build green. |
+| 0 | Foundation & Contracts | Not Started | 0% | — | — | — | — |
+| 1 | Control Plane & Domain Lifecycles | Not Started | 0% | — | — | — | — |
+| 2 | Worker Runtime Platform | Not Started | 0% | — | — | — | — |
+| 3 | Storage & Immutable Artifact Platform | Not Started | 0% | — | — | — | — |
+| 4 | Product Platform | Not Started | 0% | — | — | — | — |
+| 5 | Image Processing Platform | Not Started | 0% | — | — | — | — |
+| 6 | Blueprint Platform | Not Started | 0% | — | — | — | — |
+| 7 | Manifest Platform | Not Started | 0% | — | — | — | — |
+| 8 | Render Engine & PDF Platform | Not Started | 0% | — | — | — | — |
+| 9 | Pipeline & Coordinator Platform | Not Started | 0% | — | — | — | — |
+| 10 | Observability, Cost Accounting & Metrics | Not Started | 0% | — | — | — | — |
+| 11 | Security & Compliance Hardening | Not Started | 0% | — | — | — | — |
+| 12 | Performance, Budgets & Scale Readiness | Not Started | 0% | — | — | — | — |
+| 13 | Manufacturing & Vendor Platform | Not Started | 0% | — | — | — | — |
+| 14 | Integration & End-to-End Validation | Not Started | 0% | — | — | — | — |
+| 15 | Production Cutover | Not Started | 0% | — | — | — | — |
+| 16 | Reserved Future Platforms | Not Started | 0% | — | — | — | Off critical path |
+
+**Status legend:** Not Started · In Progress · In Review · Blocked · Done.
+
+---
+
+## Milestones
+
+| ID | Milestone | Phase | Status |
+|---|---|---|---|
+| M0 | Architecture Ready | ADS + Phase 0 | ✅ Complete (planning) |
+| M1 | Clean Slate | −1 | ✅ Complete (2026-07-22) |
+| M2 | Foundation Ready | 0 | ⬜ Pending |
+| M3 | Control Plane Ready | 1 | ⬜ Pending |
+| M4 | Runtime Ready | 2 | ⬜ Pending |
+| M5 | Artifact Platform Ready | 3 | ⬜ Pending |
+| M6 | Product Platform Ready | 4 | ⬜ Pending |
+| M7 | Image Platform Ready | 5 | ⬜ Pending |
+| M8 | Blueprint Ready | 6 | ⬜ Pending |
+| M9 | Manifest Ready | 7 | ⬜ Pending |
+| M10 | Renderer Ready | 8 | ⬜ Pending |
+| M11 | Pipeline Ready | 9 | ⬜ Pending |
+| M12 | Observable & Costed | 10 | ⬜ Pending |
+| M13 | Hardened | 11 | ⬜ Pending |
+| M14 | Performant & Scale-Ready | 12 | ⬜ Pending |
+| M15 | Manufacturing-Ready (Foundations) | 13 | ⬜ Pending |
+| M16 | Validated | 14 | ⬜ Pending |
+| M17 | Production Ready | 15 | ⬜ Pending |
+| M18 | Extension Roadmap Ratified | 16 | ⬜ Pending |
+
+> **Planning Complete** — the frozen planning suite is the foundation for all phases above.
+
+---
+
+## Architecture Decisions
+
+ADRs live in the ADR directory (established in Phase 0 per WBS `2.3.1`).
+
+**No implementation ADRs created.**
+
+---
+
+## Known Risks
+
+_Active implementation risks only (carried forward as they arise)._
+
+| ID | Risk | Severity | Phase | Status | Mitigation |
+|---|---|---|---|---|---|
+| RSK-1 | **Background processing is paused** — with V1 removed and V2 not yet built, enqueued jobs (image-hardening, PDF, thumbnails, r2-cleanup) have no consumer: uploads stay `pending`, PDFs/thumbnails aren't generated. | Medium | −1 → until Phase 8/9 | Accepted (intended reset consequence) | No data lost (enqueues/rows persist); processing resumes when Worker V2 lands. App-side behaviors catalogued in the Phase −1 dependency inventory for re-homing. |
+
+---
+
+## Upcoming Work
+
+- **Phase 0 — Foundation & Contracts** (next; **not started — awaiting instruction**). See `WORKER_V2_PHASES.md` Phase 0 / `WORKER_V2_WBS.md` (WBS 2).
+
+---
+
+## Project Statistics
+
+| Metric | Value |
+|---|---|
+| Lines of Code | 0 |
+| Tests | 0 |
+| Coverage | — |
+| Packages | 0 |
+| Modules | 0 |
+| Build Status | App typecheck passing (`tsc --noEmit` exit 0) |
+| Performance | — |
+| Artifacts | — |
+| Render Accuracy | — |
+| Worker Version | v0.0.0 (V1 removed; V2 not started) |
+
+---
+
+## Recent Activity
+
+| Date | Entry |
+|---|---|
+| 2026-07-22 | **Phase −1 (Worker Reset) complete** → M1 Clean Slate. Legacy `worker/` V1 tree removed; dead `worker` ref cleaned from root `tsconfig.json`; `worker/README.md` placeholder added; rollback tag `worker-v1-final`; app typecheck green. Execution plan + dependency inventory authored under `docs/architecture/execution/`. |
+| 2026-07-22 | Planning completed — ADS + Implementation Guide + Phase Plan + WBS + Engineering Playbook frozen. |
+
+---
+
+_This document is updated after every completed implementation phase._
