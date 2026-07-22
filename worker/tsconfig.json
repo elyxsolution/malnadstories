@@ -14,7 +14,8 @@
       "@workerv2/di": ["packages/di/src/index.ts"],
       "@workerv2/build-info": ["packages/build-info/src/index.ts"],
       "@workerv2/control-plane": ["packages/control-plane/src/index.ts"],
-      "@workerv2/runtime": ["packages/runtime/src/index.ts"]
+      "@workerv2/runtime": ["packages/runtime/src/index.ts"],
+      "@workerv2/infra-contracts": ["packages/infra-contracts/src/index.ts"]
     },
     "noEmit": true
   },

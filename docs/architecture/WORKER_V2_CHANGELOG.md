@@ -28,6 +28,50 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-22 — Phase 3 · Infrastructure Contracts & Persistence Foundation
+
+**Added:**
+- **`@workerv2/infra-contracts`** — the abstraction layer between the pure domain and future
+  infrastructure (contracts + DTOs + outbound mappers + infra events; **no** concrete storage/DB):
+  - **Repositories** — `Repository<T,Id>` + `AlbumRepository`/`AssetRepository`/`RunRepository`
+    (return domain objects only), `RunStateQuery` (read side of INV-6), append-only `AuditSink` (INV-9).
+  - **Unit of Work / Transactions** — generic `UnitOfWork` (transactional `RepositoryFactory`),
+    `Transaction`, `TransactionManager.withUnitOfWork(...)`.
+  - **Repository factory** — `RepositoryToken` + `repositoryToken()`; tokens `ALBUM_/ASSET_/RUN_REPOSITORY`.
+  - **DTOs** — `AlbumRecord`/`AssetRecord`/`RunRecord`/`AuditRecordDto` (flat, JSON-safe persistence models).
+  - **Mappers (anti-corruption layer)** — `RecordMapper<D,R>` contract + concrete **outbound**
+    mappers (`albumToRecord`/`assetToRecord`/`runToRecord`/`auditToRecord`). Inbound is contract-only.
+  - **Storage contracts** — write-once, content-addressed `ArtifactStore` (INV-2/INV-10),
+    `StorageKey`, `ContentAddressing`, `StorageAdapter`.
+  - **Adapter seams** — `PersistenceAdapter`, `StorageAdapter`.
+  - **Infra technical events** — `INFRA_EVENTS` + `makeInfraEvent` (INV-12) + `TechnicalEventSink`.
+  - **Validation contracts** — `Validator<T>` + `valid`/`invalid`.
+- **Runtime:** interfaces-only capability **version-negotiation** hooks
+  (`CapabilityRequirement`/`Offer`/`NegotiationResult`/`CapabilityNegotiator`) — additive.
+- **ADR-0004** — Phase 3 delivers infrastructure contracts, not implementations.
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries) for `infra-contracts`; runtime index re-exports the negotiation contracts.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure contracts + deterministic mappers/factories; no perf-sensitive paths.
+
+**Security:** No secrets/PII; DTOs/events JSON-safe; no new external surface. Domain stays infrastructure-independent (verified — no infra import in `control-plane`).
+
+**Documentation:** Package `README.md` + JSDoc on every public export; ADR-0004; `WORKER_V2_PROGRESS.md` updated (Phase 3 → contracts done, M5).
+
+**Testing:** **19 new tests** — outbound mappers, infra events + validation, and the persistence/storage contracts exercised via in-memory **test doubles** (repositories, unit of work, transaction manager, write-once artifact store) + a reference capability negotiator. `pnpm verify` green (**142 tests total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Concrete persistence/storage adapters + domain reconstitution (inbound mappers) are deferred to a later phase (ADR-0002 + ADR-0004).
+
+**ADR References:** **ADR-0004** (contracts-not-implementations; deferred concrete store + reconstitution; negotiation hooks).
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-3-infra-contracts`)._
+
+---
+
 ### v0.0.0 — 2026-07-22 — Phase 2 · Worker Runtime Platform
 
 **Added:**

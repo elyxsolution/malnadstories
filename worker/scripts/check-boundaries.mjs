@@ -49,6 +49,10 @@ const ALLOWED = {
     'logger',
     'control-plane',
   ],
+  // Infrastructure contracts (Phase 3): the abstraction seam between the pure domain and
+  // future infrastructure. Depends inward on the foundation leaves + control-plane (domain
+  // types + technical-event model). NO concrete storage/DB — contracts + DTOs + mappers only.
+  'infra-contracts': ['contracts', 'utils', 'errors', 'control-plane'],
 };
 
 /** Recursively collect .ts source files under a directory. */

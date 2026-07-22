@@ -29,3 +29,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0001](0001-worker-v2-foundation-scope-and-layout.md) | Worker V2 foundation scope & repository layout | Accepted |
 | [0002](0002-control-plane-domain-first-persistence-deferred.md) | Control Plane: domain model first, persistence deferred | Accepted |
 | [0003](0003-runtime-dependency-boundary-and-plugin-framework.md) | Runtime dependency boundary & plugin framework scope | Accepted |
+| [0004](0004-phase-3-infrastructure-contracts-not-implementations.md) | Phase 3 delivers infrastructure contracts, not implementations | Accepted |

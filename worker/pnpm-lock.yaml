@@ -89,6 +89,21 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/infra-contracts:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/logger:
     dependencies:
       '@workerv2/contracts':

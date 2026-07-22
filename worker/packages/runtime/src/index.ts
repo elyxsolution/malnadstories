@@ -27,6 +27,14 @@ export { orderServices } from './services/dependency-graph.js';
 // --- Capabilities ---
 export type { Capability } from './capabilities/capability.js';
 export { CapabilityRegistry } from './capabilities/capability.js';
+// Capability version negotiation — interfaces only (implementation deferred).
+export type {
+  CapabilityRequirement,
+  CapabilityOffer,
+  CapabilityMatch,
+  CapabilityNegotiationResult,
+  CapabilityNegotiator,
+} from './capabilities/negotiation.js';
 
 // --- Plugins ---
 export type { Plugin, PluginContext } from './plugins/plugin.js';
