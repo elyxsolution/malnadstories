@@ -62,6 +62,13 @@ const ALLOWED = {
   // Depends on the foundation leaves + control-plane (value objects for provenance) +
   // infra-contracts. The DOMAIN never depends on this package; storage stays replaceable.
   'artifact-store': ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
+  // Processing framework (Phase 6 task): the generic DECLARATIVE processing model (steps,
+  // pipelines, plans, context, policies, processor contracts) — pure data + pure functions,
+  // no execution engine. Depends on the foundation leaves + control-plane (RunId/Timestamp
+  // value objects) + infra-contracts (StorageKey — artifact-centric I/O). Deliberately does
+  // NOT depend on runtime: capability requirements are structurally compatible instead, so
+  // any engine can consume pipelines without the hosting framework.
+  processing: ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
 };
 
 /** Recursively collect .ts source files under a directory. */

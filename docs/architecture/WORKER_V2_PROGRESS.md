@@ -12,18 +12,18 @@
 | Stage | Status |
 |---|---|
 | Planning Phase | ✅ Complete |
-| Implementation Phase | 🔄 In Progress (7 / 18 phases) |
+| Implementation Phase | 🔄 In Progress (8 / 18 task-phases) |
 | Testing Phase | ⬜ Not Started |
 | Production Readiness | ⬜ Not Started |
 | Deployment | ⬜ Not Started |
 
-**Overall Completion:** Planning 100% · **Implementation ≈39%** (task-phases −1…5 delivered; note: task-phases "4" and "5" both delivered pieces of the frozen Storage phase — the persistence engine and the content-addressed byte Artifact Platform respectively — so the frozen Phase 3 / M5 is now **complete**, while the frozen Product Platform remains not started)
+**Overall Completion:** Planning 100% · **Implementation ≈44%** (task-phases −1…6 delivered; numbering note: task-phases "4"/"5" completed the frozen Storage phase (M5), and task-phase "6" delivered the **declarative pipeline model** belonging to the frozen Pipeline phase (Phase 9, INV-5) — the coordinator/engine half of that phase, and the frozen Product Platform, remain not started)
 
 | Field | Value |
 |---|---|
-| Current Active Phase | None (Artifact Platform complete; next phase not started) |
-| Current Milestone | ✅ M5 — Artifact Platform Ready (contracts + persistence engine + content-addressed byte store all done; durable backends remain drop-in swaps) |
-| Current Branch | `worker-v2/phase-5-artifact-platform` |
+| Current Active Phase | None (processing framework complete; next phase not started) |
+| Current Milestone | M5 ✅ complete; frozen Phase 9's declarative pipeline model delivered early (engine/coordinator pending) |
+| Current Branch | `worker-v2/phase-6-processing` |
 | Current Version | Worker V2 v0.0.0 |
 | Last Updated | 2026-07-23 |
 
@@ -43,7 +43,7 @@
 | 6 | Blueprint Platform | Not Started | 0% | — | — | — | — |
 | 7 | Manifest Platform | Not Started | 0% | — | — | — | — |
 | 8 | Render Engine & PDF Platform | Not Started | 0% | — | — | — | — |
-| 9 | Pipeline & Coordinator Platform | Not Started | 0% | — | — | — | — |
+| 9 | Pipeline & Coordinator Platform | 🟡 Declarative model done | 40% | 2026-07-23 | — | — | Task-phase 6 delivered the **declarative half** (INV-5): `@workerv2/processing` — step/pipeline/plan models, DAG validation, deterministic stage compilation, declarative retry/timeout/cancellation/failure policies + the shared `planFailureAction` decision function, processor contracts, capability requirements (structurally = runtime negotiation seam), `ProcessingContext`. ADR-0007. Coordinator/engine (scheduling, recovery, replay dispatch) remains. |
 | 10 | Observability, Cost Accounting & Metrics | Not Started | 0% | — | — | — | — |
 | 11 | Security & Compliance Hardening | Not Started | 0% | — | — | — | — |
 | 12 | Performance, Budgets & Scale Readiness | Not Started | 0% | — | — | — | — |
@@ -96,6 +96,7 @@ ADR directory established in Phase 0 (`docs/architecture/adr/`, WBS `2.3.1`).
 | 0004 | Phase 3 delivers infrastructure contracts, not implementations | ✅ Accepted |
 | 0005 | In-memory persistence engine + domain reconstitution API | ✅ Accepted |
 | 0006 | Content-addressed Artifact Platform (byte store, registry, provenance) | ✅ Accepted |
+| 0007 | Declarative processing framework (the pipeline model without an engine) | ✅ Accepted |
 
 ---
 
@@ -112,6 +113,7 @@ _Active implementation risks only (carried forward as they arise)._
 ## Upcoming Work
 
 - **Frozen Phase 4 — Product Platform** (**not started**). See `WORKER_V2_PHASES.md` Phase 4 / `WORKER_V2_WBS.md` (WBS 6).
+- **Frozen Phase 9 remainder — Coordinator/engine**: scheduling, crash recovery, replay dispatch, run-graph emission — interpreting the now-frozen declarative pipeline model (`@workerv2/processing`); plus a concrete capability negotiator (the runtime's reserved `CapabilityNegotiator` seam).
 - **Deferred infra implementations (now narrowed after the Artifact Platform):** a **durable** persistence backend (SQL/KV) and a **durable** `BlobStore`/registry (object storage) — both drop-in swaps behind the existing contracts (the reusable `runArtifactStoreContract` suite proves a new backend). The content-addressed byte store, addressing, streaming, integrity, registry, validation, and provenance are now **done** (ADR-0006).
 - **Storage-side Asset Lifecycle wiring (WBS 5.2.2 remainder):** connecting artifact writes to audited asset-state transitions happens when a producing pipeline exists (image/render phases) — the Control Plane transitions + artifact substrate are both ready.
 
@@ -121,11 +123,11 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Metric | Value |
 |---|---|
-| Lines of Code | ~4,300 src + ~3,000 test (foundation + control-plane + runtime + infra-contracts + persistence + artifact-store) |
-| Tests | 213 passing (Vitest) |
+| Lines of Code | ~5,400 src + ~3,650 test (foundation + control-plane + runtime + infra-contracts + persistence + artifact-store + processing) |
+| Tests | 261 passing (Vitest) |
 | Coverage | v8 provider configured (not gated yet) |
-| Packages | 15 (`@workerv2/*` — 10 foundation + control-plane + runtime + infra-contracts + persistence + artifact-store) |
-| Modules | 104 source modules |
+| Packages | 16 (`@workerv2/*` — 10 foundation + control-plane + runtime + infra-contracts + persistence + artifact-store + processing) |
+| Modules | 118 source modules |
 | Build Status | `pnpm verify` green — typecheck + boundaries + lint + format + test |
 | Performance | — |
 | Artifacts | — |
@@ -138,6 +140,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Date | Entry |
 |---|---|
+| 2026-07-23 | **Processing Framework (task-phase 6) complete — the frozen Pipeline phase's declarative half (INV-5).** Added `@workerv2/processing` — the generic, framework-independent DECLARATIVE processing model: **step model** (artifact-centric — inputs/outputs are content-addressed identities, bound via `fromArtifact`/`fromStepOutput`, never files), **pipeline model** (`definePipeline` = the single validating constructor: ids/versions/slots/policies, unique ids, unknown/self/duplicate deps, inputs must reference declared outputs of explicit dependencies, **DAG validation**), **execution-plan model** (`compileExecutionPlan` — total + deterministic: Kahn + lexicographic tie-break, longest-chain stages, declaration-order invariant), **ProcessingContext** (immutable, resolved artifact identities, frozen version pins, injected time, engine-owned cancellation signal), **declarative retry/timeout/cancellation/failure models** (pure `delayBeforeAttempt` math + the shared `planFailureAction` decision function — nothing executed), **processor contracts** (`Processor`/`ProcessorResolver`/`validateProcessorOutputs`), and **capability requirements** structurally identical to the runtime's negotiation seam (compile-time-proven) without depending on the runtime. Zero execution behavior (no timers/clock/randomness/env/I-O — verified). ADR-0007. 48 new tests; `pnpm verify` green (**261 total**, 16 packages). |
 | 2026-07-23 | **Artifact Platform (task-phase 5) complete — frozen Phase 3 / M5 now fully done.** Added `@workerv2/artifact-store` — the concrete **content-addressed, write-once byte `ArtifactStore`**: deterministic **sha256 addressing** (`sha256:<digest>`, pinned by a published test vector), a replaceable **`BlobStore`** backend seam (in-memory reference; guarantees live ABOVE the seam), write-once + integrity-at-write guards (`StorageError`/`IntegrityError`), **idempotent** content-derived writes (`putContent`/`putStream`), **streaming** I/O (incremental hashing; chunking never changes identity), **integrity verification** (`Sha256IntegrityVerifier` + `getVerified` corruption guard), the write-once **artifact registry** with **provenance** (Run, processing step, kind, frozen version pins, source-asset lineage, injected time) + `byRun` lineage query, **artifact validation** (untrusted-input boundary), and the `ArtifactPlatform` facade implementing the Phase-3 `StorageAdapter`. Extended `infra-contracts` with the streaming/provenance/registry/integrity contracts + `IntegrityError`. Includes a **reusable contract suite** (`runArtifactStoreContract`) future durable backends must pass. Storage holds no business logic; identity is backend-independent (both verified by tests + boundary checker). ADR-0006. 50 new tests; `pnpm verify` green (**213 total**). |
 | 2026-07-23 | **Persistence engine (task-phase 4) complete.** Added `@workerv2/persistence` — the concrete in-memory **State Store** implementing the Phase 3 contracts: transaction-bound repositories, `InMemoryUnitOfWork` (atomic commit/rollback) with **optimistic locking** (`ConcurrencyError`), the durable **Run Registry** (INV-6), append-only **audit** persistence, **write-once artifact-metadata** persistence, infra **validation**, and a storage-isolated `RecordTable` primitive. Added the domain-owned **reconstitution API** (`Album/Asset/Run.reconstitute`, no events, invariants enforced) + concrete **inbound mappers** + **serialization-symmetry** round-trip tests. Domain stays persistence-independent (verified). ADR-0005. 21 tests; `pnpm verify` green (163 total). |
 | 2026-07-22 | **Phase 3 (Infrastructure Contracts & Persistence Foundation) complete** → M5 (contracts). Added `@workerv2/infra-contracts`: repository/UoW/transaction/repository-factory/storage/adapter **interfaces**, persistence **DTOs**, concrete **outbound** mappers (anti-corruption layer), infra technical events (INV-12), and validation contracts. Domain stays infrastructure-independent (verified). Concrete storage/DB adapters + inbound reconstitution **deferred** — ADR-0004. Also added interfaces-only capability version-negotiation hooks to the runtime. 19 tests; `pnpm verify` green (142 total). |

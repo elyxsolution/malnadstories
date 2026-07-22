@@ -22,6 +22,7 @@ const PACKAGES = [
   'infra-contracts',
   'persistence',
   'artifact-store',
+  'processing',
 ] as const;
 
 const alias = Object.fromEntries(

@@ -152,6 +152,24 @@ importers:
         specifier: workspace:*
         version: link:../utils
 
+  packages/processing:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/runtime:
     dependencies:
       '@workerv2/build-info':

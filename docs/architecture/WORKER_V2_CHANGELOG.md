@@ -28,6 +28,110 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Processing Framework (task-phase 6)
+
+> Delivers the DECLARATIVE half of the frozen Pipeline phase (INV-5): the generic processing
+> model later rendering, PDF, image, and manufacturing pipelines execute. Pure data + pure
+> functions — no execution engine, no scheduling, no business logic.
+
+**Added:**
+- **`@workerv2/processing`** — the framework-independent declarative processing model:
+  - **Step model (artifact-centric)** — `ProcessingStep`/`ProcessingStepSpec`: processor by
+    NAME + compatible version range (engine-resolved later), named input slots bound via
+    `fromArtifact(key)` (content address) or `fromStepOutput(stepId, output)` (symbolic upstream
+    reference), declared output slots, capability requirements, per-step policies, JSON-safe config.
+  - **Pipeline model** — `definePipeline(spec)`: the ONLY constructor. Validates ids/semver/slot
+    names/policies, unique step ids, unknown/self/duplicate dependencies, step-output inputs
+    reference **declared** outputs of steps the consumer **explicitly** dependsOn, and the
+    dependency graph is a **DAG**. Deep-frozen; deterministic.
+  - **Dependency-graph validation** — `orderStepGraph`: Kahn + lexicographic tie-breaking;
+    longest-chain **stages** (mutually independent within a stage); canonical stage-monotonic
+    flat order; unknown/self-dep/cycle rejection.
+  - **Execution-plan model** — `compileExecutionPlan(pipeline)`: **total** (pipelines only exist
+    validated) + deterministic; `ExecutionPlan` (order/stages/`PlannedStep`s) deep-frozen;
+    declaration-order invariant (tested).
+  - **Processing Context** — `makeProcessingContext`: immutable per-attempt data — RESOLVED
+    artifact identities, expected output slots, config, frozen version pins (INV-11), injected
+    `startedAt`, engine-owned `CancellationSignal` (not frozen; `NEVER_CANCELLED` neutral value).
+  - **Retry model** — `RetryPolicy` (none/fixed/exponential + caps) validated declaratively;
+    `delayBeforeAttempt` = pure math (no waiting).
+  - **Timeout model** — `TimeoutPolicy` (attempt + overall budgets) validated; enforced by an
+    engine later.
+  - **Cancellation model** — `CancellationPolicy` (unsupported/cooperative/abortive + grace) +
+    the read-only `CancellationSignal` contract.
+  - **Failure model** — `FailureKind` (transient/permanent/timeout/cancelled), frozen
+    `StepFailure` records, `FailurePolicy` (onPermanent locked to 'fail'), and the SHARED pure
+    decision function `planFailureAction` → retry (with computed delay/next attempt) / fail /
+    cancelled — so failure semantics can never drift between engines.
+  - **Processor contracts** — `Processor` (context → explicit `ProcessorOutcome`),
+    `ProcessorDescriptor`, `ProcessorResolver`, `validateProcessorOutputs` (exact-slot-match
+    conformance shared by all engines).
+  - **Capability requirements** — `StepCapabilityRequirement`, structurally IDENTICAL to the
+    runtime's reserved `CapabilityRequirement` negotiation contract (compile-time-proven in
+    tests) **without** a runtime dependency — engines feed step requirements straight into a
+    future `CapabilityNegotiator`.
+- **ADR-0007** — declarative processing framework decisions (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries) for `processing`.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory validation/compilation; Kahn is O(V+E); no perf-sensitive paths.
+
+**Security:** No secrets/PII; config/failure contexts documented JSON-safe; no new external
+surface; no I/O of any kind.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0007; ADR index; `WORKER_V2_PROGRESS.md`
+(frozen Phase 9 → declarative model done).
+
+**Testing:** **48 new tests** — retry/timeout/cancellation/failure policy validation +
+deterministic delay math + the `planFailureAction` decision table; pipeline validation (happy
+path, defaults, deep-freeze, determinism, capability/version carry-through, and 12 rejection
+classes incl. cycles, undeclared outputs, missing dependsOn); graph/stage determinism
+(declaration-order invariance, longest-chain staging); plan compilation (staging, immutability,
+repeat + order invariance); context construction (freeze/defaults/live signal/spec isolation);
+processor contracts (output conformance, contract-only implementability); runtime structural
+compatibility (compile-time). `pnpm verify` green (**261 total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. No execution engine exists yet — nothing consumes pipelines at run
+time until the coordinator phase; all current consumers are definition-time.
+
+**ADR References:** **ADR-0007**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-6-processing`)._
+
+#### Phase Retrospective (task-phase 6)
+
+- **Architectural decisions.** (1) The model is engine-neutral by construction: no runtime
+  dependency — capability requirements are structurally compatible with the runtime's
+  negotiation seam instead of imported, so local/distributed/replay engines all consume
+  pipelines unchanged. (2) Artifact-centric I/O: steps bind content addresses or symbolic
+  upstream outputs — with the write-once store (ADR-0006) this makes re-execution naturally
+  idempotent. (3) Invalid pipelines are unrepresentable: one validating constructor
+  (`definePipeline`), making plan compilation total and deterministic. (4) Declarative policies
+  with exactly ONE shared interpretation point (`planFailureAction`) — semantics fixed now,
+  execution later.
+- **ADRs.** ADR-0007 (accepted), incl. rejected alternatives (runtime dependency, shipping a
+  local executor, execution-time validation, file-path I/O).
+- **Scope adjustments.** None against the task scope. Mapping note: this is the frozen Phase 9's
+  declarative half delivered early as its own package; coordinator/scheduling/recovery/replay
+  stay in the frozen Pipeline phase. Version-range MATCHING is deliberately not implemented
+  (declared, opaque) — negotiation belongs to the engine per the runtime's reserved seam.
+- **Remaining risks.** The engine will reveal whether the plan's stage model needs richer
+  scheduling metadata (priorities, resource hints) — additive if so; `CancellationSignal` is
+  poll-based (cooperative) — sufficient for INV-7-idempotent steps, revisit if push semantics
+  are ever needed; capability negotiation semantics (range grammar) still undefined until the
+  negotiator lands.
+- **Reusable abstractions.** `orderStepGraph` (any DAG with deterministic staging),
+  `planFailureAction`/`delayBeforeAttempt` (any retrying subsystem), `ProcessingContext` +
+  `Processor` contracts (every processing platform: image, render/PDF, manufacturing),
+  `validateProcessorOutputs` (engine conformance), `StepCapabilityRequirement` (negotiation
+  input), the diamond-pipeline test fixture (engine tests later).
+
+---
+
 ### v0.0.0 — 2026-07-23 — Artifact Platform (task-phase 5)
 
 > Completes the content-addressed **byte** store deferred by ADR-0004/0005 — the last open piece
