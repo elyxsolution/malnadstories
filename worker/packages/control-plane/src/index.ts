@@ -57,5 +57,8 @@ export { canStartRun } from './policies/one-active-run.js';
 // --- Aggregates ---
 export type { TransitionOutcome } from './aggregates/outcome.js';
 export { Album } from './aggregates/album.js';
+export type { AlbumSnapshot } from './aggregates/album.js';
 export { Asset } from './aggregates/asset.js';
+export type { AssetSnapshot } from './aggregates/asset.js';
 export { Run } from './aggregates/run.js';
+export type { RunSnapshot } from './aggregates/run.js';

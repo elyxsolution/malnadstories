@@ -20,6 +20,7 @@ const PACKAGES = [
   'control-plane',
   'runtime',
   'infra-contracts',
+  'persistence',
 ] as const;
 
 const alias = Object.fromEntries(

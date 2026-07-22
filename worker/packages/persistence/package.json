@@ -1,0 +1,19 @@
+{
+  "name": "@workerv2/persistence",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 persistence engine — the concrete in-memory State Store implementing the Phase 3 infrastructure contracts (repositories, unit of work, transactions, optimistic locking, run registry, audit + artifact-metadata persistence). Storage-engine-agnostic; a durable backend implements the same contracts later.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/control-plane": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*"
+  }
+}

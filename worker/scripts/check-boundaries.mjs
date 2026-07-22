@@ -53,6 +53,10 @@ const ALLOWED = {
   // future infrastructure. Depends inward on the foundation leaves + control-plane (domain
   // types + technical-event model). NO concrete storage/DB — contracts + DTOs + mappers only.
   'infra-contracts': ['contracts', 'utils', 'errors', 'control-plane'],
+  // Persistence engine (Phase 4): the concrete in-memory State Store implementing the Phase 3
+  // contracts. Depends on the foundation leaves + control-plane + infra-contracts. The DOMAIN
+  // never depends on this package (persistence stays independent of the domain).
+  persistence: ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
 };
 
 /** Recursively collect .ts source files under a directory. */

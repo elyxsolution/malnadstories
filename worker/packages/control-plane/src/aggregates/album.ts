@@ -14,6 +14,18 @@ import type { TransitionOutcome } from './outcome.js';
 const MAX_TITLE = 120;
 
 /**
+ * The persisted state of an album, as handed to `Album.reconstitute`. Ids and timestamps are
+ * already-validated value objects (parsed by the caller); `status` is raw and validated here.
+ */
+export interface AlbumSnapshot {
+  readonly id: AlbumId;
+  readonly title: string;
+  readonly status: string;
+  readonly createdAt: Timestamp;
+  readonly updatedAt: Timestamp;
+}
+
+/**
  * The Album aggregate — the source-of-truth model of an album's lifecycle. Immutable: every
  * operation returns a NEW `Album` plus the emitted domain event and audit record. Pure and
  * deterministic (all time/ids are injected via `DomainContext`).
@@ -61,6 +73,33 @@ export class Album {
       metadata: ctx.metadata,
     });
     return ok({ aggregate: album, event, audit });
+  }
+
+  /**
+   * Reconstitute an album from persisted state WITHOUT emitting events — the domain-owned
+   * reconstruction path repositories use (they never call the private constructor). Enforces the
+   * same invariants as `create` (title bounds) plus a valid persisted status, so a corrupt record
+   * cannot become a bad aggregate.
+   */
+  static reconstitute(snapshot: AlbumSnapshot): Result<Album, ValidationError> {
+    const title = snapshot.title.trim();
+    if (title === '' || title.length > MAX_TITLE) {
+      return err(
+        new ValidationError(`Album title must be 1..${MAX_TITLE} characters`, {
+          context: { length: title.length },
+        }),
+      );
+    }
+    if (!ALBUM_MACHINE.hasState(snapshot.status)) {
+      return err(
+        new ValidationError(`Unknown album status: "${snapshot.status}"`, {
+          context: { status: snapshot.status },
+        }),
+      );
+    }
+    return ok(
+      new Album(snapshot.id, title, snapshot.status, snapshot.createdAt, snapshot.updatedAt),
+    );
   }
 
   /** Attempt a lifecycle transition. Returns a `TransitionError` if the edge is illegal. */

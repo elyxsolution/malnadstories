@@ -1,5 +1,6 @@
 import type { Result } from '@workerv2/contracts';
-import { ok } from '@workerv2/utils';
+import { ok, err } from '@workerv2/utils';
+import { ValidationError } from '@workerv2/errors';
 import type { RunId, AlbumId } from '../ids.js';
 import type { Timestamp } from '../time.js';
 import type { DomainContext } from '../context.js';
@@ -11,6 +12,16 @@ import type { VersionSet } from '../version/version-set.js';
 import { domainEvent } from '../events/domain-event.js';
 import { recordTransition } from '../audit/audit-record.js';
 import type { TransitionOutcome } from './outcome.js';
+
+/** The persisted state of a run, as handed to `Run.reconstitute`. */
+export interface RunSnapshot {
+  readonly id: RunId;
+  readonly albumId: AlbumId;
+  readonly status: string;
+  readonly versions: VersionSet;
+  readonly createdAt: Timestamp;
+  readonly updatedAt: Timestamp;
+}
 
 /**
  * The Run aggregate — one processing execution for an album. It pins a `VersionSet` at
@@ -60,6 +71,31 @@ export class Run {
       metadata: ctx.metadata,
     });
     return { aggregate: run, event, audit };
+  }
+
+  /**
+   * Reconstitute a run from persisted state WITHOUT emitting events (domain-owned
+   * reconstruction). The frozen `versions` are supplied pre-validated (a `VersionSet`); the
+   * persisted status is validated so a corrupt record cannot become a run.
+   */
+  static reconstitute(snapshot: RunSnapshot): Result<Run, ValidationError> {
+    if (!RUN_MACHINE.hasState(snapshot.status)) {
+      return err(
+        new ValidationError(`Unknown run status: "${snapshot.status}"`, {
+          context: { status: snapshot.status },
+        }),
+      );
+    }
+    return ok(
+      new Run(
+        snapshot.id,
+        snapshot.albumId,
+        snapshot.status,
+        snapshot.versions,
+        snapshot.createdAt,
+        snapshot.updatedAt,
+      ),
+    );
   }
 
   /**

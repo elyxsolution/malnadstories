@@ -1,5 +1,6 @@
 import type { Result } from '@workerv2/contracts';
-import { ok } from '@workerv2/utils';
+import { ok, err } from '@workerv2/utils';
+import { ValidationError } from '@workerv2/errors';
 import type { AssetId, AlbumId } from '../ids.js';
 import type { Timestamp } from '../time.js';
 import type { DomainContext } from '../context.js';
@@ -9,6 +10,15 @@ import type { AssetState, AssetTrigger } from '../lifecycle/asset.js';
 import { domainEvent } from '../events/domain-event.js';
 import { recordTransition } from '../audit/audit-record.js';
 import type { TransitionOutcome } from './outcome.js';
+
+/** The persisted state of an asset, as handed to `Asset.reconstitute`. */
+export interface AssetSnapshot {
+  readonly id: AssetId;
+  readonly albumId: AlbumId;
+  readonly status: string;
+  readonly createdAt: Timestamp;
+  readonly updatedAt: Timestamp;
+}
 
 /**
  * The Asset aggregate — the lifecycle model of an uploaded asset (incoming → … → deleted).
@@ -55,6 +65,29 @@ export class Asset {
       metadata: ctx.metadata,
     });
     return { aggregate: asset, event, audit };
+  }
+
+  /**
+   * Reconstitute an asset from persisted state WITHOUT emitting events (domain-owned
+   * reconstruction). Validates the persisted status so a corrupt record cannot become an asset.
+   */
+  static reconstitute(snapshot: AssetSnapshot): Result<Asset, ValidationError> {
+    if (!ASSET_MACHINE.hasState(snapshot.status)) {
+      return err(
+        new ValidationError(`Unknown asset status: "${snapshot.status}"`, {
+          context: { status: snapshot.status },
+        }),
+      );
+    }
+    return ok(
+      new Asset(
+        snapshot.id,
+        snapshot.albumId,
+        snapshot.status,
+        snapshot.createdAt,
+        snapshot.updatedAt,
+      ),
+    );
   }
 
   /** Attempt a lifecycle transition. Returns a `TransitionError` if the edge is illegal. */

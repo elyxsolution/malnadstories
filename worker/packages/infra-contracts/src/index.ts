@@ -21,6 +21,8 @@ export type {
   AuditRecordMapper,
 } from './persistence/mapper.js';
 export { albumToRecord, assetToRecord, runToRecord, auditToRecord } from './persistence/mapper.js';
+export { recordToAlbum, recordToAsset, recordToRun, recordToAudit } from './persistence/mapper.js';
+export { albumMapper, assetMapper, runMapper, auditMapper } from './persistence/mapper.js';
 
 // --- Persistence: repositories ---
 export type {

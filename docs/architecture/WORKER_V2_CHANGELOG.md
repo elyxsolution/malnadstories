@@ -28,6 +28,51 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Persistence Engine (task-phase 4)
+
+> Completes the State Store deferred by ADR-0002/0004 — part of the frozen Storage phase (M5),
+> **not** the frozen Product Platform.
+
+**Added:**
+- **`@workerv2/persistence`** — the concrete in-memory **State Store** on the Phase 3 contracts:
+  - **Storage primitive** — generic, domain-ignorant `RecordTable<T>` (`InMemoryRecordTable`),
+    isolating storage from persistence models so backends are interchangeable.
+  - **Optimistic locking** — `TableTransaction` (versioned rows + identity map) → `ConcurrencyError`.
+  - **Repositories** — `TransactionalAlbum/Asset/RunRepository`, returning domain aggregates via
+    the explicit mappers (DTOs never escape; reconstruction via the domain so invariants hold).
+  - **Unit of Work** — `InMemoryUnitOfWork` (atomic commit/rollback across repositories + audit +
+    run-registry + artifact metadata) + `StateStore.transaction(...)` + `asPersistenceAdapter()`.
+  - **Run Registry** — durable one-active-run enforcement (INV-6): domain pre-check + commit-time guard.
+  - **Audit persistence** (append-only, INV-9) + **write-once artifact-metadata** persistence (INV-2/10).
+  - **Infrastructure validation** — `validateAlbum/Asset/RunRecord` (unknown → DTO) + `Validator` objects.
+- **`@workerv2/control-plane`** — domain-owned **reconstitution API**: `Album/Asset/Run.reconstitute(snapshot)`
+  (rebuild from persisted state, no events, invariants enforced) + `*Snapshot` types.
+- **`@workerv2/infra-contracts`** — concrete **inbound** mappers (`recordToAlbum/Asset/Run/Audit`)
+  + ready-made `RecordMapper` objects (`albumMapper` …), completing the anti-corruption layer.
+- **ADR-0005** — in-memory persistence engine + domain reconstitution.
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries) for `persistence`; `infra-contracts` mapper module gained the inbound half; control-plane aggregates gained `reconstitute`.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** In-memory, single-process; optimistic-lock validation is O(changed rows). Reference engine — durable backends tune later.
+
+**Security:** No secrets/PII; DTOs/records JSON-safe. Domain stays persistence-independent (verified — no persistence import in `control-plane`).
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0005; `WORKER_V2_PROGRESS.md` updated (Phase 3 storage → engine done, 85%).
+
+**Testing:** **21 new tests** — save/load round-trips, **optimistic concurrency** (stale-update + insert-conflict), rollback atomicity, corrupt-record → `PersistenceError`, **Run Registry INV-6** (block + release + different-albums), audit append + rollback, artifact write-once, infra validation, domain reconstitution, and **serialization-symmetry** (save → load → save). `pnpm verify` green (**163 total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. The engine is in-memory (process-local); a durable backend implements the same contracts later without changes above the `RecordTable` seam.
+
+**ADR References:** **ADR-0005** (in-memory reference engine; reconstitution owned by the domain; storage isolated from models).
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-4-persistence`)._
+
+---
+
 ### v0.0.0 — 2026-07-22 — Phase 3 · Infrastructure Contracts & Persistence Foundation
 
 **Added:**
