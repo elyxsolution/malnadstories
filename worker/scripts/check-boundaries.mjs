@@ -69,6 +69,12 @@ const ALLOWED = {
   // NOT depend on runtime: capability requirements are structurally compatible instead, so
   // any engine can consume pipelines without the hosting framework.
   processing: ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
+  // Blueprint Platform (Phase 7 task / frozen Blueprint phase's model+compiler): the immutable,
+  // content-addressable album production representation. Depends on the foundation leaves +
+  // control-plane (AlbumId) + infra-contracts (StorageKey — artifact-centric references).
+  // NO storage/runtime/processing dependency: hashing is local (same sha256:<hex> format as
+  // the artifact platform — asserted compatible by tests, not by import).
+  blueprint: ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
 };
 
 /** Recursively collect .ts source files under a directory. */

@@ -23,6 +23,7 @@ const PACKAGES = [
   'persistence',
   'artifact-store',
   'processing',
+  'blueprint',
 ] as const;
 
 const alias = Object.fromEntries(

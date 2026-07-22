@@ -28,6 +28,109 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Blueprint Platform (task-phase 7)
+
+> Delivers the frozen Blueprint phase's MODEL + COMPILER (Rec 3's "blueprint" half): the
+> immutable, deterministic, content-addressable representation of everything that must be
+> produced for an album. No rendering, no execution, no storage.
+
+**Added:**
+- **`@workerv2/blueprint`** — the Blueprint Platform:
+  - **Model + graph** — a typed containment TREE: `album` root → optional `cover` + ordered
+    `spread`s → `placement`s (content-addressed artifact + normalized frame) and `text`s.
+    Artifact-centric throughout (`StorageKey` identities; file paths structurally rejected).
+  - **Stable identifiers** — every node id is DERIVED from structure (`album`, `cover`,
+    `spread:NNNN`, `<parent>:placement:<slot>`, `<parent>:text:NNNN`) and validation enforces
+    the derivation (I7) — ids can never be random or drift, making diffs meaningful.
+  - **Declarative compiler** — `compileBlueprint(source)`: consumes a domain-shaped source,
+    computes no layout, makes no rendering decisions; canonicalizes placement order by slot
+    (declaration order NON-semantic) while spread/text order stays SEMANTIC; routes its own
+    output through the full validation gate; returns a deep-frozen
+    `CompiledBlueprint { blueprint, hash, canonical }`.
+  - **Validation (invariants I1–I10)** — `validateBlueprint(unknown)`: supported schema
+    version, valid album id, unique + sorted node ids, exactly one album root, **no dangling
+    references**, containment is a tree with full reachability, stable ids, contiguous spread
+    indexes (cover first), unique+sorted placement slots (placements before texts), normalized
+    frames, bounded text. The ONLY way a `Blueprint` value exists.
+  - **Canonical serialization** — `serializeBlueprint` (canonical JSON: sorted keys, semantic
+    array order) + `parseBlueprint` (never trusts incoming form — full gate; round-trip
+    byte-stable). `canonicalJson` promoted to `@workerv2/utils` (additive).
+  - **Hashing / identity** — `hashBlueprint` = `sha256:<hex>` over canonical UTF-8 bytes;
+    identity depends ONLY on canonical content; byte-compatible with artifact addressing
+    (ADR-0006) — storing a canonical blueprint as an artifact yields key === hash (test-proven
+    cross-check; no storage import).
+  - **Versioning** — `BLUEPRINT_SCHEMA_VERSION` participates in canonical content (a schema
+    bump changes every identity, by design); parse rejects unsupported versions.
+  - **Diff model** — `diffBlueprints`: per-stable-id added/removed/changed (canonical node
+    comparison), sorted + frozen + symmetric-by-construction.
+  - **Graph helpers** — `walkBlueprint` (deterministic DFS), `referencedArtifacts` (deduped,
+    sorted), `totalPages`.
+- **`@workerv2/utils`** — `canonicalJson` (deterministic serialization primitive, additive).
+- **ADR-0008** — blueprint identity/ordering/validation decisions (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries) for `blueprint`; utils index exports
+`canonicalJson`.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory compile/validate/hash; linear passes + one sort; sha256 over a
+canonical string per identity computation. No perf-sensitive paths.
+
+**Security:** No secrets/PII; no I/O; artifact references validated to content-address shape;
+untrusted serialized blueprints pass the full invariant gate before existing as values.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0008; ADR index; `WORKER_V2_PROGRESS.md`
+(frozen Blueprint phase → model + compiler done).
+
+**Testing:** **42 new tests** — compiler happy path (stable-id graph, canonical children
+order, no-cover variant), determinism (recompile identity; placement-order invariance;
+spread-order sensitivity), deep-freeze immutability, source rejections (album id, title,
+no-spreads, duplicate slots, malformed artifact key, slot token, frame bounds, pages, text
+size); canonical serialization (repeat-stability, round-trip, key-order/whitespace
+independence, unparseable JSON); identity (format, content-only, semantic-change sensitivity,
+**artifact-platform byte-compatibility** incl. store round-trip); validation invariants I1–I10
+individually violated on hand-built inputs; diff (identical/added/removed/changed/symmetry);
+graph traversals (DFS order, artifact dedupe+sort, page totals); `canonicalJson` unit tests in
+utils. `pnpm verify` green (**303 total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Nothing consumes blueprints yet — the manifest phase and the
+resolvers (frozen Blueprint phase remainder) are the future consumers/producers.
+
+**ADR References:** **ADR-0008**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-7-blueprint`)._
+
+#### Phase Retrospective (task-phase 7)
+
+- **Architectural decisions.** (1) Identity = sha256 of canonical JSON — content-addressable
+  by construction, byte-compatible with artifact addressing so "blueprint as artifact" is free
+  later (compatibility proven by test, not import — the package has zero storage dependency).
+  (2) Stable ids are DERIVED from structure and enforced by validation — stability is a
+  theorem, not a convention, which is what makes the per-id diff model trustworthy.
+  (3) Ordering split explicitly: semantic (spread/text sequence) vs canonical (placement
+  slots, node list) — equivalent sources always hash identically, meaningful reorderings
+  always differ. (4) One validation gate; the compiler validates its own output — an
+  invariant-violating blueprint is unrepresentable.
+- **ADRs.** ADR-0008 (accepted), incl. rejected alternatives (UUID identities, author-chosen
+  ids, storage-package dependency, order-insensitive hashing).
+- **Scope adjustments.** None against the task scope. Mapping note: this is the frozen
+  Blueprint phase's model + compiler; the resolver chain (layout/template/theme) and catalogs
+  are NOT built — they are future additive PRODUCERS of `BlueprintSource`, and blueprint/
+  template/theme version freezing into the version registry lands with them.
+- **Remaining risks.** Node vocabulary is deliberately minimal (no stickers/QR/styling yet) —
+  additive kinds require a schema-version bump which changes all identities (by design, but a
+  migration moment); frames forbid bleed overflow until pre-press requirements arrive; schema
+  N-1 parse support is undefined until a 2.0.0 exists.
+- **Reusable abstractions.** `canonicalJson` (utils — any canonical-form need),
+  `validateBlueprint` (the gate future resolvers compile against), `BlueprintSource` (the
+  resolver-chain output contract), the diff model (Run Explorer / replay blast-radius
+  analysis later), `referencedArtifacts` (manifest building + retention/GC analysis),
+  blueprint-as-artifact (identity-equal storage) for the manifest/render phases.
+
+---
+
 ### v0.0.0 — 2026-07-23 — Processing Framework (task-phase 6)
 
 > Delivers the DECLARATIVE half of the frozen Pipeline phase (INV-5): the generic processing

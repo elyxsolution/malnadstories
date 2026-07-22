@@ -18,7 +18,8 @@
       "@workerv2/infra-contracts": ["packages/infra-contracts/src/index.ts"],
       "@workerv2/persistence": ["packages/persistence/src/index.ts"],
       "@workerv2/artifact-store": ["packages/artifact-store/src/index.ts"],
-      "@workerv2/processing": ["packages/processing/src/index.ts"]
+      "@workerv2/processing": ["packages/processing/src/index.ts"],
+      "@workerv2/blueprint": ["packages/blueprint/src/index.ts"]
     },
     "noEmit": true
   },

@@ -13,6 +13,7 @@ import {
   isPlainObject,
   hasOwn,
   deepFreeze,
+  canonicalJson,
 } from '@workerv2/utils';
 
 describe('result constructors + combinators', () => {
@@ -76,5 +77,24 @@ describe('object helpers', () => {
     const frozen = deepFreeze(nested);
     expect(Object.isFrozen(frozen)).toBe(true);
     expect(Object.isFrozen((frozen as { a: unknown }).a)).toBe(true);
+  });
+});
+
+describe('canonicalJson', () => {
+  it('is key-order independent (deterministic)', () => {
+    expect(canonicalJson({ b: 2, a: 1 })).toBe('{"a":1,"b":2}');
+    expect(canonicalJson({ a: 1, b: 2 })).toBe(canonicalJson({ b: 2, a: 1 }));
+  });
+
+  it('preserves array order (semantic) and canonicalizes nested objects', () => {
+    expect(canonicalJson([{ z: 1, a: 2 }, 3])).toBe('[{"a":2,"z":1},3]');
+    expect(canonicalJson([3, 1, 2])).toBe('[3,1,2]');
+  });
+
+  it('omits undefined-valued keys and handles primitives', () => {
+    expect(canonicalJson({ a: 1, gone: undefined })).toBe('{"a":1}');
+    expect(canonicalJson('x')).toBe('"x"');
+    expect(canonicalJson(null)).toBe('null');
+    expect(canonicalJson(true)).toBe('true');
   });
 });

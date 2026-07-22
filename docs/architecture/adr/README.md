@@ -33,3 +33,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0005](0005-in-memory-persistence-engine-and-domain-reconstitution.md) | In-memory persistence engine + domain reconstitution API | Accepted |
 | [0006](0006-content-addressed-artifact-platform.md) | Content-addressed Artifact Platform (byte store, registry, provenance) | Accepted |
 | [0007](0007-declarative-processing-framework.md) | Declarative processing framework (the pipeline model without an engine) | Accepted |
+| [0008](0008-content-addressable-blueprint-platform.md) | Content-addressable Blueprint Platform (model, compiler, identity) | Accepted |
