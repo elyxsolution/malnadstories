@@ -3,7 +3,7 @@
 // infra technical events. NO concrete storage/DB/queue implementations, no business logic.
 
 // --- Errors ---
-export { PersistenceError, StorageError, MappingError } from './errors.js';
+export { PersistenceError, StorageError, MappingError, IntegrityError } from './errors.js';
 
 // --- Validation contracts ---
 export type { Validator } from './validation/validator.js';
@@ -57,6 +57,13 @@ export type {
   ArtifactStore,
   StorageAdapter,
 } from './storage/artifact-store.js';
+
+// --- Storage contracts: streaming, provenance, registry, integrity (byte-level artifact platform) ---
+export type { ArtifactByteStream, StreamingArtifactStore } from './storage/streaming.js';
+export type { ArtifactKind, ArtifactProvenance, ArtifactDescriptor } from './storage/provenance.js';
+export { ARTIFACT_KINDS } from './storage/provenance.js';
+export type { ArtifactRegistry } from './storage/registry.js';
+export type { IntegrityVerifier } from './storage/integrity.js';
 
 // --- Infrastructure technical events (INV-12) ---
 export type { InfraEventType, TechnicalEventSink } from './events/infra-events.js';

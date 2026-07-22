@@ -57,6 +57,11 @@ const ALLOWED = {
   // contracts. Depends on the foundation leaves + control-plane + infra-contracts. The DOMAIN
   // never depends on this package (persistence stays independent of the domain).
   persistence: ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
+  // Artifact platform (Phase 5 task / frozen Phase 3 byte store): the concrete content-addressed,
+  // write-once byte ArtifactStore + registry + integrity + provenance on the Phase 3 contracts.
+  // Depends on the foundation leaves + control-plane (value objects for provenance) +
+  // infra-contracts. The DOMAIN never depends on this package; storage stays replaceable.
+  'artifact-store': ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
 };
 
 /** Recursively collect .ts source files under a directory. */

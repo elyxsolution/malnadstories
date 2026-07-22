@@ -28,6 +28,108 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Artifact Platform (task-phase 5)
+
+> Completes the content-addressed **byte** store deferred by ADR-0004/0005 — the last open piece
+> of the frozen Storage & Immutable Artifact Platform. **M5 is now fully complete.**
+
+**Added:**
+- **`@workerv2/artifact-store`** — the concrete Artifact Platform on the Phase 3 storage contracts:
+  - **Content addressing** — `Sha256ContentAddressing` (`sha256:<hex-digest>`), `hashBytes`/
+    `formatStorageKey`/`digestOf`; deterministic, pinned by the published empty-content sha256
+    test vector. Identity derives from bytes alone (INV-10) — backend-independent by construction.
+  - **Replaceable backend seam** — `BlobStore` (`InMemoryBlobStore` reference): a deliberately dumb
+    byte KV BELOW every guarantee, so a durable object store (e.g. R2) is a drop-in (WBS 5.1.1).
+    Defensive copies isolate stored bytes from caller mutation.
+  - **Write-once artifact store** — `ContentAddressedArtifactStore` (implements the new
+    `StreamingArtifactStore`): `put` rejects mis-addressed content (`IntegrityError`) AND
+    overwrites (`StorageError`, INV-2); `putContent`/`putStream` derive the key and are
+    **idempotent** for byte-identical content (INV-7).
+  - **Streaming interfaces** — `putStream` (incremental hashing; chunking never changes identity),
+    `getStream` (bounded 64 KiB chunks), zero-byte stream handled.
+  - **Integrity verification** — `Sha256IntegrityVerifier` (pure `Result`-based verify) +
+    `getVerified` (read-time corruption guard).
+  - **Artifact registry** — `InMemoryArtifactRegistry`: write-once content-address → descriptor
+    index; conflicting re-registration rejected, identical re-registration a no-op (INV-7),
+    descriptors deep-frozen; `byRun` lineage query.
+  - **Provenance** — `describeArtifact(data, provenance, contentType?)`: single assembly point so
+    key/digest/size can never disagree with the content; time injected via `provenance.createdAt`.
+  - **Artifact validation** — `validateArtifactDescriptor` + `artifactDescriptorValidator`
+    (untrusted-input boundary: shape + key⇄digest consistency + value-object parsing).
+  - **Facade** — `ArtifactPlatform` (implements the Phase-3 `StorageAdapter`; backend injected).
+- **`@workerv2/infra-contracts`** — byte-level artifact contracts (additive): `ArtifactByteStream`,
+  `StreamingArtifactStore`, `ArtifactKind`/`ARTIFACT_KINDS`, `ArtifactProvenance` (Run + step +
+  frozen version pins + source-asset lineage + injected `createdAt`), `ArtifactDescriptor`,
+  `ArtifactRegistry`, `IntegrityVerifier`, and `IntegrityError`.
+- **Reusable contract suite** — `runArtifactStoreContract(name, factory)`
+  (`packages/artifact-store/test/contract/`): the compliance suite any future durable
+  `StreamingArtifactStore` backend must pass.
+- **ADR-0006** — content-addressed Artifact Platform decisions (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries) for `artifact-store`; `infra-contracts`
+index/errors export the new contracts.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Hashing is single-pass/incremental; reads return copies (immutability over micro-cost —
+reference engine). `putStream` buffers in memory while hashing (a durable backend can spool);
+registry queries are linear scans (index later if needed).
+
+**Security:** No secrets/PII. Integrity-at-write + verified reads make corruption and mis-addressed
+writes detectable; write-once semantics make tampering additive-only; validation guards untrusted
+registry rows before they are trusted.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0006; ADR index; `WORKER_V2_PROGRESS.md`
+(frozen Phase 3 → ✅ 100%, M5 complete).
+
+**Testing:** **50 new tests** — addressing determinism + known-vector + distinctness; the reusable
+store contract (write-once, integrity-at-write, absent-key, streaming equivalence, idempotent
+re-put); putContent idempotency; **backend-independence of identity** (two backends, same key);
+byte-level immutability under caller mutation; corruption → `IntegrityError`; streaming round-trips
++ empty + large-chunked; registry write-once/idempotent/frozen/lineage; descriptor validation
+(accept + 15 rejection branches); integrity verifier; platform end-to-end
+(describe → put → register → verify → byRun). `pnpm verify` green (**213 total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. The reference engine is in-memory; a durable `BlobStore`/registry
+implements the same seams later — proven via `runArtifactStoreContract` — with no change above.
+
+**ADR References:** **ADR-0006**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-5-artifact-platform`)._
+
+#### Phase Retrospective (task-phase 5)
+
+- **Architectural decisions.** (1) One addressing scheme (`sha256:<hex>`), namespaced into the key
+  so future algorithms are additive. (2) The replaceable-backend seam is a *dumb* `BlobStore` with
+  every guarantee (addressing, write-once, integrity, streaming) implemented ABOVE it — that is
+  what makes artifact identity provably backend-independent. (3) Write-once split into two write
+  modes: strict `put` (explicit key; rejects mismatch + overwrite) vs idempotent content-derived
+  writes (`putContent`/`putStream`) — retry-safe by construction, no overwrite possible since
+  identical bytes ⇒ identical identity. (4) Artifacts are first-class immutable objects: descriptor
+  assembly lives in exactly one place (`describeArtifact`), provenance (Run / VersionSet pins /
+  Processing Step / lineage / injected time) is typed and validated, and the registry is write-once
+  with structural-idempotence.
+- **ADRs.** ADR-0006 (accepted), recording the four decisions above plus rejected alternatives
+  (UUID-addressed keys; strict-reject of identical re-writes; free-form provenance).
+- **Scope adjustments.** None against the task scope. The task's "Phase 5" maps onto the frozen
+  Phase 3 byte store (per the numbering note carried since task-phase 4) — completing M5 rather
+  than starting the frozen Image Platform. WBS 5.2.2's *event wiring* (artifact writes → audited
+  asset transitions) is deferred to the first producing pipeline, since both halves (Control-Plane
+  transitions, artifact substrate) now exist and only a producer can connect them meaningfully.
+- **Remaining risks.** Durable backends (BlobStore/registry/persistence) are still process-local —
+  mitigated by the reusable contract suite; `putStream` buffers while hashing (spooling is a
+  backend concern); registry lookups are linear (fine at reference scale); unreferenced-artifact
+  archival/GC semantics reserved.
+- **Reusable abstractions.** `BlobStore` (any byte backend), `runArtifactStoreContract` (backend
+  compliance suite), `Sha256ContentAddressing`/`IntegrityVerifier` (any subsystem needing stable
+  content identity), `ArtifactProvenance`/`ArtifactDescriptor`/`ArtifactRegistry` (render/image/
+  manufacturing phases all attach lineage through these), `describeArtifact` (single descriptor
+  assembly), `ArtifactByteStream` (platform-neutral streaming primitive).
+
+---
+
 ### v0.0.0 — 2026-07-23 — Persistence Engine (task-phase 4)
 
 > Completes the State Store deferred by ADR-0002/0004 — part of the frozen Storage phase (M5),

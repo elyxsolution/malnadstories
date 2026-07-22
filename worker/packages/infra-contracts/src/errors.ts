@@ -24,3 +24,14 @@ export class MappingError extends WorkerV2Error {
     super(message, { ...options, code: 'VALIDATION' });
   }
 }
+
+/**
+ * A content-integrity check failed: bytes did not hash to their expected content address (a
+ * mis-addressed write, or corruption of stored/streamed content). Distinct from `StorageError`
+ * (an overwrite attempt) — this means the CONTENT does not match its identity.
+ */
+export class IntegrityError extends WorkerV2Error {
+  constructor(message: string, options?: Omit<WorkerV2ErrorOptions, 'code'>) {
+    super(message, { ...options, code: 'VALIDATION' });
+  }
+}

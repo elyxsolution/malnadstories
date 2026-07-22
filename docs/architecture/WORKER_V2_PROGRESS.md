@@ -12,18 +12,18 @@
 | Stage | Status |
 |---|---|
 | Planning Phase | ✅ Complete |
-| Implementation Phase | 🔄 In Progress (6 / 18 phases) |
+| Implementation Phase | 🔄 In Progress (7 / 18 phases) |
 | Testing Phase | ⬜ Not Started |
 | Production Readiness | ⬜ Not Started |
 | Deployment | ⬜ Not Started |
 
-**Overall Completion:** Planning 100% · **Implementation ≈33%** (task-phases −1…4 delivered; note: task-phase "4" delivered the persistence engine — the State Store belonging to the frozen Storage phase / M5 — **not** the frozen Product Platform, which remains not started)
+**Overall Completion:** Planning 100% · **Implementation ≈39%** (task-phases −1…5 delivered; note: task-phases "4" and "5" both delivered pieces of the frozen Storage phase — the persistence engine and the content-addressed byte Artifact Platform respectively — so the frozen Phase 3 / M5 is now **complete**, while the frozen Product Platform remains not started)
 
 | Field | Value |
 |---|---|
-| Current Active Phase | None (persistence engine complete; next phase not started) |
-| Current Milestone | M5 — Artifact Platform Ready (contracts + persistence engine done; durable backend + byte store deferred) |
-| Current Branch | `worker-v2/phase-4-persistence` |
+| Current Active Phase | None (Artifact Platform complete; next phase not started) |
+| Current Milestone | ✅ M5 — Artifact Platform Ready (contracts + persistence engine + content-addressed byte store all done; durable backends remain drop-in swaps) |
+| Current Branch | `worker-v2/phase-5-artifact-platform` |
 | Current Version | Worker V2 v0.0.0 |
 | Last Updated | 2026-07-23 |
 
@@ -37,7 +37,7 @@
 | 0 | Foundation & Contracts | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | 10 `@workerv2/*` foundation packages; strict TS + boundary/cycle check + ESLint/Prettier + Vitest (50 tests); CI workflow; ADR system (ADR-0001). |
 | 1 | Control Plane & Domain Lifecycles | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | Pure domain model `@workerv2/control-plane` (aggregates, state machines, events, audit, version-set, policies); 50 tests. Persistence (State Store / Run Registry) deferred — ADR-0002. |
 | 2 | Worker Runtime Platform | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | `@workerv2/runtime` hosting framework (lifecycle, service/capability/plugin registries, DI/config/health integration, technical events); 23 tests. No domain behavior — ADR-0003. |
-| 3 | Storage & Immutable Artifact Platform | 🟡 Engine done | 85% | 2026-07-22 | 2026-07-23 | — | Contracts (`infra-contracts`) + **concrete persistence engine** (`@workerv2/persistence`: State Store, repositories, UoW/transactions, optimistic locking, Run Registry INV-6, audit + artifact-metadata persistence) + domain reconstitution API. ADR-0004/0005. Durable backend + content-addressed **byte** store still deferred. |
+| 3 | Storage & Immutable Artifact Platform | ✅ Done | 100% | 2026-07-22 | 2026-07-23 | — | Contracts (`infra-contracts`) + **persistence engine** (`@workerv2/persistence`, ADR-0005) + **content-addressed byte Artifact Platform** (`@workerv2/artifact-store`: sha256 addressing + verification, write-once byte store over a replaceable `BlobStore`, streaming, integrity, registry, validation, provenance — ADR-0006). Durable backends (SQL/KV + object storage) remain drop-in swaps behind the same contracts. |
 | 4 | Product Platform | Not Started | 0% | — | — | — | — |
 | 5 | Image Processing Platform | Not Started | 0% | — | — | — | — |
 | 6 | Blueprint Platform | Not Started | 0% | — | — | — | — |
@@ -65,7 +65,7 @@
 | M2 | Foundation Ready | 0 | ✅ Complete (2026-07-22) |
 | M3 | Control Plane Ready | 1 | ✅ Complete (2026-07-22) — domain model (persistence deferred, ADR-0002) |
 | M4 | Runtime Ready | 2 | ✅ Complete (2026-07-22) |
-| M5 | Artifact Platform Ready | 3 | 🟡 Contracts + persistence engine complete (2026-07-23); durable backend + byte store deferred — ADR-0004/0005 |
+| M5 | Artifact Platform Ready | 3 | ✅ Complete (2026-07-23) — contracts + persistence engine + content-addressed byte store (ADR-0004/0005/0006); durable backends deferred as drop-in swaps |
 | M6 | Product Platform Ready | 4 | ⬜ Pending |
 | M7 | Image Platform Ready | 5 | ⬜ Pending |
 | M8 | Blueprint Ready | 6 | ⬜ Pending |
@@ -95,6 +95,7 @@ ADR directory established in Phase 0 (`docs/architecture/adr/`, WBS `2.3.1`).
 | 0003 | Runtime dependency boundary & plugin framework scope | ✅ Accepted |
 | 0004 | Phase 3 delivers infrastructure contracts, not implementations | ✅ Accepted |
 | 0005 | In-memory persistence engine + domain reconstitution API | ✅ Accepted |
+| 0006 | Content-addressed Artifact Platform (byte store, registry, provenance) | ✅ Accepted |
 
 ---
 
@@ -111,7 +112,8 @@ _Active implementation risks only (carried forward as they arise)._
 ## Upcoming Work
 
 - **Frozen Phase 4 — Product Platform** (**not started**). See `WORKER_V2_PHASES.md` Phase 4 / `WORKER_V2_WBS.md` (WBS 6).
-- **Deferred infra implementations (now narrowed after the persistence engine):** a **durable** persistence backend (SQL/KV) implementing the same contracts, and the content-addressed **byte** `ArtifactStore` + `ContentAddressing` (the artifact **metadata** persistence is built). Domain reconstitution + inbound mappers are now **done** (ADR-0005).
+- **Deferred infra implementations (now narrowed after the Artifact Platform):** a **durable** persistence backend (SQL/KV) and a **durable** `BlobStore`/registry (object storage) — both drop-in swaps behind the existing contracts (the reusable `runArtifactStoreContract` suite proves a new backend). The content-addressed byte store, addressing, streaming, integrity, registry, validation, and provenance are now **done** (ADR-0006).
+- **Storage-side Asset Lifecycle wiring (WBS 5.2.2 remainder):** connecting artifact writes to audited asset-state transitions happens when a producing pipeline exists (image/render phases) — the Control Plane transitions + artifact substrate are both ready.
 
 ---
 
@@ -119,11 +121,11 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Metric | Value |
 |---|---|
-| Lines of Code | ~3,650 src + ~2,500 test (foundation + control-plane + runtime + infra-contracts + persistence) |
-| Tests | 163 passing (Vitest) |
+| Lines of Code | ~4,300 src + ~3,000 test (foundation + control-plane + runtime + infra-contracts + persistence + artifact-store) |
+| Tests | 213 passing (Vitest) |
 | Coverage | v8 provider configured (not gated yet) |
-| Packages | 14 (`@workerv2/*` — 10 foundation + control-plane + runtime + infra-contracts + persistence) |
-| Modules | 100 source modules |
+| Packages | 15 (`@workerv2/*` — 10 foundation + control-plane + runtime + infra-contracts + persistence + artifact-store) |
+| Modules | 104 source modules |
 | Build Status | `pnpm verify` green — typecheck + boundaries + lint + format + test |
 | Performance | — |
 | Artifacts | — |
@@ -136,6 +138,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Date | Entry |
 |---|---|
+| 2026-07-23 | **Artifact Platform (task-phase 5) complete — frozen Phase 3 / M5 now fully done.** Added `@workerv2/artifact-store` — the concrete **content-addressed, write-once byte `ArtifactStore`**: deterministic **sha256 addressing** (`sha256:<digest>`, pinned by a published test vector), a replaceable **`BlobStore`** backend seam (in-memory reference; guarantees live ABOVE the seam), write-once + integrity-at-write guards (`StorageError`/`IntegrityError`), **idempotent** content-derived writes (`putContent`/`putStream`), **streaming** I/O (incremental hashing; chunking never changes identity), **integrity verification** (`Sha256IntegrityVerifier` + `getVerified` corruption guard), the write-once **artifact registry** with **provenance** (Run, processing step, kind, frozen version pins, source-asset lineage, injected time) + `byRun` lineage query, **artifact validation** (untrusted-input boundary), and the `ArtifactPlatform` facade implementing the Phase-3 `StorageAdapter`. Extended `infra-contracts` with the streaming/provenance/registry/integrity contracts + `IntegrityError`. Includes a **reusable contract suite** (`runArtifactStoreContract`) future durable backends must pass. Storage holds no business logic; identity is backend-independent (both verified by tests + boundary checker). ADR-0006. 50 new tests; `pnpm verify` green (**213 total**). |
 | 2026-07-23 | **Persistence engine (task-phase 4) complete.** Added `@workerv2/persistence` — the concrete in-memory **State Store** implementing the Phase 3 contracts: transaction-bound repositories, `InMemoryUnitOfWork` (atomic commit/rollback) with **optimistic locking** (`ConcurrencyError`), the durable **Run Registry** (INV-6), append-only **audit** persistence, **write-once artifact-metadata** persistence, infra **validation**, and a storage-isolated `RecordTable` primitive. Added the domain-owned **reconstitution API** (`Album/Asset/Run.reconstitute`, no events, invariants enforced) + concrete **inbound mappers** + **serialization-symmetry** round-trip tests. Domain stays persistence-independent (verified). ADR-0005. 21 tests; `pnpm verify` green (163 total). |
 | 2026-07-22 | **Phase 3 (Infrastructure Contracts & Persistence Foundation) complete** → M5 (contracts). Added `@workerv2/infra-contracts`: repository/UoW/transaction/repository-factory/storage/adapter **interfaces**, persistence **DTOs**, concrete **outbound** mappers (anti-corruption layer), infra technical events (INV-12), and validation contracts. Domain stays infrastructure-independent (verified). Concrete storage/DB adapters + inbound reconstitution **deferred** — ADR-0004. Also added interfaces-only capability version-negotiation hooks to the runtime. 19 tests; `pnpm verify` green (142 total). |
 | 2026-07-22 | **Phase 2 (Worker Runtime Platform) complete** → M4 Runtime Ready. Added `@workerv2/runtime`: the generic hosting framework — `Runtime` lifecycle (`RUNTIME_MACHINE`; idempotent, deterministic start/stop), service registry + dependency-graph ordering (Kahn, name-sorted; cycle/missing detection), capability registry, plugin framework (`Plugin`/`PluginContext`/`applyPlugins`), DI integration, immutable runtime metadata + config, health integration, and a technical-event bus (INV-12). Depends on control-plane for generic contracts only — no domain behavior (ADR-0003). 23 tests; `pnpm verify` green (123 total). |
