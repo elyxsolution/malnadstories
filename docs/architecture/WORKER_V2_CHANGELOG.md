@@ -28,6 +28,45 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-22 — Phase 0 · Foundation & Contracts
+
+**Added:**
+- Isolated `worker/` **pnpm workspace** (own root) with shared strict TypeScript (`tsconfig.base.json` + solution `tsconfig.json`), ESLint (flat) + Prettier, Vitest, and `.gitignore`.
+- **10 product-agnostic foundation packages** (`@workerv2/*`), one capability each:
+  `contracts` (shared types / neutral home), `utils` (Result + invariants + object helpers),
+  `errors` (typed error taxonomy), `config` (config framework + env validation, injected
+  validator), `logger` (Logger abstraction + console/noop), `metrics` (Metrics abstraction +
+  noop/in-memory), `health` (check registry), `flags` (feature-flag framework), `di`
+  (DI container foundation), `build-info` (version + build metadata).
+- **Authoritative boundary/cycle checker** `scripts/check-boundaries.mjs` (dependency direction,
+  declared-deps, acyclic package graph — zero deps).
+- **CI workflow** `.github/workflows/worker-v2-ci.yml` (install → typecheck → boundaries → lint → format → test).
+- **ADR system** `docs/architecture/adr/` (README + `0000` template + **ADR-0001** — foundation scope & layout).
+- Reserved (empty) `worker/apps/`, `worker/ops/`, and the DX-generator seam in `worker/scripts/`.
+
+**Changed:**
+- `worker/README.md` updated from the Phase −1 placeholder to document the foundation workspace.
+
+**Removed:** Nothing (Phase 0 is purely additive on top of the Phase −1 clean slate).
+
+**Performance:** No perf-sensitive code. Vitest suite runs in <1s.
+
+**Security:** Product-agnostic foundation; no secrets/PII. Error `context` + log `fields` documented as JSON-safe / secret-free (Playbook §4.3.2).
+
+**Documentation:** Per-package `README.md` + JSDoc on every public export; ADR-0001; `WORKER_V2_PROGRESS.md` updated (Phase 0 → Done, M2, stats).
+
+**Testing:** **50 Vitest tests** across all 10 packages, every exported component covered. Full gate `pnpm verify` (typecheck + boundaries + lint + format + test) green.
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. First `worker/` install requires `cd worker && pnpm install` (pnpm v11 build allowlist includes `esbuild`).
+
+**ADR References:** **ADR-0001** — Worker V2 foundation scope & repository layout (records that Phase 0 delivers generic *foundations* while later phases retain their product-wired *platforms*).
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-0-foundation`)._
+
+---
+
 ### v0.0.0 — 2026-07-22 — Phase −1 · Worker Reset
 
 **Added:**

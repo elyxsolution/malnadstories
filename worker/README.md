@@ -1,14 +1,48 @@
-# worker/ — reset for Worker V2
+# worker/ — Worker V2 platform
 
-**Status:** Emptied by **Phase −1 (Worker Reset)** on 2026-07-22. Legacy **Worker V1** has been
-fully removed. This directory is intentionally empty except for this placeholder, awaiting the
-**Worker V2 foundation** established in **Phase 0**.
+Isolated **pnpm workspace** (its own root, separate from the Next.js app at the repo root) that
+hosts the Worker V2 platform. Established in **Phase 0 (Foundation)**; the legacy Worker V1 was
+removed in Phase −1 (rollback anchor: git tag `worker-v1-final`).
 
-- **Do not** add Worker V2 implementation here yet — Phase −1 creates **no V2 folders** (per
-  `WORKER_V2_PHASES.md` Phase −1 and `WORKER_V2_WBS.md` WBS 1.1).
-- The complete Worker V1 tree is preserved at the git tag **`worker-v1-final`** (rollback anchor).
-- V1 behaviors that Worker V2 must re-home are catalogued in
-  `docs/architecture/execution/PHASE_-1_DEPENDENCY_INVENTORY.md`.
+> **Phase 0 scope:** product-agnostic engineering foundation only. Nothing here knows about
+> albums, rendering, manifests, blueprints, queues, databases, storage, or business logic. See
+> `docs/architecture/adr/0001-worker-v2-foundation-scope-and-layout.md`.
+
+## Layout
+
+```
+worker/
+  packages/            Foundation libraries (@workerv2/*), one capability each
+    contracts/         Shared types (neutral home)                 [no deps]
+    utils/             Pure helpers (Result, invariants, objects)  [contracts]
+    errors/            Typed error taxonomy                        [contracts]
+    config/            Config framework + env validation           [contracts, errors, utils]
+    logger/            Logging abstraction + impls                 [contracts]
+    metrics/           Metrics abstraction + impls                 [contracts]
+    health/            Health-check registry                       [contracts]
+    flags/             Feature-flag framework                      [contracts]
+    di/                DI container foundation                     [contracts, errors]
+    build-info/        Version + build metadata                    [contracts]
+  apps/                Reserved (no deployable app in Phase 0)
+  ops/                 Reserved (runbooks/alerting later)
+  scripts/             Repo automation (boundary checker; DX seam reserved)
+```
+
+## Commands
+
+```bash
+cd worker && pnpm install
+pnpm run typecheck    # strict TS, whole workspace
+pnpm run boundaries   # authoritative dependency-direction + cycle check
+pnpm run lint         # ESLint (flat)
+pnpm run format       # Prettier check
+pnpm run test         # Vitest
+pnpm run verify       # all of the above
+```
+
+**Dependency direction** (enforced by `scripts/check-boundaries.mjs`): `contracts` is a leaf;
+`utils`/`errors` depend only on `contracts`; all other packages depend only on those. The graph
+is acyclic and contains no product code.
 
 **Planning source of truth:** `docs/architecture/` — ADS, Implementation Guide, Phase Plan, WBS,
-Engineering Playbook.
+Engineering Playbook, ADRs.

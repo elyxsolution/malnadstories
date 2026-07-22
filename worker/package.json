@@ -1,0 +1,29 @@
+{
+  "name": "@workerv2/root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 platform — engineering foundation (Phase 0). Product-agnostic reusable packages only.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "boundaries": "node scripts/check-boundaries.mjs",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "pnpm run typecheck && pnpm run boundaries && pnpm run lint && pnpm run format && pnpm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@types/node": "^20.16.0",
+    "eslint": "^9.13.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.10.0",
+    "vitest": "^2.1.0"
+  }
+}

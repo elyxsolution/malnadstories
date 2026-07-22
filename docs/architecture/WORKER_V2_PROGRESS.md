@@ -12,18 +12,18 @@
 | Stage | Status |
 |---|---|
 | Planning Phase | ✅ Complete |
-| Implementation Phase | 🔄 In Progress (1 / 18 phases) |
+| Implementation Phase | 🔄 In Progress (2 / 18 phases) |
 | Testing Phase | ⬜ Not Started |
 | Production Readiness | ⬜ Not Started |
 | Deployment | ⬜ Not Started |
 
-**Overall Completion:** Planning 100% · **Implementation ≈6% (1 / 18 phases — Phase −1 complete)**
+**Overall Completion:** Planning 100% · **Implementation ≈11% (2 / 18 phases — through Phase 0)**
 
 | Field | Value |
 |---|---|
-| Current Active Phase | None (Phase −1 complete; Phase 0 not started) |
-| Current Milestone | M1 — Clean Slate |
-| Current Branch | `worker-v2/phase--1-worker-reset` |
+| Current Active Phase | None (Phase 0 complete; Phase 1 not started) |
+| Current Milestone | M2 — Foundation Ready |
+| Current Branch | `worker-v2/phase-0-foundation` |
 | Current Version | Worker V2 v0.0.0 |
 | Last Updated | 2026-07-22 |
 
@@ -34,7 +34,7 @@
 | Phase | Name | Status | % | Started | Completed | Owner | Notes |
 |---|---|---|---|---|---|---|---|
 | −1 | Worker Reset | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | V1 `worker/` tree removed; rollback tag `worker-v1-final`; app build green. |
-| 0 | Foundation & Contracts | Not Started | 0% | — | — | — | — |
+| 0 | Foundation & Contracts | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | 10 `@workerv2/*` foundation packages; strict TS + boundary/cycle check + ESLint/Prettier + Vitest (50 tests); CI workflow; ADR system (ADR-0001). |
 | 1 | Control Plane & Domain Lifecycles | Not Started | 0% | — | — | — | — |
 | 2 | Worker Runtime Platform | Not Started | 0% | — | — | — | — |
 | 3 | Storage & Immutable Artifact Platform | Not Started | 0% | — | — | — | — |
@@ -62,7 +62,7 @@
 |---|---|---|---|
 | M0 | Architecture Ready | ADS + Phase 0 | ✅ Complete (planning) |
 | M1 | Clean Slate | −1 | ✅ Complete (2026-07-22) |
-| M2 | Foundation Ready | 0 | ⬜ Pending |
+| M2 | Foundation Ready | 0 | ✅ Complete (2026-07-22) |
 | M3 | Control Plane Ready | 1 | ⬜ Pending |
 | M4 | Runtime Ready | 2 | ⬜ Pending |
 | M5 | Artifact Platform Ready | 3 | ⬜ Pending |
@@ -86,9 +86,11 @@
 
 ## Architecture Decisions
 
-ADRs live in the ADR directory (established in Phase 0 per WBS `2.3.1`).
+ADR directory established in Phase 0 (`docs/architecture/adr/`, WBS `2.3.1`).
 
-**No implementation ADRs created.**
+| ADR | Title | Status |
+|---|---|---|
+| 0001 | Worker V2 foundation scope & repository layout | ✅ Accepted |
 
 ---
 
@@ -104,7 +106,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 ## Upcoming Work
 
-- **Phase 0 — Foundation & Contracts** (next; **not started — awaiting instruction**). See `WORKER_V2_PHASES.md` Phase 0 / `WORKER_V2_WBS.md` (WBS 2).
+- **Phase 1 — Control Plane & Domain Lifecycles** (next; **not started — awaiting instruction**). See `WORKER_V2_PHASES.md` Phase 1 / `WORKER_V2_WBS.md` (WBS 3).
 
 ---
 
@@ -112,16 +114,16 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Metric | Value |
 |---|---|
-| Lines of Code | 0 |
-| Tests | 0 |
-| Coverage | — |
-| Packages | 0 |
-| Modules | 0 |
-| Build Status | App typecheck passing (`tsc --noEmit` exit 0) |
+| Lines of Code | ~839 src + ~523 test (foundation packages) |
+| Tests | 50 passing (Vitest) |
+| Coverage | v8 provider configured (not gated in Phase 0) |
+| Packages | 10 (`@workerv2/*` foundation) |
+| Modules | 34 source modules |
+| Build Status | `pnpm verify` green — typecheck + boundaries + lint + format + test |
 | Performance | — |
 | Artifacts | — |
 | Render Accuracy | — |
-| Worker Version | v0.0.0 (V1 removed; V2 not started) |
+| Worker Version | v0.0.0 (foundation only; no product code) |
 
 ---
 
@@ -129,6 +131,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Date | Entry |
 |---|---|
+| 2026-07-22 | **Phase 0 (Foundation & Contracts) complete** → M2 Foundation Ready. Established the isolated `worker/` pnpm workspace with 10 product-agnostic `@workerv2/*` packages (contracts, utils, errors, config, logger, metrics, health, flags, di, build-info), strict TS, authoritative boundary/cycle checker, ESLint/Prettier, Vitest (50 tests), CI workflow, and the ADR system (ADR-0001 records the Phase 0 scope + layout). `pnpm verify` green. |
 | 2026-07-22 | **Phase −1 (Worker Reset) complete** → M1 Clean Slate. Legacy `worker/` V1 tree removed; dead `worker` ref cleaned from root `tsconfig.json`; `worker/README.md` placeholder added; rollback tag `worker-v1-final`; app typecheck green. Execution plan + dependency inventory authored under `docs/architecture/execution/`. |
 | 2026-07-22 | Planning completed — ADS + Implementation Guide + Phase Plan + WBS + Engineering Playbook frozen. |
 

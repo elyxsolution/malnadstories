@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@workerv2/contracts": ["packages/contracts/src/index.ts"],
+      "@workerv2/utils": ["packages/utils/src/index.ts"],
+      "@workerv2/errors": ["packages/errors/src/index.ts"],
+      "@workerv2/config": ["packages/config/src/index.ts"],
+      "@workerv2/logger": ["packages/logger/src/index.ts"],
+      "@workerv2/metrics": ["packages/metrics/src/index.ts"],
+      "@workerv2/health": ["packages/health/src/index.ts"],
+      "@workerv2/flags": ["packages/flags/src/index.ts"],
+      "@workerv2/di": ["packages/di/src/index.ts"],
+      "@workerv2/build-info": ["packages/build-info/src/index.ts"]
+    },
+    "noEmit": true
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts"]
+}

@@ -1,0 +1,11 @@
+# Worker V2 is its OWN pnpm root (isolated from the Next.js app at the repo root),
+# so `pnpm install` here installs into worker/node_modules and never walks up to the
+# app's lockfile. Established in Phase 0 (Foundation).
+packages:
+  - 'packages/*'
+  # 'apps/*' is reserved for later phases — no deployable app exists in Phase 0.
+
+# pnpm v11 blocks native install scripts by default; allow the ones our toolchain needs.
+# esbuild (a Vitest dependency) ships a platform binary via its install script.
+allowBuilds:
+  esbuild: true
