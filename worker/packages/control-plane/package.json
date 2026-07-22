@@ -1,0 +1,17 @@
+{
+  "name": "@workerv2/control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 Control Plane DOMAIN — framework-independent, immutable, deterministic source-of-truth model (aggregates, state machines, policies, events, audit, version set). No infrastructure, no I/O.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*"
+  }
+}

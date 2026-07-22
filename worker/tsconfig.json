@@ -12,7 +12,8 @@
       "@workerv2/health": ["packages/health/src/index.ts"],
       "@workerv2/flags": ["packages/flags/src/index.ts"],
       "@workerv2/di": ["packages/di/src/index.ts"],
-      "@workerv2/build-info": ["packages/build-info/src/index.ts"]
+      "@workerv2/build-info": ["packages/build-info/src/index.ts"],
+      "@workerv2/control-plane": ["packages/control-plane/src/index.ts"]
     },
     "noEmit": true
   },

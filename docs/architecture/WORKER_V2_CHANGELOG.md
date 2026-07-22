@@ -28,6 +28,48 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-22 — Phase 1 · Control Plane & Domain Lifecycles
+
+**Added:**
+- **`@workerv2/control-plane`** — the pure Control Plane **domain** (framework-independent,
+  immutable, deterministic, no I/O; depends only on `contracts`/`utils`/`errors`):
+  - **Value objects** — branded ids (`AlbumId`/`AssetId`/`RunId`/`ActorId`/`EventId`/`AuditId`),
+    `Timestamp` (injected; no `Date.now`), `Actor`, `DomainContext`.
+  - **State machines** — generic `defineStateMachine` engine + `ALBUM_MACHINE` (Rec 13),
+    `ASSET_MACHINE` (Rec 14), `RUN_MACHINE`; illegal edges return `TransitionError` via `Result`.
+  - **Aggregates** — immutable `Album`, `Asset`, `Run`; every op returns a new aggregate +
+    `DomainEvent` + `AuditRecord`. `Run` freezes a `VersionSet` for its whole life (INV-11).
+  - **Events** — separate `DomainEvent` / `TechnicalEvent` families with `kind` discriminator +
+    guards (INV-12).
+  - **Audit** — `AuditRecord` + `recordTransition` (INV-9).
+  - **Version registry model** — `VersionSet` (validated, immutable, `require()` gate) +
+    `VERSION_COMPONENTS`.
+  - **Policy** — `canStartRun` (one active run per album, INV-6).
+- Workspace wiring for the new package (tsconfig paths, vitest alias, boundary ALLOWED map).
+- **ADR-0002** — records the domain-first / persistence-deferred scope decision.
+
+**Changed:** `worker/tsconfig.json`, `worker/vitest.config.ts`, `worker/scripts/check-boundaries.mjs` extended for `control-plane`.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory domain; no perf-sensitive paths.
+
+**Security:** No secrets/PII; audit `metadata` + event `payload` documented as JSON-safe.
+
+**Documentation:** Package `README.md` + JSDoc on every public export; ADR-0002; `WORKER_V2_PROGRESS.md` updated (Phase 1 → Done, M3).
+
+**Testing:** **50 new domain tests** (value objects, state machine, lifecycles, events, audit, version-set, policy, aggregates) — determinism, immutability, and invariant compliance asserted. `pnpm verify` green (**100 tests total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Domain has no persistence; the deferred State Store / Run Registry (ADR-0002) arrive in Phase 2.
+
+**ADR References:** **ADR-0002** — Control Plane: domain model first, persistence deferred.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-1-control-plane`)._
+
+---
+
 ### v0.0.0 — 2026-07-22 — Phase 0 · Foundation & Contracts
 
 **Added:**

@@ -32,6 +32,9 @@ const ALLOWED = {
   flags: ['contracts'],
   di: ['contracts', 'errors', 'utils'],
   'build-info': ['contracts'],
+  // Control Plane DOMAIN (Phase 1): pure, framework-independent. Depends only on the
+  // foundation leaves — never on runtime/infrastructure packages.
+  'control-plane': ['contracts', 'utils', 'errors'],
 };
 
 /** Recursively collect .ts source files under a directory. */

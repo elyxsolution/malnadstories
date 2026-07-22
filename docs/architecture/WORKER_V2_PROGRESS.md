@@ -12,18 +12,18 @@
 | Stage | Status |
 |---|---|
 | Planning Phase | ✅ Complete |
-| Implementation Phase | 🔄 In Progress (2 / 18 phases) |
+| Implementation Phase | 🔄 In Progress (3 / 18 phases) |
 | Testing Phase | ⬜ Not Started |
 | Production Readiness | ⬜ Not Started |
 | Deployment | ⬜ Not Started |
 
-**Overall Completion:** Planning 100% · **Implementation ≈11% (2 / 18 phases — through Phase 0)**
+**Overall Completion:** Planning 100% · **Implementation ≈17% (3 / 18 phases — through Phase 1)**
 
 | Field | Value |
 |---|---|
-| Current Active Phase | None (Phase 0 complete; Phase 1 not started) |
-| Current Milestone | M2 — Foundation Ready |
-| Current Branch | `worker-v2/phase-0-foundation` |
+| Current Active Phase | None (Phase 1 complete; Phase 2 not started) |
+| Current Milestone | M3 — Control Plane Ready |
+| Current Branch | `worker-v2/phase-1-control-plane` |
 | Current Version | Worker V2 v0.0.0 |
 | Last Updated | 2026-07-22 |
 
@@ -35,7 +35,7 @@
 |---|---|---|---|---|---|---|---|
 | −1 | Worker Reset | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | V1 `worker/` tree removed; rollback tag `worker-v1-final`; app build green. |
 | 0 | Foundation & Contracts | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | 10 `@workerv2/*` foundation packages; strict TS + boundary/cycle check + ESLint/Prettier + Vitest (50 tests); CI workflow; ADR system (ADR-0001). |
-| 1 | Control Plane & Domain Lifecycles | Not Started | 0% | — | — | — | — |
+| 1 | Control Plane & Domain Lifecycles | ✅ Done | 100% | 2026-07-22 | 2026-07-22 | — | Pure domain model `@workerv2/control-plane` (aggregates, state machines, events, audit, version-set, policies); 50 tests. Persistence (State Store / Run Registry) deferred — ADR-0002. |
 | 2 | Worker Runtime Platform | Not Started | 0% | — | — | — | — |
 | 3 | Storage & Immutable Artifact Platform | Not Started | 0% | — | — | — | — |
 | 4 | Product Platform | Not Started | 0% | — | — | — | — |
@@ -63,7 +63,7 @@
 | M0 | Architecture Ready | ADS + Phase 0 | ✅ Complete (planning) |
 | M1 | Clean Slate | −1 | ✅ Complete (2026-07-22) |
 | M2 | Foundation Ready | 0 | ✅ Complete (2026-07-22) |
-| M3 | Control Plane Ready | 1 | ⬜ Pending |
+| M3 | Control Plane Ready | 1 | ✅ Complete (2026-07-22) — domain model (persistence deferred, ADR-0002) |
 | M4 | Runtime Ready | 2 | ⬜ Pending |
 | M5 | Artifact Platform Ready | 3 | ⬜ Pending |
 | M6 | Product Platform Ready | 4 | ⬜ Pending |
@@ -91,6 +91,7 @@ ADR directory established in Phase 0 (`docs/architecture/adr/`, WBS `2.3.1`).
 | ADR | Title | Status |
 |---|---|---|
 | 0001 | Worker V2 foundation scope & repository layout | ✅ Accepted |
+| 0002 | Control Plane: domain model first, persistence deferred | ✅ Accepted |
 
 ---
 
@@ -106,7 +107,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 ## Upcoming Work
 
-- **Phase 1 — Control Plane & Domain Lifecycles** (next; **not started — awaiting instruction**). See `WORKER_V2_PHASES.md` Phase 1 / `WORKER_V2_WBS.md` (WBS 3).
+- **Phase 2 — Worker Runtime Platform** (next; **not started — awaiting instruction**). See `WORKER_V2_PHASES.md` Phase 2 / `WORKER_V2_WBS.md` (WBS 4). Also carries the deferred Control Plane persistence (State Store / Run Registry) per ADR-0002.
 
 ---
 
@@ -114,11 +115,11 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Metric | Value |
 |---|---|
-| Lines of Code | ~839 src + ~523 test (foundation packages) |
-| Tests | 50 passing (Vitest) |
-| Coverage | v8 provider configured (not gated in Phase 0) |
-| Packages | 10 (`@workerv2/*` foundation) |
-| Modules | 34 source modules |
+| Lines of Code | ~1,650 src + ~1,050 test (foundation + control-plane domain) |
+| Tests | 100 passing (Vitest) |
+| Coverage | v8 provider configured (not gated yet) |
+| Packages | 11 (`@workerv2/*` — 10 foundation + control-plane domain) |
+| Modules | 53 source modules |
 | Build Status | `pnpm verify` green — typecheck + boundaries + lint + format + test |
 | Performance | — |
 | Artifacts | — |
@@ -131,6 +132,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Date | Entry |
 |---|---|
+| 2026-07-22 | **Phase 1 (Control Plane & Domain Lifecycles) complete** → M3 Control Plane Ready. Added the pure `@workerv2/control-plane` domain: branded ids/timestamps/actor value objects, generic state-machine engine + album/asset/run lifecycles, immutable `Album`/`Asset`/`Run` aggregates, domain vs technical events (INV-12), audit records (INV-9), `VersionSet` (INV-11), and the one-active-run policy (INV-6). Framework-independent, immutable, deterministic (injected time/ids); boundary-enforced (deps = contracts/utils/errors only). 50 domain tests. Persistence (State Store / Run Registry) deferred to Phase 2 — ADR-0002. `pnpm verify` green (100 tests total). |
 | 2026-07-22 | **Phase 0 (Foundation & Contracts) complete** → M2 Foundation Ready. Established the isolated `worker/` pnpm workspace with 10 product-agnostic `@workerv2/*` packages (contracts, utils, errors, config, logger, metrics, health, flags, di, build-info), strict TS, authoritative boundary/cycle checker, ESLint/Prettier, Vitest (50 tests), CI workflow, and the ADR system (ADR-0001 records the Phase 0 scope + layout). `pnpm verify` green. |
 | 2026-07-22 | **Phase −1 (Worker Reset) complete** → M1 Clean Slate. Legacy `worker/` V1 tree removed; dead `worker` ref cleaned from root `tsconfig.json`; `worker/README.md` placeholder added; rollback tag `worker-v1-final`; app typecheck green. Execution plan + dependency inventory authored under `docs/architecture/execution/`. |
 | 2026-07-22 | Planning completed — ADS + Implementation Guide + Phase Plan + WBS + Engineering Playbook frozen. |

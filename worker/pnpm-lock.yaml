@@ -50,6 +50,18 @@ importers:
 
   packages/contracts: {}
 
+  packages/control-plane:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/di:
     dependencies:
       '@workerv2/contracts':

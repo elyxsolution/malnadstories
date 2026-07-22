@@ -17,6 +17,7 @@ const PACKAGES = [
   'flags',
   'di',
   'build-info',
+  'control-plane',
 ] as const;
 
 const alias = Object.fromEntries(
