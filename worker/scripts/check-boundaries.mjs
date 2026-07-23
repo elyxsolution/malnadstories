@@ -146,6 +146,22 @@ const ALLOWED = {
     'infra-contracts',
     'processing',
   ],
+  // Image Foundation Processors (Phase 13 task / frozen Image phase foundation, M7 partial): the
+  // first CONCRETE processors — generic image normalization + metadata extraction — built WITH the
+  // Processor SDK. Depends on the foundation leaves + control-plane (RunId/Timestamp value objects,
+  // via the SDK context) + infra-contracts (StorageKey/ArtifactKind CONTRACTS only) + processing
+  // (the Processor/context/failure contracts) + processor-sdk (the base processor + harness). Pure
+  // TypeScript image-container parsing — NO native codec, NO storage impl, NO rendering/PDF/layout,
+  // NO album knowledge. Nothing depends on this package (it produces `Processor`s a host registers).
+  'image-processors': [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'processing',
+    'processor-sdk',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */

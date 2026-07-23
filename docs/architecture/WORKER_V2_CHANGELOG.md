@@ -28,6 +28,80 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Image Foundation Processors (task-phase 13)
+
+> Delivers the FIRST concrete processors — generic, deterministic image normalization + metadata
+> extraction, built WITH the Processor SDK, over content-addressed Artifacts, INDEPENDENT of album
+> rendering. No album knowledge, no page composition, no PDF, no layout, no storage/R2 assumptions,
+> no native codec. The heavy pixel transcode is a native backend deferred behind the same contract.
+
+**Added:**
+- **`@workerv2/image-processors`** — the six Image Foundation Processors, each a single
+  transformation built on `createProcessor` (`descriptor` + `execute`):
+  - **`image.validate`** (`image` → `report`) — recognized + allowed format, structurally
+    decodable, within byte/dimension limits INCLUDING a **decompression-bomb pixel guard**; a valid
+    image yields a `ValidationReport`, an invalid one a `permanent` failure.
+  - **`image.decode`** (`image` → `decoded`) — structural decode to a `DecodedImage`: geometry, bit
+    depth, channels, colour type, alpha, ICC presence. (Not a pixel decode — that is deferred.)
+  - **`image.metadata`** (`image` → `metadata`) — what the file declares: format, dimensions, and
+    EXIF (orientation, capture date, make/model) into an `ImageMetadata`.
+  - **`image.exif-orientation`** (`decoded` + `metadata` → `oriented`) — the transform mapping the
+    source EXIF orientation onto the canonical display orientation (1) + the resulting dimensions.
+  - **`image.color-normalize`** (`decoded` → `color`) — the plan to bring the raster into the
+    canonical sRGB working space + whether a conversion is required.
+  - **`image.format-normalize`** (`decoded` → `format`) — the canonical delivery container (alpha →
+    PNG, else JPEG; config can force a target) + whether a transcode is required.
+  - **Pure library** (`lib/`) — a bounds-checked `ByteReader`; `detectFormat` (magic bytes);
+    `decodeImage` (PNG/JPEG/GIF/BMP/WebP/TIFF header geometry + colour, HEIC best-effort `ispe`);
+    `extractMetadata`; `parseExif` (JPEG APP1 + TIFF IFD reader, orientation/make/model/date);
+    orientation math; pure `Result`-returning config parsers. **No native codec, no ambient
+    time/randomness/env** — deterministic + cross-platform.
+  - **Registration surface** — per-processor factories (`createImage*Processor(deps)`) + the
+    aggregate `createImageFoundationProcessors(deps)` + `imageFoundationProcessorSpecs`, wiring each
+    to a host `ArtifactGateway` for the execution adapter's resolver. `IMAGE_ENGINE_VERSION` stamps
+    every descriptor + processor version (version-freeze discipline).
+- **ADR-0014** — the descriptor-transformation (vs native-codec) decision, the six-processor shape,
+  content-addressed determinism, and the deferred pixel backend (+ five rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `image-processors`.
+Nothing else — the package is a downstream leaf that produces `Processor`s; no existing package
+imports it.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Header-only parsing (no full pixel decode), whole-bytes artifact I/O; descriptors
+are small canonical-JSON Artifacts. No perf-sensitive paths.
+
+**Security:** Deterministic byte parsing is fully bounds-checked (a malformed container → a clean
+parse failure / `permanent` reject, never a throw-through); the decompression-bomb pixel guard
+caps declared dimensions; metadata carries only image facts (no secrets/PII beyond what the file
+declares); no I/O beyond the injected gateway; no file paths, URLs, or storage-backend assumptions.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0014; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 13 → done, with the Phase Retrospective; M7 → foundation processors complete).
+
+**Testing:** **42 new tests** — library (format detection across 6 formats + null; PNG/JPEG/GIF/
+BMP/TIFF/WebP dimensions + colour + ICC; EXIF orientation 1–8, make/model/date, TIFF, garbage-safe;
+metadata; orientation math); processors (validate accept/report, unrecognized/bomb/allow-list/
+byte-cap/bad-config rejects; decode success + undecodable + missing-input; metadata; exif-orientation
+chained on decode+metadata incl. swap + default-1 + wrong-schema reject; color-normalize sRGB plan +
+ICC/grayscale conversion; format-normalize alpha→PNG/else→JPEG + force-target + invalid-target
+reject); **determinism** (byte-identical content address across independent runs; different input →
+different address) + registry surface. `pnpm verify` green (**528 total**, 23 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. The native pixel-transcode backend (canonical master + derivatives) is a
+follow-up implemented behind the SAME `Processor` contract and wired to a host `ArtifactGateway`
+over the real content-addressed store; the render/assemble processors follow. Register these
+processors into the adapter's resolver via `createImageFoundationProcessors(deps)`.
+
+**ADR References:** **ADR-0014**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-23 — Processor SDK (task-phase 12)
 
 > Delivers the reusable framework future processors are built with to execute Manifest work while

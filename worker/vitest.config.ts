@@ -29,6 +29,7 @@ const PACKAGES = [
   'coordinator',
   'execution-adapter',
   'processor-sdk',
+  'image-processors',
 ] as const;
 
 const alias = Object.fromEntries(
