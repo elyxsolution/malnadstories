@@ -173,6 +173,17 @@ const ALLOWED = {
   // processor or an orchestrator. No album/render/PDF/product logic. Nothing here depends on this
   // package yet (image processors will consume it via the gateway).
   'image-backend': ['contracts', 'utils', 'errors', 'infra-contracts'],
+  // Page Composition Engine (Phase 15 task / frozen Render phase compositor half): the
+  // deterministic compositor that transforms Blueprint surfaces + normalized image Artifacts into
+  // rendered page Artifacts (layer stack, transform application, masks, clipping, frames,
+  // background fills, z-ordering, minimal blend modes, page rasterization, composition validation).
+  // Depends on the foundation leaves + infra-contracts (StorageKey) + blueprint (the SURFACE data it
+  // composes) + image-backend (the ImageBackend it runs pixel work through + the Pixel Gateway/byte
+  // port it produces page rasters with — future GPU acceleration lives behind that backend). NO PDF
+  // generation, NO album packaging, NO vendor/printing logic, NO storage of its own, NO
+  // coordinator/manifest/product dependency. Nothing depends on this package yet (a later render
+  // processor / assemble stage will).
+  composition: ['contracts', 'utils', 'errors', 'infra-contracts', 'blueprint', 'image-backend'],
 };
 
 /** Recursively collect .ts source files under a directory. */

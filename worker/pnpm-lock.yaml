@@ -72,6 +72,27 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/composition:
+    dependencies:
+      '@workerv2/blueprint':
+        specifier: workspace:*
+        version: link:../blueprint
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/image-backend':
+        specifier: workspace:*
+        version: link:../image-backend
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/config:
     dependencies:
       '@workerv2/contracts':

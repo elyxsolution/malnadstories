@@ -28,6 +28,72 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Page Composition Engine (task-phase 15)
+
+> Delivers the deterministic compositor that transforms a Blueprint surface + normalized image
+> Artifacts into a rendered, content-addressed page Artifact. Consumes only Blueprint data +
+> Artifacts; produces immutable page rasters; pixel work runs through the replaceable ImageBackend
+> (future GPU acceleration). No PDF generation, no album packaging, no vendor/printing logic, no
+> storage of its own.
+
+**Added:**
+- **`@workerv2/composition`** — the Page Composition Engine:
+  - **`LayerStack` compositor** (`rasterizeStack`) — background fill, layer stack + **z-ordering**
+    (stable), **transform application** (orthogonal rotate + fit `fill`/`cover`/`contain`),
+    **clipping**, grayscale **masks** (per-pixel alpha), **frame** borders, **minimal blend modes**
+    (`normal`/`multiply`/`screen`, source-over integer sRGB), **page rasterization** to one RGBA
+    raster.
+  - **Blueprint adapter** — `surfaceToLayerStack`/`findSurface`/`placementsOf`/`rectToPixels`/
+    `surfaceArtifacts`: the only reader of blueprint data; placements → image layers (destination =
+    normalized frame → pixels; z = canonical order; clip = destination); text nodes are not
+    rasterized. Non-blueprint attributes come from deterministic `SurfaceCompositionOptions`.
+  - **`CompositionEngine`** — `composeSurface(blueprint, surfaceId, target, options)`: resolve each
+    placement's image Artifact (decode via the Pixel Gateway) → build stack → rasterize → validate →
+    produce a content-addressed page Artifact. `rasterize(stack)` exposes the pure compositor path.
+  - **`Canvas`** — the backend-free RGBA buffer with the isolated composite/blend + frame loop.
+  - **Transform application** — `fitRaster`/`toRgba` over any `ImageBackend`.
+  - **Validation** — `validateLayerStack` (pre-rasterize) + `validateComposedPage` (pre-produce).
+  - **Colour/blend primitives** — `compositePixel`/`fillRgba`/`clampByte` + `WHITE`/`TRANSPARENT`.
+- **ADR-0016** — the LayerStack-vs-direct decision, the adapter-only-reads-blueprint boundary,
+  transforms-behind-ImageBackend (GPU seam), determinism/content-addressing, text-out-of-scope, and
+  validate-gates-production (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `composition`. Nothing
+else — the package is a downstream leaf; no existing package imports it yet.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure JS per-pixel composite loop (determinism over throughput; transforms run
+through the backend, so a GPU backend accelerates them). Whole-page in-memory rasterization.
+
+**Security:** No I/O beyond the injected byte port; the rendered page is validated before it is ever
+produced (no malformed page Artifact); no storage/PDF/vendor surface; no secrets/PII.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0016; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 15 → done, with the Phase Retrospective; M10 → page compositor complete).
+
+**Testing:** **43 new tests** — colour/blend (normal/multiply/screen, opacity, alpha accumulation,
+clamp/fill); compositor (background, placement, z-order, opacity, blend, clipping, masks, frames,
+orthogonal rotate); fit (fill/cover/contain dims + padding/opacity); validation (stack + composed
+page gates); blueprint adapter (rect→pixels, surface lookup, placements→layers, unresolved artifact,
+surfaceArtifacts); engine end-to-end (blueprint surface → page Artifact, decode round-trip,
+background fill, error paths); **determinism** (byte-identical over a rotate+fit+mask+frame+blend
+pipeline; same content address across independent stores; different background → different page).
+`pnpm verify` green (**611 total**, 25 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. A later render/assemble processor drives `CompositionEngine` (the
+`surface.render` manifest node); the PDF/print artifact stage consumes composed pages separately; a
+future theme resolver can populate per-layer compositing attributes; a text layer type + font engine
+is reserved behind the same `LayerStack`.
+
+**ADR References:** **ADR-0016**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — Native Image Backend (task-phase 14)
 
 > Delivers the replaceable, framework-independent pixel-processing backend future image processors

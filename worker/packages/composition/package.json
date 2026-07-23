@@ -1,0 +1,20 @@
+{
+  "name": "@workerv2/composition",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 Page Composition Engine — the deterministic compositor that transforms Blueprint surfaces + normalized image Artifacts into rendered page Artifacts. Layer stack + transform application + masks + clipping + frames + background fills + z-ordering + minimal blend modes + page rasterization + composition validation. Runs pixel work through the replaceable ImageBackend (future GPU acceleration behind the same contract) and produces immutable, content-addressed page rasters. Implements NO PDF generation, NO album packaging, NO vendor/printing logic, and performs NO storage of its own.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*",
+    "@workerv2/blueprint": "workspace:*",
+    "@workerv2/image-backend": "workspace:*"
+  }
+}
