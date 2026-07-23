@@ -12,18 +12,18 @@
 | Stage | Status |
 |---|---|
 | Planning Phase | ✅ Complete |
-| Implementation Phase | 🔄 In Progress (10 / 18 task-phases) |
+| Implementation Phase | 🔄 In Progress (11 / 18 task-phases) |
 | Testing Phase | ⬜ Not Started |
 | Production Readiness | ⬜ Not Started |
 | Deployment | ⬜ Not Started |
 
-**Overall Completion:** Planning 100% · **Implementation ≈55%** (task-phases −1…8 delivered; numbering note: task-phases "4"/"5" completed the frozen Storage phase (M5), task-phase "6" delivered the frozen Pipeline phase's declarative model, task-phase "7" delivered the frozen **Blueprint phase's model + compiler** (M8 partial — layout/template/theme resolvers + catalogs remain), and task-phase "8" delivered the frozen **Product phase's definition + resolution core** (M6 partial — processing-profile registry, pricing versions, vendor-profile data remain))
+**Overall Completion:** Planning 100% · **Implementation ≈60%** (task-phases −1…9 delivered; numbering note: task-phases "4"/"5" completed the frozen Storage phase (M5), task-phase "6" delivered the frozen Pipeline phase's declarative model, task-phase "7" delivered the frozen **Blueprint phase's model + compiler** (M8 partial — layout/template/theme resolvers + catalogs remain), task-phase "8" delivered the frozen **Product phase's definition + resolution core** (M6 partial — processing-profile registry, pricing versions, vendor-profile data remain), and task-phase "9" delivered the frozen **Manifest phase** (M9 — model, compiler, validation, identity, diff, processing bridge))
 
 | Field | Value |
 |---|---|
-| Current Active Phase | None (Product Platform definition + resolution core complete; next phase not started) |
-| Current Milestone | M6 🟡 — Product model/catalog/resolution/compatibility done (processing-profile registry + pricing + vendor data pending) |
-| Current Branch | `worker-v2/phase-8-product` |
+| Current Active Phase | None (Manifest Platform complete; next phase not started) |
+| Current Milestone | M9 ✅ — Manifest Ready (model/compiler/validator/identity/diff/processing-bridge; version-registry freeze happens when runs pin versions) |
+| Current Branch | `worker-v2/phase-9-manifest` |
 | Current Version | Worker V2 v0.0.0 |
 | Last Updated | 2026-07-23 |
 
@@ -41,7 +41,7 @@
 | 4 | Product Platform | 🟡 Definition + resolution core done | 60% | 2026-07-23 | — | — | Task-phase 8 delivered `@workerv2/product`: immutable versioned product model + catalogs (validating constructors, one gate per shape, canonical serialization, sha256 content addressing), constraints + capabilities as data, deterministic versioning + INV-11 pins, the resolver chain (product + content → **`BlueprintSource`**, never a Blueprint; product gate re-verified after the chain), and the compatibility matrix (product × processing profile × runtime capability × blueprint schema version). ADR-0009. Processing-profile REGISTRY + pricing versions + vendor-profile data remain. |
 | 5 | Image Processing Platform | Not Started | 0% | — | — | — | — |
 | 6 | Blueprint Platform | 🟡 Model + compiler done | 60% | 2026-07-23 | — | — | Task-phase 7 delivered `@workerv2/blueprint`: immutable content-addressable blueprint model + graph, declarative compiler, validation (invariants I1–I10: stable derived ids, tree containment, no dangling refs, deterministic ordering), canonical serialization, sha256 identity (byte-compatible with artifact addressing), schema versioning, diff model. ADR-0008. Layout/template/theme resolvers + catalogs + version freeze remain. |
-| 7 | Manifest Platform | Not Started | 0% | — | — | — | — |
+| 7 | Manifest Platform | ✅ Done | 100% | 2026-07-23 | 2026-07-23 | — | Task-phase 9 delivered `@workerv2/manifest`: the immutable, content-addressable description of EXECUTABLE WORK derived from a blueprint — work-node model with EXPLICIT consumed/produced artifact bindings, declarative compiler (one `surface.render` node per surface consuming the blueprint-as-artifact + placed images, one `album.assemble` node; stable derived ids), validation M1–M11, canonical serialization + sha256 identity, schema versioning, diff model, identity-neutral provenance traces, and the LOSSLESS bridge into `@workerv2/processing` (`toPipeline` → `definePipeline` → `compileExecutionPlan`, test-proven). Processing policy/capability/binding contracts REUSED, not duplicated. No execution/scheduling/rendering. ADR-0010. |
 | 8 | Render Engine & PDF Platform | Not Started | 0% | — | — | — | — |
 | 9 | Pipeline & Coordinator Platform | 🟡 Declarative model done | 40% | 2026-07-23 | — | — | Task-phase 6 delivered the **declarative half** (INV-5): `@workerv2/processing` — step/pipeline/plan models, DAG validation, deterministic stage compilation, declarative retry/timeout/cancellation/failure policies + the shared `planFailureAction` decision function, processor contracts, capability requirements (structurally = runtime negotiation seam), `ProcessingContext`. ADR-0007. Coordinator/engine (scheduling, recovery, replay dispatch) remains. |
 | 10 | Observability, Cost Accounting & Metrics | Not Started | 0% | — | — | — | — |
@@ -69,7 +69,7 @@
 | M6 | Product Platform Ready | 4 | 🟡 Definition + resolution core complete (2026-07-23, ADR-0009); processing-profile registry / pricing versions / vendor-profile data pending |
 | M7 | Image Platform Ready | 5 | ⬜ Pending |
 | M8 | Blueprint Ready | 6 | 🟡 Model + compiler + identity complete (2026-07-23, ADR-0008); resolvers/catalogs/version-freeze pending |
-| M9 | Manifest Ready | 7 | ⬜ Pending |
+| M9 | Manifest Ready | 7 | ✅ Complete (2026-07-23, ADR-0010) — model + compiler + validator + identity + diff + processing bridge; version-registry freeze when runs pin versions |
 | M10 | Renderer Ready | 8 | ⬜ Pending |
 | M11 | Pipeline Ready | 9 | ⬜ Pending |
 | M12 | Observable & Costed | 10 | ⬜ Pending |
@@ -99,6 +99,7 @@ ADR directory established in Phase 0 (`docs/architecture/adr/`, WBS `2.3.1`).
 | 0007 | Declarative processing framework (the pipeline model without an engine) | ✅ Accepted |
 | 0008 | Content-addressable Blueprint Platform (model, compiler, identity) | ✅ Accepted |
 | 0009 | Immutable Product Platform (definitions, catalogs, resolution to BlueprintSource) | ✅ Accepted |
+| 0010 | Content-addressable Manifest Platform (model, compiler, processing reuse) | ✅ Accepted |
 
 ---
 
@@ -116,7 +117,8 @@ _Active implementation risks only (carried forward as they arise)._
 
 - **Frozen Product phase remainder (WBS 6.2.1–6.2.3):** the processing-profile REGISTRY (Classic/Premium/Luxury/Archive/Draft profiles owning render/processing params — Rec 7), pricing versions, and vendor-profile data — all further catalog-like immutable values; the compatibility matrix (`@workerv2/product`) already names profiles as opaque tokens, so wiring the registry is additive.
 - **Frozen Blueprint phase remainder**: layout/template/theme RESOLVERS + font/sticker-pack catalogs — these now have their CONTRACT: they implement `SourceResolver` (`@workerv2/product`) in the resolver chain, producing `BlueprintSource` — + Blueprint/Template/Theme version freezing into the version registry.
-- **Frozen Phase 9 remainder — Coordinator/engine**: scheduling, crash recovery, replay dispatch, run-graph emission — interpreting the now-frozen declarative pipeline model (`@workerv2/processing`); plus a concrete capability negotiator (the runtime's reserved `CapabilityNegotiator` seam).
+- **Frozen Render phase (Phase 8) — now unblocked:** the deterministic render engine consumes a `Manifest` alone (INV-3): bind the `surface.render`/`album.assemble` processor names, honor `config.surface`/`config.surfaces`, produce write-once artifacts. The manifest is its validated, content-addressed, self-contained input contract (`@workerv2/manifest`, ADR-0010).
+- **Frozen Phase 9 remainder — Coordinator/engine**: scheduling, crash recovery, replay dispatch, run-graph emission — interpreting the now-frozen declarative pipeline model (`@workerv2/processing`); manifests already bridge in losslessly (`toPipeline` → `compileExecutionPlan`); plus a concrete capability negotiator (the runtime's reserved `CapabilityNegotiator` seam).
 - **Deferred infra implementations (now narrowed after the Artifact Platform):** a **durable** persistence backend (SQL/KV) and a **durable** `BlobStore`/registry (object storage) — both drop-in swaps behind the existing contracts (the reusable `runArtifactStoreContract` suite proves a new backend). The content-addressed byte store, addressing, streaming, integrity, registry, validation, and provenance are now **done** (ADR-0006).
 - **Storage-side Asset Lifecycle wiring (WBS 5.2.2 remainder):** connecting artifact writes to audited asset-state transitions happens when a producing pipeline exists (image/render phases) — the Control Plane transitions + artifact substrate are both ready.
 
@@ -126,11 +128,11 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Metric | Value |
 |---|---|
-| Lines of Code | ~7,700 src + ~5,300 test (foundation + control-plane + runtime + infra-contracts + persistence + artifact-store + processing + blueprint + product) |
-| Tests | 370 passing (Vitest) |
+| Lines of Code | ~8,600 src + ~5,800 test (foundation + control-plane + runtime + infra-contracts + persistence + artifact-store + processing + blueprint + product + manifest) |
+| Tests | 410 passing (Vitest) |
 | Coverage | v8 provider configured (not gated yet) |
-| Packages | 18 (`@workerv2/*` — 10 foundation + control-plane + runtime + infra-contracts + persistence + artifact-store + processing + blueprint + product) |
-| Modules | 140 source modules |
+| Packages | 19 (`@workerv2/*` — 10 foundation + control-plane + runtime + infra-contracts + persistence + artifact-store + processing + blueprint + product + manifest) |
+| Modules | 150 source modules |
 | Build Status | `pnpm verify` green — typecheck + boundaries + lint + format + test |
 | Performance | — |
 | Artifacts | — |
@@ -143,6 +145,7 @@ _Active implementation risks only (carried forward as they arise)._
 
 | Date | Entry |
 |---|---|
+| 2026-07-23 | **Manifest Platform (task-phase 9) complete — the frozen Manifest phase (M9).** Added `@workerv2/manifest` — the immutable, deterministic, **content-addressable** description of EXECUTABLE WORK derived from a blueprint: **work-node model** (DAG of nodes with EXPLICIT consumed artifacts — content-addressed bindings — and produced output slots; processors by registry NAME; stable DERIVED ids `render:<surface>`/`assemble:album`), **declarative compiler** (`compileManifest`: one `surface.render` node per surface consuming the BLUEPRINT ITSELF as a content-addressed artifact (key = its hash, ADR-0008) + that surface's placed images → one `page` output; one `album.assemble` node consuming every page in semantic order → the `album` output; self-contained — an engine needs manifest + artifact store only, the INV-3 enabler), **validation M1–M11** (single gate; schema version, album id, blueprint provenance hash, canonical orderings, NO dangling references/bindings, binding-to-declared-output consistency, policies validated by the REUSED processing validators, acyclic DAG via `orderStepGraph`; unknown keys dropped — can never reach identity), **canonical serialization + sha256 identity** (byte-compatible with artifact/blueprint addressing), **schema versioning**, **diff model** (per-stable-id, symmetric), **identity-neutral traces** (`trace`/`attachTrace` ride the `CompiledManifest` wrapper — never hashed; future resolver-chain traces attach without changing identity, test-proven), and the **lossless processing bridge** (`toPipeline` → `definePipeline` → `compileExecutionPlan` — same stages, test-proven; pipeline id embeds the manifest hash). Processing retry/timeout/cancellation/capability/binding contracts REUSED, not duplicated. Zero execution/scheduling/rendering. ADR-0010. 40 new tests; `pnpm verify` green (**410 total**, 19 packages). |
 | 2026-07-23 | **Product Platform (task-phase 8) complete — the frozen Product phase's definition + resolution core.** Added `@workerv2/product` — the immutable, versioned, **content-addressable** product definition system: **product model** (stable token id + semver + dimensions + page-count offering + material option axes; any change = a new version), **versioned catalogs** (a catalog is a value with its own semver; multiple product versions coexist; exact-or-latest resolution via deterministic `compareSemver`), **one validation gate per shape** (invariants P1–P10 / C1–C5; validating constructors canonicalize every NON-semantic ordering and deep-freeze), **canonical serialization + sha256 identity** (byte-compatible with artifact/blueprint addressing), **constraints as data** (option coupling + per-spread limits; pure interpreter), **capabilities** (structurally = the runtime negotiation shape, no import), **versioning + INV-11 pins** (`productVersionPins` → `VersionSet`), the **resolver chain** (`resolveProduct`: product + selection + content → **`BlueprintSource`**, never a `Blueprint`; `SourceResolver` = the pure, order-semantic contract future layout/template/theme resolvers implement; the final source is structurally re-copied and RE-VERIFIED against the product — the chain cannot escape the gate; frames pass through untouched — zero rendering/layout, test-proven via the unchanged blueprint compiler), and the **compatibility matrix** (first-match rules: product × processing-profile ids (opaque) × required runtime capabilities × blueprint schema versions → deterministic verdict with exact reasons). Blueprint stays independent of catalog internals (dependency = product → blueprint only; boundary-enforced). ADR-0009. 67 new tests; `pnpm verify` green (**370 total**, 18 packages). |
 | 2026-07-23 | **Blueprint Platform (task-phase 7) complete — the frozen Blueprint phase's model + compiler.** Added `@workerv2/blueprint` — the immutable, deterministic, **content-addressable** album-production representation: typed containment-tree **model** (album → cover/spreads → placements/texts; placements reference **artifact identities**, never files), **declarative compiler** (`compileBlueprint`: no layout/rendering decisions, output routed through the single validation gate, deep-frozen `CompiledBlueprint`), **validation invariants I1–I10** (schema version, unique/sorted ids, single album root, **no dangling references**, tree + reachability, **stable DERIVED ids**, contiguous spreads, sorted slots, normalized frames), **canonical serialization** (`canonicalJson` promoted to utils; key order/whitespace never trusted), **sha256 identity** = canonical content only (byte-compatible with artifact addressing — a canonical blueprint stored as an artifact gets key = its own hash, test-proven), **schema versioning**, **diff model** (per-stable-id added/removed/changed; symmetric), and graph traversals (`walkBlueprint`/`referencedArtifacts`/`totalPages`). Zero execution/rendering/storage (verified). ADR-0008. 42 new tests; `pnpm verify` green (**303 total**, 17 packages). |
 | 2026-07-23 | **Processing Framework (task-phase 6) complete — the frozen Pipeline phase's declarative half (INV-5).** Added `@workerv2/processing` — the generic, framework-independent DECLARATIVE processing model: **step model** (artifact-centric — inputs/outputs are content-addressed identities, bound via `fromArtifact`/`fromStepOutput`, never files), **pipeline model** (`definePipeline` = the single validating constructor: ids/versions/slots/policies, unique ids, unknown/self/duplicate deps, inputs must reference declared outputs of explicit dependencies, **DAG validation**), **execution-plan model** (`compileExecutionPlan` — total + deterministic: Kahn + lexicographic tie-break, longest-chain stages, declaration-order invariant), **ProcessingContext** (immutable, resolved artifact identities, frozen version pins, injected time, engine-owned cancellation signal), **declarative retry/timeout/cancellation/failure models** (pure `delayBeforeAttempt` math + the shared `planFailureAction` decision function — nothing executed), **processor contracts** (`Processor`/`ProcessorResolver`/`validateProcessorOutputs`), and **capability requirements** structurally identical to the runtime's negotiation seam (compile-time-proven) without depending on the runtime. Zero execution behavior (no timers/clock/randomness/env/I-O — verified). ADR-0007. 48 new tests; `pnpm verify` green (**261 total**, 16 packages). |

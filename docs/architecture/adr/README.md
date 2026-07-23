@@ -35,3 +35,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0007](0007-declarative-processing-framework.md) | Declarative processing framework (the pipeline model without an engine) | Accepted |
 | [0008](0008-content-addressable-blueprint-platform.md) | Content-addressable Blueprint Platform (model, compiler, identity) | Accepted |
 | [0009](0009-immutable-product-platform.md) | Immutable Product Platform (definitions, catalogs, resolution to BlueprintSource) | Accepted |
+| [0010](0010-content-addressable-manifest-platform.md) | Content-addressable Manifest Platform (model, compiler, processing reuse) | Accepted |

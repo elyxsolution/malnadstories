@@ -28,6 +28,136 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Manifest Platform (task-phase 9)
+
+> Delivers the frozen Manifest phase (M9 — Manifest Ready): the immutable, deterministic,
+> content-addressable representation of EXECUTABLE WORK derived from Blueprints — the render
+> contract (INV-1) and the INV-3 enabler. Consumes Blueprints; produces work DESCRIPTIONS
+> only. No execution, no scheduling, no rendering.
+
+**Added:**
+- **`@workerv2/manifest`** — the Manifest Platform:
+  - **Manifest model + contracts** — `Manifest` (schema version + album id + the source
+    blueprint's content hash as PROVENANCE + id-sorted work nodes) and `WorkNode`: a DAG
+    node that EXPLICITLY declares consumed artifacts (named slots → content-addressed
+    `ArtifactInputBinding`s) and produced output slots, the processor by registry NAME
+    (data, never code), required runtime capabilities, JSON-safe config, and declarative
+    policies. **Processing Framework contracts REUSED, not duplicated**: node ids are
+    `StepId`s, bindings/capabilities/retry/timeout/cancellation/failure are
+    `@workerv2/processing`'s own types.
+  - **Manifest compiler** — `compileManifest(blueprint, options)`: the canonical
+    blueprint-intent → processing-intent translation. One `surface.render` node per surface
+    (cover + each spread), consuming the BLUEPRINT ITSELF as a content-addressed artifact
+    (key = its own hash — ADR-0008 makes "blueprint as artifact" free) plus that surface's
+    placed images, producing one `page`; one `album.assemble` node consuming every page
+    output (semantic surface order preserved in config) producing the final `album`. Stable
+    DERIVED node ids (`render:<surfaceId>`, `assemble:album`). Optional uniform declarative
+    policy overrides. Output routed through the full validation gate, then canonicalized,
+    hashed, deep-frozen → `CompiledManifest { manifest, hash, canonical, trace? }`.
+  - **Processing graph + dependency graph** — validation reuses `orderStepGraph` (M11
+    acyclicity); `orderManifest` exposes the canonical total order + parallel stages;
+    `terminalNodes` names the deliverables.
+  - **Artifact bindings** — explicit per node (`consumes`/`produces`); M7 proves every
+    step-output binding resolves to a DECLARED output of an EXPLICIT dependency (no dangling
+    bindings); `consumedArtifacts` (deduped, sorted external content addresses — includes
+    the blueprint) and `producedOutputs` give the platform-level views. Self-contained: an
+    engine needs the manifest + the artifact store, nothing else.
+  - **Manifest validation** — `validateManifest(unknown)` (invariants M1–M11): schema
+    version, album id, blueprint provenance hash shape, unique/sorted node ids, node shape,
+    strictly-ascending dependsOn/produces/requires, binding consistency, policies validated
+    by the REUSED processing validators, acyclic graph. Nodes/policies are REBUILT from the
+    known vocabulary — unknown keys are dropped and can never reach the identity.
+  - **Canonical serialization** — `serializeManifest`/`parseManifest` (canonical JSON; full
+    gate on parse; byte-stable round-trips; incoming key order/whitespace irrelevant).
+  - **Manifest hashing** — `hashManifest` = `sha256:<hex>` over canonical UTF-8; identity
+    depends ONLY on canonical manifest content; byte-compatible with artifact (ADR-0006) and
+    blueprint (ADR-0008) addressing.
+  - **Manifest versioning** — `MANIFEST_SCHEMA_VERSION` participates in canonical content (a
+    schema bump changes every identity, by design); parse rejects unsupported versions.
+  - **Manifest diff** — `diffManifests`: per-stable-node-id added/removed/changed (canonical
+    node comparison), sorted + frozen + symmetric; `identical` also covers the envelope.
+  - **Identity-neutral traces** — the `trace` compile option and `attachTrace` put
+    provenance (e.g. future resolver-chain traces) on the `CompiledManifest` WRAPPER only —
+    attachable/replaceable without ever affecting canonical form or hash (test-proven).
+  - **Processing bridge** — `toPipelineSpec`/`toPipeline`: a lossless structural mapping
+    into a validated `ProcessingPipeline` via `definePipeline` (pipeline id embeds the
+    manifest hash), proving by construction that every manifest is consumable by the
+    declarative processing model; `compileExecutionPlan` over the bridged pipeline yields
+    the same stages as `orderManifest` (test-proven).
+- **ADR-0010** — manifest shape/translation/self-containment/trace decisions (+ rejected
+  alternatives: standalone vocabulary, pipeline-as-manifest, embedded blueprint content,
+  hashed traces, per-image nodes).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `manifest`.
+Nothing else — blueprint/processing/product are untouched.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory compile/validate/hash; linear passes + sorts at manifest
+scale; sha256 over a canonical string per identity computation. No perf-sensitive paths.
+
+**Security:** No secrets/PII; no I/O. Untrusted manifests pass the full invariant gate
+before existing as values; unknown keys are structurally dropped (nothing smuggled toward
+engines); artifact references validated to content-address shape; policies bounded by the
+processing validators' ceilings.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0010; ADR index; `WORKER_V2_PROGRESS.md`
+(frozen Manifest phase → done, M9 complete).
+
+**Testing:** **40 new tests** — compiler (canonical translation structure: per-surface
+render nodes, blueprint-as-artifact bindings, assemble wiring + semantic surface order,
+stable ids, cover-less variant, determinism/recompile identity, deep-freeze, default +
+override policies, invalid-override rejection); traces (compile-time + `attachTrace`,
+identity/canonical invariance); validation invariants M1–M11 individually violated
+(incl. dangling bindings, undeclared outputs, binding-without-dependsOn, non-JSON config,
+cyclic graph); serialization (byte-stable round-trip, key-order/whitespace independence,
+unknown-key dropping, unparseable JSON); identity (format, content-only, semantic-change
+sensitivity, wrapper consistency); graph views (stages, consumed artifacts incl. blueprint,
+produced outputs, terminal nodes); processing bridge (lossless mapping, execution-plan
+stage equality); diff (identical/added/removed/changed/symmetry/envelope-only).
+`pnpm verify` green (**410 total**, 19 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. The render engine (frozen Phase 8) is the future consumer: it
+binds `surface.render`/`album.assemble` and consumes a manifest alone (INV-3). The
+coordinator (frozen Phase 9 remainder) consumes manifests through the pipeline bridge.
+
+**ADR References:** **ADR-0010**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-9-manifest`)._
+
+#### Phase Retrospective (task-phase 9)
+
+- **Architectural decisions.** (1) The manifest REUSES the Processing Framework's contracts
+  (ids, bindings, policies, capabilities, DAG ordering) instead of duplicating them — retry/
+  cancellation semantics stay single-sourced, and the pipeline bridge becomes a lossless
+  structural mapping proven by `definePipeline` + `compileExecutionPlan`. (2) The canonical
+  translation binds the BLUEPRINT ITSELF as a consumed artifact (key = its content hash),
+  making the manifest self-contained (INV-3) without duplicating blueprint content inside
+  it. (3) Identity = canonical manifest content only; the validation gate REBUILDS values
+  from the known vocabulary so unknown keys can never reach the hash; provenance traces ride
+  the compiled WRAPPER (`attachTrace`) and are identity-neutral by construction. (4) Stable
+  derived node ids (`render:<surface>`, `assemble:album`) — the fourth application of the
+  house pattern — keep the diff model trustworthy across recompilations.
+- **ADRs.** ADR-0010 (accepted), incl. rejected alternatives (standalone policy vocabulary,
+  pipeline-as-manifest, embedded blueprint subtrees, hashed traces, per-image prep nodes).
+- **Scope adjustments.** None against the task scope. The translation vocabulary is
+  deliberately minimal (2 processors, `page`/`album` outputs) — richer work shapes
+  (thumbnails, previews, per-image derivations, pre-press variants) are additive node kinds
+  behind a schema-version bump, per ADR-0010.
+- **Remaining risks.** The render engine must honor the processor-name + config contract
+  (`config.surface`/`config.surfaces`) — mitigated by the constants being exported as the
+  shared vocabulary; per-node policy overrides are uniform for now (per-processor
+  differentiation is a compile-option extension); manifest version-registry freezing waits
+  for runs pinning versions (INV-11 bridge exists in control-plane).
+- **Reusable abstractions.** The compile→gate→canonicalize→hash→freeze pattern is now the
+  proven house style (blueprint → product → manifest); the identity-neutral wrapper
+  (`CompiledManifest.trace`) is the template for attaching provenance to ANY content-addressed
+  value; `orderStepGraph` proved reusable as a cross-package DAG validator; the
+  bridge-to-pipeline technique (embed the content hash in the pipeline id) gives any future
+  work-producing platform an execution path for free.
+
 ### v0.0.0 — 2026-07-23 — Product Platform (task-phase 8)
 
 > Delivers the frozen Product phase's DEFINITION + RESOLUTION core (Rec 2/4/15): the

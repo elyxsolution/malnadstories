@@ -1,0 +1,21 @@
+{
+  "name": "@workerv2/manifest",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 Manifest Platform — the immutable, deterministic, content-addressable description of EXECUTABLE WORK derived from a Blueprint: manifest model (work nodes with explicit consumed/produced artifact bindings), declarative compiler (blueprint intent → processing intent), processing/dependency graph, validation, canonical serialization, hashing, schema versioning, diff model, and the bridge to the declarative Processing Framework. Reuses the processing policy/capability/binding contracts. Pure data + pure functions; NO execution, NO scheduling, NO rendering, NO storage.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/control-plane": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*",
+    "@workerv2/processing": "workspace:*",
+    "@workerv2/blueprint": "workspace:*"
+  }
+}

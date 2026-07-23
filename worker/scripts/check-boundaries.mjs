@@ -82,6 +82,21 @@ const ALLOWED = {
   // vocabulary ONLY — resolution PRODUCES the compiler's input). The dependency direction is
   // product -> blueprint; blueprint stays independent of catalog internals (no reverse import).
   product: ['contracts', 'utils', 'errors', 'control-plane', 'blueprint'],
+  // Manifest Platform (Phase 9 task / frozen Manifest phase): the immutable, content-addressable
+  // description of EXECUTABLE WORK derived from a blueprint. Depends on the foundation leaves +
+  // control-plane (AlbumId) + infra-contracts (StorageKey) + blueprint (the compiler CONSUMES
+  // blueprints) + processing (REUSED contracts: StepId, ArtifactInputBinding, policies,
+  // capability requirements, orderStepGraph — no duplication). NO runtime/storage dependency;
+  // the manifest describes work, an engine (later phase) executes it.
+  manifest: [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'processing',
+    'blueprint',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */
