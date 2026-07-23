@@ -28,6 +28,7 @@ const PACKAGES = [
   'manifest',
   'coordinator',
   'execution-adapter',
+  'processor-sdk',
 ] as const;
 
 const alias = Object.fromEntries(

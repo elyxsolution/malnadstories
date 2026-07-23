@@ -1,0 +1,20 @@
+{
+  "name": "@workerv2/processor-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 Processor SDK — the reusable framework for implementing processors that execute Manifest work while staying independent of rendering technologies. Base processor abstraction + consistent lifecycle, a reusable processor context, artifact-access ports, progress reporting, diagnostics hooks, resource guards (cancellation/deadline), validation helpers, and a comprehensive test harness. Operates exclusively on content-addressed Artifacts. Implements NO concrete processor, NO rendering, NO PDF, NO image processing; depends on NO storage implementation and NO file-path API.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/control-plane": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*",
+    "@workerv2/processing": "workspace:*"
+  }
+}

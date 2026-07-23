@@ -131,6 +131,21 @@ const ALLOWED = {
     'runtime',
     'coordinator',
   ],
+  // Processor SDK (Phase 12 task): the reusable framework future concrete processors are BUILT
+  // with — base processor + lifecycle, reusable context, artifact-access ports, progress,
+  // diagnostics, resource guards, validation, and a test harness. It sits UPSTREAM of the engine:
+  // it produces `Processor`s (the processing contract) but depends on NO coordinator/adapter/
+  // runtime. Depends on the foundation leaves + control-plane (RunId/Timestamp) + infra-contracts
+  // (StorageKey/ArtifactKind CONTRACTS only — no storage impl) + processing (the Processor/context
+  // contracts it implements against). Implements no concrete processor and no rendering.
+  'processor-sdk': [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'processing',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */

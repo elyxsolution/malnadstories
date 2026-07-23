@@ -28,6 +28,109 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Processor SDK (task-phase 12)
+
+> Delivers the reusable framework future processors are built with to execute Manifest work while
+> staying INDEPENDENT of rendering technologies. Implements no concrete processor, no rendering,
+> no PDF, no image processing; operates exclusively on content-addressed Artifacts; depends on no
+> storage implementation and no file-path API.
+
+**Added:**
+- **`@workerv2/processor-sdk`** — the Processor SDK:
+  - **Base Processor abstraction** — `createProcessor(spec, deps)`: the single construction entry
+    point. The author supplies a descriptor, optional `requiredInputs`/`validate`, and an
+    `execute(ctx) → Record<slot, StorageKey>`; the base runs the consistent lifecycle around it.
+  - **Processor lifecycle** — report progress → validate inputs → guard cancellation/deadlines →
+    execute → validate produced outputs against the declared slots (reusing the engine's shared
+    `validateProcessorOutputs`). Every failure (guard trip, validation abort, output mismatch,
+    unexpected throw) becomes an in-band `StepFailure` OUTCOME — never an escaping exception.
+  - **Processor Context** — the ergonomic execution surface: `input`/`hasInput`/`read`/`readText`/
+    `readJson`, `produce`/`produceText`/`produceJson`, `reportProgress`, `debug`/`info`/`warning`/
+    `error`, and a `guard`. Byte- and content-address-oriented — no paths, no URLs.
+  - **Artifact access helpers** — the `ArtifactGateway` port (`read`/`exists`/`write`): read an
+    input Artifact by content address, produce a new one (content-addressed, write-once,
+    idempotent). NO storage backend is assumed; the SDK owns this narrow port.
+  - **Progress reporting** (`ProgressReporter` + `ProgressUpdate`/`ProgressReport`) and
+    **Diagnostics hooks** (`DiagnosticsSink` + `DiagnosticEvent`/`Diagnostic`) — replaceable sinks
+    stamped with the attempt's identity; no `console`.
+  - **Resource guards** — `ResourceGuard`: cooperative `throwIfCancelled`/`throwIfExpired`/
+    `check()`; cancellation polled from the engine-owned signal, the deadline compared against an
+    INJECTED clock (no ambient time, no timer). A trip becomes a `cancelled`/`timeout` failure.
+  - **Validation helpers** — `requireInputs`/`requireInput`/`requireConfig(parse)`/`ensure`, all
+    failing via a `permanent` `ProcessorAbort`; config schemas stay OUT of the SDK.
+  - **SDK contracts** — `ArtifactGateway`, `ProgressReporter`, `DiagnosticsSink`, `Clock` +
+    `ProcessorAbort`/`abortPermanent`/`abortTransient`.
+  - **Processor test harness** — `ProcessorHarness` (+ `InMemoryArtifactGateway`,
+    `RecordingProgressReporter`, `RecordingDiagnosticsSink`): seed input Artifacts, run a
+    processor against a built `ProcessingContext`, and inspect the outcome, produced Artifacts,
+    progress, and diagnostics — the reusable scaffolding for every future processor.
+- **ADR-0013** — the base-processor + narrow artifact-port + injected-sinks + guards + harness
+  decisions (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `processor-sdk`.
+Nothing else — the SDK is upstream of the engine; nothing else changed.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** In-memory helpers; whole-bytes artifact I/O (a streaming port is additive for
+very large artifacts). No perf-sensitive paths.
+
+**Security:** No secrets/PII; no I/O beyond the injected gateway. A processor that throws is
+contained (normalized to a `transient` failure); diagnostics/aborts carry only JSON-safe detail.
+No file paths, URLs, or storage-backend assumptions anywhere in the surface.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0013; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 12 → done; the SDK unblocks the Image and Render processor phases).
+
+**Testing:** **16 new tests** — harness end-to-end (read input → produce output; progress phase
+sequence validate→execute→execute→finalize with attempt identity; debug/info diagnostics;
+multi-input merge; validated config; content-addressed idempotence); lifecycle + validation
+(missing-input → permanent, config-abort → permanent, output-slot mismatch → permanent, thrown →
+transient, warning diagnostic on failure); resource guards (cancellation → `cancelled`, deadline →
+`timeout`, `ResourceGuard.remainingMs`/`expired`, gateway read/miss, `abortPermanent`/`Transient`
+kinds, `requireConfig` accept/reject). `pnpm verify` green (**486 total**, 22 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Concrete processors (image canonicalize/derive, surface render, album
+assemble) are the next phases, built WITH this SDK and registered into the adapter's resolver; a
+host wires the `ArtifactGateway` to the real content-addressed store and supplies the deadline
+resolver from the step's timeout policy.
+
+**ADR References:** **ADR-0013**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+#### Phase Retrospective (task-phase 12)
+
+- **Architectural decisions.** (1) A base processor runs one consistent lifecycle so every future
+  processor is a small `execute` + descriptor and inherits validation, progress, diagnostics,
+  guards, and failure normalization — no boilerplate, no drift; output conformance reuses the
+  engine's `validateProcessorOutputs`. (2) Artifact access is a narrow SDK-owned `ArtifactGateway`
+  port (bytes + content address only), so a processor depends on NO storage implementation and
+  knows nothing of R2/paths/URLs; a host adapts its real store to it. (3) Progress/diagnostics are
+  injected sinks and cancellation/deadlines are cooperative guards against an injected clock — the
+  SDK reads no ambient time and arms no timer. (4) Every failure becomes an in-band `StepFailure`
+  outcome with a meaningful kind, so a processor can never crash the driver and retry semantics
+  stay the engine's. (5) A full test harness ships with the SDK so processor phases start with
+  scaffolding, not a blank page.
+- **ADRs.** ADR-0013 (accepted), incl. rejected alternatives (no framework, reuse the full
+  `ArtifactStore` as the processor surface, throw-for-failure, SDK-owned real-timer deadlines).
+- **Scope adjustments.** None against the task scope. The SDK is deliberately minimal: whole-bytes
+  artifact I/O (a streaming gateway is additive when a processor needs very large artifacts), no
+  config-schema library (only the `requireConfig` gate; schemas live with each processor), and the
+  harness gateway uses a non-cryptographic `mem:` address (a test double; real gateways use sha256).
+- **Remaining risks.** The concrete image/render/assemble processors are the next phases and must
+  keep all rendering/PDF/image logic in THEM, never leaking into the SDK; a host must wire the
+  gateway to the real store and derive deadlines from the step timeout policy; a streaming artifact
+  port is a future additive extension.
+- **Reusable abstractions.** `createProcessor` + the lifecycle runner is the template every
+  processor uses; `ProcessorContext` is the one execution surface; `ArtifactGateway`/
+  `ProgressReporter`/`DiagnosticsSink` are the host-wired ports; `ResourceGuard` is the
+  cancellation/deadline pattern; `ProcessorAbort` + `requireInputs`/`requireConfig`/`ensure` are
+  the validation vocabulary; and `ProcessorHarness` is the ready-made test rig for every future
+  processor phase.
+
 ### v0.0.0 — 2026-07-23 — Execution Adapter (task-phase 11)
 
 > Delivers the concrete single-process infrastructure adapter that DRIVES the pure Coordinator
