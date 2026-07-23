@@ -113,6 +113,24 @@ const ALLOWED = {
     'processing',
     'manifest',
   ],
+  // Execution Adapter (Phase 11 task): the INFRASTRUCTURE adapter that drives the pure
+  // Coordinator — effect loop, processor dispatch/resolution, capability negotiation, session
+  // (persist journal + publish events), tick driver, and pre-flight validation. This is the
+  // side-effect layer, so it may depend "outward" on the coordinator + runtime (the reserved
+  // CapabilityNegotiator contracts) + processing (processor/context/policies) + control-plane
+  // (RunId/Timestamp) + infra-contracts (StorageKey). It implements NO processor and NO storage/
+  // DB/queue/network — those are injected through its replaceable interfaces. Nothing depends on
+  // this package (it is a top-level driver).
+  'execution-adapter': [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'processing',
+    'runtime',
+    'coordinator',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */

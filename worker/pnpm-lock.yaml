@@ -137,6 +137,33 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/execution-adapter:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/coordinator':
+        specifier: workspace:*
+        version: link:../coordinator
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/processing':
+        specifier: workspace:*
+        version: link:../processing
+      '@workerv2/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/flags:
     dependencies:
       '@workerv2/contracts':

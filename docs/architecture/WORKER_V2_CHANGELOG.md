@@ -28,6 +28,118 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Execution Adapter (task-phase 11)
+
+> Delivers the concrete single-process infrastructure adapter that DRIVES the pure Coordinator
+> (ADR-0011): it invokes processors through contracts, feeds results back, persists journals
+> through an interface, and publishes execution events — with the Coordinator staying completely
+> pure and deterministic. NO processors, rendering, PDF, image processing, or storage/DB/queue/
+> network/R2 implementation; no business logic.
+
+**Added:**
+- **`@workerv2/execution-adapter`** — the infrastructure adapter (all side effects live here):
+  - **Execution Driver + Effect Loop** — `runToCompletion` / `pump` / `executeRun`: a tiny,
+    sequential loop that per sweep ticks due timeouts, asks the Coordinator which nodes are
+    dispatchable NOW, and for each (in the Coordinator's canonical order) negotiates → resolves →
+    dispatches → invokes → reports, then waits out retry backoff between sweeps. It re-orders and
+    decides NOTHING — the journal it produces is byte-identical to the pure Coordinator's own
+    driver output (test-proven determinism).
+  - **Processor Dispatcher** — `invokeProcessor`: the single call site of `Processor.process()`;
+    returns the outcome unchanged, normalizing only a THROW into a `transient` `StepFailure` so
+    the loop always gets in-band data and the Coordinator's retry policy decides.
+  - **Processor Resolver** — `InMemoryProcessorRegistry implements ProcessorResolver`: holds
+    caller-INJECTED processors by name (+ exact/wildcard version policy). The adapter implements
+    no processor.
+  - **Capability Negotiator** — `DefaultCapabilityNegotiator`: the concrete implementation of the
+    runtime's reserved `CapabilityNegotiator` seam (interfaces-only until now). Negotiates each
+    node's required capabilities against the host's offers BEFORE dispatch; unmet → a permanent
+    step failure (Coordinator fail-fast takes over). Minimal deterministic version policy
+    (undefined/`*` = any; else exact) — richer semver ranges additive behind the same interface.
+  - **Execution Session** — `ExecutionSession`: one run's stateful holder and the ONLY place a
+    Coordinator step's side effects apply — advance the held state, PERSIST the journal entries,
+    PUBLISH the events (persist-then-publish; the journal is the source of truth). A Coordinator
+    rejection (out-of-sequence command) surfaces as an `AdapterError`.
+  - **Tick Driver** — `tickIfDue` / `nextWakeAt`: advance injected time (drive a `tick` when a
+    timeout budget elapsed) and report the earliest future wake instant (retry backoff / timeout)
+    so a host resumes without polling. No timer armed.
+  - **Adapter contracts** — replaceable seams `Clock`, `Waiter`, `JournalStore`, `EventSink` +
+    references `systemClock`/`manualClock`, `immediateWaiter`/`clockAdvancingWaiter`,
+    `InMemoryJournalStore`, `InMemoryEventSink`/`noopEventSink`/`publisherSink`.
+  - **Execution validation** — `validateExecutable`: the pre-flight gate (every node's processor
+    resolves AND its capabilities negotiate) — mis-wiring becomes an up-front error.
+- **ADR-0012** — the effect/purity boundary, replaceable seams, injected-processors, and the
+  concrete capability-negotiation policy (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `execution-adapter`.
+Nothing else — the Coordinator and every upstream package are untouched (the adapter depends on
+them; nothing depends on the adapter).
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** In-memory reference seams; the loop is O(work) with one processor invocation per
+attempt; no perf-sensitive paths. Durable/parallel backends tune later behind the same interfaces.
+
+**Security:** No secrets/PII; no networking/DB/storage. A processor that throws is contained
+(normalized to a transient failure) so a misbehaving injected processor cannot crash the driver;
+`AdapterError` carries only JSON-safe context.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0012; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 11 → done; the Coordinator now has a concrete driving adapter).
+
+**Testing:** **24 new tests** — end-to-end diamond + Manifest runs to a succeeded run (journal
+persisted, events published, `coordinator.resume` reconstructs the exact state, `coordinator.validate`
+passes); deterministic journal (identical across runs + exact canonical kind sequence); resume a
+partial journal and finish; already-settled run is a no-op; retry-with-backoff to success (via the
+clock-advancing waiter); permanent fail-fast + skip; thrown-processor normalization; unmet-capability
+permanent failure; processor dispatcher (outcome pass-through + throw normalization); registry
+resolve (name/version/wildcard/missing/duplicate); negotiator (satisfied/unmet/version/empty);
+`validateExecutable` (accept / missing processor / unmet capabilities / manifest-with-offers);
+tick driver (`nextWakeAt` earliest backoff, `tickIfDue` no-op); session (persist+publish on start,
+coordinator-rejection → `AdapterError`). `pnpm verify` green (**470 total**, 21 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Concrete processors (image / render-PDF / assemble) are built in their
+own phases and REGISTERED into the resolver; durable `JournalStore` / bus-backed `EventSink` /
+distributed driver drop in behind the existing seams without touching the Coordinator.
+
+**ADR References:** **ADR-0012**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-11-execution-adapter`)._
+
+#### Phase Retrospective (task-phase 11)
+
+- **Architectural decisions.** (1) A hard effect/purity split: the Coordinator decides, the
+  adapter performs — the driver relays Coordinator decisions unchanged, so a `manualClock`-driven
+  run's journal is byte-identical to the pure Coordinator's, which is how "decisions unchanged" is
+  a test, not a hope. (2) Every side effect is a replaceable seam (`Clock`/`Waiter`/`JournalStore`/
+  `EventSink`), and `ExecutionSession` is the single funnel that applies a step's effects — so a
+  distributed/durable adapter swaps seams without touching the Coordinator API. (3) The adapter
+  implements no work and no policy: processors are injected; `invokeProcessor` only relays,
+  normalizing a throw to a transient failure so the Coordinator's retry policy stays authoritative.
+  (4) The runtime's reserved `CapabilityNegotiator` seam is filled with a minimal, deterministic
+  exact-or-wildcard policy, negotiated before dispatch.
+- **ADRs.** ADR-0012 (accepted), incl. rejected alternatives (fold the driver into the Coordinator,
+  parallel dispatch by default, ship a `setTimeout` waiter, adapter-side retry/output logic, full
+  semver-range negotiation now).
+- **Scope adjustments.** None against the task scope. The reference driver is deliberately
+  single-process and serial (deterministic + easy to reason about); a distributed/parallel adapter
+  and durable seam backends are additive follow-ups behind the same interfaces. Waiting between
+  retry sweeps is a `Waiter` seam (deterministic `clockAdvancingWaiter` for tests; a wall-clock
+  waiter is a one-line host impl) so the package ships timer-free.
+- **Remaining risks.** The reference seams are in-memory/ambient (`systemClock` is the sole ambient
+  reference) — durable backends are the drop-in; the default `immediateWaiter` does not advance a
+  clock, so retry-backoff runs need a clock-advancing/wall-clock waiter (guarded by `maxSweeps`);
+  one-active-run (INV-6) is the Control Plane Run Registry's job, consulted by a host before a
+  session is created; real end-to-end album production still waits on the injected image/render
+  processors (RSK-1 lifts when those land).
+- **Reusable abstractions.** The `ExecutionSession` "apply one Coordinator step → persist + publish"
+  funnel is the template every future adapter reuses; `JournalStore`/`EventSink`/`Clock`/`Waiter`
+  are the seam set a durable or distributed adapter re-implements; `InMemoryProcessorRegistry` +
+  `DefaultCapabilityNegotiator` are the resolver/negotiator any host starts from; `invokeProcessor`
+  (throw-normalizing) is the safe processor call site; `validateExecutable` is the pre-flight gate
+  for any driver.
+
 ### v0.0.0 — 2026-07-23 — Coordinator Platform (task-phase 10)
 
 > Delivers the frozen Pipeline & Coordinator phase's **Coordinator/engine** (M11 — Pipeline

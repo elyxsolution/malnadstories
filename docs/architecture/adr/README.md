@@ -37,3 +37,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0009](0009-immutable-product-platform.md) | Immutable Product Platform (definitions, catalogs, resolution to BlueprintSource) | Accepted |
 | [0010](0010-content-addressable-manifest-platform.md) | Content-addressable Manifest Platform (model, compiler, processing reuse) | Accepted |
 | [0011](0011-deterministic-execution-coordinator.md) | Deterministic execution Coordinator (event-sourced reducer, no infrastructure) | Accepted |
+| [0012](0012-execution-adapter-drives-pure-coordinator.md) | Execution Adapter drives the pure Coordinator through replaceable seams | Accepted |
