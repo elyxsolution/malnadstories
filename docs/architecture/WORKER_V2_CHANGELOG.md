@@ -28,6 +28,139 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Coordinator Platform (task-phase 10)
+
+> Delivers the frozen Pipeline & Coordinator phase's **Coordinator/engine** (M11 — Pipeline
+> Ready): the deterministic execution coordinator that orchestrates Manifest/Pipeline execution
+> WITHOUT performing any processing. Consumes a Manifest; produces execution DECISIONS + a
+> recorded history only. No processor execution, rendering, PDF, image processing, artifact
+> loading, storage, queue, networking, or timers (time is injected).
+
+**Added:**
+- **`@workerv2/coordinator`** — the Coordinator Platform, a pure, event-sourced deterministic
+  reducer:
+  - **Execution State model** — `ExecutionState`: immutable, serializable snapshot of a run
+    (run status + per-node `NodeExecution` records keyed by Manifest node id, the primary
+    execution identity, + the fold counter `seq`). Holds no topology (the `ExecutionGraph`) and
+    no history (the journal), so it stays small and reconstructable.
+  - **Run + node state machines** — the run REUSES the Control Plane `RUN_MACHINE` (INV-8: one
+    source of truth); the per-node `NODE_MACHINE` (`pending → ready → running →
+    succeeded|failed|cancelled|skipped`, with `running → ready` for a retry) is enforced on
+    every journal fold — illegal transitions are unrepresentable.
+  - **Execution graph** — `buildExecutionGraph` derives immutable topology (canonical Kahn
+    order + stages + dependency/dependent adjacency + terminal nodes) once from a validated
+    `ProcessingPipeline`.
+  - **Execution Journal** — `JournalEntry`/`JournalKind` + `applyJournalEntry`: the SINGLE,
+    validating, total state-mutation function. Every command decides entries and folds them —
+    state is always the fold of the journal.
+  - **Dependency scheduler + Ready Queue** — `computeReadyQueue`: a pure query returning
+    deterministically-ordered `dispatchable` nodes (ready, backoff elapsed, run live, within an
+    optional declarative `maxInFlight`) and `waiting` nodes gated by a retry `readyAt`.
+  - **Node Lifecycle + Context** — `dispatch` marks a new attempt running and returns the
+    resolved `ProcessingContext` (`buildProcessingContext` resolves step-output bindings from
+    recorded upstream outputs + frozen version pins + injected start time). `validateProcessors`
+    accepts a `ProcessorResolver` to check resolvability — the coordinator NEVER calls `process`.
+  - **Retry Orchestrator** — reuses processing's shared `planFailureAction`, so retry semantics
+    never drift from the pipeline model. A retry is a `node.retry-scheduled` entry whose backoff
+    is a FUTURE `readyAt` (never a timer).
+  - **Timeout State tracking** — dispatch records `attemptDeadline`/`overallDeadline` as pure
+    offsets of the injected start; `dueTimeouts(now)` reports elapsed budgets and `tick(now)`
+    converts them into `timeout` failures via the orchestrator. No timer fires.
+  - **Cancellation propagation** — `requestCancellation` begins a cancel drain (un-started nodes
+    cancelled immediately; in-flight nodes settle; run finalizes once quiescent).
+  - **Progress model** — `progressOf`: a pure projection (counts by state, terminal fraction,
+    settled flags).
+  - **Event publication contracts** — `ExecutionEvent` + `ExecutionEventPublisher` seam; events
+    are DERIVED from journal entries (`execution.<kind>`), so the published stream and recorded
+    history can never disagree. Distinct from Control Plane domain events (INV-12).
+  - **Resume model** — `resumeFromJournal`: re-fold a persisted journal into the EXACT prior
+    state (INV-7 crash recovery, no drift); a tampered journal (out-of-order seq, illegal
+    transition, unknown node) is rejected.
+  - **Replay model** — `describeReplay`/`seedReplay`: the semantics of **Retry / Replay /
+    Rebuild / Regenerate** (Rec 18) as data + a seed. `retry` reuses succeeded outputs and
+    re-runs only the rest; `replay`/`rebuild` seed a clean run on the SAME frozen versions;
+    `regenerate` is a documented seam (a new manifest needs a new coordinator).
+  - **Coordinator validation** — `validateExecutionState`: the untrusted-state gate (node set
+    matches the graph, the dependency rule holds, success records outputs, run status agrees
+    with node states).
+  - **Coordinator façade** — `createCoordinator` binds a run's graph + frozen `VersionSet` and
+    exposes the pure transition/query API; `coordinatorFromManifest` bridges a compiled Manifest
+    via `toPipeline` (ADR-0010). Holds no mutable state — any infrastructure adapter
+    (single-process, distributed, queue-backed) drives it through the same public API.
+- **ADR-0011** — deterministic Coordinator decisions (event-sourced reducer, no infrastructure,
+  injected time, Manifest via the pipeline bridge; + rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `coordinator`. Nothing
+else — processing/manifest/control-plane are untouched (reused, not modified).
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory reducers/queries; scheduling is O(V+E) over the graph per query;
+no perf-sensitive paths, no I/O.
+
+**Security:** No secrets/PII; no I/O of any kind. Untrusted resumed/checkpointed states pass the
+validation gate; journals are validated on fold (contiguous seq + legal transitions); event
+payloads/journal detail documented JSON-safe.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0011; ADR index; `WORKER_V2_PROGRESS.md`
+(frozen Pipeline & Coordinator phase → ✅ 100%, M11 complete).
+
+**Testing:** **36 new tests** — end-to-end diamond + Manifest runs to a succeeded run;
+determinism (identical journals/states); contiguous seq; resolved `ProcessingContext`
+(step-output inputs + versions + config); event derivation; dispatch/output/start preconditions;
+scheduler (arming, canonical parallel order, `maxInFlight`, draining); node machine legality;
+journal-fold guards (out-of-order seq, illegal transition, unknown node); retry orchestrator
+(transient backoff `readyAt`, budget-exhaustion fail-fast + skip, permanent-never-retried);
+timeout tracking (deadlines, `dueTimeouts`, `tick`); cancellation (drain + finalize, immediate
+finalize, node self-cancel, cannot-cancel-settled); resume (terminal + partial re-fold equality,
+tamper rejection); replay (semantic table, retry seed reuses outputs, replay/rebuild/regenerate);
+validation (consistent accept, dependency/pipeline-id/incomplete-success rejections). `pnpm
+verify` green (**446 total**, 20 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. No processors execute yet — an infrastructure adapter (a later phase)
+supplies the effect loop (dispatch → `processor.process` → report; feed `tick`; persist the
+journal; forward events) and drives the coordinator through its public API.
+
+**ADR References:** **ADR-0011**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-10-coordinator`)._
+
+#### Phase Retrospective (task-phase 10)
+
+- **Architectural decisions.** (1) The coordinator is a PURE, event-sourced reducer: the
+  append-only journal is the single state-mutation path (`applyJournalEntry`), so state is always
+  the fold of the journal — which makes Resume a provably-driftless re-fold (INV-7) and removes
+  any second state-writer that could diverge from history. (2) No infrastructure coupling: time
+  is injected, retry backoff is a future `readyAt`, timeouts are pure offsets applied by `tick`,
+  and the boundary checker proves zero runtime/storage/queue/network deps — adapters drive the
+  coordinator, the coordinator drives nothing. (3) Reuse over re-derivation: the run machine is
+  the Control Plane's `RUN_MACHINE`, retry semantics are processing's shared `planFailureAction`,
+  ordering is `orderStepGraph`, and the context is `makeProcessingContext` — the same
+  reuse-not-duplicate philosophy the manifest applied to processing (ADR-0010). (4) The core
+  binds a pipeline (drives ANY pipeline) and consumes a Manifest through the lossless
+  `toPipeline` bridge — orchestration stays completely separate from processing.
+- **ADRs.** ADR-0011 (accepted), incl. rejected alternatives (stateful in-place coordinator,
+  coordinator-executes-processors, timer/scheduler engine, bespoke retry vocabulary,
+  journal-inside-state).
+- **Scope adjustments.** None against the task scope. This completes the frozen Pipeline &
+  Coordinator phase's engine half (the declarative half landed in task-phase 6). Mapping note:
+  concrete DRIVING adapters (single-process/distributed/queue-backed) and a concrete
+  `CapabilityNegotiator` are deliberately NOT built — the coordinator is designed so they attach
+  without changing its public API. Fail-fast is the failure policy; per-branch partial completion
+  is a future additive option. `maxInFlight` is advisory scheduling data, not enforced concurrency.
+- **Remaining risks.** The effect loop lives in a future adapter — until one exists, no processor
+  runs (RSK-1 stays: background processing paused). One-active-run (INV-6) is enforced by the
+  Control Plane's Run Registry, which the driving adapter must consult before starting a run;
+  the coordinator drives a single bound run. Replay is semantics + seed, not a full replay UX.
+- **Reusable abstractions.** The event-sourced reducer pattern (journal = single mutation path →
+  free resume) is the template for any future stateful-but-deterministic subsystem; the
+  `applyJournalEntry` fold + `validateExecutionState` gate mirror the house
+  compile→gate→canonicalize pattern for STATE rather than values; `ExecutionGraph` +
+  `computeReadyQueue` give any DAG a deterministic scheduler; the coordinator's journal + events
+  are the exact data the Observability phase (Phase 10) records for run-graph/timeline/cost.
+
 ### v0.0.0 — 2026-07-23 — Manifest Platform (task-phase 9)
 
 > Delivers the frozen Manifest phase (M9 — Manifest Ready): the immutable, deterministic,

@@ -1,0 +1,21 @@
+{
+  "name": "@workerv2/coordinator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 Coordinator Platform — the deterministic execution coordinator that orchestrates Manifest/Pipeline execution WITHOUT performing any processing itself: execution-state model, run + node state machines, deterministic dependency scheduler + ready queue, retry/timeout/cancellation orchestration over the declarative Processing policies, progress model, append-only execution journal (event-sourced resume), execution-event publication contracts, and Retry/Replay/Rebuild/Regenerate semantics. Pure data + pure functions; NO processor execution, NO rendering, NO PDF, NO image processing, NO storage, NO queue, NO networking, NO timers (time is injected).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/control-plane": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*",
+    "@workerv2/processing": "workspace:*",
+    "@workerv2/manifest": "workspace:*"
+  }
+}

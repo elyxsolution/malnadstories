@@ -98,6 +98,30 @@ importers:
         specifier: workspace:*
         version: link:../utils
 
+  packages/coordinator:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/manifest':
+        specifier: workspace:*
+        version: link:../manifest
+      '@workerv2/processing':
+        specifier: workspace:*
+        version: link:../processing
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/di:
     dependencies:
       '@workerv2/contracts':

@@ -26,6 +26,7 @@ const PACKAGES = [
   'blueprint',
   'product',
   'manifest',
+  'coordinator',
 ] as const;
 
 const alias = Object.fromEntries(

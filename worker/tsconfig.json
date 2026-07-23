@@ -21,7 +21,8 @@
       "@workerv2/processing": ["packages/processing/src/index.ts"],
       "@workerv2/blueprint": ["packages/blueprint/src/index.ts"],
       "@workerv2/product": ["packages/product/src/index.ts"],
-      "@workerv2/manifest": ["packages/manifest/src/index.ts"]
+      "@workerv2/manifest": ["packages/manifest/src/index.ts"],
+      "@workerv2/coordinator": ["packages/coordinator/src/index.ts"]
     },
     "noEmit": true
   },

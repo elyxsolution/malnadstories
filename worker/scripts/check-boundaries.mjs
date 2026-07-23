@@ -97,6 +97,22 @@ const ALLOWED = {
     'processing',
     'blueprint',
   ],
+  // Coordinator Platform (Phase 10 task / frozen Phase 9 remainder — Coordinator/engine): the
+  // deterministic execution coordinator that orchestrates Manifest/Pipeline execution. Depends
+  // on the foundation leaves + control-plane (RunId/Timestamp/VersionSet + the reused RUN_MACHINE
+  // + the state-machine engine) + infra-contracts (StorageKey) + processing (REUSED declarative
+  // model: ExecutionPlan, policies, planFailureAction, ProcessingContext, ProcessorResolver,
+  // orderStepGraph) + manifest (consumes a Manifest via its lossless pipeline bridge). NO runtime
+  // (any engine drives it), NO storage/persistence/artifact-store (no I/O), NO queue/network/timers.
+  coordinator: [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'processing',
+    'manifest',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */
