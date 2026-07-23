@@ -162,6 +162,17 @@ const ALLOWED = {
     'processing',
     'processor-sdk',
   ],
+  // Native Image Backend (Phase 14 task / frozen Image phase pixel backend): the replaceable,
+  // framework-independent pixel-processing backend future image processors use for DETERMINISTIC
+  // transformations (decode/resize/rotate/crop/ICC-convert/validate) + the Pixel Gateway that
+  // produces immutable, content-addressed raster Artifacts + a pure-TS deterministic reference
+  // backend + a reusable contract-test harness. Depends ONLY on the foundation leaves +
+  // infra-contracts (StorageKey — the Pixel Gateway's artifact port is structurally compatible
+  // with the SDK's ArtifactGateway, NOT imported). NO processor-sdk/processing/coordinator/
+  // manifest/blueprint/runtime dependency: the backend is a low-level pixel engine, not a
+  // processor or an orchestrator. No album/render/PDF/product logic. Nothing here depends on this
+  // package yet (image processors will consume it via the gateway).
+  'image-backend': ['contracts', 'utils', 'errors', 'infra-contracts'],
 };
 
 /** Recursively collect .ts source files under a directory. */

@@ -28,6 +28,78 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Native Image Backend (task-phase 14)
+
+> Delivers the replaceable, framework-independent pixel-processing backend future image processors
+> use for DETERMINISTIC image transformations, plus the Pixel Gateway that produces immutable,
+> content-addressed raster Artifacts. Ships a pure-TS deterministic reference backend; a native/GPU
+> (sharp/libvips) backend is a reserved drop-in behind the SAME contracts. No album knowledge, no
+> page rendering, no PDF, no product logic, no coordinator dependency.
+
+**Added:**
+- **`@workerv2/image-backend`** — the Native Image Backend:
+  - **Backend contract** — `ImageBackend` (`decode`/`encode`/`resize`/`rotate`/`crop`/`convert`/
+    `apply`/`validate`): a small, total, pure interface; the replaceable seam every backend
+    implements.
+  - **Deterministic reference backend** — `ReferenceImageBackend` (`info.deterministic = true`),
+    pure TypeScript: decode of the canonical **WV2R** container + uncompressed **BMP** (24/32-bit);
+    **resize** (nearest/bilinear, center-aligned + `Math.round`); **rotate** (90/180/270 lossless
+    permutation); **crop**; **colour convert** (channel layout + sRGB↔linear transfer LUTs +
+    Rec.601 grayscale — the deterministic ICC-family transforms); **output validation**.
+  - **Pixel Gateway** — `PixelGateway(backend, store)`: read → decode → apply operation pipeline →
+    **validate** → produce a content-addressed raster Artifact through a narrow `ArtifactBytesPort`
+    (structurally compatible with the SDK's `ArtifactGateway`; identical output → same key).
+  - **Raster IO** — `encodeRaster`/`decodeRaster` (WV2R: fixed byte order, uncompressed, no padding
+    → encoded bytes are a pure function of pixels), `decodeBmp`, `validateRaster`.
+  - **Operations** — declarative `ImageOperation` union (`resize`/`rotate`/`crop`/`convert`) +
+    `validateOperation`.
+  - **Backend test harness** — `runImageBackendContract` (the reusable suite every backend, incl. a
+    future sharp/GPU backend, must pass) + `InMemoryArtifactBytesStore` + raster fixture builders
+    (`makeRaster`/`solidRaster`/`gradientRaster`).
+- **ADR-0015** — the reference-vs-sharp decision, the pure `ImageBackend` contract, the
+  container+BMP pixel source, the narrow artifact port, and validate-before-produce (+ rejected
+  alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `image-backend`. Nothing
+else — the package is a downstream leaf; no existing package imports it yet.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** The reference backend favours determinism over raw throughput (pure JS loops, no
+SIMD); high-throughput transforms are the reserved native backend's concern. Whole-raster in-memory
+processing; no streaming yet.
+
+**Security:** Fully bounds-checked byte parsing (a malformed container/BMP → a clean `BackendError`,
+never a throw-through); output validation gates production so no malformed pixel Artifact can be
+created; no I/O beyond the injected byte port; no native binary, no file paths, no storage-backend
+assumptions.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0015; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 14 → done, with the Phase Retrospective; M7 → foundation processors + pixel backend).
+
+**Testing:** **40 new tests** — raster IO (WV2R round-trip + determinism + colour-space/channel
+preservation + truncation/geometry rejects; BMP 24/32-bit BGR→RGB + bottom-up + backend decode);
+transforms (crop in/out-of-bounds; rotate 90/180/270 permutations + 270∘90 inverse + dimension
+swap; resize nearest replication + same-size identity copy + bilinear determinism; grayscale luma +
+gray↔rgb + add/drop alpha + sRGB↔linear fixed points); gateway (decode→transform→produce +
+content-addressed idempotence + invalid-raster/invalid-op rejects + pure `applyOperations`);
+**determinism** (two backends byte-identical over a 6-op pipeline; same content address across
+independent stores; different ops → different output) + the reusable `runImageBackendContract`
+suite against the reference. `pnpm verify` green (**568 total**, 24 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. A native/GPU (`sharp`/libvips) backend is a drop-in behind `ImageBackend`
+(validated by `runImageBackendContract`); the image foundation processors' normalization plans wire
+to real pixel work via `PixelGateway`; a host passes one concrete content-addressed store to both
+the gateway's `ArtifactBytesPort` and the SDK's `ArtifactGateway`.
+
+**ADR References:** **ADR-0015**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — Image Foundation Processors (task-phase 13)
 
 > Delivers the FIRST concrete processors — generic, deterministic image normalization + metadata

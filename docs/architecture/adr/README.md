@@ -40,3 +40,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0012](0012-execution-adapter-drives-pure-coordinator.md) | Execution Adapter drives the pure Coordinator through replaceable seams | Accepted |
 | [0013](0013-processor-sdk-framework.md) | Processor SDK: a rendering-independent framework for building Artifact processors | Accepted |
 | [0014](0014-image-foundation-processors.md) | Image Foundation Processors: deterministic, rendering-independent image normalization | Accepted |
+| [0015](0015-native-image-backend.md) | Native Image Backend: a replaceable, deterministic pixel-processing backend | Accepted |

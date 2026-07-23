@@ -25,7 +25,8 @@
       "@workerv2/coordinator": ["packages/coordinator/src/index.ts"],
       "@workerv2/execution-adapter": ["packages/execution-adapter/src/index.ts"],
       "@workerv2/processor-sdk": ["packages/processor-sdk/src/index.ts"],
-      "@workerv2/image-processors": ["packages/image-processors/src/index.ts"]
+      "@workerv2/image-processors": ["packages/image-processors/src/index.ts"],
+      "@workerv2/image-backend": ["packages/image-backend/src/index.ts"]
     },
     "noEmit": true
   },
