@@ -75,6 +75,13 @@ const ALLOWED = {
   // NO storage/runtime/processing dependency: hashing is local (same sha256:<hex> format as
   // the artifact platform — asserted compatible by tests, not by import).
   blueprint: ['contracts', 'utils', 'errors', 'control-plane', 'infra-contracts'],
+  // Product Platform (Phase 8 task / frozen Product phase's definition + resolution core):
+  // immutable versioned product definitions, catalogs, constraints, capabilities, hashing,
+  // the resolver chain, and the compatibility model. Depends on the foundation leaves +
+  // control-plane (VersionComponent — INV-11 pins) + blueprint (the BlueprintSource source
+  // vocabulary ONLY — resolution PRODUCES the compiler's input). The dependency direction is
+  // product -> blueprint; blueprint stays independent of catalog internals (no reverse import).
+  product: ['contracts', 'utils', 'errors', 'control-plane', 'blueprint'],
 };
 
 /** Recursively collect .ts source files under a directory. */

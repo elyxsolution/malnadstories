@@ -28,6 +28,129 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-23 — Product Platform (task-phase 8)
+
+> Delivers the frozen Product phase's DEFINITION + RESOLUTION core (Rec 2/4/15): the
+> immutable, versioned, content-addressable product definition system that resolves products
+> into `BlueprintSource` inputs for the Blueprint Platform. No rendering, no layout, no
+> execution, no storage.
+
+**Added:**
+- **`@workerv2/product`** — the Product Platform:
+  - **Product model** — `ProductDefinition`: stable lowercase-token id + semver + name +
+    dimensions (mm) + page-count offering + `hasCover` + material OPTION AXES (closed,
+    validated vocabularies with defaults) + constraints + capabilities. Immutable: any change
+    is a NEW version; (id, version) names a definition, the content hash addresses it.
+  - **Product validation** — `validateProduct(unknown)` (invariants P1–P10: schema version,
+    token id, semver, bounded name/dimensions, strictly-ascending page counts, canonical
+    option/constraint/capability order, referential integrity of constraints) — the ONLY way
+    a definition exists. `defineProduct` = the validating constructor: canonicalizes every
+    NON-semantic ordering, stamps the schema version, routes through the gate, deep-freezes.
+  - **Product catalog** — `ProductCatalog`: an immutable, VERSIONED value (own semver;
+    products in canonical (id, version) order; C1–C5 gate + `defineCatalog` constructor).
+    Multiple versions of a product coexist; `getProduct` resolves exact-or-latest via the
+    deterministic `compareSemver`; `listProducts` yields stable (id, version, hash) refs.
+  - **Canonical serialization + hashing** — `serializeProduct`/`parseProduct` +
+    `serializeCatalog`/`parseCatalog` (canonical JSON; incoming key order/whitespace never
+    trusted — full gate on parse; byte-stable round-trips) and `hashProduct`/`hashCanonical`
+    (`sha256:<hex>` over canonical UTF-8 — byte-compatible with artifact (ADR-0006) and
+    blueprint (ADR-0008) addressing, so a canonical definition stored as an artifact gets a
+    key equal to its own hash).
+  - **Product constraints** — declarative constraint DATA (`requires-option` /
+    `excludes-option` coupling + `max-placements-per-spread` / `max-texts-per-spread` limits)
+    with a pure interpreter: `resolveSelection` (defaults applied, vocabulary + coupling
+    verified) and `spreadLimits` (strictest wins).
+  - **Product capabilities** — `ProductCapability` declarations structurally IDENTICAL to the
+    runtime's `CapabilityRequirement` / processing's `StepCapabilityRequirement` (no import —
+    consumable by any engine); pure helpers (`missingCapabilities`, `requiredCapabilityNames`).
+  - **Product versioning** — deterministic `compareSemver` total order; `productVersionRef`
+    (id + version + hash); `productVersionPins` bridging to the control plane's `VersionSet`
+    (INV-11) so a run pins the product it resolved.
+  - **Product resolver + resolver chain + resolver contracts** — `resolveProduct(catalog,
+    request, chain)`: catalog lookup → selection resolution → the chain (each `SourceResolver`
+    is a PURE, named + versioned transformation of the draft source; order is SEMANTIC;
+    provenance recorded) → structural re-copy (drops unknown keys, shares nothing) → the
+    PRODUCT GATE the chain cannot escape (cover presence, page-count sum, per-spread limits,
+    albumId untouched) → deep-frozen `ProductResolution { product, productHash, selection,
+    resolvers, source, pins }`. **Resolution produces `BlueprintSource` — never a
+    `Blueprint`** — and makes NO layout/rendering decision (frames pass through untouched,
+    test-proven byte-identical).
+  - **Compatibility model** — `CompatibilityMatrix`: a versioned, first-match rule matrix
+    binding product (id/version or `*`) → compatible processing-profile ids (OPAQUE tokens —
+    the profile registry is a later deliverable), required runtime capabilities, and
+    blueprint schema versions. `checkCompatibility` → deterministic verdict with exact
+    per-facet reasons; matrix is canonical, serializable, content-hashable.
+- **ADR-0009** — Product Platform identity/resolution/compatibility decisions (+ rejected
+  alternatives: mutable records, resolution-to-Blueprint, blueprint→product dependency,
+  constraints-as-code, semver-range matching).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `product`. Nothing
+else — `@workerv2/blueprint` is untouched (verified: no reverse import; boundary-enforced).
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory validation/resolution/hashing; linear passes + sorts at
+catalog scale; sha256 over a canonical string per identity computation. No perf-sensitive paths.
+
+**Security:** No secrets/PII; no I/O. Untrusted definitions/catalogs/matrices pass full
+invariant gates before existing as values; resolution structurally re-copies content (unknown
+keys dropped — nothing smuggled toward the compiler); resolver chains are re-verified against
+the product so third-party resolvers cannot bypass product rules.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0009; ADR index; `WORKER_V2_PROGRESS.md`
+(frozen Product phase → definition + resolution core done).
+
+**Testing:** **67 new tests** — validating constructors (canonicalization, freeze, equivalent
+inputs → identical definitions), invariants P1–P10 + C1–C5 individually violated, catalog
+resolution (exact/latest, numeric semver ordering, duplicate rejection), serialization
+(byte-stable round-trips, key-order/whitespace independence), identity (format, content-only,
+semantic-change sensitivity), versioning (compareSemver, refs, INV-11 pins), constraints
+(defaults, requires/excludes, strictest limit), resolution (happy path, **compiles through the
+unchanged blueprint compiler deterministically**, frame pass-through, caller-mutation
+isolation, unknown-key dropping, cover/page-sum/limit enforcement, chain order semantics +
+provenance, chain-cannot-escape-gate, resolver failure propagation, chain metadata rejection),
+compatibility (first-match, wildcard, per-facet reasons, round-trip, hashing). `pnpm verify`
+green (**370 total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Nothing consumes product resolutions yet — future consumers: the
+frozen Blueprint phase's layout/template/theme resolvers (they implement `SourceResolver`),
+the manifest phase, and runs pinning product versions via `VersionSet`.
+
+**ADR References:** **ADR-0009**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-8-product`)._
+
+#### Phase Retrospective (task-phase 8)
+
+- **Architectural decisions.** (1) Dual identity: (id, version) NAMES an immutable definition;
+  the sha256 content hash ADDRESSES it — pins stay honest because a pinned version can never
+  silently change meaning. (2) Resolution produces `BlueprintSource`, never a `Blueprint`, and
+  the dependency points product → blueprint only — the compiler remains the single validation
+  authority and blueprint identity stays independent of catalog internals. (3) Constraints and
+  compatibility are DATA with pure interpreters, so definitions/matrices stay serializable,
+  hashable, and diffable. (4) The resolver chain re-verifies its final output against the
+  product (same one-gate philosophy as the blueprint compiler): a third-party resolver cannot
+  produce an out-of-contract source. (5) Capability shapes stay structurally identical to the
+  runtime's negotiation contract without importing it (same technique as processing).
+- **ADRs.** ADR-0009 (accepted), incl. rejected alternatives (mutable catalog records,
+  resolution-to-Blueprint, inverted dependency, constraints-as-code, semver-range matching).
+- **Scope adjustments.** None against the task scope. Mapping note: this is the frozen Product
+  phase's definition + resolution core; the processing-profile REGISTRY (Rec 7), pricing
+  versions, and vendor-profile data (WBS 6.2.1–6.2.3) are NOT built — the compatibility matrix
+  already references profile ids as opaque tokens, so the registry lands additively later.
+- **Remaining risks.** The constraint vocabulary is minimal (option coupling + per-spread
+  limits) — richer rules are additive constraint kinds behind a product schema-version bump;
+  `compareSemver` is a deterministic total order, not full SemVer precedence (documented);
+  material taxonomy lives per-definition (no global registry) until vendor-profile work needs
+  one.
+- **Reusable abstractions.** The validating-constructor + single-gate + canonical-order
+  pattern (third use: blueprint → catalog → matrix) is now the house style for versioned
+  value systems; `SourceResolver` is the extension seam every future layout/template/theme
+  resolver implements; `hashCanonical` gives any canonical value content addressing;
+  `productVersionPins` is the template for bridging platform versions into `VersionSet`.
+
 ### v0.0.0 — 2026-07-23 — Blueprint Platform (task-phase 7)
 
 > Delivers the frozen Blueprint phase's MODEL + COMPILER (Rec 3's "blueprint" half): the
