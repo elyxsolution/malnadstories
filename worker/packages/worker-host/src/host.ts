@@ -12,12 +12,17 @@ import {
   immediateWaiter,
   executeRun,
 } from '@workerv2/execution-adapter';
-import type { Clock, InMemoryProcessorRegistry } from '@workerv2/execution-adapter';
+import type {
+  Clock,
+  InMemoryProcessorRegistry,
+  JournalStore,
+  EventSink,
+} from '@workerv2/execution-adapter';
 import type { Coordinator, ExecutionState } from '@workerv2/coordinator';
 import { coordinatorFromManifest } from '@workerv2/coordinator';
 import type { Blueprint } from '@workerv2/blueprint';
 import { serializeBlueprint, BLUEPRINT_SCHEMA_VERSION } from '@workerv2/blueprint';
-import type { CompiledManifest } from '@workerv2/manifest';
+import type { CompiledManifest, ManifestPolicies } from '@workerv2/manifest';
 import {
   compileManifest,
   MANIFEST_SCHEMA_VERSION,
@@ -34,6 +39,7 @@ import type { ProcessorDependencies } from '@workerv2/processor-sdk';
 import { pdfExportSpec, SLOT as PDF_SLOT, PDF_EXPORTER_VERSION } from '@workerv2/pdf-export';
 import { StateStore } from '@workerv2/persistence';
 import { ContentAddressedStore } from './store.js';
+import type { HostArtifactStore } from './store.js';
 import { ServiceRegistry, BackendRegistry } from './registry.js';
 import { registerProcessors } from './registration.js';
 import { hostCapabilityOffers } from './capabilities.js';
@@ -54,9 +60,20 @@ import type { ExecutionDiagnostics } from './diagnostics.js';
 
 const NEVER_CANCELLED: CancellationSignal = { isCancelled: () => false, reason: () => null };
 
-/** Optional additional ImageBackends to register (id → backend) for selection/replacement. */
+/**
+ * Optional INJECTED infrastructure — the DI seams a production runtime uses to REPLACE the in-memory
+ * defaults with durable implementations (Phase 19). Every field is optional; omitting it keeps the
+ * Phase-18 in-memory behavior exactly, so the host's default semantics are unchanged.
+ */
 export interface WorkerHostOverrides {
+  /** Additional ImageBackends to register (id → backend) for selection/replacement. */
   readonly backends?: ReadonlyArray<{ readonly id: string; readonly backend: ImageBackend }>;
+  /** A durable content-addressed store replacing the in-memory one. */
+  readonly store?: HostArtifactStore;
+  /** A durable execution-journal store replacing the per-run in-memory one. */
+  readonly journalStore?: JournalStore;
+  /** A durable/observing execution-event sink replacing the in-memory one. */
+  readonly eventSink?: EventSink;
 }
 
 /** The compiled, coordinator-ready form of an album run's work. */
@@ -83,17 +100,21 @@ export interface RunResult {
 
 export class WorkerHost {
   readonly config: HostConfig;
-  readonly store: ContentAddressedStore;
+  readonly store: HostArtifactStore;
   readonly backends: BackendRegistry;
   readonly processors: InMemoryProcessorRegistry;
   readonly services: ServiceRegistry;
   readonly offers: readonly CapabilityOffer[];
   private readonly backend: ImageBackend;
   private readonly processorDeps: ProcessorDependencies;
+  private readonly journalStore: JournalStore | undefined;
+  private readonly eventSink: EventSink | undefined;
 
   constructor(config: Partial<HostConfig> = {}, overrides: WorkerHostOverrides = {}) {
     this.config = resolveHostConfig(config);
-    this.store = new ContentAddressedStore();
+    this.store = overrides.store ?? new ContentAddressedStore();
+    this.journalStore = overrides.journalStore;
+    this.eventSink = overrides.eventSink;
     this.processorDeps = { artifacts: this.store };
 
     // --- Backend registration (the reference backend is canonical; more are pluggable) ---
@@ -128,10 +149,17 @@ export class WorkerHost {
     return this.store.put(encodeRaster(raster));
   }
 
-  /** Store the blueprint + compile it into a coordinator-ready run (Blueprint → Manifest → Coordinator). */
-  prepare(blueprint: Blueprint): PreparedRun {
+  /**
+   * Store the blueprint + compile it into a coordinator-ready run (Blueprint → Manifest →
+   * Coordinator). Optional declarative `policies` (e.g. a runtime's retry overrides) flow into the
+   * manifest compiler; omitting them keeps the default (no retry).
+   */
+  prepare(blueprint: Blueprint, policies?: ManifestPolicies): PreparedRun {
     const blueprintKey = this.store.put(new TextEncoder().encode(serializeBlueprint(blueprint)));
-    const compiled = unwrap(compileManifest(blueprint), 'compileManifest');
+    const compiled = unwrap(
+      compileManifest(blueprint, policies === undefined ? {} : { policies }),
+      'compileManifest',
+    );
     const versions = unwrap(
       VersionSet.create({
         manifest: MANIFEST_SCHEMA_VERSION,
@@ -160,8 +188,8 @@ export class WorkerHost {
     const { state } = await executeRun({
       coordinator,
       runId,
-      journal: new InMemoryJournalStore(),
-      events: new InMemoryEventSink(),
+      journal: this.journalStore ?? new InMemoryJournalStore(),
+      events: this.eventSink ?? new InMemoryEventSink(),
       options: {
         clock,
         resolver: this.processors,
@@ -179,8 +207,8 @@ export class WorkerHost {
    * then export the Document to a PDF Artifact. Deterministic: identical Blueprint + seeded
    * Artifacts + config always yield identical Artifact identities.
    */
-  async run(blueprint: Blueprint): Promise<RunResult> {
-    const prepared = this.prepare(blueprint);
+  async run(blueprint: Blueprint, policies?: ManifestPolicies): Promise<RunResult> {
+    const prepared = this.prepare(blueprint, policies);
     const runId = unwrap(makeRunId('run-1'), 'makeRunId');
     const startedAt = this.config.clockStart;
 

@@ -45,3 +45,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0017](0017-document-assembly-platform.md) | Document Assembly Platform: an immutable, format-independent document model | Accepted |
 | [0018](0018-pdf-export-processor.md) | PDF Export Processor: the first concrete, deterministic document exporter | Accepted |
 | [0019](0019-worker-host-composition-root.md) | Worker Host: the single composition root & end-to-end album pipeline | Accepted |
+| [0020](0020-production-runtime.md) | Production Runtime: durable infrastructure, lifecycle & recovery as composition | Accepted |

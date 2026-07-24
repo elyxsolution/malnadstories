@@ -35,6 +35,7 @@ const PACKAGES = [
   'document',
   'pdf-export',
   'worker-host',
+  'worker-runtime',
 ] as const;
 
 const alias = Object.fromEntries(

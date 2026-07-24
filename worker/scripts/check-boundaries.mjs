@@ -244,6 +244,29 @@ const ALLOWED = {
     'document',
     'pdf-export',
   ],
+  // Production Runtime (Phase 19 task): the OPERATIONAL layer over the Worker Host composition root.
+  // It provides DURABLE infrastructure (artifact store, journal store, event persistence) injected
+  // into the host via its DI seams, external runtime/worker configuration, runtime bootstrap +
+  // worker lifecycle + graceful shutdown + restart recovery, observational health, structured
+  // logging, and optional metrics. A composition concern only — depends on the foundation leaves +
+  // control-plane (ids/timestamps) + infra-contracts (StorageKey) + artifact-store (content
+  // addressing) + execution-adapter (JournalStore/EventSink/JournalEntry contracts) + coordinator
+  // (resume for recovery) + blueprint (re-prepare on recovery) + image-backend (RasterImage seeding)
+  // + worker-host (the root it drives). It changes NO Coordinator/Processor/Manifest/render/export
+  // behavior. Nothing depends on this package.
+  'worker-runtime': [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'artifact-store',
+    'execution-adapter',
+    'coordinator',
+    'blueprint',
+    'image-backend',
+    'worker-host',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */

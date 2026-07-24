@@ -13,6 +13,10 @@
 export { WorkerHost } from './host.js';
 export type { WorkerHostOverrides, PreparedRun, RunResult } from './host.js';
 
+// --- Policy types the host's API accepts (re-exported so a runtime can build them) ---
+export type { ManifestPolicies } from '@workerv2/manifest';
+export type { RetryPolicy } from '@workerv2/processing';
+
 // --- Configuration ---
 export {
   resolveHostConfig,
@@ -25,6 +29,7 @@ export type { HostConfig, RenderTarget } from './config.js';
 
 // --- Content-addressed store (ArtifactGateway + ArtifactBytesPort) ---
 export { ContentAddressedStore } from './store.js';
+export type { HostArtifactStore } from './store.js';
 
 // --- Registries (dependency injection; no globals) ---
 export { ServiceRegistry, BackendRegistry } from './registry.js';

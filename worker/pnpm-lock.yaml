@@ -503,6 +503,42 @@ importers:
         specifier: workspace:*
         version: link:../utils
 
+  packages/worker-runtime:
+    dependencies:
+      '@workerv2/artifact-store':
+        specifier: workspace:*
+        version: link:../artifact-store
+      '@workerv2/blueprint':
+        specifier: workspace:*
+        version: link:../blueprint
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/coordinator':
+        specifier: workspace:*
+        version: link:../coordinator
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/execution-adapter':
+        specifier: workspace:*
+        version: link:../execution-adapter
+      '@workerv2/image-backend':
+        specifier: workspace:*
+        version: link:../image-backend
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+      '@workerv2/worker-host':
+        specifier: workspace:*
+        version: link:../worker-host
+
 packages:
 
   '@esbuild/aix-ppc64@0.21.5':

@@ -28,6 +28,77 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Production Runtime (task-phase 19)
+
+> Turns Worker V2 into a production-ready runtime: durable stores, worker lifecycle + graceful
+> shutdown, restart recovery, health, structured logging, and metrics — a pure operational
+> composition concern. No new business/rendering features and no processing-semantics change; the
+> only prior-package touch is additive, default-preserving DI seams on the host.
+
+**Added:**
+- **`@workerv2/worker-runtime`** — the Production Runtime:
+  - **Durable storage** — `PersistentArtifactStore` (content-addressed; SAME sha256 identities as
+    in-memory), `DurableJournalStore`, `PersistentEventSink`, and `RunRecordStore`, all over a
+    swappable synchronous **`StorageBackend`** (`InMemoryStorageBackend` + `FileSystemStorageBackend`).
+  - **`WorkerRuntime`** — the operational facade: `start`/`run`/`recover`/`shutdown`, exposing the
+    durable stores, logger, and metrics.
+  - **`bootstrapRuntime`** — builds a durable-infrastructure `WorkerHost` (injects the durable stores
+    via the host's DI seams) + selects logging/metrics.
+  - **`WorkerLifecycle`** — `idle → starting → running → draining → stopped` with in-flight tracking +
+    graceful shutdown (refuses to stop with work in flight).
+  - **Restart recovery** — a durable run record + `coordinator.resume` re-fold of the durable journal;
+    content-addressed artifacts are reused, not regenerated.
+  - **Configuration** — `RuntimeConfig` (storage / backend / worker limits / retry overrides /
+    diagnostics / features) + `resolveRuntimeConfig` + `loadRuntimeConfigFromEnv` + `retryPolicies`.
+  - **Observational** — `reportHealth` (readiness/liveness/storage/backend), `StructuredLogger`
+    (Run ID·Node ID·Processor·Duration·Outcome·Artifact IDs) + recording/no-op refs, and
+    `RuntimeMetrics` (durations/artifact counts/retries/failures/processor timings/backend usage) —
+    none influence execution.
+  - **Integration harness** — `makeRuntimeHarness` + `seedRuntimeAlbum` (restart-simulating).
+- **ADR-0020** — the separate-package + additive-seam decision, durable-drop-ins-behind-a-sync-seam,
+  resume-based recovery, observational-only health/logging/metrics, and external config (+ rejected
+  alternatives).
+
+**Changed:** **`@workerv2/worker-host`** — additive, default-preserving DI seams only:
+`WorkerHostOverrides` gains `store`/`journalStore`/`eventSink`; `prepare`/`run` gain an optional
+`policies` param; `HostArtifactStore` + policy types exported. Omitting all overrides = exact Phase-18
+behavior. Plus workspace wiring for `worker-runtime`. No core package or processing-semantics change.
+
+**Removed:** Nothing.
+
+**Performance:** Synchronous storage backend (fs sync APIs); the in-process journal append is
+read-modify-write (fine at album scale; a real backend offers append). Durable I/O only around runs.
+
+**Security:** Durable storage of content-addressed artifacts + journals only (no secrets/PII beyond
+what a run produces); config is external + explicit; health/logging/metrics are read-only projections;
+filesystem keys are base64url-encoded (safe + reversible).
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0020; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 19 → done, with the Phase Retrospective; M17 partial).
+
+**Testing:** **27 new tests** — storage (in-memory + filesystem backend round-trip + durability;
+`PersistentArtifactStore` content-address/idempotent/size; `DurableJournalStore` append/load;
+`PersistentEventSink`; `RunRecordStore`); config (defaults, env loader, retry→policies); lifecycle
+(transitions, graceful shutdown, in-flight guards); health (ready/live, not-ready-before-start);
+runtime (startup → durable album run → shutdown; artifacts + journal + run record persisted;
+work-rejected-after-shutdown; structured logs with required fields; metrics recorded; diagnostics
+off); recovery (restart → recover to the same terminal state; artifact reuse across restart;
+unknown-run → undefined; durable journal reconstructs state). `pnpm verify` green (**706 total**, 29
+packages).
+
+**Breaking Changes:** None (host changes are additive + default-preserving).
+
+**Migration Notes:** Deploy with `storage.kind = 'filesystem'` (or a real backend behind
+`StorageBackend`); inject a real logger + metrics adapter; expose `runtime.health()`; on boot iterate
+`recoverableRuns()` + `recover()`. A networked object-store/KV backend, INV-6 gating, load/soak, and
+the app→host cutover are the follow-ups (all drop-ins behind the existing seams).
+
+**ADR References:** **ADR-0020**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — Worker Host & End-to-End Pipeline (task-phase 18)
 
 > Delivers the SINGLE composition root that wires every previously-built platform into a complete

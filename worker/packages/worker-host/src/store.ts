@@ -4,6 +4,21 @@ import type { ArtifactGateway, ArtifactWriteMeta } from '@workerv2/processor-sdk
 import type { ArtifactBytesPort, ArtifactBytesMeta } from '@workerv2/image-backend';
 
 /**
+ * The store shape the host needs: BOTH artifact ports plus the synchronous content-address helpers
+ * the host uses to seed sources + store the blueprint. `ContentAddressedStore` is the in-memory
+ * default; a durable implementation (e.g. the production runtime's persistent store) satisfies the
+ * SAME interface, so it drops in as an injected override — the only thing that changes is the host
+ * wiring.
+ */
+export interface HostArtifactStore extends ArtifactGateway, ArtifactBytesPort {
+  /** Synchronous content-addressed write (idempotent); returns the key. */
+  put(content: Uint8Array): StorageKey;
+  /** The content address of `content` without storing it. */
+  address(content: Uint8Array): StorageKey;
+  readonly size: number;
+}
+
+/**
  * The host's CONTENT-ADDRESSED artifact store — the single store every processor, the composition
  * engine, and the exporter read/write through. It implements BOTH the Processor SDK's
  * `ArtifactGateway` and the image-backend's `ArtifactBytesPort` (structurally compatible), so one
@@ -16,7 +31,7 @@ import type { ArtifactBytesPort, ArtifactBytesMeta } from '@workerv2/image-backe
  * store is a drop-in swap here (only the host wiring changes), which is the whole point of the
  * composition root.
  */
-export class ContentAddressedStore implements ArtifactGateway, ArtifactBytesPort {
+export class ContentAddressedStore implements HostArtifactStore {
   private readonly blobs = new Map<string, Uint8Array>();
 
   async read(key: StorageKey): Promise<Uint8Array> {

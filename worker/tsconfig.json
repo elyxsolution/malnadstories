@@ -30,7 +30,8 @@
       "@workerv2/composition": ["packages/composition/src/index.ts"],
       "@workerv2/document": ["packages/document/src/index.ts"],
       "@workerv2/pdf-export": ["packages/pdf-export/src/index.ts"],
-      "@workerv2/worker-host": ["packages/worker-host/src/index.ts"]
+      "@workerv2/worker-host": ["packages/worker-host/src/index.ts"],
+      "@workerv2/worker-runtime": ["packages/worker-runtime/src/index.ts"]
     },
     "noEmit": true
   },
