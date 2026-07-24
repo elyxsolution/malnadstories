@@ -1,0 +1,6 @@
+# Vercel builds ONLY the Next.js frontend (repository root).
+# Worker V2 is a completely independent PNPM workspace deployed separately on Render — Vercel must
+# never upload, install, type-check, or build it. Excluding it here keeps the two deployables fully
+# decoupled and the frontend build fast. (Render deploys with Root Directory = worker, so it never
+# reads this file.)
+worker
