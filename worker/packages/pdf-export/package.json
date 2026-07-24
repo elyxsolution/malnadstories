@@ -1,0 +1,23 @@
+{
+  "name": "@workerv2/pdf-export",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 PDF Export Processor — the first concrete document exporter, built with the Processor SDK, that converts an immutable Document into a DETERMINISTIC PDF Artifact. Pure-TypeScript PDF generator (no non-deterministic PDF library: timestamps, random ids, object ordering, and producer/creation metadata are overridden/normalized) + PDF assembly/page placement + metadata writer + export configuration + PDF validation + PDF descriptor + a test harness. Consumes immutable Documents + resolves referenced Page Artifacts; modifies NO Documents, renders NO pages, processes NO images, composes NO layouts, and performs NO storage/networking (production goes through the Artifact Platform via the SDK gateway).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/control-plane": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*",
+    "@workerv2/processing": "workspace:*",
+    "@workerv2/processor-sdk": "workspace:*",
+    "@workerv2/document": "workspace:*",
+    "@workerv2/image-backend": "workspace:*"
+  }
+}

@@ -43,3 +43,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0015](0015-native-image-backend.md) | Native Image Backend: a replaceable, deterministic pixel-processing backend | Accepted |
 | [0016](0016-page-composition-engine.md) | Page Composition Engine: a deterministic Blueprint → page-Artifact compositor | Accepted |
 | [0017](0017-document-assembly-platform.md) | Document Assembly Platform: an immutable, format-independent document model | Accepted |
+| [0018](0018-pdf-export-processor.md) | PDF Export Processor: the first concrete, deterministic document exporter | Accepted |

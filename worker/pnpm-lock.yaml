@@ -302,6 +302,36 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  packages/pdf-export:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@workerv2/document':
+        specifier: workspace:*
+        version: link:../document
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/image-backend':
+        specifier: workspace:*
+        version: link:../image-backend
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/processing':
+        specifier: workspace:*
+        version: link:../processing
+      '@workerv2/processor-sdk':
+        specifier: workspace:*
+        version: link:../processor-sdk
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/persistence:
     dependencies:
       '@workerv2/contracts':

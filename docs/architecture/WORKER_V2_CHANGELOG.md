@@ -28,6 +28,76 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — PDF Export Processor (task-phase 17)
+
+> Delivers the first concrete document exporter — a normal Processor SDK implementation that converts
+> an immutable Document into a DETERMINISTIC PDF Artifact, independent of Document construction + page
+> rendering. The Document Platform is unchanged. Modifies no Documents, renders no pages, processes no
+> images, composes no layouts, no business logic, no storage/networking (production goes through the
+> Artifact Platform via the SDK gateway).
+
+**Added:**
+- **`@workerv2/pdf-export`** — the PDF Export Processor:
+  - **Processor** — `pdfExportSpec` / `createPdfExportProcessor` (`document.export.pdf`): input
+    `document` (the canonical Document JSON artifact) → outputs `pdf` + `descriptor`. Parses the
+    Document (read-only), resolves each Page Artifact (`decodeRaster` — container read only),
+    validates page-size consistency, assembles the PDF, validates it, and produces both Artifacts
+    through the SDK gateway.
+  - **PDF Generator / Assembly Engine** — `generatePdf`: pure-TS deterministic writer with page
+    placement (image XObject per page filling the media box inset by bleed), a metadata writer
+    (fixed `Producer`, no dates), crop marks, bleed, and a compression policy (`none`/`flate`).
+  - **Low-level PDF writer** — `PdfBuilder` (controlled object numbering + ordering, byte-accurate
+    xref, content-derived trailer `/ID`, deterministic UTF-16BE-hex strings) + `pdfTextString`/
+    `streamObject`.
+  - **Image packing** — `rasterToPdfImage`: format packing only (channel select/de-interleave →
+    DeviceGray / DeviceRGB / DeviceRGB+SMask); no pixel transformation.
+  - **Export configuration** — `parsePdfExportConfig`/`canonicalExportConfig` (`page size · bleed ·
+    crop marks · compression · metadata · PDF version`) — part of export identity.
+  - **Validation** — `validateExportPages` (uniform sizes) + `validatePdf` (structure) — an invalid
+    PDF Artifact is never produced.
+  - **PDF Descriptor** — `buildPdfDescriptor`: document identity + ordered page identities + config +
+    PDF version + processor version, for replay/audit/debug (produced as a JSON Artifact).
+  - **Test harness** — `setupPdfExport`/`samplePageRaster`/`samplePrintProfile`.
+- **ADR-0018** — the pure-writer decision, the SDK-processor shape, format-packing-not-processing,
+  config-as-identity, and validate-gates-production (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `pdf-export`. Nothing else —
+the package is a downstream leaf; the Document Platform is untouched.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure-JS PDF assembly; `none` compression embeds raw image samples (largest, fully
+deterministic); `flate` (node:zlib) is smaller and deterministic per zlib.
+
+**Security:** Full validation at every boundary (config, Document, page references, generated PDF);
+no dates / random ids / host metadata leak into the PDF; no storage/networking; production goes
+through the SDK Artifact gateway; no secrets/PII.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0018; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 17 → done, with the Phase Retrospective; M10 → PDF exporter complete).
+
+**Testing:** **26 new tests** — config (defaults, full config, unsupported-value rejection, canonical
+identity); generator (channel→colour-space packing, PDF structure, fixed Producer + no dates, PDF
+version + bleed + crop marks, flate smaller + filter, byte-identical determinism, config-changes-bytes);
+validation (uniform/inconsistent pages, PDF structure accept/reject); processor end-to-end (successful
+export + descriptor, metadata embedding + override, page ordering; failures: malformed Document,
+missing page reference, inconsistent page sizes, unsupported config); determinism + artifact identity
+(byte-identical PDF + same content address; different config → different Artifact; replay-stable
+descriptor). `pnpm verify` green (**662 total**, 27 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. A real pipeline wires the processor into the coordinator's resolver against
+the real content-addressed store, feeding Documents whose pages are real composed page Artifacts.
+Additional exporters (preview/print-package/archival) follow the same architecture — an SDK processor
+consuming the same immutable Document.
+
+**ADR References:** **ADR-0018**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — Document Assembly Platform (task-phase 16)
 
 > Delivers the immutable, content-addressable, format-INDEPENDENT layer that assembles rendered

@@ -194,6 +194,27 @@ const ALLOWED = {
   // not render/rasterize them; and NO PDF/export/storage/network. Nothing depends on this package
   // yet (future export processors will consume the immutable Document via the Processor SDK).
   document: ['contracts', 'utils', 'errors', 'infra-contracts'],
+  // PDF Export Processor (Phase 17 task / frozen Render+PDF phase's first exporter): the first
+  // CONCRETE document exporter, built with the Processor SDK, that converts an immutable Document
+  // into a DETERMINISTIC PDF Artifact (pure-TS PDF generator + assembly/page-placement + metadata
+  // writer + export config + PDF validation + PDF descriptor). Depends on the foundation leaves +
+  // control-plane (RunId/Timestamp via the SDK context) + infra-contracts (StorageKey) + processing
+  // (the Processor contract) + processor-sdk (the base processor + harness) + document (parse/hash
+  // the immutable Document — READ-ONLY; it modifies no documents) + image-backend (`decodeRaster`
+  // ONLY — reading a page raster container to embed it; NOT resize/rotate/convert/composite, so no
+  // image processing/rendering). NO composition/coordinator/manifest/product dependency; NO storage/
+  // networking (production goes through the SDK's Artifact gateway). Nothing depends on this package.
+  'pdf-export': [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'processing',
+    'processor-sdk',
+    'document',
+    'image-backend',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */
