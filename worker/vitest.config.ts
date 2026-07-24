@@ -32,6 +32,7 @@ const PACKAGES = [
   'image-processors',
   'image-backend',
   'composition',
+  'document',
 ] as const;
 
 const alias = Object.fromEntries(

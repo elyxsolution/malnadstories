@@ -42,3 +42,4 @@ an invariant's interpretation, or introduces/retires a subsystem — **stop and 
 | [0014](0014-image-foundation-processors.md) | Image Foundation Processors: deterministic, rendering-independent image normalization | Accepted |
 | [0015](0015-native-image-backend.md) | Native Image Backend: a replaceable, deterministic pixel-processing backend | Accepted |
 | [0016](0016-page-composition-engine.md) | Page Composition Engine: a deterministic Blueprint → page-Artifact compositor | Accepted |
+| [0017](0017-document-assembly-platform.md) | Document Assembly Platform: an immutable, format-independent document model | Accepted |

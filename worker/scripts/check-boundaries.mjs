@@ -184,6 +184,16 @@ const ALLOWED = {
   // coordinator/manifest/product dependency. Nothing depends on this package yet (a later render
   // processor / assemble stage will).
   composition: ['contracts', 'utils', 'errors', 'infra-contracts', 'blueprint', 'image-backend'],
+  // Document Assembly Platform (Phase 16 task / frozen Render+PDF phase's document half): the
+  // immutable, content-addressable layer that assembles rendered Page Artifacts into a complete,
+  // format-INDEPENDENT printable document model (aggregate + builder + document manifest + page
+  // ordering + print metadata/settings/profile + assembly config + validation + canonical
+  // serialization + sha256 identity + Document Descriptor + a test harness). Depends ONLY on the
+  // foundation leaves + infra-contracts (StorageKey — page artifact references). NO image-backend/
+  // composition/blueprint/coordinator dependency: it references rendered pages by identity, it does
+  // not render/rasterize them; and NO PDF/export/storage/network. Nothing depends on this package
+  // yet (future export processors will consume the immutable Document via the Processor SDK).
+  document: ['contracts', 'utils', 'errors', 'infra-contracts'],
 };
 
 /** Recursively collect .ts source files under a directory. */

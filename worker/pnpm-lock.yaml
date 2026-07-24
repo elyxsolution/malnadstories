@@ -152,6 +152,21 @@ importers:
         specifier: workspace:*
         version: link:../errors
 
+  packages/document:
+    dependencies:
+      '@workerv2/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@workerv2/errors':
+        specifier: workspace:*
+        version: link:../errors
+      '@workerv2/infra-contracts':
+        specifier: workspace:*
+        version: link:../infra-contracts
+      '@workerv2/utils':
+        specifier: workspace:*
+        version: link:../utils
+
   packages/errors:
     dependencies:
       '@workerv2/contracts':

@@ -28,6 +28,76 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Document Assembly Platform (task-phase 16)
+
+> Delivers the immutable, content-addressable, format-INDEPENDENT layer that assembles rendered
+> Page Artifacts into a complete printable document model — the bridge between rendering and export.
+> Generates no PDF, renders no pages, performs no storage/networking, introduces no business logic.
+> Future exporters (PDF/preview/print-package) consume the same immutable Document as independent
+> Processor-SDK processors; the platform is unaware of them.
+
+**Added:**
+- **`@workerv2/document`** — the Document Assembly Platform:
+  - **Document aggregate + contracts** — a schema-versioned immutable `Document`: ordered pages
+    (each a content-addressed Page Artifact reference + kind + optional surface provenance),
+    document metadata, a print profile (settings), print metadata, and assembly configuration.
+  - **Document Builder** — `buildDocument(source)`: assembles page IDENTITIES (never bytes), applies
+    deterministic assembly defaults, routes through the single validation gate, computes the
+    canonical form + hash, and freezes. Invalid/incomplete documents are never produced.
+  - **Validation** — `validateDocument` (invariants D1–D8): schema version, complete metadata, valid
+    + contiguous page ordering, no duplicate indices, present (well-formed) page artifact
+    references, consistent print settings, consistent cover. Reconstructs a clean deep-frozen
+    document (unknown keys dropped).
+  - **Canonical serialization** — `serializeDocument`/`parseDocument` (round-trip stable; canonical
+    form recomputed on parse, never trusted).
+  - **Content-addressable identity** — `hashDocument` = `sha256:<hex>` over the canonical form,
+    derived exclusively from ordered page identities + metadata + print config; equivalent documents
+    hash identically; byte-compatible with artifact addressing (the Document is itself an artifact).
+  - **Document Manifest** — `toDocumentManifest`: the ordered page-reference listing.
+  - **Document Descriptor** — `describeDocument`: a deterministic, JSON-safe record (identity +
+    ordered page refs + print profile + metadata + assembly config) for replay/debug/validate/audit/
+    future export.
+  - **Test harness** — `sampleDocumentSource`/`samplePageInputs`/`fakePageKey`/`SAMPLE_PRINT_PROFILE`.
+- **ADR-0017** — the model-platform decision, pages-by-identity, structural format independence,
+  canonical identity/determinism, and validate-gates-construction (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `document`. Nothing else —
+the package is a downstream leaf; no existing package imports it yet.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure data assembly + a single sha256 over the canonical form; no rendering, no I/O.
+
+**Security:** Full validation at the construction boundary (unknown keys dropped; bounded strings /
+counts / dimensions); no storage/networking; the Document references pages by content address only;
+no secrets/PII; deterministic (no timestamps/randomness).
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0017; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 16 → done, with the Phase Retrospective; M10 → page compositor + document model).
+
+**Testing:** **25 new tests** — construction (derived page count, assembly defaults, cover-first,
+canonical form + hash); page ordering (sort-by-index, order-independent identity); document manifest
+projection; validation failures (incomplete metadata, empty pages, missing/malformed artifact,
+duplicate indices, non-contiguous indices, inconsistent print settings, inconsistent/duplicate
+cover); canonical hashing (sha256 format, equivalent → identical, differing → different, print
+metadata participates); serialization symmetry (round-trip + key-order independence); descriptor
+generation (records identity + ordered refs + profile + metadata + assembly; pure); deterministic
+identity + **replay consistency** (byte-identical builds; replay from canonical → same identity +
+descriptor + manifest); immutable behavior (deep-frozen; mutation throws). `pnpm verify` green
+(**636 total**, 26 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. The PDF/preview/print-package **export processors** are the next work,
+built with the Processor SDK, each consuming the immutable `Document` (this phase deliberately builds
+none). A render/assemble stage feeds real composed page Artifacts as the document's pages.
+
+**ADR References:** **ADR-0017**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — Page Composition Engine (task-phase 15)
 
 > Delivers the deterministic compositor that transforms a Blueprint surface + normalized image
