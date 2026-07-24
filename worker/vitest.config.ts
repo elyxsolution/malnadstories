@@ -45,7 +45,7 @@ const alias = Object.fromEntries(
 export default defineConfig({
   resolve: { alias },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
     environment: 'node',
     globals: false,
     clearMocks: true,

@@ -3,7 +3,9 @@
 # app's lockfile. Established in Phase 0 (Foundation).
 packages:
   - 'packages/*'
-  # 'apps/*' is reserved for later phases — no deployable app exists in Phase 0.
+  # The deployable Worker application (Phase 19.5) — the composition/bootstrap process that hosts
+  # the production runtime. Libraries live in packages/*; only the app emits build artifacts.
+  - 'apps/*'
 
 # pnpm v11 blocks native install scripts by default; allow the ones our toolchain needs.
 # esbuild (a Vitest dependency) ships a platform binary via its install script.

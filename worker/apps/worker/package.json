@@ -1,0 +1,23 @@
+{
+  "name": "@workerv2/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 deployable application (Phase 19.5) — the minimal executable process that composes the existing production runtime (@workerv2/worker-runtime) into a runnable worker service for local, Docker, and Render execution. It only bootstraps + drives existing libraries: it duplicates no runtime logic and modifies no completed architecture. Loads RuntimeConfig from env, constructs WorkerRuntime, recovers unfinished work, consumes jobs from a replaceable queue adapter, and shuts down gracefully on SIGINT/SIGTERM.",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@workerv2/worker-runtime": "workspace:*",
+    "@workerv2/blueprint": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0"
+  }
+}

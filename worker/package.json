@@ -15,7 +15,10 @@
     "format:write": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "pnpm run typecheck && pnpm run boundaries && pnpm run lint && pnpm run format && pnpm run test"
+    "verify": "pnpm run typecheck && pnpm run boundaries && pnpm run lint && pnpm run format && pnpm run test",
+    "build": "pnpm --filter @workerv2/app run build",
+    "start": "pnpm --filter @workerv2/app run start",
+    "dev": "pnpm --filter @workerv2/app run dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

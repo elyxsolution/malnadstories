@@ -1,5 +1,8 @@
-# apps/ — reserved
+# apps/ — deployable applications
 
-Deployable Worker V2 applications will live here. **Empty in Phase 0** — no deployable app
-exists yet. The first app (the Worker Runtime host) is established in a later phase, per
-`WORKER_V2_PHASES.md` / `WORKER_V2_WBS.md`. Do not add product code here during Phase 0.
+Deployable Worker V2 applications live here (libraries live in `packages/*`; only apps emit build
+artifacts).
+
+- **`worker/`** — the deployable Worker process (Phase 19.5). The minimal composition/bootstrap layer
+  that hosts the production runtime (`@workerv2/worker-runtime`) as a runnable service for local,
+  Docker, and Render execution. See `apps/worker/README.md`.

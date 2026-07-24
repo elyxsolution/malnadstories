@@ -1,0 +1,8 @@
+# Keep the Docker build context small + reproducible. The build stage runs `pnpm install`
+# itself, so host node_modules / build outputs must NOT be copied in.
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.DS_Store

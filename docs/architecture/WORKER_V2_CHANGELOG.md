@@ -28,6 +28,71 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Deployable Worker Application (Phase 19.5)
+
+> Creates the minimal executable process that composes the production runtime into a runnable worker
+> service (local / Docker / Render). This is an application composition/bootstrap layer, NOT a new
+> architectural phase: it duplicates no runtime logic and modifies no completed architecture
+> (Phases 0–19). No ADR.
+
+**Added:**
+- **`apps/worker` (`@workerv2/app`)** — the deployable Worker process:
+  - **`main.ts`** — `WorkerApplication` (lifecycle: startup → recovery → idle → processing →
+    draining → shutdown) + a guarded `runFromEnv()` entrypoint. Consumes jobs from the queue adapter
+    and hands each Blueprint to `runtime.run(...)`.
+  - **`config.ts`** — reuses `loadRuntimeConfigFromEnv`; adds only app knobs (poll interval, health
+    port); validates + fails fast (`ConfigError`).
+  - **`bootstrap.ts`** — constructs `WorkerRuntime` (injecting a JSON-lines structured logger; optional
+    metrics + a durable backend); selects the queue adapter. Duplicates no runtime logic.
+  - **`queue.ts`** — the isolated (deferred) queue seam: a `QueueAdapter` interface + an in-memory
+    polling adapter; the runtime stays queue-unaware. A real broker drops in behind the same interface.
+  - **`shutdown.ts`** — one-shot SIGINT/SIGTERM handling.
+  - **`health.ts`** — optional observational HTTP `/health` (lifecycle state / storage / recovery /
+    current job / version).
+  - **Build**: `tsup` bundles the app + every `@workerv2/*` library into one self-contained
+    `dist/main.js` (only Node built-ins external → no runtime `node_modules`); `Dockerfile`
+    (multi-stage, tiny, non-root); `README.md` (local / Docker / Render / env / flows).
+
+**Changed (additive workspace wiring only — no library/behavior change):**
+- `pnpm-workspace.yaml` — added `apps/*`.
+- root `package.json` — added `build` / `start` / `dev` scripts delegating to `@workerv2/app`.
+- root `tsconfig.json` + `vitest.config.ts` — added `apps/*` globs (typecheck + tests).
+- `apps/README.md` — documents the new app.
+- **`@workerv2/worker-host`** — unchanged (its Phase-19 DI seams were already sufficient).
+- **`@workerv2/worker-runtime`** — one additive line: `bootstrapApp` passes an optional `backend`
+  through the runtime's EXISTING `BootstrapDeps.backend` seam (no runtime behavior change).
+- `.dockerignore` added at the workspace root.
+
+**Removed:** Nothing.
+
+**Build system:** the project no longer relies solely on `--noEmit` — **only the application emits
+build artifacts** (`apps/worker/dist`, gitignored); every library stays `--noEmit`.
+
+**Security:** runs as non-root in Docker; config validated + fail-fast; the app performs no I/O beyond
+the runtime's durable store + the optional health HTTP endpoint; health/logging/metrics observational.
+
+**Documentation:** `apps/worker/README.md` (local / Docker / Render / env vars / build pipeline /
+startup+shutdown+recovery flows); `apps/README.md`; `WORKER_V2_PROGRESS.md` (Phase 19.5 → done).
+
+**Testing:** **11 new app tests** — config loading + fail-fast validation; queue (FIFO/ack/nack);
+application bootstrap + startup to idle; health snapshot; job processing → PDF (via the unchanged
+runtime) + acked + metrics; graceful shutdown (drain + `runtime.shutdown` + shutdown summary +
+`whenStopped`); restart-recovery startup over a shared durable backend. Build proven: `pnpm build`
+emits a 256 KB self-contained bundle and `node dist/main.js` boots to `worker.ready`. **The existing
+706 tests pass unchanged** → `pnpm verify` green (**717 total**).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** From `worker/`: `pnpm install && pnpm build && pnpm start` runs a real worker.
+Render: root dir `worker`, build `pnpm install && pnpm build`, start `pnpm start` (or the Dockerfile).
+Set `WV2_STORAGE=filesystem` + `WV2_STORAGE_ROOT` for durability/recovery.
+
+**ADR References:** None (application-composition layer).
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — Production Runtime (task-phase 19)
 
 > Turns Worker V2 into a production-ready runtime: durable stores, worker lifecycle + graceful
