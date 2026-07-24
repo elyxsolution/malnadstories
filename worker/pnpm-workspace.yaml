@@ -9,5 +9,11 @@ packages:
 
 # pnpm v11 blocks native install scripts by default; allow the ones our toolchain needs.
 # esbuild (a Vitest dependency) ships a platform binary via its install script.
+# sharp (the image-processing backend, Phase I-1) ships a platform binary the same way.
+# puppeteer downloads a Chromium binary via its install script. We skip it in this workspace (the unit
+# tests drive a FAKE renderer — no browser needed); the production image installs Chromium in the
+# Dockerfile. Set to true only if you want Chromium fetched during `pnpm install` here.
 allowBuilds:
   esbuild: true
+  puppeteer: false
+  sharp: true

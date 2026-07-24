@@ -7,8 +7,11 @@ describe('loadAppConfig', () => {
   it('applies defaults for an empty environment', () => {
     const config = loadAppConfig({});
     expect(config.runtime.storage.kind).toBe('memory');
-    expect(config.pollIntervalMs).toBe(1000);
-    expect(config.healthPort).toBeNull();
+    expect(config.app.pollIntervalMs).toBe(1000);
+    expect(config.app.healthPort).toBeNull();
+    // Infrastructure + processors are off by default — the worker stays idle.
+    expect(config.infrastructure).toBeNull();
+    expect(config.processors.enabled).toEqual([]);
   });
 
   it('reads storage, backend, poll interval, and health port from env', () => {
@@ -19,9 +22,13 @@ describe('loadAppConfig', () => {
       PORT: '8080',
     });
     expect(config.runtime.storage).toEqual({ kind: 'filesystem', root: '/data' });
-    expect(config.pollIntervalMs).toBe(250);
-    expect(config.healthPort).toBe(8080);
-    expect(summarizeConfig(config)).toMatchObject({ storage: 'filesystem', pollIntervalMs: 250 });
+    expect(config.app.pollIntervalMs).toBe(250);
+    expect(config.app.healthPort).toBe(8080);
+    expect(summarizeConfig(config)).toMatchObject({
+      storage: 'filesystem',
+      pollIntervalMs: 250,
+      infrastructure: 'disabled',
+    });
   });
 
   it('fails fast on invalid configuration', () => {

@@ -18,9 +18,15 @@ export interface WorkerJob {
 /**
  * The replaceable QUEUE ADAPTER. `poll` returns the next job or `null` when the queue is empty;
  * `ack`/`nack` acknowledge completion/failure. Kept minimal + broker-agnostic on purpose.
+ *
+ * `TJob` defaults to `WorkerJob` so the historical album-render loop (and every existing caller +
+ * test) is unchanged: `QueueAdapter` still means `QueueAdapter<WorkerJob>`. A broker adapter that
+ * delivers the generic `Job` envelope (see `./job.ts`) implements `QueueAdapter<Job>` behind the SAME
+ * three-method contract — the parametrization is how one interface serves both the legacy blueprint
+ * path and the generic job path without either knowing about the other.
  */
-export interface QueueAdapter {
-  poll(): Promise<WorkerJob | null>;
+export interface QueueAdapter<TJob = WorkerJob> {
+  poll(): Promise<TJob | null>;
   ack(jobId: string): Promise<void>;
   nack(jobId: string, error: unknown): Promise<void>;
 }
