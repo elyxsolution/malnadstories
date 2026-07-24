@@ -34,6 +34,7 @@ const PACKAGES = [
   'composition',
   'document',
   'pdf-export',
+  'worker-host',
 ] as const;
 
 const alias = Object.fromEntries(

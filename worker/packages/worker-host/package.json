@@ -1,0 +1,33 @@
+{
+  "name": "@workerv2/worker-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Worker V2 Worker Host — the single composition root. It constructs and wires together every previously-built platform (control plane, coordinator, execution adapter, processor SDK, image backend + processors, composition, document, PDF export, artifact store, persistence) into a complete executable album-generation pipeline, with full dependency injection (no globals, no ambient state). It registers processors + image backends + repositories + artifact stores, configures capability negotiation, executes complete Runs (Blueprint → Manifest → Coordinator → processors → composition → Document → PDF export → PDF Artifact), and surfaces observational execution diagnostics. It implements NO rendering, NO PDF generation, NO business logic; it changes no Coordinator, Processor SDK, or orchestration semantics — it is purely wiring.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@workerv2/contracts": "workspace:*",
+    "@workerv2/utils": "workspace:*",
+    "@workerv2/errors": "workspace:*",
+    "@workerv2/control-plane": "workspace:*",
+    "@workerv2/infra-contracts": "workspace:*",
+    "@workerv2/runtime": "workspace:*",
+    "@workerv2/processing": "workspace:*",
+    "@workerv2/processor-sdk": "workspace:*",
+    "@workerv2/coordinator": "workspace:*",
+    "@workerv2/execution-adapter": "workspace:*",
+    "@workerv2/manifest": "workspace:*",
+    "@workerv2/blueprint": "workspace:*",
+    "@workerv2/artifact-store": "workspace:*",
+    "@workerv2/persistence": "workspace:*",
+    "@workerv2/image-backend": "workspace:*",
+    "@workerv2/image-processors": "workspace:*",
+    "@workerv2/composition": "workspace:*",
+    "@workerv2/document": "workspace:*",
+    "@workerv2/pdf-export": "workspace:*"
+  }
+}

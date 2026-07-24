@@ -215,6 +215,35 @@ const ALLOWED = {
     'document',
     'image-backend',
   ],
+  // Worker Host (Phase 18 task): the SINGLE composition root. It is the ONLY package that performs
+  // dependency wiring, so it legitimately depends "outward" on every platform it composes —
+  // control-plane, coordinator, execution-adapter, runtime (capability offers), processing,
+  // processor-sdk, manifest, blueprint, artifact-store (content addressing + store), persistence
+  // (repositories), image-backend, image-processors, composition, document, pdf-export — plus the
+  // foundation leaves. It implements NO rendering/PDF/business logic and changes no other package's
+  // behavior; it only constructs, registers, and executes. Nothing depends on this package (it is
+  // the top-level root), so the dependency direction stays acyclic.
+  'worker-host': [
+    'contracts',
+    'utils',
+    'errors',
+    'control-plane',
+    'infra-contracts',
+    'runtime',
+    'processing',
+    'processor-sdk',
+    'coordinator',
+    'execution-adapter',
+    'manifest',
+    'blueprint',
+    'artifact-store',
+    'persistence',
+    'image-backend',
+    'image-processors',
+    'composition',
+    'document',
+    'pdf-export',
+  ],
 };
 
 /** Recursively collect .ts source files under a directory. */

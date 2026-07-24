@@ -28,6 +28,77 @@ Frozen planning foundation (no code).
 
 <!-- Newest first. One entry per phase (and per notable change) using the Change Entry Template. -->
 
+### v0.0.0 — 2026-07-24 — Worker Host & End-to-End Pipeline (task-phase 18)
+
+> Delivers the SINGLE composition root that wires every previously-built platform into a complete
+> executable album-generation pipeline, with full dependency injection. It introduces no new
+> business logic, rendering algorithm, document format, or orchestration semantics, and changes no
+> other package — it is purely wiring. A real album now generates end to end (Blueprint → PDF
+> Artifact), lifting RSK-1 architecturally.
+
+**Added:**
+- **`@workerv2/worker-host`** — the composition root:
+  - **`WorkerHost`** — constructs + injects every dependency (no globals, no ambient state); registers
+    processors + image backends + repositories + the artifact store; configures capability
+    negotiation; executes complete Runs; surfaces diagnostics.
+  - **`ContentAddressedStore`** — one sha256, idempotent store implementing BOTH the SDK
+    `ArtifactGateway` and the image-backend `ArtifactBytesPort`, so all Artifact identities stay
+    consistent (a canonical Blueprint/Manifest/Document gets a key = its own hash).
+  - **`ServiceRegistry` + `BackendRegistry`** — explicit DI + multi-backend registration (selected by
+    config, not processor logic; reference backend canonical).
+  - **`registerProcessors`** — wires every completed processor into one resolver (6 image foundation
+    processors + `surface.render`/`album.assemble` adapters + `document.export.pdf`).
+  - **Adapter processors** — `createSurfaceRenderProcessor` (drives `CompositionEngine`) and
+    `createAlbumAssembleProcessor` (drives the Document Builder): thin bindings of the Manifest's
+    node names to existing engines (no new algorithm/format).
+  - **Run executor** — `WorkerHost.prepare`/`executeManifest`/`run`: Blueprint → Manifest →
+    Coordinator (via the Execution Adapter, deterministic monotonic injected clock) → assembled
+    Document → PDF export → PDF Artifact.
+  - **Observational diagnostics** — `buildDiagnostics` (summary, execution order, produced artifacts,
+    duration, retries, failures) derived purely from the post-run state; never influences execution.
+- **ADR-0019** — the single-root decision, adapter-processors-as-glue, one shared store, the
+  host-orchestrated export stage, determinism + observational diagnostics, and config-driven backend
+  selection (+ rejected alternatives).
+
+**Changed:** workspace wiring (tsconfig/vitest/boundaries + lockfile) for `worker-host`. No other
+package changed — the host only constructs, registers, and drives.
+
+**Removed:** Nothing (purely additive).
+
+**Performance:** Pure in-memory composition + a synthetic deterministic clock; whole-album run is a
+sequential effect loop over the Coordinator. Durable store + distributed adapter are documented
+drop-ins.
+
+**Security:** No new external surface; full DI (no globals/ambient state); the host performs no
+storage/networking of its own beyond the injected in-memory store; every processor's production goes
+through the Artifact gateway; no secrets/PII.
+
+**Documentation:** Package `README.md` + JSDoc; ADR-0019; ADR index; `WORKER_V2_PROGRESS.md`
+(task-phase 18 → done, with the Phase Retrospective; RSK-1 architecturally lifted; M16 partial).
+
+**Testing:** **17 new integration tests** — complete album generation (Blueprint → valid PDF + page
+count + Document); observational diagnostics (order, artifacts, retries, failures); deterministic
+output + artifact-identity stability (same input → same PDF/Document keys; different album → different
+keys); processor registration (all names registered + resolvable); dependency composition (service
+registry contents, host isolation, duplicate-registration rejection); capability negotiation (offers,
+satisfied/unmet, a run with no offers fails); replay (rebuild → identical artifacts) + resume (journal
+re-fold → identical state); backend replacement (a counting backend proves the selected backend is
+driven; reference backend identical across hosts; unregistered backend fails fast). `pnpm verify`
+green (**679 total**, 28 packages).
+
+**Breaking Changes:** None.
+
+**Migration Notes:** None. Swapping the store, an image backend, or a processor changes ONLY the host
+wiring. Follow-ups (all drop-ins behind existing seams): a durable store + distributed driving
+adapter, one-active-run (INV-6) gating via the Control Plane Run Registry, load/soak + a
+byte-reproducibility harness, and app→host enqueue re-homing for production consumption.
+
+**ADR References:** **ADR-0019**.
+
+**Commit References:** _(recorded at commit — branch `worker-v2/phase-12-processor-sdk`)._
+
+---
+
 ### v0.0.0 — 2026-07-24 — PDF Export Processor (task-phase 17)
 
 > Delivers the first concrete document exporter — a normal Processor SDK implementation that converts
