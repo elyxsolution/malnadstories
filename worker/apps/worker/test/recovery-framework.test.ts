@@ -94,24 +94,16 @@ describe('PeriodicScheduler', () => {
 });
 
 describe('RecoveryCoordinator', () => {
-  function build(): {
-    coordinator: RecoveryCoordinator;
-    sink: RecordingSink;
-    metrics: RecordingMetricsSink;
-  } {
+  // Phase I-4: the coordinator takes ONLY an event sink. Its metrics + logger dependencies are gone
+  // — the observability layer derives both from this one stream (see observability-events.test.ts).
+  function build(): { coordinator: RecoveryCoordinator; sink: RecordingSink } {
     const sink = new RecordingSink();
-    const metrics = new RecordingMetricsSink();
-    const coordinator = new RecoveryCoordinator({
-      events: sink,
-      metrics,
-      logger: new RecordingLogger(),
-      batchSize: 100,
-    });
-    return { coordinator, sink, metrics };
+    const coordinator = new RecoveryCoordinator({ events: sink, batchSize: 100 });
+    return { coordinator, sink };
   }
 
-  it('detects + heals each item, emitting events + metrics', async () => {
-    const { coordinator, sink, metrics } = build();
+  it('detects + heals each item, emitting the full event stream', async () => {
+    const { coordinator, sink } = build();
     coordinator.register(
       new FakeRecoverable('image-hardening', [
         { kind: 'stale-pending', id: 'p1' },
@@ -127,9 +119,16 @@ describe('RecoveryCoordinator', () => {
       'recovery.completed',
       'recovery.started',
       'recovery.completed',
+      'recovery.sweep', // Phase I-4: one sweep-level event carrying the aggregate totals
     ]);
-    expect(metrics.counter(METRICS.jobsRecovered, { processor: 'image-hardening' })).toBe(2);
-    expect(metrics.counter(METRICS.staleDetected, { processor: 'image-hardening' })).toBe(2);
+    // The per-item outcome now travels on the event, which is what the metrics are derived from.
+    const completed = sink.events.filter((e) => e.type === 'recovery.completed');
+    expect(completed.map((e) => e.detail?.['outcome'])).toEqual(['recovered', 'recovered']);
+    // One sweep-level event carries the aggregate totals + duration.
+    const sweep = sink.events.find((e) => e.type === 'recovery.sweep');
+    expect(sweep?.detail).toMatchObject({ recovered: 2, detected: 2 });
+    expect(typeof sweep?.durationMs).toBe('number');
+    expect(coordinator.backlog).toBe(2);
   });
 
   it('tallies mixed outcomes (recovered / abandoned / already-healed / skipped)', async () => {

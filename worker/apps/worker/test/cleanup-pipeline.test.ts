@@ -3,7 +3,6 @@ import { RecordingLogger } from '@workerv2/worker-runtime';
 import type { Job } from '../src/job.js';
 import type { ObjectStore, ObjectMetadata } from '../src/infra/storage/object-store.js';
 import { CleanupProcessor, R2_CLEANUP_TYPE } from '../src/processors/cleanup/cleanup-processor.js';
-import { RecordingMetricsSink, METRICS } from '../src/recovery/metrics.js';
 import { CancellationSource } from '../src/recovery/cancellation.js';
 import type { ProcessorEvent, ProcessorEventSink } from '../src/processors/pipeline/events.js';
 
@@ -55,19 +54,18 @@ function job(keys: unknown): Job<{ keys: readonly string[] }> {
 function build(): {
   processor: CleanupProcessor;
   store: FakeObjectStore;
-  metrics: RecordingMetricsSink;
   events: RecordingSink;
 } {
   const store = new FakeObjectStore();
-  const metrics = new RecordingMetricsSink();
   const events = new RecordingSink();
+  // Phase I-4: the processor takes NO metrics sink. It reports the delete count on the
+  // `cleanup.completed` event and the observability layer derives the counter from it.
   const processor = new CleanupProcessor({
     objectStore: store,
     logger: new RecordingLogger(),
-    metrics,
     events,
   });
-  return { processor, store, metrics, events };
+  return { processor, store, events };
 }
 
 describe('cleanup pipeline', () => {
@@ -75,8 +73,8 @@ describe('cleanup pipeline', () => {
     const ctx = build();
     await ctx.processor.process(job(['k1', 'k2', 'k3']));
     expect(ctx.store.deleted).toEqual(['k1', 'k2', 'k3']);
-    expect(ctx.metrics.counter(METRICS.orphanObjectsRemoved)).toBe(3);
     const done = ctx.events.events.find((e) => e.type === 'cleanup.completed');
+    expect(typeof done?.durationMs).toBe('number');
     expect(done?.detail).toMatchObject({ deleted: 3 });
   });
 

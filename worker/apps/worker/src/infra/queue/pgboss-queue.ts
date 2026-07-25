@@ -63,6 +63,8 @@ export interface JobProducer {
 export class PgBossQueueAdapter implements QueueAdapter<Job>, JobProducer {
   /** Maps an in-flight job id → the queue it came from, so ack/nack target the right queue. */
   private readonly queueOfJob = new Map<string, string>();
+  /** Round-robin position across the responsible queues — the anti-starvation state. */
+  private cursor = 0;
   private started = false;
 
   constructor(
@@ -102,17 +104,36 @@ export class PgBossQueueAdapter implements QueueAdapter<Job>, JobProducer {
   }
 
   /**
-   * Poll the responsible queues in declared order and return the first available job as a `Job`
-   * envelope, or `null` when all are empty. Remembers the job→queue mapping for ack/nack.
+   * Poll the responsible queues ROUND-ROBIN and return the first available job as a `Job` envelope,
+   * or `null` when all are empty. Remembers the job→queue mapping for ack/nack.
+   *
+   * FAIRNESS (Phase I-5 fix). This previously scanned `this.queues` in DECLARED order and returned
+   * the first hit. Because `image-hardening` is declared first, any standing backlog on it meant
+   * `album-pdf` and `r2-cleanup` were never reached — a customer's PDF could wait behind thousands
+   * of uploads indefinitely. Starvation was invisible in normal operation because the queues are
+   * usually near-empty; it only appears under exactly the load this phase validates.
+   *
+   * The cursor advances past whichever queue was served, so over any window of N polls each of the
+   * N queues gets a turn. It is deliberately a plain rotation rather than a weighted or
+   * priority scheme: fairness is the property being fixed, and anything cleverer would be an
+   * unvalidated policy.
+   *
+   * `filter` restricts the poll to job types whose concurrency lane still has room.
    */
-  async poll(): Promise<Job | null> {
-    for (const queue of this.queues) {
+  async poll(filter?: readonly string[]): Promise<Job | null> {
+    const eligible =
+      filter === undefined ? this.queues : this.queues.filter((q) => filter.includes(q));
+    if (eligible.length === 0) return null;
+
+    for (let i = 0; i < eligible.length; i += 1) {
+      const queue = eligible[(this.cursor + i) % eligible.length] as string;
       const jobs = await this.boss.fetch<Record<string, unknown>>(queue, {
         includeMetadata: true,
         batchSize: 1,
       });
       const raw = jobs[0];
       if (raw !== undefined) {
+        this.cursor = (this.cursor + i + 1) % eligible.length;
         this.queueOfJob.set(raw.id, queue);
         return toJob(raw, queue);
       }
@@ -145,6 +166,11 @@ export class PgBossQueueAdapter implements QueueAdapter<Job>, JobProducer {
     await this.boss.stop({ graceful: true, wait: true });
     this.started = false;
     this.queueOfJob.clear();
+  }
+
+  /** Jobs polled but not yet acked/nacked by this adapter (an operational gauge). */
+  get inFlight(): number {
+    return this.queueOfJob.size;
   }
 
   private requireQueue(jobId: string): string {

@@ -1,5 +1,4 @@
 import type { CancellationToken } from '../../recovery/cancellation.js';
-import { METRICS } from '../../recovery/metrics.js';
 import type { CleanupContext, CleanupDeps, CleanupStage } from './cleanup-context.js';
 
 /**
@@ -37,7 +36,8 @@ export class DeleteObjectsStage implements CleanupStage {
       await deps.objectStore.delete(key);
       deleted += 1;
     }
-    if (deleted > 0) deps.metrics.increment(METRICS.orphanObjectsRemoved, deleted);
+    // The count is REPORTED, not instrumented: it rides out on the context and then on the
+    // `cleanup.completed` event, from which the observability layer derives the counter.
     return { ...ctx, deleted };
   }
 }

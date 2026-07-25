@@ -1,11 +1,18 @@
 import type { StructuredLogger } from '@workerv2/worker-runtime';
 
 /**
- * PIPELINE METRICS — a generic counter + observation sink for recovery/cleanup (and any future
- * pipeline). It is intentionally minimal + backend-agnostic (`increment` for counters, `observe` for
- * durations/sizes), so a real backend (Prometheus/OTel/StatsD) drops in behind the SAME interface and a
- * dashboard consumes the well-known metric names below. This phase ships the interface + in-memory /
- * logging / noop sinks; no dashboard.
+ * PIPELINE METRICS — a generic counter + observation sink introduced in Phase I-3, before the
+ * Observability layer existed.
+ *
+ * STATUS AFTER PHASE I-4: this interface is retained as a stable port, but it is no longer a SECOND
+ * metrics path. The observability layer supplies `MetricsProviderSink`, which implements this
+ * interface over the one `MetricsProvider`, so every sample — whatever era of code emitted it —
+ * reaches the same backend. Nothing in the worker constructs a metrics sink of its own any more:
+ * recovery and cleanup were refactored to emit events instead, and the counters below are now
+ * DERIVED from those events under the `WORKER_METRICS` vocabulary.
+ *
+ * The names are kept for compatibility with anything already built against them; new instrumentation
+ * should use `observability/metric-names.ts`.
  */
 
 export interface MetricsSink {

@@ -1,4 +1,3 @@
-import type { StructuredLogger } from '@workerv2/worker-runtime';
 import type { Job } from '../job.js';
 import type { QueueAdapter } from '../queue.js';
 import type { InfrastructureConfig } from './config.js';
@@ -64,44 +63,56 @@ export function createInfrastructure(
   };
 }
 
+/** The outcome of connecting + probing one dependency. */
+export interface InfraProbe {
+  readonly dependency: 'database' | 'queue' | 'storage';
+  readonly state: 'healthy' | 'unhealthy';
+  /** How long connect + probe took (ms) — a slow dependency is worth seeing at boot. */
+  readonly durationMs: number;
+}
+
 /**
- * Connect + health-probe every adapter, logging each outcome. Throws `InfrastructureError` on the first
- * failure so the process exits with a clear cause (fail fast — a worker that cannot reach its
+ * Connect + health-probe every adapter and RETURN the outcomes. Throws `InfrastructureError` on the
+ * first failure so the process exits with a clear cause (fail fast — a worker that cannot reach its
  * infrastructure must never pretend to be ready).
+ *
+ * OBSERVABILITY (Phase I-4): this function no longer logs. It used to write three `infra.preflight`
+ * lines and an `infra.preflight.ok` of its own, which duplicated — and disagreed in shape with — the
+ * startup report. It now REPORTS RESULTS and the caller (`StartupDiagnostics`) decides how to present
+ * them, so connectivity appears exactly once, inside the single startup report.
  */
-export async function preflightInfrastructure(
-  infra: Infrastructure,
-  logger: StructuredLogger,
-): Promise<void> {
-  await infra.database.connect();
-  await probe('database', () => infra.database.healthCheck(), logger);
-
-  await infra.queue.connect();
-  await probe('queue', () => infra.queue.healthCheck(), logger);
-
-  await probe('storage', () => infra.objectStore.healthCheck(), logger);
-
-  logger.log({ level: 'info', message: 'infra.preflight.ok', detail: {} });
+export async function preflightInfrastructure(infra: Infrastructure): Promise<InfraProbe[]> {
+  const probes: InfraProbe[] = [];
+  probes.push(
+    await probe('database', async () => {
+      await infra.database.connect();
+      return infra.database.healthCheck();
+    }),
+  );
+  probes.push(
+    await probe('queue', async () => {
+      await infra.queue.connect();
+      return infra.queue.healthCheck();
+    }),
+  );
+  probes.push(await probe('storage', () => infra.objectStore.healthCheck()));
+  return probes;
 }
 
 /** Close the connection-holding adapters (queue + database). Best-effort; never throws. */
-export async function closeInfrastructure(
-  infra: Infrastructure,
-  logger: StructuredLogger,
-): Promise<void> {
+export async function closeInfrastructure(infra: Infrastructure): Promise<{ failures: number }> {
   const results = await Promise.allSettled([infra.queue.close(), infra.database.close()]);
-  const failures = results.filter((r) => r.status === 'rejected').length;
-  logger.log({ level: 'info', message: 'infra.closed', detail: { failures } });
+  return { failures: results.filter((r) => r.status === 'rejected').length };
 }
 
 async function probe(
-  dependency: string,
+  dependency: InfraProbe['dependency'],
   check: () => Promise<'healthy' | 'unhealthy'>,
-  logger: StructuredLogger,
-): Promise<void> {
+): Promise<InfraProbe> {
+  const started = Date.now();
   const state = await check();
-  logger.log({ level: 'info', message: 'infra.preflight', detail: { dependency, state } });
   if (state !== 'healthy') {
     throw new InfrastructureError(dependency, `health check reported "${state}"`);
   }
+  return { dependency, state, durationMs: Date.now() - started };
 }

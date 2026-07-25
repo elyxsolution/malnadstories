@@ -7,7 +7,7 @@ import { CancellationError, NONE } from '../../recovery/cancellation.js';
 import type { CancellationToken } from '../../recovery/cancellation.js';
 import { Pipeline } from '../pipeline/pipeline.js';
 import { LoggingEventSink } from '../pipeline/events.js';
-import type { ProcessorEventSink } from '../pipeline/events.js';
+import type { ProcessorEventSink, ProcessorEventType } from '../pipeline/events.js';
 import { DEFAULT_RENDER_TIMEOUTS, PrintRouteError, RendererCrashedError } from './page-renderer.js';
 import type { PageRenderer, RenderTimeouts } from './page-renderer.js';
 import { AlbumPdfRepository } from './album-pdf-repository.js';
@@ -45,10 +45,14 @@ export interface PdfProcessorDeps {
  * outcome so the broker ACKs. A superseded/already-rendered job is a silent no-op. Any real failure marks
  * `album_pdfs` = `failed` with a typed code (admin regenerate recovers it; the Phase I-3 sweep will
  * auto-redrive transient codes with a fresh token). Nothing is left stuck in `generating`.
+ *
+ * OBSERVABILITY (Phase I-4): no logging, metrics, or tracing happens here. Every outcome is stated once
+ * as a `ProcessorEvent` and the Observability layer derives the log line, the counter, and the span.
  */
 export class PdfProcessor implements Processor<PdfPayload> {
   readonly type = ALBUM_PDF_TYPE;
   private readonly pipeline: Pipeline<RenderContext, RenderDeps>;
+  private readonly events: ProcessorEventSink;
 
   constructor(private readonly deps: PdfProcessorDeps) {
     const renderDeps: RenderDeps = {
@@ -59,18 +63,15 @@ export class PdfProcessor implements Processor<PdfPayload> {
       timeouts: deps.timeouts ?? DEFAULT_RENDER_TIMEOUTS,
       logger: deps.logger,
     };
-    this.pipeline = new Pipeline(
-      deps.stages ?? defaultRenderStages(),
-      renderDeps,
-      deps.events ?? new LoggingEventSink(deps.logger),
-    );
+    this.events = deps.events ?? new LoggingEventSink(deps.logger);
+    this.pipeline = new Pipeline(deps.stages ?? defaultRenderStages(), renderDeps, this.events);
   }
 
   async process(job: Job<PdfPayload>, cancellation: CancellationToken = NONE): Promise<void> {
     const correlationId = job.metadata.correlationId;
     const payload = parsePayload(job.payload);
     if (payload === null) {
-      this.log('error', 'pdf.bad_payload', { jobId: job.id, correlationId });
+      this.emit('processor.rejected', correlationId, { reason: 'bad_payload', jobId: job.id });
       return;
     }
 
@@ -81,48 +82,64 @@ export class PdfProcessor implements Processor<PdfPayload> {
     };
 
     try {
-      await this.pipeline.run(initial, { processor: ALBUM_PDF_TYPE, correlationId }, cancellation);
-      this.log('info', 'pdf.ready', { albumId: payload.albumId, correlationId });
+      await this.pipeline.run(
+        initial,
+        { processor: ALBUM_PDF_TYPE, correlationId, detail: { albumId: payload.albumId } },
+        cancellation,
+      );
+      this.emit('processor.result', correlationId, { albumId: payload.albumId, outcome: 'ready' });
     } catch (error) {
       if (error instanceof CancellationError) {
         // Shutdown mid-render: leave the row `generating` (the recovery sweep re-drives) — never mark failed.
-        this.log('info', 'pdf.cancelled', { albumId: payload.albumId, correlationId });
+        this.emit('processor.skipped', correlationId, {
+          reason: 'cancelled',
+          albumId: payload.albumId,
+        });
         throw error;
       }
       if (error instanceof SupersededError) {
-        this.log('info', 'pdf.superseded', {
+        // Ack — a newer request owns the token, or the album is already rendered.
+        this.emit('processor.skipped', correlationId, {
+          reason: 'superseded',
           albumId: payload.albumId,
-          reason: error.message,
-          correlationId,
+          note: error.message,
         });
-        return; // ack — a newer request owns the token, or the album is already rendered
+        return;
       }
       const { code, message } = classify(error);
       try {
         await this.deps.pdf.markFailed(payload.albumId, message, code);
       } catch (dbError) {
-        this.log('error', 'pdf.markfailed_failed', {
+        // The render already failed; failing to RECORD that is a second, separate fault worth its
+        // own event — it is the case that leaves a row stuck in `generating` until the sweep heals it.
+        this.emit('processor.failed', correlationId, {
+          reason: 'markfailed_failed',
           albumId: payload.albumId,
           error: toMessage(dbError),
-          correlationId,
         });
       }
-      this.log('warning', 'pdf.failed', {
+      this.emit('processor.rejected', correlationId, {
+        reason: code,
         albumId: payload.albumId,
-        code,
         error: message,
-        correlationId,
       });
-      // ack — terminal 'failed' (admin regenerate; I-3 sweep auto-redrives transient codes).
+      // ack — terminal 'failed' (admin regenerate; the I-3 sweep auto-redrives transient codes).
     }
   }
 
-  private log(
-    level: 'debug' | 'info' | 'warning' | 'error',
-    message: string,
+  /** State one terminal outcome as an event. The observability layer decides how it is reported. */
+  private emit(
+    type: ProcessorEventType,
+    correlationId: string,
     detail: Record<string, unknown>,
   ): void {
-    this.deps.logger.log({ level, message, detail });
+    this.events.emit({
+      type,
+      processor: ALBUM_PDF_TYPE,
+      correlationId,
+      at: new Date().toISOString(),
+      detail,
+    });
   }
 }
 

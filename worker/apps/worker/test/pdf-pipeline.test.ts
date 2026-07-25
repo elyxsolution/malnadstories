@@ -159,7 +159,10 @@ describe('pdf pipeline — skip (ack, no failure)', () => {
     await ctx.processor.process(job());
     expect(ctx.renderer.calls).toHaveLength(0);
     expect(ctx.pdf.failed).toBeNull();
-    expect(ctx.logger.records.some((r) => r.message === 'pdf.superseded')).toBe(true);
+    // Phase I-4: stated as a `processor.skipped` event, rendered by the default logging sink.
+    expect(ctx.logger.records.find((r) => r.message === 'processor.skipped')?.detail).toMatchObject(
+      { reason: 'superseded' },
+    );
   });
 
   it('skips when the album is already rendered (duplicate delivery)', async () => {
@@ -248,6 +251,8 @@ describe('pdf pipeline — idempotency & guards', () => {
     const ctx = build();
     await ctx.processor.process({ ...job(), payload: {} as { albumId: string; token: string } });
     expect(ctx.pdf.failed).toBeNull();
-    expect(ctx.logger.records.some((r) => r.message === 'pdf.bad_payload')).toBe(true);
+    expect(
+      ctx.logger.records.find((r) => r.message === 'processor.rejected')?.detail,
+    ).toMatchObject({ reason: 'bad_payload' });
   });
 });

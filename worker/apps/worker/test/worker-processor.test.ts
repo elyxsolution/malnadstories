@@ -10,6 +10,7 @@ import { ProcessorRegistry } from '../src/processors/registry.js';
 import type { Processor } from '../src/processors/registry.js';
 import { ProcessorJobRunner } from '../src/processors/runner.js';
 import { JobRouter } from '../src/router.js';
+import { MemoryLogSink } from '../src/observability/index.js';
 
 /** An in-memory QueueAdapter<Job> for the generic consume loop. */
 class InMemoryJobQueue implements QueueAdapter<Job> {
@@ -46,14 +47,15 @@ function buildWorker(processor: Processor): {
   queue: InMemoryJobQueue;
 } {
   const config = loadAppConfig({ WV2_POLL_INTERVAL_MS: '5' });
-  const { runtime, logger } = buildRuntime(config, {
+  const { runtime, logger, observability } = buildRuntime(config, {
     logger: new RecordingLogger(),
     backend: new InMemoryStorageBackend(),
+    sink: new MemoryLogSink(), // keep the app's own structured output out of the test console
   });
   const registry = new ProcessorRegistry().register(processor);
   const runner = new ProcessorJobRunner(new JobRouter(registry));
   const queue = new InMemoryJobQueue();
-  const components: AppComponents<Job> = { runtime, queue, logger, runner };
+  const components: AppComponents<Job> = { runtime, queue, logger, runner, observability };
   return { app: new WorkerApplication<Job>(config, components), queue };
 }
 

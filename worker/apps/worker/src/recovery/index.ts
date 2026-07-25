@@ -21,4 +21,4 @@ export { RecoveryCoordinator } from './coordinator.js';
 export type { RecoveryCoordinatorDeps, RecoverySummary } from './coordinator.js';
 
 export { PeriodicScheduler } from './scheduler.js';
-export type { SchedulerOptions } from './scheduler.js';
+export type { SchedulerOptions, SchedulerStats } from './scheduler.js';

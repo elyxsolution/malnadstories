@@ -1,6 +1,5 @@
 import type { StructuredLogger } from '@workerv2/worker-runtime';
 import type { ObjectStore } from '../../infra/storage/object-store.js';
-import type { MetricsSink } from '../../recovery/metrics.js';
 import type { Stage } from '../pipeline/pipeline.js';
 
 /**
@@ -13,10 +12,15 @@ export interface CleanupContext {
   readonly deleted: number;
 }
 
+/**
+ * Stage dependencies. Note what is NOT here: a metrics sink. Phase I-4 removed it — the delete count
+ * already travels on the `cleanup.completed` event, so the Observability layer derives the
+ * `worker.cleanup.objects_removed` counter from that one fact. A stage that both emitted an event AND
+ * incremented a counter was stating the same thing twice, in two places that could drift.
+ */
 export interface CleanupDeps {
   readonly objectStore: ObjectStore;
   readonly logger: StructuredLogger;
-  readonly metrics: MetricsSink;
 }
 
 export type CleanupStage = Stage<CleanupContext, CleanupDeps>;

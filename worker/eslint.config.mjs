@@ -29,6 +29,12 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
+    // Benchmark suites PRINT their reports — that is their deliverable. Confined to test files, so
+    // no production module can smuggle a `console` call in under this exemption.
+    files: ['apps/*/test/**/*.test.ts', 'packages/*/test/**/*.test.ts'],
+    rules: { 'no-console': 'off' },
+  },
+  {
     // Config/build files run in a Node script context.
     files: ['*.config.ts', '*.config.mjs', 'scripts/**/*.mjs'],
     languageOptions: {

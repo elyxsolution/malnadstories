@@ -314,18 +314,28 @@ describe('image pipeline — transient failures (throw → retry)', () => {
   });
 });
 
+/**
+ * Phase I-4: the processor no longer hand-logs its terminal outcomes — it emits `processor.rejected`
+ * / `processor.skipped` events, and the default `LoggingEventSink` renders them as records whose
+ * `message` IS the event type. The observable behaviour is asserted through that.
+ */
+function outcome(ctx: ReturnType<typeof build>, type: string): Record<string, unknown> | undefined {
+  return ctx.logger.records.find((r) => r.message === type)?.detail as
+    Record<string, unknown> | undefined;
+}
+
 describe('image pipeline — guard rails', () => {
   it('drops a poison payload without throwing (ack) and never touches storage', async () => {
     const ctx = build();
     await ctx.processor.process({ ...makeJob(), payload: {} as { photoId: string } });
     expect(ctx.store.writes).toEqual([]);
-    expect(ctx.logger.records.some((r) => r.message === 'image.bad_payload')).toBe(true);
+    expect(outcome(ctx, 'processor.rejected')).toMatchObject({ reason: 'bad_payload' });
   });
 
   it('is a no-op when the photo row has vanished', async () => {
     const ctx = build(); // nothing seeded
     await ctx.processor.process(makeJob());
     expect(ctx.store.writes).toEqual([]);
-    expect(ctx.logger.records.some((r) => r.message === 'image.photo_missing')).toBe(true);
+    expect(outcome(ctx, 'processor.skipped')).toMatchObject({ reason: 'photo_missing' });
   });
 });

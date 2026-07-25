@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { RecordingLogger } from '@workerv2/worker-runtime';
 import {
   loadInfrastructureConfig,
   createInfrastructure,
@@ -143,38 +142,34 @@ describe('createInfrastructure (dependency injection)', () => {
 });
 
 describe('preflightInfrastructure', () => {
-  it('connects + health-probes every dependency and logs each outcome', async () => {
+  // Phase I-4: preflight no longer logs. It RETURNS the probe outcomes and the startup report
+  // presents them, so connectivity is reported exactly once instead of in two disagreeing shapes.
+  it('connects + health-probes every dependency and returns each outcome', async () => {
     const f = fakes();
-    const logger = new RecordingLogger();
-    await preflightInfrastructure(createInfrastructure(config(), f), logger);
+    const probes = await preflightInfrastructure(createInfrastructure(config(), f));
 
     expect(f.database.connected).toBe(true);
     expect(f.queue.connected).toBe(true);
-    const probes = logger.records.filter((r) => r.message === 'infra.preflight');
-    expect(probes.map((r) => (r.detail as { dependency: string }).dependency)).toEqual([
-      'database',
-      'queue',
-      'storage',
-    ]);
-    expect(logger.records.some((r) => r.message === 'infra.preflight.ok')).toBe(true);
+    expect(probes.map((p) => p.dependency)).toEqual(['database', 'queue', 'storage']);
+    expect(probes.every((p) => p.state === 'healthy')).toBe(true);
+    expect(probes.every((p) => typeof p.durationMs === 'number')).toBe(true);
   });
 
   it('throws InfrastructureError (fail fast) when a dependency is unhealthy', async () => {
     const f = fakes();
     f.database.health = 'unhealthy';
-    await expect(
-      preflightInfrastructure(createInfrastructure(config(), f), new RecordingLogger()),
-    ).rejects.toBeInstanceOf(InfrastructureError);
+    await expect(preflightInfrastructure(createInfrastructure(config(), f))).rejects.toBeInstanceOf(
+      InfrastructureError,
+    );
   });
 });
 
 describe('closeInfrastructure', () => {
-  it('closes the connection-holding adapters', async () => {
+  it('closes the connection-holding adapters and reports failures', async () => {
     const f = fakes();
-    const logger = new RecordingLogger();
-    await closeInfrastructure(createInfrastructure(config(), f), logger);
+    const result = await closeInfrastructure(createInfrastructure(config(), f));
     expect(f.queue.closed).toBe(true);
     expect(f.database.closed).toBe(true);
-    expect(logger.records.some((r) => r.message === 'infra.closed')).toBe(true);
+    expect(result.failures).toBe(0);
   });
 });

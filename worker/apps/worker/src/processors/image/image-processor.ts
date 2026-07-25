@@ -7,7 +7,7 @@ import { NONE } from '../../recovery/cancellation.js';
 import type { CancellationToken } from '../../recovery/cancellation.js';
 import { Pipeline } from '../pipeline/pipeline.js';
 import { LoggingEventSink } from '../pipeline/events.js';
-import type { ProcessorEventSink } from '../pipeline/events.js';
+import type { ProcessorEventSink, ProcessorEventType } from '../pipeline/events.js';
 import type { ImageCodec } from './image-codec.js';
 import type { ImageContext, ImageStage, StageDeps } from './image-context.js';
 import type { PhotoRow, PhotoStore } from './photo-repository.js';
@@ -43,10 +43,16 @@ interface ImagePayload {
  * OUTCOME CONTRACT (drives ack vs. retry): this method RESOLVES for every terminal outcome — success, a
  * permanent rejection (photo marked `rejected`), an already-done photo, a vanished row, or a poison
  * payload — so the broker ACKs. It REJECTS only for transient failures, so the broker retries.
+ *
+ * OBSERVABILITY (Phase I-4): this processor performs NO logging, metrics, or tracing of its own. Every
+ * terminal outcome is stated ONCE as a `ProcessorEvent`; the Observability layer decides the severity,
+ * the counter, and the span attributes. That is why there is no logger call anywhere below — the
+ * `logger` dependency exists solely to be handed to the stages.
  */
 export class ImageProcessor implements Processor<ImagePayload> {
   readonly type = IMAGE_HARDENING_TYPE;
   private readonly pipeline: Pipeline<ImageContext, StageDeps>;
+  private readonly events: ProcessorEventSink;
 
   constructor(private readonly deps: ImageProcessorDeps) {
     const stageDeps: StageDeps = {
@@ -55,41 +61,41 @@ export class ImageProcessor implements Processor<ImagePayload> {
       photos: deps.photos,
       logger: deps.logger,
     };
-    this.pipeline = new Pipeline(
-      deps.stages,
-      stageDeps,
-      deps.events ?? new LoggingEventSink(deps.logger),
-    );
+    this.events = deps.events ?? new LoggingEventSink(deps.logger);
+    this.pipeline = new Pipeline(deps.stages, stageDeps, this.events);
   }
 
   async process(job: Job<ImagePayload>, cancellation: CancellationToken = NONE): Promise<void> {
     const correlationId = job.metadata.correlationId;
     const photoId = parsePhotoId(job.payload);
     if (photoId === null) {
-      // A malformed payload can never be fixed by retrying — drop it (ack) with a loud log.
-      this.log('error', 'image.bad_payload', { jobId: job.id, correlationId });
+      // A malformed payload can never be fixed by retrying — drop it (ack), loudly.
+      this.emit('processor.rejected', correlationId, { reason: 'bad_payload', jobId: job.id });
       return;
     }
 
     const photo = await this.deps.photos.findById(photoId);
     if (photo === null) {
-      this.log('warning', 'image.photo_missing', { photoId, correlationId });
-      return; // row deleted mid-flight — nothing to do
+      // Row deleted mid-flight — nothing to do.
+      this.emit('processor.skipped', correlationId, { reason: 'photo_missing', photoId });
+      return;
     }
     if (photo.status === 'rejected') {
+      this.emit('processor.skipped', correlationId, { reason: 'already_rejected', photoId });
       return; // terminal — idempotent no-op
     }
     if (photo.status === 'ready') {
       // Already processed — idempotent no-op. Any deferred raw cleanup (a crash between mark-ready and
       // raw-delete) is reconciled by the Recovery Coordinator's `orphan-raw` sweep, not here — the
       // processor stays focused on processing.
+      this.emit('processor.skipped', correlationId, { reason: 'already_ready', photoId });
       return;
     }
 
     const ineligible = this.rejectionReason(photo);
     if (ineligible !== null) {
       await this.deps.photos.markRejected(photoId);
-      this.log('warning', 'image.rejected', { photoId, reason: ineligible, correlationId });
+      this.emit('processor.rejected', correlationId, { reason: 'ineligible', photoId, ineligible });
       return;
     }
 
@@ -116,22 +122,23 @@ export class ImageProcessor implements Processor<ImagePayload> {
     try {
       const ctx = await this.pipeline.run(
         initial,
-        { processor: this.type, correlationId },
+        { processor: this.type, correlationId, detail: { photoId: photo.id } },
         cancellation,
       );
-      this.log('info', 'image.ready', {
+      // The pipeline already emitted `processor.completed` (timing). This adds the DOMAIN result the
+      // pipeline cannot know — the sanitized dimensions the album will be laid out against.
+      this.emit('processor.result', correlationId, {
         photoId: photo.id,
         width: ctx.width ?? null,
         height: ctx.height ?? null,
-        correlationId,
       });
     } catch (error) {
       if (error instanceof PermanentImageError) {
         await this.deps.photos.markRejected(photo.id);
-        this.log('warning', 'image.rejected', {
+        this.emit('processor.rejected', correlationId, {
+          reason: 'undecodable',
           photoId: photo.id,
-          reason: error.message,
-          correlationId,
+          error: error.message,
         });
         return; // terminal → ack
       }
@@ -149,12 +156,19 @@ export class ImageProcessor implements Processor<ImagePayload> {
     return null;
   }
 
-  private log(
-    level: 'debug' | 'info' | 'warning' | 'error',
-    message: string,
+  /** State one terminal outcome as an event. The observability layer decides how it is reported. */
+  private emit(
+    type: ProcessorEventType,
+    correlationId: string,
     detail: Record<string, unknown>,
   ): void {
-    this.deps.logger.log({ level, message, detail });
+    this.events.emit({
+      type,
+      processor: this.type,
+      correlationId,
+      at: new Date().toISOString(),
+      detail,
+    });
   }
 }
 

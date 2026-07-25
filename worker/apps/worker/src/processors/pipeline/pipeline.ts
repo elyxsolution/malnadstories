@@ -26,6 +26,14 @@ export interface Stage<TCtx, TDeps> {
 export interface PipelineRun {
   readonly processor: string;
   readonly correlationId: string;
+  /**
+   * The SUBJECT of this run (`{ photoId }`, `{ albumId }`) — small, stable identifiers merged into
+   * every event the run emits. Added in Phase I-4 so the lifecycle events say WHAT they are about,
+   * which is what let the processors stop hand-logging "image.ready photoId=…" alongside the
+   * pipeline's own events. Purely additive: the pipeline still knows nothing about the domain, it
+   * just carries an opaque bag it was handed.
+   */
+  readonly detail?: Readonly<Record<string, unknown>>;
 }
 
 export class Pipeline<TCtx, TDeps> {
@@ -76,14 +84,21 @@ export class Pipeline<TCtx, TDeps> {
   private emit(
     type: ProcessorEvent['type'],
     meta: PipelineRun,
-    extra: Partial<Pick<ProcessorEvent, 'stage' | 'durationMs' | 'error' | 'detail'>>,
+    extra: Partial<Pick<ProcessorEvent, 'stage' | 'durationMs' | 'error'>> & {
+      detail?: Record<string, unknown>;
+    },
   ): void {
+    const detail =
+      meta.detail === undefined && extra.detail === undefined
+        ? undefined
+        : { ...meta.detail, ...extra.detail };
     this.events.emit({
       type,
       processor: meta.processor,
       correlationId: meta.correlationId,
       at: new Date().toISOString(),
       ...extra,
+      ...(detail === undefined ? {} : { detail }),
     });
   }
 }

@@ -1,4 +1,3 @@
-import type { StructuredLogger } from '@workerv2/worker-runtime';
 import type {
   ProcessorEvent,
   ProcessorEventSink,
@@ -6,25 +5,35 @@ import type {
 } from '../processors/pipeline/events.js';
 import { CancellationError } from './cancellation.js';
 import type { CancellationToken } from './cancellation.js';
-import { METRICS } from './metrics.js';
-import type { MetricsSink } from './metrics.js';
 import type { RecoverableProcessor, RecoveryItem, RecoveryOutcome } from './recoverable.js';
 
 /**
  * THE RECOVERY COORDINATOR — the single owner of reconciliation, healing, and recovery policy. It holds
  * a set of `RecoverableProcessor`s and, each sweep, asks every one for its stale work then heals each
- * item, emitting `recovery.*` events + metrics. It contains NO domain logic (nothing about photos, PDFs,
- * or R2) — that lives in the processors' recovery hooks — so it never changes as processors are added.
+ * item, emitting `recovery.*` events. It contains NO domain logic (nothing about photos, PDFs, or R2) —
+ * that lives in the processors' recovery hooks — so it never changes as processors are added.
  *
  * The sweep is BOUNDED (each processor returns at most `batchSize` items — no full scans) and
  * CANCELLATION-AWARE (it stops promptly on shutdown). Every heal is idempotent, so a sweep that overlaps
  * a concurrent one, or re-runs after a crash, is always safe.
+ *
+ * OBSERVABILITY (Phase I-4): this coordinator was previously instrumented THREE times over — for the same
+ * facts it emitted an event, incremented a metric, AND wrote a log line, in three vocabularies that could
+ * drift apart. It now emits ONLY events, and its `metrics` + `logger` dependencies are gone. The
+ * Observability layer derives every counter, timing and log line from that one stream:
+ *
+ *     recovery.started   → `worker.recovery.stale_detected` + a span per healed item
+ *     recovery.completed → `worker.recovery.outcome{outcome}` + `worker.recovery.duration_ms`
+ *     recovery.failed    → `worker.recovery.failed` + an errored span
+ *     recovery.sweep     → `worker.recovery.sweep_duration_ms` + the backlog gauge + the summary log
+ *
+ * The detect-failure and cancellation cases, which used to be bespoke log calls, are events too — so a
+ * detection failure is finally visible in metrics rather than only in a log line.
  */
 
 export interface RecoveryCoordinatorDeps {
+  /** The single instrumentation channel. Everything this coordinator reports goes here. */
   readonly events: ProcessorEventSink;
-  readonly metrics: MetricsSink;
-  readonly logger: StructuredLogger;
   /** Max items healed per processor per sweep. */
   readonly batchSize: number;
 }
@@ -37,8 +46,12 @@ export interface RecoverySummary {
   failed: number;
 }
 
+/** The scope name used for sweep-level events, which belong to no single processor. */
+const SWEEP_SCOPE = 'recovery';
+
 export class RecoveryCoordinator {
   private readonly processors: RecoverableProcessor[] = [];
+  private lastBacklog = 0;
 
   constructor(private readonly deps: RecoveryCoordinatorDeps) {}
 
@@ -46,6 +59,16 @@ export class RecoveryCoordinator {
   register(processor: RecoverableProcessor): this {
     this.processors.push(processor);
     return this;
+  }
+
+  /** Registered handler names, sorted — reported by `/diagnostics`. */
+  get handlers(): readonly string[] {
+    return this.processors.map((p) => p.name).sort();
+  }
+
+  /** Items detected by the most recent sweep — the source of the recovery-backlog gauge. */
+  get backlog(): number {
+    return this.lastBacklog;
   }
 
   /** Run ONE recovery sweep across every processor. Returns aggregate outcomes. Never throws (except on cancel). */
@@ -58,49 +81,55 @@ export class RecoveryCoordinator {
       skipped: 0,
       failed: 0,
     };
+    let detected = 0;
+    let cancelled = false;
 
     try {
       for (const processor of this.processors) {
         token.throwIfCancelled();
-        await this.sweepProcessor(processor, token, totals);
+        detected += await this.sweepProcessor(processor, token, totals);
       }
     } catch (error) {
       if (!(error instanceof CancellationError)) throw error;
-      this.deps.logger.log({ level: 'info', message: 'recovery.cancelled', detail: { ...totals } });
+      cancelled = true;
     }
 
-    this.deps.metrics.observe(METRICS.sweepDurationMs, Date.now() - sweepStart);
-    this.deps.logger.log({ level: 'info', message: 'recovery.sweep', detail: { ...totals } });
+    this.lastBacklog = detected;
+    this.emit(
+      'recovery.sweep',
+      SWEEP_SCOPE,
+      `sweep:${sweepStart}`,
+      { ...totals, detected, ...(cancelled ? { cancelled: true } : {}) },
+      Date.now() - sweepStart,
+    );
     return totals;
   }
 
+  /** Sweep one processor; returns how many stale items it reported. */
   private async sweepProcessor(
     processor: RecoverableProcessor,
     token: CancellationToken,
     totals: RecoverySummary,
-  ): Promise<void> {
+  ): Promise<number> {
     let items: readonly RecoveryItem[];
     try {
       items = await processor.detectStale(this.deps.batchSize, token);
     } catch (error) {
       if (error instanceof CancellationError) throw error;
-      this.deps.logger.log({
-        level: 'warning',
-        message: 'recovery.detect_failed',
-        detail: { processor: processor.name, error: toMessage(error) },
+      // A detection failure is a real fault (a bad query, a dead connection). It must be visible — but
+      // it must not abort the sweep for the OTHER processors.
+      this.emit('recovery.failed', processor.name, `detect:${processor.name}`, {
+        phase: 'detect',
+        error: toMessage(error),
       });
-      return;
-    }
-    if (items.length > 0) {
-      this.deps.metrics.increment(METRICS.staleDetected, items.length, {
-        processor: processor.name,
-      });
+      return 0;
     }
 
     for (const item of items) {
       token.throwIfCancelled();
       await this.healItem(processor, item, totals, token);
     }
+    return items.length;
   }
 
   private async healItem(
@@ -114,52 +143,40 @@ export class RecoveryCoordinator {
     const start = Date.now();
     try {
       const result = await processor.recover(item, token);
-      const durationMs = Date.now() - start;
-      this.deps.metrics.observe(METRICS.recoveryDurationMs, durationMs, {
-        processor: processor.name,
-      });
-      this.tally(totals, result.outcome, processor.name);
-      this.emit('recovery.completed', processor.name, correlationId, {
-        kind: item.kind,
-        id: item.id,
-        outcome: result.outcome,
-        durationMs,
-        ...(result.detail ?? {}),
-      });
+      this.tally(totals, result.outcome);
+      this.emit(
+        'recovery.completed',
+        processor.name,
+        correlationId,
+        { kind: item.kind, id: item.id, outcome: result.outcome, ...(result.detail ?? {}) },
+        Date.now() - start,
+      );
     } catch (error) {
       if (error instanceof CancellationError) throw error;
       totals.failed += 1;
-      this.emit('recovery.failed', processor.name, correlationId, {
-        kind: item.kind,
-        id: item.id,
-        error: toMessage(error),
-      });
-      this.deps.logger.log({
-        level: 'warning',
-        message: 'recovery.item_failed',
-        detail: { processor: processor.name, id: item.id, error: toMessage(error) },
-      });
+      this.emit(
+        'recovery.failed',
+        processor.name,
+        correlationId,
+        { phase: 'recover', kind: item.kind, id: item.id, error: toMessage(error) },
+        Date.now() - start,
+      );
     }
   }
 
-  private tally(totals: RecoverySummary, outcome: RecoveryOutcome, processor: string): void {
+  private tally(totals: RecoverySummary, outcome: RecoveryOutcome): void {
     switch (outcome) {
       case 'recovered':
         totals.recovered += 1;
-        this.deps.metrics.increment(METRICS.jobsRecovered, 1, { processor });
-        this.deps.metrics.increment(METRICS.retriesAttempted, 1, { processor });
         break;
       case 'abandoned':
         totals.abandoned += 1;
-        this.deps.metrics.increment(METRICS.jobsAbandoned, 1, { processor });
         break;
       case 'already-healed':
         totals.alreadyHealed += 1;
-        this.deps.metrics.increment(METRICS.jobsAlreadyHealed, 1, { processor });
         break;
       case 'skipped':
         totals.skipped += 1;
-        this.deps.metrics.increment(METRICS.retriesSkipped, 1, { processor });
         break;
     }
   }
@@ -169,12 +186,14 @@ export class RecoveryCoordinator {
     processor: string,
     correlationId: string,
     detail: Record<string, unknown>,
+    durationMs?: number,
   ): void {
     const event: ProcessorEvent = {
       type,
       processor,
       correlationId,
       at: new Date().toISOString(),
+      ...(durationMs === undefined ? {} : { durationMs }),
       detail,
     };
     this.deps.events.emit(event);

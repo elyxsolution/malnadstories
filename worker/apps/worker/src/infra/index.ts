@@ -29,7 +29,12 @@ export {
   closeInfrastructure,
   InfrastructureError,
 } from './infrastructure.js';
-export type { Infrastructure, InfrastructureDeps, ManagedQueue } from './infrastructure.js';
+export type {
+  Infrastructure,
+  InfrastructureDeps,
+  InfraProbe,
+  ManagedQueue,
+} from './infrastructure.js';
 
 // --- Queue adapter (pg-boss) ---
 export { PgBossQueueAdapter } from './queue/pgboss-queue.js';

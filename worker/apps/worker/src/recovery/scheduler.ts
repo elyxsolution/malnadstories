@@ -23,11 +23,27 @@ export interface SchedulerOptions {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * Read-only scheduler state. EXPOSED, not logged: the scheduler reports what it is doing and the
+ * observability layer's `recoverySchedulerProbe` decides what that means for health (repeated
+ * failures ⇒ `degraded`). Structurally compatible with `probes.ts`'s `SchedulerStats`, without the
+ * recovery layer having to depend on the observability layer.
+ */
+export interface SchedulerStats {
+  readonly running: boolean;
+  readonly consecutiveFailures: number;
+  /** ISO-8601 time the last run finished, or `null` before the first run. */
+  readonly lastRunAt: string | null;
+  readonly lastError: string | null;
+}
+
 export class PeriodicScheduler {
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: Promise<void> = Promise.resolve();
   private consecutiveFailures = 0;
+  private lastRunAt: string | null = null;
+  private lastError: string | null = null;
   private source: CancellationSource | null = null;
   private readonly jitterMs: number;
   private readonly backoffFactor: number;
@@ -40,6 +56,16 @@ export class PeriodicScheduler {
     this.jitterMs = opts.jitterMs ?? 0;
     this.backoffFactor = opts.backoffFactor ?? 2;
     this.maxBackoffMs = opts.maxBackoffMs ?? opts.intervalMs * 10;
+  }
+
+  /** Current scheduler state, for the health probe + diagnostics. */
+  get stats(): SchedulerStats {
+    return {
+      running: this.running,
+      consecutiveFailures: this.consecutiveFailures,
+      lastRunAt: this.lastRunAt,
+      lastError: this.lastError,
+    };
   }
 
   /** Begin scheduling. The first run fires after one interval (+jitter). Idempotent. */
@@ -78,17 +104,17 @@ export class PeriodicScheduler {
     try {
       await this.task(source.token);
       this.consecutiveFailures = 0;
+      this.lastError = null;
     } catch (error) {
       this.consecutiveFailures += 1;
+      this.lastError = error instanceof Error ? error.message : String(error);
       this.opts.logger.log({
         level: 'warning',
         message: 'scheduler.task_failed',
-        detail: {
-          consecutiveFailures: this.consecutiveFailures,
-          error: error instanceof Error ? error.message : String(error),
-        },
+        detail: { consecutiveFailures: this.consecutiveFailures, error: this.lastError },
       });
     } finally {
+      this.lastRunAt = new Date().toISOString();
       this.source = null;
       this.scheduleNext(); // no overlap: schedule the next only after this settles
     }

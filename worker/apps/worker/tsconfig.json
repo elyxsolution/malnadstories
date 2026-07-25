@@ -4,7 +4,11 @@
     "baseUrl": "../..",
     "paths": {
       "@workerv2/worker-runtime": ["packages/worker-runtime/src/index.ts"],
-      "@workerv2/blueprint": ["packages/blueprint/src/index.ts"]
+      "@workerv2/blueprint": ["packages/blueprint/src/index.ts"],
+      "@workerv2/contracts": ["packages/contracts/src/index.ts"],
+      "@workerv2/metrics": ["packages/metrics/src/index.ts"],
+      "@workerv2/health": ["packages/health/src/index.ts"],
+      "@workerv2/build-info": ["packages/build-info/src/index.ts"]
     },
     "noEmit": true
   },

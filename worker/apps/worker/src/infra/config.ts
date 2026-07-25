@@ -1,4 +1,10 @@
-import { ConfigError, parsePositiveInt, requireEnv } from '../config-error.js';
+import {
+  ConfigError,
+  parseBoolean,
+  parseIntInRange,
+  parseUrl,
+  requireEnv,
+} from '../config-error.js';
 
 /**
  * INFRASTRUCTURE CONFIGURATION — the external, injectable config for the production I/O adapters
@@ -114,25 +120,68 @@ export function loadInfrastructureConfig(
     },
     database: {
       connectionString: directUrl,
-      maxConnections: parsePositiveInt(env['WV2_DB_MAX_CONNECTIONS'], 5, 'WV2_DB_MAX_CONNECTIONS'),
+      // Bounded: an unbounded pool per worker silently exhausts Postgres' session limit once more
+      // than a couple of workers run.
+      maxConnections: parseIntInRange(
+        env['WV2_DB_MAX_CONNECTIONS'],
+        5,
+        1,
+        100,
+        'WV2_DB_MAX_CONNECTIONS',
+      ),
     },
     render: {
-      // The app origin Chromium loads the print route from (default = local dev).
-      appUrl: (env['APP_URL'] ?? 'http://localhost:3000').replace(/\/+$/, ''),
+      // The app origin Chromium loads the print route from (default = local dev). Validated as an
+      // absolute http(s) URL here, so a typo fails at boot rather than on the first PDF job.
+      appUrl: parseUrl(env['APP_URL'], 'http://localhost:3000', 'APP_URL'),
     },
     recovery: {
-      enabled: env['WV2_RECOVERY'] !== 'off',
-      intervalMs: parsePositiveInt(
+      enabled: parseBoolean(env['WV2_RECOVERY'], true, 'WV2_RECOVERY'),
+      intervalMs: parseIntInRange(
         env['WV2_RECOVERY_INTERVAL_MS'],
         60_000,
+        1_000,
+        3_600_000,
         'WV2_RECOVERY_INTERVAL_MS',
       ),
-      jitterMs: 15_000,
-      batchSize: parsePositiveInt(env['WV2_RECOVERY_BATCH'], 100, 'WV2_RECOVERY_BATCH'),
-      imageStalePendingMs: 5 * 60 * 1000,
-      pdfStaleMs: 7 * 60 * 1000, // > a render's worst-case runtime, so the sweep never races a live render
-      pdfMaxAttempts: 5,
-      pdfTokenTtlMs: 5 * 60 * 1000,
+      jitterMs: parseIntInRange(
+        env['WV2_RECOVERY_JITTER_MS'],
+        15_000,
+        0,
+        600_000,
+        'WV2_RECOVERY_JITTER_MS',
+      ),
+      batchSize: parseIntInRange(env['WV2_RECOVERY_BATCH'], 100, 1, 10_000, 'WV2_RECOVERY_BATCH'),
+      imageStalePendingMs: parseIntInRange(
+        env['WV2_RECOVERY_IMAGE_STALE_MS'],
+        5 * 60 * 1000,
+        30_000,
+        86_400_000,
+        'WV2_RECOVERY_IMAGE_STALE_MS',
+      ),
+      // Must exceed a render's worst-case runtime so the sweep never races a live render — the
+      // relationship itself is asserted by `validateAppConfig`, not just the range.
+      pdfStaleMs: parseIntInRange(
+        env['WV2_RECOVERY_PDF_STALE_MS'],
+        7 * 60 * 1000,
+        60_000,
+        86_400_000,
+        'WV2_RECOVERY_PDF_STALE_MS',
+      ),
+      pdfMaxAttempts: parseIntInRange(
+        env['WV2_RECOVERY_PDF_MAX_ATTEMPTS'],
+        5,
+        1,
+        100,
+        'WV2_RECOVERY_PDF_MAX_ATTEMPTS',
+      ),
+      pdfTokenTtlMs: parseIntInRange(
+        env['WV2_RECOVERY_PDF_TOKEN_TTL_MS'],
+        5 * 60 * 1000,
+        60_000,
+        3_600_000,
+        'WV2_RECOVERY_PDF_TOKEN_TTL_MS',
+      ),
     },
   };
 }

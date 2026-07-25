@@ -26,7 +26,19 @@ export interface WorkerJob {
  * path and the generic job path without either knowing about the other.
  */
 export interface QueueAdapter<TJob = WorkerJob> {
-  poll(): Promise<TJob | null>;
+  /**
+   * Take the next available job, or `null` when nothing is available.
+   *
+   * `filter` (Phase I-5, OPTIONAL) restricts the poll to the given job types. It exists because
+   * adaptive concurrency needs to say "don't hand me another PDF, that lane is full" — and the only
+   * correct place to express that is BEFORE taking the job from the broker. Taking a job and then
+   * declining it would either burn a delivery attempt (nack) or hold a locked job idle, both of
+   * which are worse than not asking for it.
+   *
+   * The parameter is optional and additive: an adapter that ignores it stays correct (it just
+   * returns jobs the caller may have to run anyway), and every pre-Phase-I-5 caller is unchanged.
+   */
+  poll(filter?: readonly string[]): Promise<TJob | null>;
   ack(jobId: string): Promise<void>;
   nack(jobId: string, error: unknown): Promise<void>;
 }

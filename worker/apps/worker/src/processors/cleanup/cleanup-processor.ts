@@ -3,8 +3,6 @@ import type { Job } from '../../job.js';
 import type { ObjectStore } from '../../infra/storage/object-store.js';
 import { CancellationError, NONE } from '../../recovery/cancellation.js';
 import type { CancellationToken } from '../../recovery/cancellation.js';
-import { METRICS } from '../../recovery/metrics.js';
-import type { MetricsSink } from '../../recovery/metrics.js';
 import type { Processor } from '../registry.js';
 import { Pipeline } from '../pipeline/pipeline.js';
 import { LoggingEventSink } from '../pipeline/events.js';
@@ -22,28 +20,30 @@ interface CleanupPayload {
 export interface CleanupProcessorDeps {
   readonly objectStore: ObjectStore;
   readonly logger: StructuredLogger;
-  readonly metrics: MetricsSink;
   readonly events?: ProcessorEventSink;
 }
 
 /**
  * THE CLEANUP PROCESSOR — deletes a batch of orphaned R2 objects for one `r2-cleanup` job. It emits the
- * semantic `cleanup.*` events + records metrics, and delegates the work to the composable cleanup
- * pipeline. It is fully idempotent: missing/already-deleted keys are no-ops, so duplicate delivery and
- * retry-after-partial are both safe. A transient failure (R2 blip) is rethrown so the broker retries
- * (the app enqueues r2-cleanup with retries) — cleanup never needs a "failed" terminal state.
+ * semantic `cleanup.*` events and delegates the work to the composable cleanup pipeline. It is fully
+ * idempotent: missing/already-deleted keys are no-ops, so duplicate delivery and retry-after-partial are
+ * both safe. A transient failure (R2 blip) is rethrown so the broker retries (the app enqueues
+ * r2-cleanup with retries) — cleanup never needs a "failed" terminal state.
+ *
+ * OBSERVABILITY (Phase I-4): the processor no longer records metrics itself. It carries the duration and
+ * the delete count OUT on the `cleanup.completed` event, and the Observability layer derives the timing
+ * and the objects-removed counter from it.
  */
 export class CleanupProcessor implements Processor<CleanupPayload> {
   readonly type = R2_CLEANUP_TYPE;
   private readonly pipeline: Pipeline<CleanupContext, CleanupDeps>;
   private readonly events: ProcessorEventSink;
 
-  constructor(private readonly deps: CleanupProcessorDeps) {
+  constructor(deps: CleanupProcessorDeps) {
     this.events = deps.events ?? new LoggingEventSink(deps.logger);
     const cleanupDeps: CleanupDeps = {
       objectStore: deps.objectStore,
       logger: deps.logger,
-      metrics: deps.metrics,
     };
     this.pipeline = new Pipeline(defaultCleanupStages(), cleanupDeps, this.events);
   }
@@ -52,12 +52,9 @@ export class CleanupProcessor implements Processor<CleanupPayload> {
     const correlationId = job.metadata.correlationId;
     const keys = parseKeys(job.payload);
     if (keys === null) {
-      this.deps.logger.log({
-        level: 'error',
-        message: 'cleanup.bad_payload',
-        detail: { jobId: job.id, correlationId },
-      });
-      return; // poison payload — drop (ack)
+      // Poison payload — drop (ack).
+      this.emit('processor.rejected', correlationId, { reason: 'bad_payload', jobId: job.id });
+      return;
     }
 
     this.emit('cleanup.started', correlationId, { keys: keys.length });
@@ -68,13 +65,15 @@ export class CleanupProcessor implements Processor<CleanupPayload> {
         { processor: R2_CLEANUP_TYPE, correlationId },
         cancellation,
       );
-      this.deps.metrics.observe(METRICS.cleanupDurationMs, Date.now() - start);
-      this.emit('cleanup.completed', correlationId, { deleted: ctx.deleted });
+      this.emit('cleanup.completed', correlationId, { deleted: ctx.deleted }, Date.now() - start);
     } catch (error) {
       const cancelled = error instanceof CancellationError;
-      this.emit('cleanup.failed', correlationId, {
-        ...(cancelled ? { reason: 'cancelled' } : { error: toMessage(error) }),
-      });
+      this.emit(
+        'cleanup.failed',
+        correlationId,
+        { ...(cancelled ? { reason: 'cancelled' } : { error: toMessage(error) }) },
+        Date.now() - start,
+      );
       throw error; // retryable (idempotent deletes make the retry safe); cancelled → redelivered later
     }
   }
@@ -83,12 +82,14 @@ export class CleanupProcessor implements Processor<CleanupPayload> {
     type: ProcessorEventType,
     correlationId: string,
     detail: Record<string, unknown>,
+    durationMs?: number,
   ): void {
     const event: ProcessorEvent = {
       type,
       processor: R2_CLEANUP_TYPE,
       correlationId,
       at: new Date().toISOString(),
+      ...(durationMs === undefined ? {} : { durationMs }),
       detail,
     };
     this.events.emit(event);
