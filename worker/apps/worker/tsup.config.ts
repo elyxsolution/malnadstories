@@ -20,7 +20,9 @@ export default defineConfig({
   //   • the production infrastructure SDKs (pg-boss / postgres / aws-sdk) are inlined too. They are
   //     reached only through a DYNAMIC import gated on `WV2_INFRA=on`, so esbuild code-splitting keeps
   //     them out of the default-boot chunk — the infra-less worker never loads them.
-  noExternal: [/^@workerv2\//, 'pg-boss', 'postgres', '@aws-sdk/client-s3'],
+  //   • `dotenv` is inlined too: env loading runs on the DEFAULT boot path, before any config is
+  //     read, so leaving it external would break the "dist/main.js needs no node_modules" property.
+  noExternal: [/^@workerv2\//, 'pg-boss', 'postgres', '@aws-sdk/client-s3', 'dotenv'],
   // External modules resolved from node_modules at runtime:
   //   • pg-native / cloudflare:sockets — environment-guarded, never required under Node (bundle guard);
   //   • sharp / heic-convert / libheif-js — NATIVE binary / WASM, not bundleable;
@@ -28,6 +30,13 @@ export default defineConfig({
   //     These load ONLY inside the dynamically-imported processor chunk (WV2_INFRA=on), so the default
   //     worker never needs them; the production image ships them via node_modules (see Dockerfile).
   external: ['pg-native', 'cloudflare:sockets', 'sharp', 'heic-convert', 'libheif-js', 'puppeteer'],
+  // ESM/CJS interop. `dotenv` is CommonJS and calls `require('fs')` internally. Inlining it into an
+  // ESM bundle leaves esbuild's `__require` shim, which throws on any dynamic require — including
+  // Node builtins. Defining a real `require` from `import.meta.url` gives inlined CJS dependencies a
+  // working resolver. (Caught by running the built artifact, not by typecheck or tests.)
+  banner: {
+    js: "import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);",
+  },
   clean: true,
   sourcemap: true,
   dts: false,

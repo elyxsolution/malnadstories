@@ -114,16 +114,24 @@ drizzle/
   0036_error_events.sql               error_events (append-only captured failures/exceptions/slow ops; deduped by fingerprint via partial unique (fingerprint) where not resolved → occurrences++). Admin-only RLS + service-role writes (no delete). record_error_event() SECURITY DEFINER RPC = single capture entrypoint (app + worker): dedupe-upsert + audit error.created + open a critical system_alert (reuses 0035). Phase 10B
   0037_perf_indexes.sql               PURELY ADDITIVE performance indexes (Phase 10D) — no schema/RLS/grant change: albums(user_id,updated_at), orders(user_id,placed_at), orders(album_id,status), addresses(user_id), payments(order_id). Targets the hottest RLS/lookup predicates the base tables (0001) never indexed
   0039_stickers.sql                   sticker_categories + stickers (admin-managed decorative artwork for the cover + pages). Mirrors cover_templates (0023): artwork in private R2 under stickers/…; PUBLIC-READ active rows (anon/authenticated SELECT active); service-role writes only. RBAC `sticker:manage` (content role). Placed stickers store only `stickerId` in album jsonb — the print route/admin/builder resolve URLs by id so a deactivated-but-placed sticker still renders
-worker/                       Separate Node service (own package.json; pnpm install inside)
-  src/index.ts                Boot: start pg-boss, register image + pdf workers, sweep
-  src/jobs/image-hardening.ts validate → EXIF → re-encode → thumbnail → upload → delete raw
-  src/jobs/album-pdf.ts       Puppeteer → print route → page.pdf → upload PDF to R2
-  src/jobs/r2-cleanup.ts      delete a batch of R2 keys (album deletion; idempotent)
-  src/lib/image.ts            sharp + file-type + exifr + heic-convert helpers
-  src/lib/observability.ts    Phase 10B worker capture mirror (sanitize + record_error_event RPC + job timing)
-  src/{env,queue,r2,supabase}.ts   env, pg-boss conn, R2 client, service-role client
-  tsconfig.json               @builder/* -> ../src/lib/builder/* (PDF reuses model.ts)
+worker/                       Worker V2 — its OWN pnpm workspace (Worker V1 was removed; tag `worker-v1-final`)
+  .env.example                Env template — copy to worker/.env, or use the repo-root .env.local
+  ops/                        RUNBOOK.md · CONFIGURATION.md · CAPACITY.md (written for operators)
+  packages/                   Foundation libraries (@workerv2/*): contracts, logger, metrics, health, …
+  apps/worker/                THE DEPLOYABLE SERVICE (Docker/Render target)
+    src/main.ts               Entrypoint: load .env → config → reference OR production worker
+    src/env.ts                .env discovery (process.env always wins)
+    src/config.ts             All config + two-pass validation; `mode` = production | reference
+    src/concurrency.ts        Adaptive per-job-type lanes + backpressure
+    src/infra/                pg-boss queue · R2 object store · Supabase Postgres adapters
+    src/processors/           image-hardening · album-pdf · r2-cleanup (registry → pipeline → stages)
+    src/recovery/             Recovery Coordinator + periodic scheduler
+    src/observability/        Logging · tracing · metrics · health · diagnostics
+    src/testing/              Load + chaos harness (never imported by production; absent from dist)
 ```
+
+> **Production mode requires `WV2_INFRA=on`.** Without it the worker boots into *reference mode*:
+> healthy, idle, and processing nothing. The startup banner says so explicitly, with the reason.
 
 ---
 
@@ -290,11 +298,17 @@ Album `size` is data-driven: the create-album form renders `products.pages`, and
 | `WORKER_URL` | App-side, **server-only** (never `NEXT_PUBLIC`); base URL of the worker service. The app probes `WORKER_URL/health` to gate/wake worker-dependent ops (Phase G). Unset → gating disabled (probe reports "ready"), for local dev. |
 | `PORT` | Worker-only; port the worker's `/health` availability server binds to (Render injects it; default `8080`) |
 | `APP_URL` | Worker-only; base URL the PDF job's Chromium navigates to (default `http://localhost:3000`) |
-| `KEEP_RAW_ORIGINAL` | Worker-only; `false` (default) deletes the raw upload after sanitizing |
-| `WORKER_SWEEP_INTERVAL_MS` | Worker-only; how often to re-scan for stuck `pending` photos (default 60000) |
+| `WV2_INFRA` | **Worker-only; THE MASTER SWITCH.** `on`/`true`/`1`/`yes` enables production mode. Unset → the worker runs *reference mode*: healthy, idle, processing nothing. |
 
-The worker reads these from the **repo-root `.env.local`** (single source of secrets);
-see `worker/.env.example`.
+The worker auto-loads `.env.local` / `.env`, searching from its working directory **upward**, so the
+**repo-root `.env.local`** (single source of secrets) is picked up automatically. `process.env`
+always wins, so Render/Docker injection is never overridden. Worker-only overrides go in
+`worker/.env`. Full template + every worker variable: **`worker/.env.example`**;
+operational reasoning: **`worker/ops/CONFIGURATION.md`**.
+
+> `KEEP_RAW_ORIGINAL` and `WORKER_SWEEP_INTERVAL_MS` were Worker V1 variables and no longer exist.
+> V2 uses `WV2_RECOVERY_INTERVAL_MS` for the sweep. The worker does **not** use `SUPABASE_URL` or
+> `SUPABASE_SERVICE_ROLE_KEY` — it connects to Postgres directly via `DIRECT_URL`.
 
 **R2 bucket CORS** (Cloudflare dashboard → bucket → Settings) must allow `PUT` and
 `GET` from the app origin, with `content-type`/`content-length` headers and `ETag`
@@ -309,9 +323,13 @@ exposed — direct browser uploads/displays fail without it.
 pnpm dev          # http://localhost:3000
 
 # Terminal 2 — the background worker (FIRST TIME: install its own deps)
-cd worker && pnpm install   # standalone package; has its own pnpm-workspace.yaml
-pnpm dev                    # = tsx watch src/index.ts
+cd worker && pnpm install   # standalone workspace; has its own pnpm-workspace.yaml
+cp .env.example .env        # then set WV2_INFRA=on (secrets come from the repo-root .env.local)
+pnpm dev                    # = tsx watch apps/worker/src/main.ts
 ```
+
+On boot the worker prints a banner stating whether it is in **PRODUCTION** or **REFERENCE** mode,
+which processors are registered, and — if it is idle — exactly why.
 
 The worker connects to the same Supabase Postgres (pg-boss creates its own `pgboss`
 schema automatically) and reads the repo-root `.env.local`. Without it running,

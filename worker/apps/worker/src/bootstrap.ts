@@ -69,6 +69,8 @@ export interface AppComponents<TJob = WorkerJob> {
   readonly monitor?: RuntimeMonitor;
   /** Registry contents for `/diagnostics`. */
   readonly composition?: CompositionSources;
+  /** `.env` files that contributed variables, reported at startup so a surprising value is traceable. */
+  readonly envFiles?: readonly string[];
   /**
    * Concurrency lanes. Injected so a composition root (or a load test) can share ONE controller
    * between the dispatch loop and the recovery scheduler — which is how recovery learns to defer

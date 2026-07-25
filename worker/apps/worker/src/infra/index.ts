@@ -8,7 +8,8 @@
 // --- Config ---
 export {
   loadInfrastructureConfig,
-  loadProcessorConfig,
+  infrastructureRequested,
+  missingInfrastructureVars,
   WORKER_QUEUES,
   ConfigError,
 } from './config.js';
@@ -19,7 +20,6 @@ export type {
   DatabaseInfraConfig,
   RenderInfraConfig,
   RecoveryInfraConfig,
-  ProcessorConfig,
 } from './config.js';
 
 // --- Composition + preflight ---

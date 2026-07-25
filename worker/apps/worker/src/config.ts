@@ -11,8 +11,8 @@ import {
   parseRatio,
 } from './config-error.js';
 import { assertConfigValid } from './config-validation.js';
-import { loadInfrastructureConfig, loadProcessorConfig } from './infra/config.js';
-import type { InfrastructureConfig, ProcessorConfig } from './infra/config.js';
+import { infrastructureRequested, loadInfrastructureConfig } from './infra/config.js';
+import type { InfrastructureConfig } from './infra/config.js';
 import type { ObservabilityConfig } from './observability/index.js';
 import { parseLogLevel } from './observability/index.js';
 import type { ConcurrencyConfig } from './concurrency.js';
@@ -39,6 +39,9 @@ import { DEFAULT_LANE } from './concurrency.js';
 export const WORKER_VERSION = '0.0.0';
 /** The production-runtime library version this app hosts. */
 export const RUNTIME_VERSION = '0.0.0';
+
+/** Which worker this process is: a real processor worker, or the in-memory reference worker. */
+export type WorkerMode = 'production' | 'reference';
 
 /** App-process knobs (not runtime, not infrastructure, not observability). */
 export interface AppProcessConfig {
@@ -101,9 +104,15 @@ export interface AppConfig {
   /** Per-job-type concurrency lanes + the global in-flight ceiling (Phase I-5). */
   readonly concurrency: ConcurrencyConfig;
   readonly observability: ObservabilityConfig;
-  /** Production infrastructure config, or `null` when infrastructure is disabled (`WV2_INFRA` != `on`). */
+  /** Production infrastructure config, or `null` when infrastructure is not enabled. */
   readonly infrastructure: InfrastructureConfig | null;
-  readonly processors: ProcessorConfig;
+  /**
+   * `production` when the concrete processors are wired to real infrastructure; `reference` when the
+   * worker is running its in-memory album path and will consume no production jobs. Derived, not
+   * configured — it exists so startup can state the mode in one word instead of leaving a developer
+   * to infer it from three unrelated fields.
+   */
+  readonly mode: WorkerMode;
   /** Non-fatal configuration warnings surfaced by the startup report + the `configuration` probe. */
   readonly warnings: readonly string[];
 }
@@ -179,13 +188,14 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     diagnosticsToken: emptyToNull(env['WV2_DIAGNOSTICS_TOKEN']),
   };
 
+  const infrastructure = loadInfrastructureConfig(env);
   const assembled: AppConfig = {
     runtime,
     app,
     concurrency: loadConcurrencyConfig(env),
     observability: loadObservabilityConfig(env),
-    infrastructure: loadInfrastructureConfig(env),
-    processors: loadProcessorConfig(env),
+    infrastructure,
+    mode: infrastructure === null ? 'reference' : 'production',
     warnings: [],
   };
 
@@ -236,10 +246,33 @@ export function summarizeConfig(config: AppConfig): Record<string, unknown> {
           ? `every ${config.infrastructure.recovery.intervalMs}ms (batch ${config.infrastructure.recovery.batchSize})`
           : 'disabled',
     appUrl: config.infrastructure?.render.appUrl ?? null,
-    processors: config.processors.enabled.length,
     warnings: config.warnings.length,
   };
 }
+
+/**
+ * Why infrastructure is disabled, phrased so a developer can act on it without reading any code.
+ * `null` when it IS enabled.
+ *
+ * This exists because "infrastructure: disabled" on its own is a symptom, not a diagnosis — it does
+ * not say whether the switch is unset, or set to something unrecognised, or which variables are
+ * missing.
+ */
+export function infrastructureDisabledReason(
+  config: AppConfig,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): { readonly reason: string; readonly expected: string } | null {
+  if (config.infrastructure !== null) return null;
+  const raw = env['WV2_INFRA'];
+  if (raw === undefined || raw.trim().length === 0) {
+    return { reason: 'WV2_INFRA is not set', expected: 'WV2_INFRA=on' };
+  }
+  // A recognised-but-false value: the operator turned it off deliberately.
+  return { reason: `WV2_INFRA is set to "${raw}" (disabled)`, expected: 'WV2_INFRA=on' };
+}
+
+/** Whether production mode was ASKED for, whatever the outcome. Re-exported for startup reporting. */
+export { infrastructureRequested };
 
 function emptyToNull(value: string | undefined): string | null {
   return value === undefined || value.trim().length === 0 ? null : value;

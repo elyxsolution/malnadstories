@@ -9,9 +9,10 @@ describe('loadAppConfig', () => {
     expect(config.runtime.storage.kind).toBe('memory');
     expect(config.app.pollIntervalMs).toBe(1000);
     expect(config.app.healthPort).toBeNull();
-    // Infrastructure + processors are off by default — the worker stays idle.
+    // Infrastructure is off by default — the worker runs in reference mode and consumes no
+    // production jobs. `mode` states that in one field rather than leaving it to be inferred.
     expect(config.infrastructure).toBeNull();
-    expect(config.processors.enabled).toEqual([]);
+    expect(config.mode).toBe('reference');
   });
 
   it('reads storage, backend, poll interval, and health port from env', () => {

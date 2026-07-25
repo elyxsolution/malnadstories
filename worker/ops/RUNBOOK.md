@@ -29,12 +29,12 @@ not destructive.
 
 Three endpoints on the worker's URL. `$WORKER` is the Render service URL.
 
-| Endpoint | Question it answers | Act on it by |
-|---|---|---|
-| `GET /health` | Ready for work? (`{"status":"ok"}` = yes) | This is what the app checks |
-| `GET /live` | Should I **restart** it? (503 = yes) | Restart the service |
-| `GET /ready` | Should it be given work? (503 = no) | Wait; check dependencies |
-| `GET /diagnostics` | What exactly is this process? | Investigation only |
+| Endpoint           | Question it answers                       | Act on it by                |
+| ------------------ | ----------------------------------------- | --------------------------- |
+| `GET /health`      | Ready for work? (`{"status":"ok"}` = yes) | This is what the app checks |
+| `GET /live`        | Should I **restart** it? (503 = yes)      | Restart the service         |
+| `GET /ready`       | Should it be given work? (503 = no)       | Wait; check dependencies    |
+| `GET /diagnostics` | What exactly is this process?             | Investigation only          |
 
 ```bash
 curl -s $WORKER/health | jq
@@ -69,19 +69,19 @@ Every line has `level`, `message`, `timestamp`. Work-related lines also carry `j
 
 **The lines that matter:**
 
-| `message` | Meaning | Action |
-|---|---|---|
-| `worker.ready` | Booted successfully | None |
-| `worker.startup.report` | Startup checks — read `overall` | `warn` → read `checks[]` |
-| `worker.job.start` / `.done` | Normal work | None |
-| `worker.job.failed` | A job failed; will retry | None unless repeating |
-| `worker.dispatch.failed` | Broker hiccup; loop survived and retried | None unless repeating |
-| `worker.drain.timeout` | Shutdown abandoned a job (it will be redelivered) | None |
-| `processor.rejected` | A photo/PDF was permanently rejected (bad input) | Only if a customer complains |
-| `recovery.sweep` | Self-healing ran | None |
-| `recovery.deferred` | Self-healing skipped — worker busy | None; normal under load |
-| `resource.reset` with `reason:"unhealthy"` | **Chromium crashed and was rebuilt** | Investigate if frequent |
-| `observability.metrics.degraded` | Telemetry backend failing | Non-urgent |
+| `message`                                  | Meaning                                           | Action                       |
+| ------------------------------------------ | ------------------------------------------------- | ---------------------------- |
+| `worker.ready`                             | Booted successfully                               | None                         |
+| `worker.startup.report`                    | Startup checks — read `overall`                   | `warn` → read `checks[]`     |
+| `worker.job.start` / `.done`               | Normal work                                       | None                         |
+| `worker.job.failed`                        | A job failed; will retry                          | None unless repeating        |
+| `worker.dispatch.failed`                   | Broker hiccup; loop survived and retried          | None unless repeating        |
+| `worker.drain.timeout`                     | Shutdown abandoned a job (it will be redelivered) | None                         |
+| `processor.rejected`                       | A photo/PDF was permanently rejected (bad input)  | Only if a customer complains |
+| `recovery.sweep`                           | Self-healing ran                                  | None                         |
+| `recovery.deferred`                        | Self-healing skipped — worker busy                | None; normal under load      |
+| `resource.reset` with `reason:"unhealthy"` | **Chromium crashed and was rebuilt**              | Investigate if frequent      |
+| `observability.metrics.degraded`           | Telemetry backend failing                         | Non-urgent                   |
 
 **Find one customer's job:**
 
@@ -93,7 +93,7 @@ Every line has `level`, `message`, `timestamp`. Work-related lines also carry `j
 
 ## 3. Deploying
 
-Render → service → **Manual Deploy** → *Deploy latest commit*. Or push to the deploy branch.
+Render → service → **Manual Deploy** → _Deploy latest commit_. Or push to the deploy branch.
 
 Render builds `worker/apps/worker/Dockerfile` with **Root Directory = `worker`**.
 
@@ -134,7 +134,7 @@ See `CAPACITY.md` for how many you need.
 ### Photos stuck on "Processing…"
 
 1. Is the worker up? `curl -s $WORKER/health`
-2. Is it *ready*? A `degraded` status with `database` or `storage` unhealthy means it cannot work.
+2. Is it _ready_? A `degraded` status with `database` or `storage` unhealthy means it cannot work.
 3. Wait 5 minutes. The **recovery sweep** re-drives stuck photos automatically every 60s.
 4. Still stuck after 10 minutes → check logs for `processor.rejected` (the photo was invalid — the
    customer must re-upload) or `recovery.failed`.
@@ -145,7 +145,7 @@ See `CAPACITY.md` for how many you need.
    heals any paid album missing a PDF.
 2. If it stays missing, regenerate it: **Admin → Albums → \[album\] → Regenerate PDF**.
 3. Check logs for `processor.rejected` with `reason` — e.g. `render_timeout`, `print_route_error`.
-   `print_route_error` means the *app* failed to serve the print page, not the worker.
+   `print_route_error` means the _app_ failed to serve the print page, not the worker.
 
 ### Restarting recovery
 

@@ -11,6 +11,8 @@ import { CancellationSource } from './recovery/cancellation.js';
 import { ConcurrencyController, memoryPressureSensor } from './concurrency.js';
 import { installSignalHandlers } from './shutdown.js';
 import { coarseStatus, startHealthServer } from './health.js';
+import { loadEnvFiles, describeEnvFiles } from './env.js';
+import { printStartupBanner, startupModeFields } from './startup-banner.js';
 import type { HealthService, HealthSnapshot } from './health.js';
 import type {
   DiagnosticsReport,
@@ -117,6 +119,17 @@ export class WorkerApplication<TJob extends { readonly id: string } = WorkerJob>
       storageBackend: this.config.runtime.storage.kind,
       config: summarizeConfig(this.config),
     });
+    // The mode record: one grep-able line stating what this process will actually do, including the
+    // REASON when it will do nothing. Emitted in every log format.
+    this.logger.info(
+      'worker.mode',
+      startupModeFields({
+        config: this.config,
+        processors: this.knownTypes,
+        envFiles: this.components.envFiles ?? [],
+        workerVersion: WORKER_VERSION,
+      }),
+    );
 
     await (this.components.startup ?? this.defaultStartupChecks()).run();
 
@@ -533,14 +546,23 @@ function typeOf(job: { readonly id: string }): string {
 
 /** Build + run a worker from the environment (the process entrypoint's body). */
 export async function runFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  // Load `.env` files BEFORE reading configuration. Nothing already in `process.env` is overridden,
+  // so Render/Docker injection and explicit `VAR=… node dist/main.js` both still win.
+  const envLoad = env === process.env ? loadEnvFiles() : { files: [], applied: 0 };
+  const envFiles = describeEnvFiles(envLoad);
+
   const config = loadAppConfig(env);
+
   if (config.infrastructure === null) {
-    // Default path: no infrastructure → the album/blueprint worker on the in-memory queue (idle until
-    // a Blueprint is enqueued). The external SDKs and the native image stack are never loaded.
-    await driveApp(new WorkerApplication(config, bootstrapApp(config)));
+    // Reference path: no infrastructure → the album/blueprint worker on the in-memory queue. It
+    // consumes NO production jobs. The banner says so in as many words, because a silently-idle
+    // worker that looks healthy is the exact confusion this reporting exists to remove.
+    const components = { ...bootstrapApp(config), envFiles };
+    printStartupBanner({ config, processors: [], envFiles, workerVersion: WORKER_VERSION, env });
+    await driveApp(new WorkerApplication(config, components));
     return;
   }
-  await runProcessorWorker(config, config.infrastructure);
+  await runProcessorWorker(config, config.infrastructure, envFiles);
 }
 
 /**
@@ -555,6 +577,7 @@ export async function runFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<
 async function runProcessorWorker(
   config: AppConfig,
   infraConfig: NonNullable<AppConfig['infrastructure']>,
+  envFiles: readonly string[] = [],
 ): Promise<void> {
   const { runtime, logger, observability } = buildRuntime(config);
   const obs = observability;
@@ -760,6 +783,7 @@ async function runProcessorWorker(
     startup,
     monitor,
     concurrency,
+    envFiles,
     composition: {
       processors: () => registry.types,
       resources: () => resources.registered,
@@ -767,6 +791,14 @@ async function runProcessorWorker(
     },
   };
   const app = new WorkerApplication<Job>(config, components);
+
+  // Printed before `start()` so the mode is on screen instantly, even if a startup check then fails.
+  printStartupBanner({
+    config,
+    processors: registry.types,
+    envFiles,
+    workerVersion: WORKER_VERSION,
+  });
 
   await driveApp(app, {
     // The recovery sweep starts only AFTER startup validation has passed, so a worker that is about
