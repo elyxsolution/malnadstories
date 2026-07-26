@@ -46,7 +46,15 @@ describe('graceful degradation — subsystems fail independently', () => {
     const snapshot = await app.snapshot();
     expect(snapshot.live).toBe(true); // NOT dead
     expect(snapshot.ready).toBe(true); // still accepts image + cleanup jobs
-    expect(snapshot.status).toBe('degraded'); // but the operator can see it
+    // `status` is the READINESS verdict, so a ready worker stays 'ok' and `/health` stays 200 —
+    // otherwise a degraded Chromium would make the app's upload gate refuse a worker that is
+    // hardening images perfectly well.
+    expect(snapshot.status).toBe('ok');
+    // The operator still sees the degradation, in the component the probe belongs to.
+    expect(snapshot.components?.find((c) => c.name === 'chromium')).toMatchObject({
+      status: 'degraded',
+      criticality: 'readiness',
+    });
 
     // The consume loop is unaffected — it still polls and processes.
     expect(await app.processOnce()).toBe(false); // empty queue, no error

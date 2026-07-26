@@ -214,14 +214,29 @@ async function handle(
  * Collapse the fine-grained lifecycle state + the component report into the coarse `status` the app's
  * probe consumes. It lives here, beside the contract it serves, rather than inside the application —
  * `WorkerApplication` should own the lifecycle, not the wire format of a health response.
+ *
+ * `status` is a READINESS verdict, not a summary of the aggregate report. A running worker is `ok`
+ * iff `report.ready` — i.e. no `liveness`- or `readiness`-critical component is `unhealthy`. It is
+ * deliberately NOT derived from `report.status`, which is the worst status across EVERY component
+ * INCLUDING `informational` ones (see `WorkerHealthRegistry.report`).
+ *
+ * That distinction is the whole point of the criticality model. Folding the aggregate in here
+ * inverted it: `queue-coverage` is permanently `degraded` (the app declares `cover-thumbnail` and
+ * `blueprint-thumbnail`, which this worker does not serve) and a degraded Chromium is the documented
+ * graceful-degradation case — neither stops image hardening, yet both made `/health` answer 503, and
+ * the app's `checkWorker` reads a non-200 as "worker unreachable" and blocks uploads at the gate.
+ * `certification.test.ts` already asserts the invariant this now honours: an unserved queue must not
+ * pull the worker out of rotation for the work it DOES serve.
+ *
+ * Nothing is hidden by this: the aggregate status, every component's status, and its `detail` all
+ * still ride in the `/health` body's `components[]` and in the full `/ready` report.
  */
 export function coarseStatus(lifecycle: string, report: WorkerHealthReport | null): HealthStatus {
   switch (lifecycle) {
     case 'idle':
     case 'processing':
       if (report === null) return 'ok';
-      if (!report.ready) return 'degraded';
-      return report.status === 'healthy' ? 'ok' : 'degraded';
+      return report.ready ? 'ok' : 'degraded';
     case 'starting':
     case 'recovering':
       return 'starting';
