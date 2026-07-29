@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import NextImage from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -15,7 +15,12 @@ import { createAlbumDraft } from '@/lib/actions/albums';
 import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
 import { photoCap } from '@/lib/builder/model';
 import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
-import Uploader, { type Photo } from '../[id]/build/_uploader';
+import Uploader from '../[id]/build/_uploader';
+import type { Photo } from '@/lib/builder/photo';
+import { usePhotoPipeline } from '../[id]/build/_use-photo-pipeline';
+import { photoUiState } from '../[id]/build/_photo-state';
+import { stateOpacityClass } from '../[id]/build/_upload-badge';
+import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import SmartTitleInput from './_smart-title-input';
 import ProductSelect from './_product-select';
 import type { ProductOption } from '@/lib/products/catalog';
@@ -39,6 +44,9 @@ const ROMAN = ['I', 'II', 'III', 'IV'];
 const LAST_STEP = STEPS.length - 1; // 3 (Review)
 
 const PHOTOS_PER_PAGE = 2; // rough estimate for "≈ pages"
+
+/** Stable empty seed — the wizard's album starts with no photos. */
+const EMPTY_PHOTOS: Photo[] = [];
 
 // ── Album period (Task: date UX) ────────────────────────────────────────────
 // Native date inputs give YYYY-MM-DD. We compose a single human-readable string and
@@ -136,8 +144,26 @@ export default function CreateWizard({
   const [albumId, setAlbumId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [photos, setPhotos] = useState<Photo[]>([]);
   const [entering, setEntering] = useState(false); // cinematic builder-entry veil
+
+  /**
+   * THE SAME photo pipeline the builder uses — bounded upload queue, optimistic photos, the
+   * progressive poll, URL refresh and blob cleanup, in one shared hook.
+   *
+   * The wizard passes neither `onRemapId` nor `onPhotoDropped`: it has no layout, so there are
+   * no block references to remap or strip. That is the ONLY difference between the two surfaces,
+   * and it is expressed as two omitted options rather than a second implementation — which is
+   * what previously let this copy drift (it never wired `onMetadata`, so photos uploaded here
+   * gained no client dimensions).
+   */
+  const pipeline = usePhotoPipeline({
+    albumId,
+    initialPhotos: EMPTY_PHOTOS,
+    pollImmediately: true,
+    // Poll once on entry even with an empty album, to adopt any photo it already has.
+    pollWhen: true,
+  });
+  const { photos, uploads } = pipeline;
 
   // Blueprint strategies (0043): busy flag, choose-blueprint picker, and the applied result summary.
   const [bpBusy, setBpBusy] = useState(false);
@@ -155,59 +181,6 @@ export default function CreateWizard({
   // From <= To validation (both optional; only an explicit inverted range is an error).
   const dateError = !!fromDate && !!toDate && fromDate > toDate;
   const travelPeriod = composePeriod(fromDate, toDate);
-
-  // ── Poll for processing photos (reuses GET /api/photos) ──────────────────────
-  const onUploaded = useCallback((p: Photo) => setPhotos((prev) => [...prev, p]), []);
-  useEffect(() => {
-    if (!albumId) return;
-    const anyPending = photos.some((p) => p.status === 'pending');
-    if (!anyPending && photos.length > 0) return;
-    let active = true;
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/photos?albumId=${albumId}`);
-        if (!res.ok || !active) return;
-        const body = (await res.json()) as {
-          photos: {
-            id: string;
-            status: Photo['status'];
-            url: string;
-            thumbUrl: string;
-            takenAt: string | null;
-            width?: number | null;
-            height?: number | null;
-          }[];
-        };
-        if (!active) return;
-        setPhotos((prev) => {
-          const byId = new Map(prev.map((p) => [p.id, p]));
-          for (const r of body.photos) {
-            const ex = byId.get(r.id);
-            byId.set(r.id, {
-              id: r.id,
-              filename: ex?.filename ?? 'photo',
-              edit: ex?.edit ?? null,
-              status: r.status,
-              url: r.url,
-              thumbUrl: r.thumbUrl,
-              takenAt: r.takenAt,
-              width: r.width ?? null,
-              height: r.height ?? null,
-            });
-          }
-          return Array.from(byId.values());
-        });
-      } catch {
-        /* transient */
-      }
-    };
-    tick();
-    const id = setInterval(tick, 3000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [albumId, photos]);
 
   const go = (s: number) => {
     if (s < 0 || s > LAST_STEP) return;
@@ -643,7 +616,7 @@ export default function CreateWizard({
                   </div>
                 )}
               </div>
-              <Uploader albumId={albumId} remaining={Math.max(0, cap - photos.length)} onUploaded={onUploaded} />
+              <Uploader albumId={albumId} remaining={Math.max(0, cap - photos.length)} uploads={uploads} />
               {photos.length > 0 && (
                 <>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -658,18 +631,40 @@ export default function CreateWizard({
                     )}
                   </div>
                   <div className="grid grid-cols-6 gap-2 sm:grid-cols-8">
-                    {photos.slice(0, 24).map((p) => (
-                      <div key={p.id} className="relative aspect-square overflow-hidden rounded-md border bg-muted">
-                        {p.thumbUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.thumbUrl} alt={p.filename} className="absolute inset-0 h-full w-full object-cover" />
-                        ) : (
-                          <span className="absolute inset-0 grid place-items-center text-muted-foreground/40">
-                            <InlineLoader />
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                    {/* ONE list — an optimistic photo is an ordinary photo here too. */}
+                    {photos.slice(0, 24).map((p) => {
+                      // One resolver: sanitized thumb → sanitized master → local preview.
+                      const src = resolvePhotoUrl(p, 'thumb');
+                      const task = uploads.taskByTempPhotoId.get(p.id);
+                      const state = photoUiState(p, task);
+                      return (
+                        <div key={p.id} className="relative aspect-square overflow-hidden rounded-md border bg-muted">
+                          {src ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={src} alt={p.filename} className={`absolute inset-0 h-full w-full object-cover ${stateOpacityClass(state)}`} />
+                          ) : (
+                            <span className="absolute inset-0 grid place-items-center text-muted-foreground/40">
+                              <InlineLoader />
+                            </span>
+                          )}
+                          {state === 'failed' && task && task.photoId === null ? (
+                            <button
+                              type="button"
+                              onClick={() => uploads.retry(task.id)}
+                              className="absolute inset-0 grid place-items-center bg-background/85 px-1 text-center text-[10px] font-medium leading-tight text-destructive transition-transform duration-100 active:scale-[0.97]"
+                            >
+                              {task.error ?? 'Upload failed'} · Retry
+                            </button>
+                          ) : (
+                            state === 'uploading' && (
+                              <span className="absolute inset-x-0 bottom-0 h-1 bg-black/20">
+                                <span className="block h-full bg-primary transition-all duration-200" style={{ width: `${task?.progress ?? 0}%` }} />
+                              </span>
+                            )
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               )}

@@ -17,7 +17,7 @@ import { Section, Row, Slider, Toggle } from './_controls';
 import { TextInspector, StickerInspector, fmt } from './_element-inspectors';
 import { ColorField } from './_color-picker';
 import { TEMPLATE_LABEL, type Block, type EditConfig } from '@/lib/builder/model';
-import type { Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import type { BuilderApi, Selection } from './_use-builder';
 
 /**
@@ -70,7 +70,7 @@ export default function Inspector({
         ? block.photoIds[1]
         : block.photoIds[0]
       : selection.kind === 'overlay'
-        ? block.overlays[selection.index]?.photoId
+        ? block.overlays.find((o) => o.id === selection.id)?.photoId
         : undefined;
 
   if (selection.kind === 'text') {
@@ -113,20 +113,23 @@ export default function Inspector({
   }
   if (selectedPhotoId && photoMap.has(selectedPhotoId)) {
     const photo = photoMap.get(selectedPhotoId)!;
-    const ovIndex = selection.kind === 'overlay' ? selection.index : -1;
+    // Overlay identity is an id; its POSITION is looked up only for the forward/backward
+    // affordances, which are inherently about order.
+    const ovId = selection.kind === 'overlay' ? selection.id : null;
+    const ovIndex = ovId ? block.overlays.findIndex((o) => o.id === ovId) : -1;
     const overlay =
-      selection.kind === 'overlay'
+      ovId && ovIndex >= 0
         ? {
             onDelete: () => {
-              api.removeOverlay(block.key, ovIndex);
+              api.removeOverlay(block.key, ovId);
               onSelect({ kind: 'none' });
             },
             onDuplicate: () => {
-              const ni = api.duplicateOverlay(block.key, ovIndex);
-              if (ni !== undefined) onSelect({ kind: 'overlay', index: ni });
+              const ni = api.duplicateOverlay(block.key, ovId);
+              if (ni !== undefined) onSelect({ kind: 'overlay', id: ni });
             },
-            onForward: ovIndex < block.overlays.length - 1 ? () => api.reorderOverlay(block.key, ovIndex, 1) : undefined,
-            onBackward: ovIndex > 0 ? () => api.reorderOverlay(block.key, ovIndex, -1) : undefined,
+            onForward: ovIndex < block.overlays.length - 1 ? () => api.reorderOverlay(block.key, ovId, 1) : undefined,
+            onBackward: ovIndex > 0 ? () => api.reorderOverlay(block.key, ovId, -1) : undefined,
           }
         : undefined;
     return (

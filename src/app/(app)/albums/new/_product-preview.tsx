@@ -6,7 +6,7 @@ import { MalnadLoader, useRotatingMessage, LOADING_MESSAGES } from '@/components
 import Flipbook from '../[id]/build/_flipbook';
 import { DimensionsProvider } from '../[id]/build/_dimensions';
 import { photoCap } from '@/lib/builder/model';
-import type { Photo } from '../[id]/build/_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import ProductGallery from './_product-gallery';
 import { getProductPreview, type ProductPreviewResult } from '@/lib/actions/product-preview';
 

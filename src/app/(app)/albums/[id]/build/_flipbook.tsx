@@ -1,14 +1,16 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { forwardRef, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — react-pageflip ships its own types via the default export
 import HTMLFlipBook from 'react-pageflip';
 import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Minimize2 } from 'lucide-react';
-import PairContent from './_pair-frame';
+import PairContent, { type PairPhoto } from './_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from './_cover-render';
 import { useBuilderDimensions } from './_dimensions';
-import type { Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
+import type { PhotoUiState } from './_photo-state';
+import { usePhotoFor } from './_use-photo-for';
 import type { Block } from '@/lib/builder/model';
 import type { CoverConfig } from '@/lib/builder/cover';
 
@@ -68,7 +70,7 @@ function HalfPage({
   return (
     <div className="relative h-full w-full overflow-hidden bg-white">
       <div className="absolute top-0 h-full" style={{ width: '200%', left: side === 'left' ? '0' : '-100%' }}>
-        <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} half={side} />
+        <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} half={side} badge="compact" />
       </div>
       <div className="pointer-events-none absolute inset-y-0 z-[2] w-[13%]" style={foldStyle} />
       <div className="pointer-events-none absolute inset-y-0 z-[2] w-[5%]" style={outerStyle} />
@@ -76,12 +78,13 @@ function HalfPage({
   );
 }
 
-type PhotoFor = (id: string | null | undefined) => { url: string; edit?: Photo['edit'] } | undefined;
+type PhotoFor = (id: string | null | undefined) => PairPhoto | undefined;
 
 export default function Flipbook({
   blocks,
   photoMap,
   stickerUrlFor,
+  photoStateFor,
   cover,
   onClose,
   infoPanel,
@@ -90,6 +93,8 @@ export default function Flipbook({
   blocks: Block[];
   photoMap: Map<string, Photo>;
   stickerUrlFor?: (stickerId: string) => string | undefined;
+  /** Drives the shared processing badge. Absent outside the builder. */
+  photoStateFor?: (photoId: string) => PhotoUiState | undefined;
   cover: FlipCover;
   onClose: () => void;
   /** Optional right-docked panel (product info in the preview). Overlay — never changes the book. */
@@ -129,12 +134,7 @@ export default function Flipbook({
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
-  const photoFor: PhotoFor = useMemo(() => {
-    return (id) => {
-      const p = id ? photoMap.get(id) : undefined;
-      return p ? { url: p.url, edit: p.edit } : undefined;
-    };
-  }, [photoMap]);
+  const photoFor: PhotoFor = usePhotoFor(photoMap, photoStateFor);
 
   // Size ONE portrait page (aspect from the product) so the full open spread (two pages) always
   // fits the viewport — width is the binding constraint, so we fit the whole spread. `page` =

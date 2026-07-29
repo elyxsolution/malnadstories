@@ -2,6 +2,8 @@
 
 import PhotoFrame from './_photo-frame';
 import { TextBox, QrBox, StickerBox } from './_elements-render';
+import UploadBadge, { stateOpacityClass, type BadgeSize } from './_upload-badge';
+import type { PhotoUiState } from './_photo-state';
 import { backgroundStyle } from '@/lib/builder/elements';
 import type { Block, EditConfig, Overlay } from '@/lib/builder/model';
 
@@ -24,11 +26,43 @@ import type { Block, EditConfig, Overlay } from '@/lib/builder/model';
  * so the two halves meet with no sub-pixel gap — pixel-perfect, no stretch, no bleed.
  */
 
-export type PairPhoto = { url: string; edit?: EditConfig | null };
+/**
+ * `state`/`since` are OPTIONAL and client-only (Phase 4): they let the preview, flipbook and
+ * navigator show the same processing language as the tray and the canvas, through the same
+ * `UploadBadge`. The print route never supplies them, so a PDF is never decorated.
+ */
+export type PairPhoto = {
+  url: string;
+  edit?: EditConfig | null;
+  state?: PhotoUiState;
+  since?: number | null;
+};
 export type PairHalf = 'full' | 'left' | 'right';
 
 const overlapsHalf = (o: Overlay, half: PairHalf) =>
   half === 'full' || (half === 'left' ? o.x < 0.5 : o.x + o.w > 0.5);
+
+/** Wraps a frame so an unprocessed photo carries the same badge it has everywhere else. */
+function Framed({
+  photo,
+  badge,
+  onFrameReady,
+}: {
+  photo: PairPhoto;
+  badge: BadgeSize | 'none';
+  onFrameReady?: () => void;
+}) {
+  const state = photo.state ?? 'ready';
+  const show = badge !== 'none' && state !== 'ready';
+  return (
+    <>
+      <div className={`h-full w-full ${show ? stateOpacityClass(state) : ''}`}>
+        <PhotoFrame url={photo.url} edit={photo.edit} onReady={onFrameReady} />
+      </div>
+      {show && <UploadBadge state={state} since={photo.since ?? null} size={badge as BadgeSize} />}
+    </>
+  );
+}
 
 export default function PairContent({
   block,
@@ -37,9 +71,16 @@ export default function PairContent({
   onFrameReady,
   half = 'full',
   showPlaceholders = false,
+  badge = 'none',
 }: {
   block: Block;
   photoFor: (id: string | null | undefined) => PairPhoto | undefined;
+  /**
+   * Density of the processing badge for this surface: `compact` for the in-app preview and
+   * flipbook, `micro` (a bare dot) for navigator thumbs where text would be illegible, and
+   * `none` — the default — for the print route and blueprint previews.
+   */
+  badge?: BadgeSize | 'none';
   /** Resolve a sticker id → presigned URL (parallel to photoFor). Optional; stickers render only if resolved. */
   stickerUrlFor?: (stickerId: string) => string | undefined;
   onFrameReady?: () => void;
@@ -66,7 +107,7 @@ export default function PairContent({
       {isDouble ? (
         // One image across the whole open pair; per-page clipping performs the split.
         left ? (
-          <PhotoFrame url={left.url} edit={left.edit} onReady={onFrameReady} />
+          <Framed photo={left} badge={badge} onFrameReady={onFrameReady} />
         ) : (
           <EmptyHalf full label="Double-page image" />
         )
@@ -74,12 +115,12 @@ export default function PairContent({
         <>
           {showLeft && (
             <div className="absolute left-0 top-0 h-full w-1/2 overflow-hidden">
-              {left ? <PhotoFrame url={left.url} edit={left.edit} onReady={onFrameReady} /> : <EmptyHalf label="Left page" />}
+              {left ? <Framed photo={left} badge={badge} onFrameReady={onFrameReady} /> : <EmptyHalf label="Left page" />}
             </div>
           )}
           {showRight && (
             <div className="absolute left-1/2 top-0 h-full w-1/2 overflow-hidden">
-              {right ? <PhotoFrame url={right.url} edit={right.edit} onReady={onFrameReady} /> : <EmptyHalf label="Right page" />}
+              {right ? <Framed photo={right} badge={badge} onFrameReady={onFrameReady} /> : <EmptyHalf label="Right page" />}
             </div>
           )}
         </>
@@ -97,7 +138,7 @@ export default function PairContent({
         }
         return (
           <div key={i} className="absolute overflow-hidden border-2 border-white shadow" style={style}>
-            <PhotoFrame url={photo.url} edit={photo.edit} onReady={onFrameReady} />
+            <Framed photo={photo} badge={badge} onFrameReady={onFrameReady} />
           </div>
         );
       })}

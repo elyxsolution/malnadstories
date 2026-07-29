@@ -23,7 +23,8 @@ import { BACKGROUNDS, backgroundStyle } from '@/lib/builder/elements';
 import { COVER_LAYOUTS, COVER_LAYOUT_LABEL, type CoverConfig, type CoverLayout } from '@/lib/builder/cover';
 import type { Background, TextAlign } from '@/lib/builder/model';
 import type { CoverSide } from './_cover-canvas';
-import type { Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
+import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { type CoverOption } from '@/lib/covers';
 
 type Source = 'artwork' | 'photo' | 'colour';
@@ -76,11 +77,14 @@ export default function CoverPanel({
 
   const selectedCover = useMemo(() => covers.find((c) => c.id === coverId) ?? null, [covers, coverId]);
   const sidePhoto = sidePhotoId ? photoMap.get(sidePhotoId) : undefined;
+  // The cover prints at full size, so it needs the worker's sanitized master — this gate is
+  // unchanged. What's new is telling the user WHY a photo they just added isn't listed.
   const readyPhotos = photos.filter((p) => p.status === 'ready');
+  const unprocessedPhotos = photos.length - readyPhotos.length;
 
   // The image actually shown for the active page (front: photo → artwork → none; back: photo → none).
   const previewImageUrl = sidePhotoId
-    ? sidePhoto?.url ?? null
+    ? resolvePhotoUrl(sidePhoto, 'full')
     : sideBackground
       ? null
       : isFront
@@ -210,7 +214,11 @@ export default function CoverPanel({
 
         {source === 'photo' &&
           (readyPhotos.length === 0 ? (
-            <p className="rounded-xl border border-dashed bg-muted/40 px-3 py-6 text-center text-xs text-muted-foreground">Upload photos to use one on the cover.</p>
+            <p className="rounded-xl border border-dashed bg-muted/40 px-3 py-6 text-center text-xs text-muted-foreground">
+              {unprocessedPhotos > 0
+                ? `${unprocessedPhotos} photo${unprocessedPhotos === 1 ? '' : 's'} still processing. The cover is printed at full size, so a photo can only be chosen once it’s ready.`
+                : 'Upload photos to use one on the cover.'}
+            </p>
           ) : (
             <div className="grid grid-cols-3 gap-2">
               {readyPhotos.map((p) => {
@@ -228,7 +236,7 @@ export default function CoverPanel({
                   >
                     <span className="block aspect-[3/4] w-full bg-muted">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.thumbUrl || p.url} alt={p.filename} className="h-full w-full object-cover" />
+                      <img src={resolvePhotoUrl(p, 'thumb') ?? ''} alt={p.filename} className="h-full w-full object-cover" />
                     </span>
                     {active && (
                       <span className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-studio text-studio-foreground">

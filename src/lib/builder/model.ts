@@ -102,7 +102,51 @@ export const FULL_CROP: Rect = { x: 0, y: 0, w: 1, h: 1 };
  * geometry with no photos and round-trip it through save → DB → load → builder without the
  * slot disappearing. A photo is assigned later (auto-fill or manual drag/pick).
  */
-export type Overlay = { photoId: string | null; x: number; y: number; w: number; h: number };
+/**
+ * A floating photo container on a spread.
+ *
+ * `id` is a STABLE CLIENT-SIDE identity, exactly like `Block.key` — generated on hydration and
+ * on creation, never persisted. Overlays used to be addressed by array index, which is fine
+ * until something reorders or deletes: every stored index then points at a different overlay.
+ * That made index-based selection unsafe to build on, so identity moved to an id.
+ *
+ * It is OPTIONAL on the type on purpose. Pure producers outside the builder (`auto-layout`,
+ * `blueprint`, template appliers — some of which run inside server actions) construct overlays
+ * without one, and must keep compiling untouched. The builder's state container is what
+ * guarantees presence: every `Block[]` entering `useBlocks` is normalized, so an overlay inside
+ * builder state always has an id, and `serialize()` strips it again so the saved payload is
+ * byte-identical to before.
+ */
+export type Overlay = { id?: string; photoId: string | null; x: number; y: number; w: number; h: number };
+
+/** Fresh client-side overlay identity. Mirrors how `Block.key` is minted. */
+export function makeOverlayId(): string {
+  return cryptoId();
+}
+
+/**
+ * Guarantee every overlay in `blocks` carries an id, preserving any that already has one.
+ * Returns the SAME array reference when nothing was missing, so it is safe to run on every
+ * state entry without causing spurious updates.
+ */
+export function withOverlayIds(blocks: Block[]): Block[] {
+  let changed = false;
+  const next = blocks.map((b) => {
+    if (b.overlays.every((o) => !!o.id)) return b;
+    changed = true;
+    return { ...b, overlays: b.overlays.map((o) => (o.id ? o : { ...o, id: makeOverlayId() })) };
+  });
+  return changed ? next : blocks;
+}
+
+/** Strip client-only overlay ids for persistence — the server has never stored them. */
+export function stripOverlayIds(overlays: Overlay[]): Overlay[] {
+  return overlays.map((o) => {
+    const rest = { ...o };
+    delete rest.id;
+    return rest;
+  });
+}
 
 /** Geometry for a freshly added overlay (no photo yet — caller sets photoId, or null for a placeholder). */
 export const DEFAULT_OVERLAY_GEOM = { x: 0.55, y: 0.08, w: 0.34, h: 0.34 };

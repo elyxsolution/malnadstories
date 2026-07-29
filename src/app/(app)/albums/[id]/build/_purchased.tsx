@@ -7,7 +7,7 @@ import { InlineLoader } from '@/components/loading';
 
 import { Button } from '@/components/ui/button';
 import Preview from './_preview';
-import { type Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import { type Block } from '@/lib/builder/model';
 import { orderStatusView, type PurchasedStatus } from '@/lib/orders/status';
 import { pdfStageLabel, pdfStageStep, pdfFailureCustomerNote, PDF_STAGE_ORDER } from '@/lib/pdf/status';

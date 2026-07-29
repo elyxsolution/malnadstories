@@ -14,11 +14,19 @@ import PhotoFrame from './_photo-frame';
 import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
 import { ElementControls, CtlBtn, InlineTextEditor } from './_element-bits';
-import type { Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
+import type { UploadTask } from '@/lib/uploads';
+import { photoUiState } from './_photo-state';
+import UploadBadge, { stateOpacityClass } from './_upload-badge';
+import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
 import { useBuilderDimensions } from './_dimensions';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
+import type { DragApi } from './_use-drag';
+import type { SelectionTarget } from './_selection-model';
+import ReadinessBadge from './_readiness-badge';
+import { frameKey, type Readiness } from './_quality-model';
 
 /**
  * The premium open-book editing canvas for ONE spread (open pair, 3:2). Renders the page
@@ -33,21 +41,39 @@ export default function BlockCard({
   index,
   blocks,
   photoMap,
+  taskFor,
   availablePhotos,
   selection,
   onSelect,
+  isTargetSelected,
+  onSelectTarget,
+  onFrameContextMenu,
+  drag,
   onEditPhoto,
   onQuickCrop,
   stickerUrlFor,
   pickActive = false,
   onTapPlaceBase,
   showGuides = false,
+  readinessOf,
 }: {
+  /**
+   * MULTI-SELECTION (Phase 6). Optional so this component keeps working unchanged for any host
+   * that doesn't supply a selection store (the admin cover designer). `selection`/`onSelect`
+   * remain for the single-target inspector; these add the set semantics on top.
+   */
+  isTargetSelected?: (t: SelectionTarget) => boolean;
+  onSelectTarget?: (t: SelectionTarget, mods: { meta: boolean; shift: boolean }) => void;
+  onFrameContextMenu?: (e: React.MouseEvent, t: SelectionTarget) => void;
+  /** Shared drag store — drives Smart Replace previews and cross-page move feedback. */
+  drag?: DragApi;
   api: BuilderApi;
   block: Block;
   index: number;
   blocks: Block[];
   photoMap: Map<string, Photo>;
+  /** Upload task backing an optimistic photo, when it still has one (Phase 3). */
+  taskFor?: (photoId: string) => UploadTask | undefined;
   availablePhotos: Photo[];
   selection: Selection;
   onSelect: (s: Selection) => void;
@@ -57,13 +83,22 @@ export default function BlockCard({
   pickActive?: boolean;
   onTapPlaceBase?: (slot: BaseSlot) => void;
   showGuides?: boolean;
+  /**
+   * Print-readiness for one frame, keyed by `frameKey` (Phase 7). Computed ONCE per edit by the
+   * quality engine and looked up here — never recalculated per frame, which is what keeps the
+   * badges free during a drag. Absent ⇒ this canvas draws no readiness badges at all, so hosts
+   * without a quality report (the admin cover designer) are unaffected.
+   */
+  readinessOf?: (key: string) => Readiness | undefined;
 }) {
   const { page, pair } = useBuilderDimensions();
+  const baseReadiness = (slot: BaseSlot) => readinessOf?.(frameKey({ kind: 'base', blockKey: block.key, blockIndex: index, slot }));
+  const overlayReadiness = (id: string) => readinessOf?.(frameKey({ kind: 'overlay', blockKey: block.key, blockIndex: index, id }));
   const pageRef = useRef<HTMLDivElement>(null);
   const [snap, setSnap] = useState<SnapLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [picking, setPicking] = useState<
-    { kind: 'base'; slot: BaseSlot } | { kind: 'replace'; index: number } | { kind: 'overlay-add' } | null
+    { kind: 'base'; slot: BaseSlot } | { kind: 'replace'; overlayId: string } | { kind: 'overlay-add' } | null
   >(null);
 
   const isDouble = block.template === 'double-spread';
@@ -111,47 +146,107 @@ export default function BlockCard({
         {isDouble ? (
           <BaseSlotView
             photo={leftPhoto}
+            task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
             label="Click or drop the image (spans both pages)"
             selected={sel({ kind: 'base', slot: 'image' })}
             pickActive={pickActive}
             onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('image') : undefined}
-            onSelect={() => onSelect({ kind: 'base', slot: 'image' })}
+            onSelect={(mods) => {
+              onSelect({ kind: 'base', slot: 'image' });
+              onSelectTarget?.({ kind: 'base', blockKey: block.key, slot: 'image' }, mods);
+            }}
+            onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'image' })}
+            multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'image' })}
             onPick={() => setPicking({ kind: 'base', slot: 'image' })}
-            onDrop={(id) => api.assignBaseSlot(block.key, 'image', id)}
+            onDrop={(id) => {
+              api.assignBaseSlot(block.key, 'image', id);
+              drag?.end();
+            }}
+            onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'image' })}
+            incomingPreviewUrl={(() => {
+              const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'image' });
+              return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+            })()}
+            isDragSource={drag?.isSource(block.key, 'image')}
+            onDragStartFrame={(photoId) =>
+              drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'image' } })
+            }
+            onDragEndFrame={() => drag?.end()}
             onClear={() => api.clearBaseSlot(block.key, 'image')}
             onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], pair, true) : undefined}
             onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
+            readiness={baseReadiness('image')}
           />
         ) : (
           <>
             <div className="absolute left-0 top-0 h-full w-1/2">
               <BaseSlotView
                 photo={leftPhoto}
+                task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
                 label="Left page"
                 selected={sel({ kind: 'base', slot: 'left' })}
                 pickActive={pickActive}
                 onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('left') : undefined}
-                onSelect={() => onSelect({ kind: 'base', slot: 'left' })}
+                onSelect={(mods) => {
+                  onSelect({ kind: 'base', slot: 'left' });
+                  onSelectTarget?.({ kind: 'base', blockKey: block.key, slot: 'left' }, mods);
+                }}
+                onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'left' })}
+                multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'left' })}
                 onPick={() => setPicking({ kind: 'base', slot: 'left' })}
-                onDrop={(id) => api.assignBaseSlot(block.key, 'left', id)}
+                onDrop={(id) => {
+                  api.assignBaseSlot(block.key, 'left', id);
+                  drag?.end();
+                }}
+                onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'left' })}
+                incomingPreviewUrl={(() => {
+                  const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'left' });
+                  return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+                })()}
+                isDragSource={drag?.isSource(block.key, 'left')}
+                onDragStartFrame={(photoId) =>
+                  drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'left' } })
+                }
+                onDragEndFrame={() => drag?.end()}
                 onClear={() => api.clearBaseSlot(block.key, 'left')}
                 onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], page, false) : undefined}
                 onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
+                readiness={baseReadiness('left')}
               />
             </div>
             <div className="absolute left-1/2 top-0 h-full w-1/2">
               <BaseSlotView
                 photo={rightPhoto}
+                task={rightPhoto ? taskFor?.(rightPhoto.id) : undefined}
                 label="Right page"
                 selected={sel({ kind: 'base', slot: 'right' })}
                 pickActive={pickActive}
                 onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('right') : undefined}
-                onSelect={() => onSelect({ kind: 'base', slot: 'right' })}
+                onSelect={(mods) => {
+                  onSelect({ kind: 'base', slot: 'right' });
+                  onSelectTarget?.({ kind: 'base', blockKey: block.key, slot: 'right' }, mods);
+                }}
+                onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'right' })}
+                multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'right' })}
                 onPick={() => setPicking({ kind: 'base', slot: 'right' })}
-                onDrop={(id) => api.assignBaseSlot(block.key, 'right', id)}
+                onDrop={(id) => {
+                  api.assignBaseSlot(block.key, 'right', id);
+                  drag?.end();
+                }}
+                onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'right' })}
+                incomingPreviewUrl={(() => {
+                  const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'right' });
+                  return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+                })()}
+                isDragSource={drag?.isSource(block.key, 'right')}
+                onDragStartFrame={(photoId) =>
+                  drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'right' } })
+                }
+                onDragEndFrame={() => drag?.end()}
                 onClear={() => api.clearBaseSlot(block.key, 'right')}
                 onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], page, false) : undefined}
                 onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
+                readiness={baseReadiness('right')}
               />
             </div>
           </>
@@ -160,28 +255,38 @@ export default function BlockCard({
         {/* Overlays (floating framed photos — or empty placeholder containers) */}
         {block.overlays.map((o, i) => {
           const photo = o.photoId ? photoMap.get(o.photoId) : undefined;
+          // Stable client id (guaranteed by `useBlocks`). Used for the React key, for selection
+          // and for every mutation, so reordering or deleting a sibling can no longer make a
+          // stored reference point at a different overlay.
+          const oid = o.id as string;
           return (
             <Movable
-              key={`ov-${i}`}
+              key={oid}
               rect={o}
-              selected={sel({ kind: 'overlay', index: i })}
+              selected={sel({ kind: 'overlay', id: oid }) || (isTargetSelected?.({ kind: 'overlay', blockKey: block.key, id: oid }) ?? false)}
               containerRef={pageRef}
               ariaLabel="Photo overlay"
-              onSelect={() => onSelect({ kind: 'overlay', index: i })}
-              onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov, idx) => (idx === i ? { ...ov, ...r } : ov)))}
+              onSelect={(mods) => {
+                onSelect({ kind: 'overlay', id: oid });
+                onSelectTarget?.({ kind: 'overlay', blockKey: block.key, id: oid }, mods ?? { meta: false, shift: false });
+              }}
+              onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
+              onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
               onSnap={setSnap}
+              /* Sibling overlays feed the edge + equal-spacing guides. */
+              peers={block.overlays.filter((o) => o.id !== oid).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))}
               className="overflow-hidden rounded-md border-2 border-white shadow-md"
               controls={
                 <ElementControls
-                  onForward={i < block.overlays.length - 1 ? () => api.reorderOverlay(block.key, i, 1) : undefined}
-                  onBackward={i > 0 ? () => api.reorderOverlay(block.key, i, -1) : undefined}
+                  onForward={i < block.overlays.length - 1 ? () => api.reorderOverlay(block.key, oid, 1) : undefined}
+                  onBackward={i > 0 ? () => api.reorderOverlay(block.key, oid, -1) : undefined}
                   onDelete={() => {
-                    api.removeOverlay(block.key, i);
+                    api.removeOverlay(block.key, oid);
                     onSelect({ kind: 'none' });
                   }}
                   extra={
                     <>
-                      <CtlBtn label="Replace photo" onClick={() => setPicking({ kind: 'replace', index: i })}>
+                      <CtlBtn label="Replace photo" onClick={() => setPicking({ kind: 'replace', overlayId: oid })}>
                         <Replace />
                       </CtlBtn>
                       {photo && o.photoId && (
@@ -192,8 +297,8 @@ export default function BlockCard({
                       <CtlBtn
                         label="Duplicate overlay"
                         onClick={() => {
-                          const ni = api.duplicateOverlay(block.key, i);
-                          if (ni !== undefined) onSelect({ kind: 'overlay', index: ni });
+                          const ni = api.duplicateOverlay(block.key, oid);
+                          if (ni !== undefined) onSelect({ kind: 'overlay', id: ni });
                         }}
                       >
                         <Copy />
@@ -205,7 +310,9 @@ export default function BlockCard({
             >
               <OverlayContent
                 photo={photo}
-                onDropPhoto={(id) => api.replaceOverlay(block.key, i, id)}
+                task={photo ? taskFor?.(photo.id) : undefined}
+                readiness={overlayReadiness(oid)}
+                onDropPhoto={(id) => api.replaceOverlay(block.key, oid, id)}
               />
             </Movable>
           );
@@ -377,11 +484,13 @@ export default function BlockCard({
           available={availablePhotos}
           onPick={(id) => {
             if (picking.kind === 'base') api.assignBaseSlot(block.key, picking.slot, id);
-            else if (picking.kind === 'replace') api.replaceOverlay(block.key, picking.index, id);
+            else if (picking.kind === 'replace') api.replaceOverlay(block.key, picking.overlayId, id);
             else {
-              const newIndex = block.overlays.length;
-              api.addOverlay(block.key, id);
-              onSelect({ kind: 'overlay', index: newIndex });
+              // `addOverlay` appends, so the new overlay's id is discoverable from the block
+              // only after the mutation commits. Minting it here keeps selection immediate and
+              // correct without reaching back into state.
+              const newId = api.addOverlay(block.key, id);
+              if (newId) onSelect({ kind: 'overlay', id: newId });
             }
             setPicking(null);
           }}
@@ -399,8 +508,19 @@ export default function BlockCard({
  * exactly like a base slot, so a user fills a placeholder overlay by dragging onto it. Dropping
  * onto a filled overlay replaces its photo. The parent Movable still handles select/drag/resize.
  */
-function OverlayContent({ photo, onDropPhoto }: { photo?: Photo; onDropPhoto: (photoId: string) => void }) {
+function OverlayContent({
+  photo,
+  task,
+  readiness,
+  onDropPhoto,
+}: {
+  photo?: Photo;
+  task?: UploadTask;
+  readiness?: Readiness;
+  onDropPhoto: (photoId: string) => void;
+}) {
   const [over, setOver] = useState(false);
+  const uiState = photo ? photoUiState(photo, task) : 'ready';
   return (
     <div
       onDragOver={(e) => {
@@ -418,7 +538,13 @@ function OverlayContent({ photo, onDropPhoto }: { photo?: Photo; onDropPhoto: (p
       className="relative h-full w-full"
     >
       {photo ? (
-        <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" />
+        <>
+          <div className={`h-full w-full ${stateOpacityClass(uiState)}`}>
+            <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={photo.edit} alt="overlay" />
+          </div>
+          <UploadBadge state={uiState} progress={task?.progress} since={photo?.processingSince ?? null} size="compact" />
+          <ReadinessBadge readiness={readiness} size="compact" />
+        </>
       ) : (
         <div className="flex h-full w-full flex-col items-center justify-center gap-1 border border-dashed border-studio/40 bg-studio-soft/60 text-center">
           <ImagePlus className="h-4 w-4 text-studio/70" />
@@ -441,23 +567,48 @@ function OverlayContent({ photo, onDropPhoto }: { photo?: Photo; onDropPhoto: (p
 // ── Base slot ─────────────────────────────────────────────────────────────────────
 function BaseSlotView({
   photo,
+  task,
   label,
   selected,
+  multiSelected,
+  incomingPreviewUrl,
+  isDragSource,
+  onDragEnterTarget,
+  onDragStartFrame,
+  onDragEndFrame,
   pickActive = false,
   onTapPlace,
   onSelect,
+  onContextMenu,
   onPick,
   onDrop,
   onClear,
   onCrop,
   onEdit,
+  readiness,
 }: {
   photo?: Photo;
+  task?: UploadTask;
   label: string;
   selected: boolean;
+  /** Print readiness for this frame (Phase 7). Draws nothing unless it says something. */
+  readiness?: Readiness;
+  /** Part of a multi-selection (Phase 6) — drawn with the same ring as the tray. */
+  multiSelected?: boolean;
+  /** Smart Replace: the photo that would land here if dropped now. Null when not hovering. */
+  incomingPreviewUrl?: string | null;
+  /** This frame is where the current drag STARTED — dim it so the move reads as a move. */
+  isDragSource?: boolean;
+  /** The pointer entered this frame during a drag — publishes the hover to the drag store. */
+  onDragEnterTarget?: () => void;
+  /** A filled frame began a drag — publishes the payload so destinations can preview it. */
+  onDragStartFrame?: (photoId: string) => void;
+  onDragEndFrame?: () => void;
   pickActive?: boolean;
   onTapPlace?: () => void;
-  onSelect: () => void;
+  /** Receives the modifier state so the SELECTION STORE decides what a modifier means. */
+  onSelect: (mods: { meta: boolean; shift: boolean }) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   onPick: () => void;
   onDrop: (photoId: string) => void;
   onClear: () => void;
@@ -466,26 +617,53 @@ function BaseSlotView({
 }) {
   const [over, setOver] = useState(false);
   const tapToPlace = pickActive && !photo && !!onTapPlace;
+  const uiState = photo ? photoUiState(photo, task) : 'ready';
+  // Crop + edit are authored against the worker's sanitized master, so they wait for it.
+  const editable = !!photo && photo.status === 'ready';
 
   return (
     <div
       onPointerDown={(e) => {
         e.stopPropagation();
-        if (photo) onSelect();
+        if (photo) onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey });
+      }}
+      onContextMenu={(e) => {
+        e.stopPropagation();
+        onContextMenu?.(e);
       }}
       onClick={(e) => {
         e.stopPropagation();
         if (tapToPlace) onTapPlace?.();
         else if (!photo) onPick();
-        else onSelect();
+        else onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey });
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        if (photo && onEdit) onEdit();
+        if (photo && onEdit && editable) onEdit();
       }}
+      /**
+       * A FILLED slot is itself draggable, which is what makes page→page and page→tray moves
+       * possible. The payload is the same `text/photo-id` every drop handler already reads, so
+       * the destination logic is unchanged — only the set of possible sources grew.
+       */
+      draggable={!!photo}
+      onDragStart={(e) => {
+        if (!photo) return;
+        e.stopPropagation();
+        e.dataTransfer.setData('text/photo-id', photo.id);
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStartFrame?.(photo.id);
+      }}
+      onDragEnd={() => onDragEndFrame?.()}
       onDragOver={(e) => {
         e.preventDefault();
-        if (!over) setOver(true);
+        // `move` when the photo comes from another frame, `copy` from the tray — the cursor then
+        // tells the truth about whether the source keeps its photo.
+        e.dataTransfer.dropEffect = photo ? 'move' : 'copy';
+        if (!over) {
+          setOver(true);
+          onDragEnterTarget?.();
+        }
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
@@ -496,26 +674,60 @@ function BaseSlotView({
       }}
       className={`group/base absolute inset-0 cursor-pointer transition-all duration-200 ${
         over ? 'ring-2 ring-inset ring-studio-bright' : tapToPlace ? 'ring-2 ring-inset ring-studio-bright/70' : ''
-      } ${selected ? 'ring-2 ring-inset ring-studio-bright' : ''}`}
+      } ${selected ? 'ring-2 ring-inset ring-studio-bright' : multiSelected ? 'ring-2 ring-inset ring-studio' : ''}`}
     >
       {photo ? (
         <>
-          <PhotoFrame url={photo.url} edit={photo.edit} alt={photo.filename} />
+          <div
+            className={`h-full w-full transition-opacity duration-200 ${stateOpacityClass(uiState)} ${
+              // SMART REPLACE: the outgoing photo dims so the incoming one reads clearly, and the
+              // SOURCE of a page→page move dims too, so it's obvious the photo is being taken.
+              incomingPreviewUrl ? 'opacity-30' : isDragSource ? 'opacity-40' : ''
+            }`}
+          >
+            <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={photo.edit} alt={photo.filename} />
+          </div>
+
+          {/*
+            THE REPLACEMENT PREVIEW. The incoming photo is rendered in place, at the destination's
+            own geometry, fading in over the one it would replace — so the answer to "what will
+            this look like?" is the picture itself rather than a label. It is inert (`pointer-
+            events-none`) so it can never intercept the drop, and it uses the SAME `PhotoFrame` as
+            everything else, so crop/rotate/filters are honoured exactly as they will be after the
+            drop. Nothing is committed until the user actually releases.
+          */}
+          {incomingPreviewUrl && (
+            <div className="pointer-events-none absolute inset-0 z-[5] motion-safe:animate-fade-in">
+              <PhotoFrame url={incomingPreviewUrl} alt="" />
+            </div>
+          )}
+
+          {/* An optimistic photo on the page says so quietly — the photo stays the hero. */}
+          <span className="z-[6]">
+            <UploadBadge state={uiState} progress={task?.progress} since={photo?.processingSince ?? null} size="compact" />
+          </span>
+          {/* Bottom-left, so it never collides with the upload pill (top-left) or the slot
+              controls (top-right). Hidden mid-drag — a drop preview shouldn't be judged. */}
+          {!incomingPreviewUrl && !isDragSource && <ReadinessBadge readiness={readiness} size="compact" />}
           <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/25 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
-          {/* Filled base slot: dropping REPLACES the current photo — say so (CHANGE 10). */}
+          {/* Filled base slot: dropping REPLACES the current photo — name it, once, small. */}
           {over && (
-            <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center bg-studio/20 ring-2 ring-inset ring-studio-bright">
-              <span className="rounded-full bg-studio px-2.5 py-0.5 text-[11px] font-semibold text-studio-foreground shadow-sm">Replace photo</span>
+            <div className="pointer-events-none absolute inset-0 z-[6] flex items-end justify-center pb-2 ring-2 ring-inset ring-studio-bright">
+              <span className="rounded-full bg-studio px-2.5 py-0.5 text-[11px] font-semibold text-studio-foreground shadow-sm">
+                Replace
+              </span>
             </div>
           )}
           <div className="absolute right-1.5 top-1.5 z-[7] flex gap-1 opacity-0 transition-all duration-200 group-hover/base:opacity-100">
+            {/* Crop/adjust geometry is authored against the WORKER'S master, so both stay
+                gated until it exists — with the reason on the control itself. */}
             {onEdit && (
-              <SlotBtn label="Edit photo" onClick={onEdit}>
+              <SlotBtn label={editable ? 'Edit photo' : 'Editing available once processing finishes'} disabled={!editable} onClick={onEdit}>
                 <SlidersHorizontal className="h-3.5 w-3.5" />
               </SlotBtn>
             )}
             {onCrop && (
-              <SlotBtn label="Adjust crop" onClick={onCrop}>
+              <SlotBtn label={editable ? 'Adjust crop' : 'Cropping available once processing finishes'} disabled={!editable} onClick={onCrop}>
                 <Crop className="h-3.5 w-3.5" />
               </SlotBtn>
             )}
@@ -556,11 +768,14 @@ function SlotBtn({
   label,
   onClick,
   destructive,
+  disabled,
   children,
 }: {
   label: string;
   onClick: () => void;
   destructive?: boolean;
+  /** Kept visible but inert — the label explains why, which is the point of gating. */
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -568,13 +783,19 @@ function SlotBtn({
       type="button"
       aria-label={label}
       title={label}
+      disabled={disabled}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         onClick();
       }}
       className={`rounded-lg bg-background/90 p-1.5 shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors ${
-        destructive ? 'text-destructive hover:bg-destructive hover:text-destructive-foreground' : 'text-foreground hover:bg-studio hover:text-studio-foreground'
+        disabled
+          ? 'cursor-not-allowed text-muted-foreground/50'
+          : destructive
+            ? 'text-destructive hover:bg-destructive hover:text-destructive-foreground'
+            : 'text-foreground hover:bg-studio hover:text-studio-foreground'
       }`}
     >
       {children}
@@ -622,7 +843,7 @@ function PhotoPicker({
                 title={p.filename}
                 className="relative aspect-square overflow-hidden rounded-lg bg-muted ring-1 ring-border transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card hover:ring-studio-bright/60"
               >
-                <PhotoFrame url={p.url} edit={p.edit} alt={p.filename} />
+                <PhotoFrame url={resolvePhotoUrl(p, 'full') ?? ''} edit={p.edit} alt={p.filename} />
               </button>
             ))}
           </div>

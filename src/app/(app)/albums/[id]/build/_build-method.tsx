@@ -32,6 +32,7 @@ export type BuilderBlueprint = {
 export default function BuildMethod({
   albumSize,
   uploaded,
+  unprocessed = 0,
   defaultTarget,
   blueprintCount,
   onFullAuto,
@@ -44,6 +45,12 @@ export default function BuildMethod({
 }: {
   albumSize: number;
   uploaded: number;
+  /**
+   * Photos still uploading/processing. Auto-layout groups photos by ORIENTATION, which comes
+   * from the worker's sanitized master — so these can't take part yet and the dialog says so
+   * rather than quietly leaving them out.
+   */
+  unprocessed?: number;
   defaultTarget: BuilderBlueprint | null;
   blueprintCount: number;
   onFullAuto: () => void;
@@ -72,6 +79,16 @@ export default function BuildMethod({
             <X className="h-5 w-5" />
           </button>
         </header>
+
+        {unprocessed > 0 && (
+          <p className="border-b bg-secondary/40 px-6 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {unprocessed} photo{unprocessed === 1 ? '' : 's'} still processing.
+            </span>{' '}
+            Automatic layouts arrange photos by shape, which we only know once processing finishes — so
+            these won’t be placed yet. You can still add them to pages yourself, or build again later.
+          </p>
+        )}
 
         <div className="ms-scroll grid gap-4 overflow-y-auto p-6 md:grid-cols-3">
           {/* 1 · FULL AUTO */}

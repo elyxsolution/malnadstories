@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { computeFrameLayout, cssFilter, frameFinish, sharpenKernel, type EditConfig } from '@/lib/builder/model';
+import { now, record } from '@/lib/perf/metrics';
 
 /**
  * THE single render surface. Applies the non-destructive EditConfig at display time
@@ -20,6 +21,8 @@ export default function PhotoFrame({
   alt = '',
   className,
   onReady,
+  onLoadError,
+  lazy = false,
 }: {
   url: string;
   edit?: EditConfig | null;
@@ -29,6 +32,18 @@ export default function PhotoFrame({
   // to know every frame has settled). A failed image still counts as "ready" so one
   // broken/expired URL can't hang PDF generation. The app UI ignores this.
   onReady?: () => void;
+  /**
+   * Fires when the image fails to load. The builder uses this to detect an EXPIRED signed URL
+   * and refresh just that photo (Phase 5). Separate from `onReady`, which must keep treating a
+   * failure as "settled" so PDF generation can never hang on it.
+   */
+  onLoadError?: () => void;
+  /**
+   * Defer decoding until the image is near the viewport. Off by default — the PRINT ROUTE must
+   * never lazy-load, because Puppeteer's readiness gate would wait forever for images the
+   * headless viewport never scrolls to. Only surfaces that scroll opt in.
+   */
+  lazy?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ w: 0, h: 0 });
@@ -36,15 +51,59 @@ export default function PhotoFrame({
   const rawId = useId();
   const sharpenId = `ms-sharpen-${rawId.replace(/:/g, '')}`;
 
+  /**
+   * PROGRESSIVE TRANSITION (Phase 4). When the URL changes on a frame that is ALREADY showing
+   * something — the local blob giving way to the sanitized master — the outgoing image is held
+   * on screen underneath while the new one fades in over it, then dropped.
+   *
+   * Why it is invisible: both layers share the measured frame and the same computed geometry,
+   * so nothing reflows; `nat` only updates once the incoming image has decoded, so the layout
+   * never jumps mid-fade; and the two images have the same ORIENTED aspect by construction
+   * (the worker bakes EXIF rotation in, the browser applies it to the blob), so the crossfade
+   * is between two identically-framed pictures.
+   *
+   * The first paint of a frame is NOT a transition — there is nothing to fade from, so it
+   * appears immediately. The print route only ever renders final URLs, so it never crossfades
+   * and its readiness gate is untouched.
+   */
+  const [prevUrl, setPrevUrl] = useState<string | null>(null);
+  const [fadedIn, setFadedIn] = useState(true);
+  const shownUrlRef = useRef<string>(url);
+
+  useEffect(() => {
+    if (url === shownUrlRef.current) return;
+    const hadImage = !!shownUrlRef.current;
+    setPrevUrl(hadImage ? shownUrlRef.current : null);
+    setFadedIn(!hadImage); // nothing to fade from ⇒ show immediately
+    shownUrlRef.current = url;
+  }, [url]);
+
   const readyRef = useRef(false);
   const fireReady = () => {
     if (readyRef.current) return;
     readyRef.current = true;
     onReady?.();
   };
+
+  // Decode timing: the clock starts when a new URL is committed to the <img>, so the sample
+  // measures fetch + decode as the user experiences it.
+  const decodeStartRef = useRef(now());
+  useEffect(() => {
+    decodeStartRef.current = now();
+  }, [url]);
+
   const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    record('image.decode', now() - decodeStartRef.current);
     setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
+    setFadedIn(true);
     fireReady();
+  };
+  const handleError = () => {
+    // A broken incoming image must not leave the frame blank behind a half-finished fade.
+    setFadedIn(true);
+    setPrevUrl(null);
+    fireReady();
+    onLoadError?.();
   };
 
   useEffect(() => {
@@ -83,15 +142,36 @@ export default function PhotoFrame({
           className="absolute"
           style={{ left: layout.layer.left, top: layout.layer.top, width: layout.layer.width, height: layout.layer.height }}
         >
+          {/* Outgoing image, held underneath until the incoming one has decoded. */}
+          {prevUrl && !fadedIn && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={prevUrl}
+              alt=""
+              aria-hidden
+              draggable={false}
+              className="absolute left-1/2 top-1/2 max-w-none select-none"
+              style={{ width: layout.img.width, height: layout.img.height, transform: layout.img.transform }}
+            />
+          )}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
             alt={alt}
             draggable={false}
             onLoad={handleLoad}
-            onError={fireReady}
-            className="absolute left-1/2 top-1/2 max-w-none select-none"
-            style={{ width: layout.img.width, height: layout.img.height, transform: layout.img.transform, willChange: 'transform' }}
+            onError={handleError}
+            loading={lazy ? 'lazy' : undefined}
+            decoding="async"
+            onTransitionEnd={() => setPrevUrl(null)}
+            className="absolute left-1/2 top-1/2 max-w-none select-none motion-safe:transition-opacity motion-safe:duration-300 motion-safe:ease-out"
+            style={{
+              width: layout.img.width,
+              height: layout.img.height,
+              transform: layout.img.transform,
+              willChange: 'transform',
+              opacity: fadedIn ? 1 : 0,
+            }}
           />
         </div>
       ) : (
@@ -102,7 +182,9 @@ export default function PhotoFrame({
           alt={alt}
           draggable={false}
           onLoad={handleLoad}
-          onError={fireReady}
+          onError={handleError}
+          loading={lazy ? 'lazy' : undefined}
+          decoding="async"
           className="absolute inset-0 h-full w-full select-none object-cover"
         />
       )}

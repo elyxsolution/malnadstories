@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   X,
@@ -90,6 +90,10 @@ export default function AlbumSettings({
   const [notes, setNotes] = useState(description ?? '');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+  }, []);
   const [err, setErr] = useState<string | null>(null);
 
   const [newAlbumConfirm, setNewAlbumConfirm] = useState(false);
@@ -119,7 +123,10 @@ export default function AlbumSettings({
     if (res.ok) {
       onTitleSaved(name.trim());
       setSaved(true);
-      setTimeout(() => setSaved(false), 2200);
+      // Tracked so it can be cancelled on unmount — closing the dialog before the confirmation
+      // fades otherwise leaves a timer that sets state on an unmounted component.
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 2200);
     } else {
       setErr(res.error);
     }

@@ -14,7 +14,7 @@ import StickersPanel from '@/app/(app)/albums/[id]/build/_panel-stickers';
 import BackgroundsPanel from '@/app/(app)/albums/[id]/build/_panel-backgrounds';
 import QrPanel from '@/app/(app)/albums/[id]/build/_panel-qr';
 import { TextInspector, StickerInspector, QrInspector, SpineInspector } from '@/app/(app)/albums/[id]/build/_element-inspectors';
-import type { Photo } from '@/app/(app)/albums/[id]/build/_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import { makeText, makeQr, makeSticker } from '@/lib/builder/elements';
 import { cryptoId, type Background, type QrElement, type StickerElement, type TextElement, type TextVariant } from '@/lib/builder/model';
 import { normalizeCoverConfig, type CoverConfig } from '@/lib/builder/cover';

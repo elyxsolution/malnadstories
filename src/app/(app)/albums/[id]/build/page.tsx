@@ -12,7 +12,7 @@ import { DimensionsProvider } from './_dimensions';
 import { getProductDimensions } from '@/lib/products/catalog';
 import { FALLBACK_DIMENSIONS } from '@/lib/products/model';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
-import { type Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import {
   LAYOUT_TEMPLATES,
   type Background,

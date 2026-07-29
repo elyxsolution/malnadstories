@@ -11,19 +11,71 @@ import type { Rect } from '@/lib/builder/model';
  * are handled here; callers supply only the visual `children` and the `controls`.
  */
 
-export type SnapLine = { axis: 'x' | 'y'; pos: number };
+/**
+ * A guide line. `kind` decides how it is DRAWN, because the three kinds mean different things
+ * and blurring them is what makes guide systems feel noisy:
+ *   • `center` — you are aligned to a page centre or the fold (solid, strongest)
+ *   • `edge`   — you are aligned to a safe margin, or to another element's edge (solid, softer)
+ *   • `spacing`— you are equidistant from neighbours (dashed, quietest)
+ */
+export type SnapLine = { axis: 'x' | 'y'; pos: number; kind?: 'center' | 'edge' | 'spacing' };
+
+/** Another element's box, in pair-normalized coordinates — the input for peer alignment. */
+export type PeerRect = { x: number; y: number; w: number; h: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const SNAP_T = 0.012; // snap threshold (fraction of the pair)
-// Snap targets: page centres (0.25 / 0.75), the centre fold (0.5), and the safe margins.
-const SNAP_X = [0.05, 0.25, 0.5, 0.75, 0.95];
-const SNAP_Y = [0.06, 0.5, 0.94];
+// Structural targets: page centres (0.25 / 0.75), the centre fold (0.5), and the safe margins.
+const CENTER_X = [0.25, 0.5, 0.75];
+const CENTER_Y = [0.5];
+const EDGE_X = [0.05, 0.95];
+const EDGE_Y = [0.06, 0.94];
 
-function snapAxis(centre: number, half: number, targets: number[]): { value: number; line: number | null } {
-  for (const t of targets) {
-    if (Math.abs(centre - t) <= SNAP_T) return { value: t - half, line: t };
+type Candidate = { pos: number; kind: 'center' | 'edge' | 'spacing' };
+
+/**
+ * Snap `centre` to the nearest candidate within threshold.
+ *
+ * Candidates are tried in the order given, so structural guides (page centres) win ties against
+ * peer edges — being centred on the page is almost always the intent when both are within a
+ * pixel of each other.
+ */
+function snapAxis(centre: number, half: number, candidates: Candidate[]): { value: number; line: Candidate | null } {
+  let best: Candidate | null = null;
+  let bestDist = SNAP_T;
+  for (const c of candidates) {
+    const d = Math.abs(centre - c.pos);
+    if (d <= bestDist) {
+      // Strictly-less keeps the FIRST candidate on a tie, preserving the priority order.
+      if (d < bestDist || best === null) {
+        best = c;
+        bestDist = d;
+      }
+    }
   }
-  return { value: centre - half, line: null };
+  return best ? { value: best.pos - half, line: best } : { value: centre - half, line: null };
+}
+
+/**
+ * Build the candidate set for one axis: structural guides first, then alignment with the CENTRES
+ * of sibling elements, then equal-spacing positions between the two nearest siblings.
+ *
+ * Peers are only considered when there are any, so a page with a single overlay shows exactly the
+ * guides it did before — the system gets richer only where richness is meaningful.
+ */
+function candidatesFor(axis: 'x' | 'y', peers: PeerRect[]): Candidate[] {
+  const structural: Candidate[] = (axis === 'x' ? CENTER_X : CENTER_Y).map((pos) => ({ pos, kind: 'center' as const }));
+  const edges: Candidate[] = (axis === 'x' ? EDGE_X : EDGE_Y).map((pos) => ({ pos, kind: 'edge' as const }));
+  const peerCentres: Candidate[] = peers.map((p) =>
+    axis === 'x' ? { pos: p.x + p.w / 2, kind: 'edge' as const } : { pos: p.y + p.h / 2, kind: 'edge' as const },
+  );
+  // Equal spacing: the midpoint between each adjacent pair of peer centres.
+  const sorted = peerCentres.map((c) => c.pos).sort((a, b) => a - b);
+  const spacing: Candidate[] = [];
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    spacing.push({ pos: (sorted[i] + sorted[i + 1]) / 2, kind: 'spacing' });
+  }
+  return [...structural, ...edges, ...peerCentres, ...spacing];
 }
 
 export default function Movable({
@@ -42,6 +94,7 @@ export default function Movable({
   onCommit,
   onRotate,
   onSnap,
+  peers = [],
   onDoubleClick,
   className = '',
   zIndex,
@@ -59,11 +112,15 @@ export default function Movable({
   squareRatio?: number;
   rotatable?: boolean;
   containerRef: React.RefObject<HTMLElement>;
-  onSelect: () => void;
+  /** Receives modifier state so the selection store — not this component — decides semantics. */
+  onSelect: (mods?: { meta: boolean; shift: boolean }) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   onChange: (rect: Rect) => void;
   onCommit?: () => void;
   onRotate?: (deg: number) => void;
   onSnap?: (lines: SnapLine[]) => void;
+  /** Sibling boxes on the same page — enables edge + equal-spacing guides. Empty is fine. */
+  peers?: PeerRect[];
   onDoubleClick?: () => void;
   className?: string;
   zIndex?: number;
@@ -102,15 +159,15 @@ export default function Movable({
       let nx = clamp(d.start.x + dx, 0, 1 - d.start.w);
       let ny = clamp(d.start.y + dy, 0, 1 - d.start.h);
       const lines: SnapLine[] = [];
-      const sx = snapAxis(nx + d.start.w / 2, d.start.w / 2, SNAP_X);
-      const sy = snapAxis(ny + d.start.h / 2, d.start.h / 2, SNAP_Y);
+      const sx = snapAxis(nx + d.start.w / 2, d.start.w / 2, candidatesFor('x', peers));
+      const sy = snapAxis(ny + d.start.h / 2, d.start.h / 2, candidatesFor('y', peers));
       if (sx.line !== null) {
         nx = clamp(sx.value, 0, 1 - d.start.w);
-        lines.push({ axis: 'x', pos: sx.line });
+        lines.push({ axis: 'x', pos: sx.line.pos, kind: sx.line.kind });
       }
       if (sy.line !== null) {
         ny = clamp(sy.value, 0, 1 - d.start.h);
-        lines.push({ axis: 'y', pos: sy.line });
+        lines.push({ axis: 'y', pos: sy.line.pos, kind: sy.line.kind });
       }
       onSnap?.(lines);
       onChange({ ...d.start, x: nx, y: ny });
@@ -201,18 +258,47 @@ export default function Movable({
   );
 }
 
-/** Render the active snap guide lines across the page box (presentation only). */
+/**
+ * Render the active guide lines across the page box (presentation only).
+ *
+ * The three kinds are visually ranked so a glance reads the STRONGEST alignment first: centre
+ * guides are solid and full-strength, edge guides solid but softer, and spacing guides dashed
+ * and quietest. They appear only while a drag is actively snapped and vanish the instant it
+ * ends — there is no exit animation, because a guide lingering after the drop is noise.
+ */
 export function SnapGuides({ lines }: { lines: SnapLine[] }) {
   if (lines.length === 0) return null;
   return (
     <div className="pointer-events-none absolute inset-0 z-[45]">
-      {lines.map((l, i) =>
-        l.axis === 'x' ? (
-          <span key={i} className="absolute top-0 h-full w-px bg-studio-bright/80" style={{ left: `${l.pos * 100}%` }} />
+      {lines.map((l, i) => {
+        const kind = l.kind ?? 'center';
+        const colour =
+          kind === 'center' ? 'bg-studio-bright/90' : kind === 'edge' ? 'bg-studio-bright/55' : 'bg-studio-bright/40';
+        const dashed = kind === 'spacing';
+        return l.axis === 'x' ? (
+          <span
+            key={`${l.axis}-${l.pos}-${i}`}
+            className={`absolute top-0 h-full w-px motion-safe:animate-fade-in ${dashed ? '' : colour}`}
+            style={{
+              left: `${l.pos * 100}%`,
+              ...(dashed
+                ? { backgroundImage: 'repeating-linear-gradient(to bottom, hsl(var(--studio-bright)/0.5) 0 4px, transparent 4px 8px)' }
+                : {}),
+            }}
+          />
         ) : (
-          <span key={i} className="absolute left-0 w-full border-t border-studio-bright/80" style={{ top: `${l.pos * 100}%` }} />
-        ),
-      )}
+          <span
+            key={`${l.axis}-${l.pos}-${i}`}
+            className={`absolute left-0 h-px w-full motion-safe:animate-fade-in ${dashed ? '' : colour}`}
+            style={{
+              top: `${l.pos * 100}%`,
+              ...(dashed
+                ? { backgroundImage: 'repeating-linear-gradient(to right, hsl(var(--studio-bright)/0.5) 0 4px, transparent 4px 8px)' }
+                : {}),
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

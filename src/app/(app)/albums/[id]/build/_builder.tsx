@@ -18,23 +18,25 @@ import {
   LayoutGrid,
   Rows3,
   Wand2,
-  MessageSquareWarning,
   ChevronLeft,
   ChevronRight,
   BookImage,
   Eye,
-  Save,
+  ShieldCheck,
+  AlertTriangle,
   CheckCircle2,
 } from 'lucide-react';
-import Uploader, { type Photo } from './_uploader';
+import Uploader from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
+import { isTempPhotoId } from '@/lib/uploads';
 import Tray from './_tray';
-import TrayToolbar, { type TrayFilter } from './_tray-toolbar';
+import TrayToolbar from './_tray-toolbar';
 import BlockCard from './_block';
 import SubmitValidationDialog from './_submit-validation-dialog';
 import ConfirmSubmitDialog from './_confirm-submit-dialog';
 import { evaluateAlbum, type AlbumValidationReport, type IssueAction } from '@/lib/albums/validation';
 import { type RenderReadinessReport } from '@/lib/albums/render-readiness';
-import { LoadingOverlay, InlineLoader } from '@/components/loading';
+import { LoadingOverlay } from '@/components/loading';
 import PairContent from './_pair-frame';
 import Navigator from './_navigator';
 import Inspector from './_inspector';
@@ -57,9 +59,26 @@ import CoverPanel from './_panel-cover';
 import CoverTemplatesPanel, { type BuilderCoverTemplate } from './_panel-cover-templates';
 import StickersPanel from './_panel-stickers';
 import { TextInspector, StickerInspector, QrInspector, SpineInspector } from './_element-inspectors';
-import PhotoEditor from './_photo-editor';
-import QuickCrop from './_quick-crop';
 import { useBlocks, NO_SELECTION, type Selection, type BaseSlot } from './_use-builder';
+import { useSelection } from './_use-selection';
+import { findFrameHolding, selectedFrames, selectedPhotoIds, targetKey, type SelectionTarget } from './_selection-model';
+import SelectionBar from './_selection-bar';
+import { useCommands } from './_use-commands';
+import { useShortcuts, type Shortcut } from './_use-shortcuts';
+import ContextMenu, { useContextMenu } from './_context-menu';
+import { useDragStore } from './_use-drag';
+import { useMarquee, MarqueeBox } from './_use-marquee';
+import { useTrayFilters, useFavourites } from './_tray-filters';
+import { useLabels, PHOTO_LABELS, LABEL_META } from './_photo-labels';
+import { useLayoutMemory } from './_layout-memory';
+import { profileShapes, suggestLayouts } from './_layout-suggestions';
+import {
+  albumStatistics,
+  inspectAlbum,
+  pairWidthInches,
+  type QualityIssue,
+} from './_quality-model';
+import QualityPanel from './_panel-quality';
 import {
   autoLayout,
   regenerate,
@@ -92,23 +111,39 @@ import { applyBlueprint } from '@/lib/builder/blueprint';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
-import { updateBlueprintFromAlbum, exitBlueprintDraft } from '@/lib/actions/admin/templates';
 import { Button } from '@/components/ui/button';
 import { type CoverOption } from '@/lib/covers';
 import { type ActiveTemplate } from '@/lib/templates/catalog';
-import { useWorkerGate } from '@/components/worker/use-worker-gate';
+import { resolvePhotoUrl, revokeLocalPreview } from '@/lib/builder/photo-url';
+import { useIdMap } from './_use-id-map';
+import { usePhotoPipeline } from './_use-photo-pipeline';
+import { useBlueprintMode } from './_use-blueprint-mode';
+import { PhotoModals, ResubmittedDialog, ExitGuardDialog } from './_builder-modals';
+import { useSaveController } from './_use-save-controller';
+import { usePhotoFor } from './_use-photo-for';
+import { useIdlePreload } from './_use-idle-preload';
+import { isPlaceable, photoUiState } from './_photo-state';
+import { layoutInputs, useOptimisticLayout } from './_use-optimistic-layout';
+import SessionStatus from './_session-status';
 import { STUDIO_PRIMARY } from './_ui';
 
 // The flipbook (react-pageflip) is a client-only modal — load it on demand and skip SSR so
 // the library never touches `window` during render, and its bundle only ships when opened.
 const Flipbook = dynamic(() => import('./_flipbook'), { ssr: false });
 
+/**
+ * Review mode is a full-screen surface most sessions never open, so it is code-split the same
+ * way the flipbook is — the builder's initial bundle is unchanged by Phase 7.
+ */
+const ReviewMode = dynamic(() => import('./_review-mode'), { ssr: false });
+
 /** Custom-mode auto-fill kinds (Fill Empty / Replace All / Randomize). Replaces the old AssistKind. */
 type LayoutKind = 'build' | 'fill' | 'suggest';
 
-type RailTab = 'images' | 'layouts' | 'templates' | 'text' | 'stickers' | 'backgrounds' | 'qr';
+type RailTab = 'images' | 'layouts' | 'templates' | 'text' | 'stickers' | 'backgrounds' | 'qr' | 'quality';
 // 'layouts' is content-page only; 'templates' (cover designs) is cover-only. The rail is filtered
-// per mode below so each shows only its relevant tools.
+// per mode below so each shows only its relevant tools. 'quality' (Phase 7) is available in both,
+// because a cover has quality problems too.
 const RAIL: { key: RailTab; label: string; Icon: typeof Images }[] = [
   { key: 'images', label: 'Images', Icon: Images },
   { key: 'layouts', label: 'Layouts', Icon: LayoutTemplateIcon },
@@ -117,6 +152,7 @@ const RAIL: { key: RailTab; label: string; Icon: typeof Images }[] = [
   { key: 'stickers', label: 'Stickers', Icon: Sticker },
   { key: 'backgrounds', label: 'Backdrop', Icon: Palette },
   { key: 'qr', label: 'QR', Icon: QrCode },
+  { key: 'quality', label: 'Quality', Icon: ShieldCheck },
 ];
 
 export default function Builder({
@@ -183,8 +219,11 @@ export default function Builder({
   // Product geometry (Phase B) — provided by the parent DimensionsProvider. pageA = one page's
   // aspect (w/h), pairA = the open pair (2 × pageA). Every hardcoded 3:4 / 3:2 below now derives
   // from these, so the builder renders at the SAME proportions the print route prints at.
-  const { page: pageA, pair: pairA } = useBuilderDimensions();
-  const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
+  const { page: pageA, pair: pairA, dims } = useBuilderDimensions();
+  // Stamp the age of the server-rendered signed URLs at mount. They were minted moments before
+  // this page rendered, so "now" is accurate to within the request — and it is what lets the
+  // expiry-aware refresh (Phase 5) know when they need replacing, without touching the server.
+  // `photos` now comes from the photo pipeline (declared below, once `api` exists).
   const api = useBlocks(initialBlocks, pairA);
   const { blocks } = api;
 
@@ -217,23 +256,22 @@ export default function Builder({
   // changes (paid + review 'changes_requested'). Same builder engine, adapted chrome — a review
   // summary card, Resubmit-not-Checkout, and review-specific exit copy.
   const reviewMode = !blueprintMode && review?.status === 'changes_requested';
-  const [blueprintSaving, setBlueprintSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<number | null>(blueprintMeta ? new Date(blueprintMeta.updatedAt).getTime() : null);
-  const [exitDialogOpen, setExitDialogOpen] = useState(false);
-
+  // `blueprintSaving` / `exitDialogOpen` are owned by the blueprint-mode controller below.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false); // customer unsaved-changes guard
   const [resubmitted, setResubmitted] = useState(false); // review-mode resubmit confirmation
   const [pickedId, setPickedId] = useState<string | null>(null);
-  const [traySearch, setTraySearch] = useState('');
-  const [trayFilter, setTrayFilter] = useState<TrayFilter>('all');
+  // Tray search + filters now live in `useTrayFilters` (composable axes), declared below.
   const [removingUnused, setRemovingUnused] = useState(false);
 
   const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
   const [quickCrop, setQuickCrop] = useState<{ photo: Photo; aspect: number; gutter: boolean } | null>(null);
   const [flipbookOpen, setFlipbookOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  /** Distraction-free review (Phase 7). A view, never an editor — see `_review-mode`. */
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   // "Build it for me" → the 3-option Blueprint workflow (Full Auto / Choose / Custom) + its picker.
   const [buildMethodOpen, setBuildMethodOpen] = useState(false);
@@ -246,7 +284,7 @@ export default function Builder({
     summary: ReturnType<typeof summarizePlan>;
   } | null>(null);
 
-  const [saving, setSaving] = useState(false);
+  // `saving` / `lastSaved` are owned by the save controller (declared below, once `api` exists).
   const [submitting, setSubmitting] = useState(false);
   // Submission validation (advisory, non-blocking): `checking` shows the "Checking your album…"
   // overlay while saves flush; `validation` holds the report that drives the informational dialog.
@@ -256,12 +294,97 @@ export default function Builder({
   const [exiting, setExiting] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
-  const { ensureReady, modal: workerModal } = useWorkerGate();
+  /**
+   * THE PHOTO PIPELINE — optimistic photos, the upload manager's lifecycle, the progressive
+   * poll, expiry-aware URL refresh and blob cleanup, all in one hook now SHARED with the
+   * creation wizard.
+   *
+   * The builder supplies only the two things a LAYOUT-owning host must do that the wizard does
+   * not: remap block references when an optimistic id becomes real, and strip a cancelled photo
+   * from the pages it was placed on. Everything else is identical between the two surfaces, so
+   * it lives in the pipeline rather than being copied.
+   */
+  const idMap = useIdMap();
+  /**
+   * The selection store and the favourites store are declared AFTER the pipeline (they need its
+   * photo list), but the pipeline's confirm callback has to reach them. Late-bound refs keep the
+   * declaration order honest without a circular dependency.
+   */
+  const selectionRemapRef = useRef<((from: string, to: string) => void) | null>(null);
+  const favouritesRemapRef = useRef<((from: string, to: string) => void) | null>(null);
+  /** Labels follow the same late-bound remap contract as selection + favourites (Phase 7). */
+  const labelsRemapRef = useRef<((from: string, to: string) => void) | null>(null);
+  const pipeline = usePhotoPipeline({
+    albumId,
+    initialPhotos,
+    onRemapId: (fromId, toId) => {
+      idMap.register(fromId, toId);
+      api.remapPhotoId(fromId, toId);
+      setPickedId((cur) => (cur === fromId ? toId : cur));
+      setEditingPhoto((cur) => (cur && cur.id === fromId ? { ...cur, id: toId } : cur));
+      // A photo selected, favourited or MARKED while uploading keeps that state once it's real.
+      selectionRemapRef.current?.(fromId, toId);
+      favouritesRemapRef.current?.(fromId, toId);
+      labelsRemapRef.current?.(fromId, toId);
+    },
+    onPhotoDropped: (photoId) => {
+      idMap.forget(photoId);
+      api.removePhotoEverywhere(photoId);
+      setPickedId((cur) => (cur === photoId ? null : cur));
+      setEditingPhoto((cur) => (cur && cur.id === photoId ? null : cur));
+    },
+  });
+  const { photos, setPhotos, uploads, taskFor, photoStateFor, reportFailure } = pipeline;
+
+  // Live mirror for the builder's own async readers (layout verification, blob cleanup on
+  // delete). The pipeline keeps its own; this one serves the layout side.
+  const photosRef = useRef<Photo[]>(photos);
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
+
+  // Tracks whether the layout on screen was built from browser-measured shapes, and reconciles
+  // it once the worker's authoritative dimensions arrive (Phase 4).
+  const optimisticLayout = useOptimisticLayout();
+  const blocksRef = useRef<Block[]>(api.blocks);
+  blocksRef.current = api.blocks;
+
+  /**
+   * MEMORY AUDIT (Phase 5). The debounced cover save was the one timer in the builder with no
+   * cleanup: leaving the page mid-debounce left a pending `saveCoverDesign` that would fire
+   * after unmount — a stray write and a retained closure over the whole cover config. Cancelling
+   * it on unmount is safe because every intentional save path already flushes it first.
+   */
+  useEffect(
+    () => () => {
+      if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
+    },
+    [],
+  );
+
+  // Release any local preview still held when the builder unmounts (route change / exit).
+  useEffect(
+    () => () => {
+      for (const p of photosRef.current) revokeLocalPreview(p.localUrl);
+    },
+    [],
+  );
 
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const placed = useMemo(() => placedPhotoIds(blocks), [blocks]);
-  const availablePhotos = useMemo(() => photos.filter((p) => p.status === 'ready' && !placed.has(p.id)), [photos, placed]);
+  /**
+   * Photos that can be put on a page right now. Phase 3 widens this from "processed" to
+   * "has something to draw", which is what makes optimistic placement work — an uploading
+   * photo shows its own blob. `isPlaceable` still excludes failures and previews the browser
+   * cannot decode (HEIC), so a slot is never filled with nothing.
+   */
+  const availablePhotos = useMemo(
+    () => photos.filter((p) => !placed.has(p.id) && isPlaceable(p, photoUiState(p, taskFor(p.id)))),
+    [photos, placed, taskFor],
+  );
   const availableIds = useMemo(() => availablePhotos.map((p) => p.id), [availablePhotos]);
+  /** Still-uploading photos — the reason some metadata-driven tools stay unavailable. */
+  const unprocessedCount = useMemo(() => photos.filter((p) => p.status !== 'ready').length, [photos]);
   const selectedCover = useMemo(() => covers.find((c) => c.id === coverId) ?? null, [covers, coverId]);
 
   // Sticker URL resolver — active catalog ∪ referenced (resolved server-side so a deactivated but
@@ -282,6 +405,22 @@ export default function Builder({
 
   // Reset element selection whenever the focused spread changes.
   useEffect(() => setSelection(NO_SELECTION), [cur, blocks.length]);
+
+  /**
+   * ONE exception to that reset: arriving at a spread BECAUSE a quality issue pointed there.
+   *
+   * The reset above is right for ordinary navigation — paging to spread 4 shouldn't leave you
+   * editing spread 3's overlay. But "take me to the problem" means landing with the problem
+   * already selected, and the reset would undo that on the very next commit. So the intent is
+   * queued in a ref and applied by an effect declared AFTER the reset, which is what guarantees
+   * it wins without weakening the reset for every other caller.
+   */
+  const pendingFrameSel = useRef<Selection | null>(null);
+  useEffect(() => {
+    if (!pendingFrameSel.current) return;
+    setSelection(pendingFrameSel.current);
+    pendingFrameSel.current = null;
+  }, [cur, blocks.length]);
 
   // The fixed crop frame for the editing photo matches WHERE it is placed (WYSIWYG).
   const editPlacement = useMemo(() => {
@@ -370,35 +509,32 @@ export default function Builder({
     }
   }, [ctxKey, current, railTab, coverFocused, blueprintMode]);
 
-  // Poll processing photos.
-  const hasPending = photos.some((p) => p.status === 'pending');
-  useEffect(() => {
-    if (!hasPending) return;
-    let active = true;
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/photos?albumId=${albumId}`);
-        if (!res.ok) return;
-        const body = (await res.json()) as {
-          photos: { id: string; status: Photo['status']; url: string; thumbUrl: string; takenAt: string | null; width?: number | null; height?: number | null }[];
-        };
-        if (!active) return;
-        setPhotos((prev) =>
-          prev.map((p) => {
-            const u = body.photos.find((x) => x.id === p.id);
-            return u ? { ...p, status: u.status, url: u.url, thumbUrl: u.thumbUrl, takenAt: u.takenAt, width: u.width ?? null, height: u.height ?? null } : p;
-          }),
-        );
-      } catch {
-        /* transient */
+  // Polling, reconciliation, the blob handoff and the processing counts all live in the photo
+  // pipeline now — these are just the values this component renders from.
+  const { pendingPhotos, rejectedPhotos, oldestProcessingSince } = pipeline;
+
+  /**
+   * IDLE PRELOAD (Phase 5) — warm the photos on the neighbouring spreads so moving between
+   * pages is instant. Paused entirely while anything is uploading: a speculative fetch must
+   * never compete with a transfer the user actually asked for.
+   */
+  const neighbourUrls = useMemo(() => {
+    const wanted: string[] = [];
+    for (const offset of [1, -1, 2]) {
+      const b = blocks[cur + offset];
+      if (!b) continue;
+      for (const id of b.photoIds) {
+        const url = id ? resolvePhotoUrl(photoMap.get(id), 'full') : null;
+        if (url && !url.startsWith('blob:')) wanted.push(url);
       }
-    };
-    const id = setInterval(tick, 3000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [hasPending, albumId]);
+      for (const o of b.overlays) {
+        const url = o.photoId ? resolvePhotoUrl(photoMap.get(o.photoId), 'full') : null;
+        if (url && !url.startsWith('blob:')) wanted.push(url);
+      }
+    }
+    return wanted;
+  }, [blocks, cur, photoMap]);
+  useIdlePreload(neighbourUrls, uploads.stats.inFlight > 0);
 
   // ── tray ───────────────────────────────────────────────────────────────────
   const readyUnplaced = photos.filter((p) => p.status === 'ready' && !placed.has(p.id));
@@ -413,19 +549,76 @@ export default function Builder({
   );
   // Blueprint/layout CAPACITY = every base + overlay photo slot across the current spreads.
   const totalSlots = blocks.reduce((s, b) => s + requiredBaseCount(b.template) + b.overlays.length, 0);
-  const trayQuery = traySearch.trim().toLowerCase();
-  const visiblePhotos = photos.filter((p) => {
-    if (trayQuery && !p.filename.toLowerCase().includes(trayQuery)) return false;
-    if (trayFilter === 'unplaced') return p.status === 'ready' && !placed.has(p.id);
-    if (trayFilter === 'placed') return placed.has(p.id);
-    if (trayFilter === 'processing') return p.status === 'pending';
-    return true;
-  });
+  /**
+   * TRAY FILTERING (Phase 6) — independent axes combined with AND, so "unplaced" and "portrait"
+   * and "favourites" can all be on at once. The result is a plain array, so the virtual grid
+   * windows it exactly as before; filtering never touches virtualization.
+   */
+  const favourites = useFavourites(albumId);
+  /** Triage marks (Phase 7) — a client-side working aid, exactly like favourites above. */
+  const labels = useLabels(albumId);
+  const trayFilterCtx = useMemo(
+    () => ({
+      isPlaced: (id: string) => placed.has(id),
+      stateOf: (p: Photo) => photoUiState(p, taskFor(p.id)),
+      isFavourite: favourites.isFavourite,
+      labelOf: labels.labelOf,
+    }),
+    [placed, taskFor, favourites.isFavourite, labels.labelOf],
+  );
+  const tray = useTrayFilters(photos, trayFilterCtx);
+  const visiblePhotos = tray.visible;
+  // Live read for the marquee's geometric hit test, which maps indices back to photos.
+  const visiblePhotosRef = useRef<Photo[]>(visiblePhotos);
+  visiblePhotosRef.current = visiblePhotos;
+
+  /**
+   * ── ALBUM QUALITY (Phase 7) ───────────────────────────────────────────────────
+   *
+   * One derivation, consumed by four surfaces: the Quality panel, the per-frame badges on the
+   * canvas, the dots on the page strip, and the overlay in review mode. Computing it four times
+   * would be four chances to disagree, so it is computed ONCE here and passed down as lookups.
+   *
+   * `stateOf` is derived from `photoMap` rather than the pipeline's ref-based `photoStateFor`,
+   * because a memo needs an input that actually changes when the photos do — a ref read inside
+   * `useMemo` would silently go stale for exactly one render, which is the render that matters.
+   */
+  const stateOf = useCallback(
+    (photoId: string) => {
+      const p = photoMap.get(photoId);
+      return p ? photoUiState(p, taskFor(p.id)) : undefined;
+    },
+    [photoMap, taskFor],
+  );
+  // The album's printed pair width in inches — what turns "2400px wide" into "prints at 190 dpi".
+  const pairWidthIn = useMemo(() => pairWidthInches(dims.printWidthCm), [dims.printWidthCm]);
+
+  const quality = useMemo(
+    () =>
+      inspectAlbum({
+        blocks,
+        photos,
+        photoState: stateOf,
+        cover: { config: coverConfig, templateId: coverId },
+        pairAspect: pairA,
+        pairWidthIn,
+      }),
+    [blocks, photos, stateOf, coverConfig, coverId, pairA, pairWidthIn],
+  );
+  const statistics = useMemo(
+    () => albumStatistics({ blocks, photos, photoState: stateOf }),
+    [blocks, photos, stateOf],
+  );
+  const readinessOf = useCallback((key: string) => quality.readiness.get(key), [quality.readiness]);
+
+  /** Which layouts this photographer reaches for — remembered across albums, on this device. */
+  const layoutMemory = useLayoutMemory();
 
   // ── photos ─────────────────────────────────────────────────────────────────
-  const onUploaded = (photo: Photo) => setPhotos((prev) => [...prev, photo]);
-
   const onPhotoDeleted = (id: string) => {
+    // Release the local preview (if any) before the row leaves state — nothing can show it
+    // afterwards, so this is the last safe moment.
+    revokeLocalPreview(photosRef.current.find((p) => p.id === id)?.localUrl);
     api.removePhotoEverywhere(id);
     setPhotos((prev) => prev.filter((p) => p.id !== id));
   };
@@ -450,19 +643,190 @@ export default function Builder({
   const onPhotoSaved = (photoId: string, edit: EditConfig) =>
     setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit } : p)));
 
+  // ── Phase 6: selection + commands ─────────────────────────────────────────────
+  /**
+   * Bulk photo removal used by the `deletePhotos` command. Optimistic photos have no server row,
+   * so they are CANCELLED through the upload manager; real ones go through the same
+   * `DELETE /api/photos/:id` the tray has always used. No new backend interaction.
+   */
+  const deletePhotoIds = useCallback(
+    async (ids: string[]) => {
+      for (const id of ids) {
+        const task = uploads.taskByTempPhotoId.get(id);
+        if (task) {
+          uploads.cancel(task.id); // optimistic — abort, don't DELETE
+          continue;
+        }
+        try {
+          const res = await fetch(`/api/photos/${id}`, { method: 'DELETE' });
+          if (res.ok) {
+            revokeLocalPreview(photosRef.current.find((p) => p.id === id)?.localUrl);
+            setPhotos((prev) => prev.filter((p) => p.id !== id));
+          }
+        } catch {
+          /* transient — the photo stays; the user can retry */
+        }
+      }
+    },
+    [uploads, setPhotos],
+  );
+
+  /** Every selectable target in visual order — the domain Select All and Shift-range act on. */
+  const allTargets = useCallback((): SelectionTarget[] => {
+    const out: SelectionTarget[] = photos.map((p) => ({ kind: 'photo', photoId: p.id }));
+    for (const b of blocks) {
+      const slots: BaseSlot[] = b.template === 'double-spread' ? ['image'] : ['left', 'right'];
+      for (const slot of slots) out.push({ kind: 'base', blockKey: b.key, slot });
+      for (const o of b.overlays) if (o.id) out.push({ kind: 'overlay', blockKey: b.key, id: o.id });
+    }
+    return out;
+  }, [photos, blocks]);
+
+  const sel = useSelection({ blocks, photos });
+  // Stable adapters between the label / favourite stores and the command layer. They change
+  // only when the underlying stores actually change, which is what keeps the command registry
+  // memoized (see the note where they are passed in).
+  const { labelOf, setLabel, toggleLabel } = labels;
+  const labelCommandApi = useMemo(
+    () => ({ labelOf, toggle: toggleLabel, clear: (ids: readonly string[]) => setLabel(ids, null) }),
+    [labelOf, toggleLabel, setLabel],
+  );
+  const favouriteCommandApi = useMemo(
+    () => ({ isFavourite: favourites.isFavourite, toggle: favourites.toggle }),
+    [favourites.isFavourite, favourites.toggle],
+  );
+  const cmd = useCommands({
+    api,
+    blocks,
+    photos,
+    selection: sel.selection,
+    setSelection: sel.setSelection,
+    allTargets,
+    deletePhotoIds,
+    savePhotoEdit: (photoId, edit) => void savePhotoEdit({ photoId, edit }),
+    patchPhotoEdit: onPhotoSaved,
+    albumSize: size,
+    onMessage: setMessage,
+    /**
+     * Phase 7: marks and stars become COMMANDS rather than tray-only buttons, so the keyboard,
+     * the context menu and the selection bar all reach the same implementation — the reason
+     * this layer exists at all. Both adapters are MEMOIZED: `useCommands` keys its registry on
+     * them, so a fresh object literal here would rebuild every command on every render and
+     * re-render the selection bar for nothing.
+     */
+    labels: labelCommandApi,
+    favourites: favouriteCommandApi,
+    onDuplicatedPreset: layoutMemory.markDuplicated,
+  });
+  const contextMenu = useContextMenu();
+
+  /**
+   * SMART SUGGESTIONS read the photos the user is about to place: their tray SELECTION when they
+   * have one (the strongest available signal of intent), otherwise everything still unplaced.
+   * Pure shape analysis — see `_layout-suggestions` for why there is no model behind it.
+   */
+  const suggestionPool = useMemo(() => {
+    const chosen = selectedPhotoIds(sel.selection);
+    if (chosen.length > 0) {
+      const picked = chosen.map((id) => photoMap.get(id)).filter((p): p is Photo => !!p);
+      if (picked.length > 0) return picked;
+    }
+    // Cap the sample: shape statistics converge long before 2,000 photos, and re-profiling an
+    // entire import on every render would cost real time for an identical answer.
+    return availablePhotos.slice(0, 60);
+  }, [sel.selection, photoMap, availablePhotos]);
+  const suggestions = useMemo(() => suggestLayouts(profileShapes(suggestionPool)), [suggestionPool]);
+  /**
+   * The shared DRAG store. `dataTransfer` still carries the payload and still drives every drop,
+   * so drop behaviour is unchanged; this exists purely so destinations can DESCRIBE what is about
+   * to happen (Smart Replace previews, frame highlighting, cross-page move feedback).
+   */
+  const drag = useDragStore();
+
+  /**
+   * MARQUEE over the tray. Hit-testing is GEOMETRIC — it converts the rubber band into index
+   * ranges using the virtual grid's own `columns`/`rowStride`, so rows that virtualization has
+   * not mounted are selected exactly like visible ones. A DOM-based hit test would silently skip
+   * them, which is the classic virtualized-marquee bug.
+   */
+  const trayGridRef = useRef<HTMLDivElement | null>(null);
+  const trayScrollRef = useRef<HTMLDivElement>(null);
+  const marqueeGeom = useRef({ columns: 4, rowStride: 0, gap: 0, count: 0 });
+  const marquee = useMarquee({
+    containerRef: trayGridRef,
+    scrollRef: trayScrollRef,
+    hitTest: useCallback((r) => {
+      const { columns, rowStride, gap, count } = marqueeGeom.current;
+      if (rowStride <= 0 || columns <= 0) return [];
+      const el = trayGridRef.current;
+      /**
+       * Column PITCH, not cell width. For a grid of `c` columns, `W = c·cell + (c−1)·gap`, so
+       * `W / c` under-measures the pitch by a fraction of the gap and the error accumulates
+       * across the row — enough to include a spurious extra column at the marquee's edge.
+       * `(W + gap) / c` is the exact pitch.
+       */
+      const colPitch = el ? (el.clientWidth + gap) / columns : 0;
+      if (colPitch <= 0) return [];
+      const cellW = colPitch;
+      const firstRow = Math.max(0, Math.floor(r.y / rowStride));
+      const lastRow = Math.floor((r.y + r.h) / rowStride);
+      const firstCol = Math.max(0, Math.floor(r.x / cellW));
+      const lastCol = Math.min(columns - 1, Math.floor((r.x + r.w) / cellW));
+      const ids: string[] = [];
+      for (let row = firstRow; row <= lastRow; row += 1) {
+        for (let col = firstCol; col <= lastCol; col += 1) {
+          const idx = row * columns + col;
+          if (idx >= 0 && idx < count) {
+            const photo = visiblePhotosRef.current[idx];
+            if (photo) ids.push(photo.id);
+          }
+        }
+      }
+      return ids;
+    }, []),
+    onSelect: useCallback(
+      (ids: string[], mods: { meta: boolean; shift: boolean }) => {
+        const targets = ids.map((id) => ({ kind: 'photo', photoId: id }) as SelectionTarget);
+        // A plain marquee replaces; Ctrl/Cmd adds to what was already selected.
+        sel.setSelection((prev) =>
+          mods.meta
+            ? { targets: [...prev.targets, ...targets.filter((t) => !prev.targets.some((x) => targetKey(x) === targetKey(t)))], anchor: prev.anchor }
+            : { targets, anchor: targets[0] ?? null },
+        );
+      },
+      [sel],
+    ),
+  });
+
+  // Bind the late-bound remap hooks now that every store exists.
+  selectionRemapRef.current = sel.remapPhotoId;
+  favouritesRemapRef.current = favourites.remapId;
+  labelsRemapRef.current = labels.remapId;
+
   // Inspector: live (local) change then persist on release.
   const onPhotoChange = (photoId: string, edit: EditConfig) => onPhotoSaved(photoId, edit);
   const onPhotoCommit = (photoId: string, edit: EditConfig) => {
     void savePhotoEdit({ photoId, edit });
   };
 
+  // Crop/edit geometry is authored against the WORKER'S sanitized master (it applies the EXIF
+  // rotation, so a raw local preview can report different dimensions). Both editors therefore
+  // stay closed until the photo is processed — the last line of defence behind the UI gating,
+  // covering the inspector's entry point as well as the canvas.
+  const notYetEditable = () =>
+    setMessage({ kind: 'ok', text: 'Still processing — you can crop and adjust this photo in a moment.' });
+
   const openQuickCrop = (photoId: string, aspect: number, gutter: boolean) => {
     const p = photoMap.get(photoId);
-    if (p) setQuickCrop({ photo: p, aspect, gutter });
+    if (!p) return;
+    if (p.status !== 'ready') return notYetEditable();
+    setQuickCrop({ photo: p, aspect, gutter });
   };
   const openEditor = (photoId: string) => {
     const p = photoMap.get(photoId);
-    if (p) setEditingPhoto(p);
+    if (!p) return;
+    if (p.status !== 'ready') return notYetEditable();
+    setEditingPhoto(p);
   };
 
   // ── spread actions ───────────────────────────────────────────────────────────
@@ -476,11 +840,15 @@ export default function Builder({
     setCurrent(index + 1);
   };
   const duplicateBlock = (key: string) => {
+    layoutMemory.markDuplicated(blocks.find((b) => b.key === key)?.preset);
     api.duplicateBlock(key, size);
   };
   const applyPreset = (preset: LayoutPreset) => {
     if (!block) return;
     api.applyPreset(block.key, preset, availableIds);
+    // THE single place a preset is applied, so it is also the single place layout memory learns
+    // from — no other call site can forget to record it.
+    layoutMemory.markUsed(preset.key);
     setMessage({ kind: 'ok', text: 'Layout applied — review it, then Save.' });
   };
   const addText = (variant: TextVariant) => {
@@ -555,6 +923,47 @@ export default function Builder({
     }
     setCurrent(Math.max(0, api.blocks.length - 1));
   };
+  /**
+   * ONE-CLICK NAVIGATION from a quality issue to the thing it's about (Phase 7).
+   *
+   * It reuses the builder's existing view state exactly as `navigateToIssue` (the submit dialog's
+   * equivalent) does — focus the cover, focus a spread, or focus a spread AND select the offending
+   * frame so the inspector on the right is already describing it when the user arrives. That last
+   * step is the difference between "spread 7 has a problem" and being able to fix it.
+   *
+   * It never edits anything. Selection is a view concern; the issue itself is only ever advisory.
+   */
+  const goToIssue = (issue: QualityIssue) => {
+    setReviewOpen(false);
+    const loc = issue.location;
+    if (loc.kind === 'cover') {
+      setCoverFocused(true);
+      setActiveSide('front');
+      return;
+    }
+    if (loc.kind === 'tray' || loc.kind === 'photo') {
+      setCoverFocused(false);
+      setRailTab('images');
+      if (loc.kind === 'photo') sel.pick({ kind: 'photo', photoId: loc.photoId });
+      return;
+    }
+    const index = Math.max(0, Math.min(blocks.length - 1, loc.blockIndex));
+    setCoverFocused(false);
+    setEditLayout('focus');
+    setCurrent(index);
+    const t = loc.kind === 'frame' ? loc.target : null;
+    if (t) {
+      sel.pick(t);
+      // Mirror it into the single-target selection too, so the right-hand Inspector opens on the
+      // same frame rather than the page settings. Only frame-like targets have an Inspector view.
+      const single: Selection | null =
+        t.kind === 'base' ? { kind: 'base', slot: t.slot } : t.kind === 'overlay' ? { kind: 'overlay', id: t.id } : null;
+      if (!single) return;
+      if (index === cur) setSelection(single);
+      else pendingFrameSel.current = single; // survives the focus-change reset — see above
+    }
+  };
+
   const goToFirstIncomplete = () => {
     setCoverFocused(false);
     setEditLayout('focus');
@@ -565,13 +974,13 @@ export default function Builder({
 
   // The FRONT cover image actually shown (preview + flipbook + print): chosen photo → template → none.
   const coverImageUrl = useMemo(() => {
-    if (coverConfig.photoId) return photoMap.get(coverConfig.photoId)?.url ?? null;
+    if (coverConfig.photoId) return resolvePhotoUrl(photoMap.get(coverConfig.photoId), 'full');
     if (coverConfig.background) return null;
     return selectedCover?.url ?? null;
   }, [coverConfig.photoId, coverConfig.background, photoMap, selectedCover]);
   // The BACK cover image (its own uploaded photo; no admin artwork on the back).
   const backCoverImageUrl = useMemo(
-    () => (coverConfig.back.photoId ? photoMap.get(coverConfig.back.photoId)?.url ?? null : null),
+    () => (coverConfig.back.photoId ? resolvePhotoUrl(photoMap.get(coverConfig.back.photoId), 'full') : null),
     [coverConfig.back.photoId, photoMap],
   );
 
@@ -732,8 +1141,14 @@ export default function Builder({
   };
 
   // ── auto-layout ────────────────────────────────────────────────────────────────
-  const enginePhotos = photos.filter((p) => p.status === 'ready').map((p): EnginePhoto => ({ id: p.id, width: p.width ?? null, height: p.height ?? null, takenAt: p.takenAt }));
-  const availableEngine = availablePhotos.map((p): EnginePhoto => ({ id: p.id, width: p.width ?? null, height: p.height ?? null, takenAt: p.takenAt }));
+  // Phase 4: the engine now accepts photos measured in the BROWSER as well as by the worker.
+  // Both sources are ORIENTED (the worker bakes EXIF in; extraction decodes with
+  // `imageOrientation: 'from-image'`), so `classify` reads them the same way — which is what
+  // makes it safe to lay out immediately and verify afterwards. A photo with no reliable size
+  // from either source (HEIC, or a decode we didn't trust) is simply skipped, exactly as before.
+  const engineInputs = useMemo(() => layoutInputs(photos), [photos]);
+  const enginePhotos: EnginePhoto[] = engineInputs;
+  const availableEngine = useMemo(() => layoutInputs(availablePhotos), [availablePhotos]);
   const templateChoices = useMemo(() => layoutTemplates.map((t) => ({ base: t.geometry.base, overlays: t.geometry.overlays })), [layoutTemplates]);
 
   const generate = (kind: LayoutKind, strategy = 0) => {
@@ -783,41 +1198,52 @@ export default function Builder({
   const acceptProposal = () => {
     if (!proposal) return;
     api.replaceAll(proposal.blocks);
+    // Remember what shapes this layout assumed, so the guesses can be verified once the worker
+    // reports the real ones (see `_use-optimistic-layout`).
+    optimisticLayout.record(proposal.blocks, engineInputs);
     setProposal(null);
     setCurrent(0);
     setMessage({ kind: 'ok', text: 'Layout applied — review it, then Save.' });
   };
 
-  // ── persist ───────────────────────────────────────────────────────────────────
-  // The ONE reliable customer save (CHANGE 5): flush the debounced cover design FIRST (so the
-  // latest cover/back-cover/title/text/stickers/QR/background is committed, not a stale row),
-  // then persist the layout (page structure + photo placement + crop/rotate/zoom via edit_config,
-  // overlays, text, stickers, QR, backgrounds are all inside the serialized blocks). Only resolves
-  // true when EVERY write succeeded; any failure surfaces the error and leaves `dirty` set so exit
-  // is blocked. Used by the Save button, ⌘S, and Save & Leave alike.
-  const save = useCallback(async (): Promise<boolean> => {
-    setSaving(true);
-    setMessage(null);
-    if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
-    if (albumTitle.trim()) {
-      const cov = await saveCoverDesign({ albumId, title: albumTitle, coverTemplateId: coverId, config: coverConfig });
-      if (!cov.ok) {
-        setSaving(false);
-        setMessage({ kind: 'err', text: cov.error });
-        return false;
-      }
-    }
-    const res = await saveLayout({ albumId, blocks: api.serialize() });
-    setSaving(false);
-    if (res.ok) {
-      api.setDirty(false);
-      setLastSaved(Date.now());
-      setMessage({ kind: 'ok', text: 'All changes saved.' });
-      return true;
-    }
-    setMessage({ kind: 'err', text: res.error });
-    return false;
-  }, [albumId, albumTitle, coverId, coverConfig, api]);
+  /**
+   * Rebuild the layout from the now-authoritative shapes. Used both by the silent auto-fix and
+   * by the user accepting the drift offer.
+   */
+  const rebuildFromVerified = useCallback(() => {
+    const inputs = layoutInputs(photosRef.current);
+    const rebuilt = autoLayout(inputs, size, 0, templateChoices);
+    api.replaceAll(rebuilt);
+    optimisticLayout.record(rebuilt, inputs);
+  }, [api, size, templateChoices, optimisticLayout]);
+
+  /**
+   * VERIFY the optimistic layout as the worker's real dimensions land.
+   *
+   * Matching shapes → nothing happens at all. A mismatch on an untouched layout → rebuilt
+   * silently. A mismatch after the user has edited → their work is left alone and a quiet offer
+   * appears instead (rendered near the canvas), because reconciliation must never overwrite
+   * something a person deliberately arranged.
+   */
+  useEffect(() => {
+    if (!optimisticLayout.isOptimistic) return;
+    const { drifted, canAutoFix } = optimisticLayout.verify(photos, blocksRef.current);
+    if (drifted.length > 0 && canAutoFix) rebuildFromVerified();
+  }, [photos, optimisticLayout, rebuildFromVerified]);
+
+  // ── persistence ───────────────────────────────────────────────────────────────
+  // Serialization (including the temp-id resolve/strip boundary), the save sequence and the
+  // saved/dirty bookkeeping now live in the save controller. This component only triggers it.
+  const { save, saving, lastSaved, setLastSaved, serializeForSave, strippedNote } = useSaveController({
+    albumId,
+    api,
+    idMap,
+    flushCoverDebounce: () => {
+      if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
+    },
+    getCover: () => ({ title: albumTitle, coverId, config: coverConfig }),
+    onMessage: setMessage,
+  });
 
   // Save & exit (header) — never leave silently: with unsaved changes, open the guard dialog
   // (CHANGE 4). Clean albums leave immediately.
@@ -848,47 +1274,39 @@ export default function Builder({
     router.push('/dashboard');
   };
 
-  // ── Blueprint Mode persistence + exit ──────────────────────────────────────────
-  // Save Blueprint = persist the current pages (saveLayout) then distil them into THIS blueprint
-  // (updateBlueprintFromAlbum). One click, in-place — the admin keeps editing afterwards.
-  const saveBlueprint = useCallback(async (): Promise<boolean> => {
-    setBlueprintSaving(true);
-    setMessage(null);
-    const layout = await saveLayout({ albumId, blocks: api.serialize() });
-    if (!layout.ok) {
-      setBlueprintSaving(false);
-      setMessage({ kind: 'err', text: layout.error });
-      return false;
-    }
-    const res = await updateBlueprintFromAlbum({ albumId });
-    setBlueprintSaving(false);
-    if (!res.ok) {
-      setMessage({ kind: 'err', text: res.error });
-      return false;
-    }
-    api.setDirty(false);
-    setLastSaved(Date.now());
-    setMessage({ kind: 'ok', text: 'Blueprint saved.' });
-    return true;
-  }, [albumId, api]);
-
-  // Leaving Blueprint Mode returns to the admin catalog (which restores search/filters/scroll). The
-  // draft album is cleaned up server-side; an abandoned never-saved new blueprint is removed too.
-  const doExitBlueprint = useCallback(async () => {
-    setExitDialogOpen(false);
-    await exitBlueprintDraft({ albumId }); // best-effort cleanup
-    router.push('/admin/templates');
-  }, [albumId, router]);
-
-  const requestExitBlueprint = () => {
-    if (api.dirty) setExitDialogOpen(true);
-    else void doExitBlueprint();
-  };
+  // ── Blueprint Mode (admin) ──────────────────────────────────────────────────────
+  // The admin-only save/exit branch lives in its own controller — it shares nothing with the
+  // customer flow except the serialization boundary and the "last saved" clock.
+  const blueprint = useBlueprintMode({
+    albumId,
+    api,
+    serializeBlocks: serializeForSave,
+    onMessage: setMessage,
+    onSaved: () => setLastSaved(Date.now()),
+  });
+  const saveBlueprint = blueprint.save;
+  const blueprintSaving = blueprint.saving;
+  const doExitBlueprint = blueprint.doExit;
+  const requestExitBlueprint = blueprint.requestExit;
+  const exitDialogOpen = blueprint.exitDialogOpen;
+  const setExitDialogOpen = blueprint.setExitDialogOpen;
 
   // Phase 1 — user clicks Submit: flush pending saves, then run the CENTRAL validation service on
   // the current state. If ANY issue (error or warning) → show the informational dialog. If clean →
   // submit directly. Validation never blocks; it informs (the dialog offers "Continue Anyway").
   const onSubmitClick = async () => {
+    // Phase 3 guard. Validation reads the CLIENT's blocks, where a still-uploading photo looks
+    // like a filled slot — but the save strips it, so the album would be submitted with a hole
+    // the user was told was filled. A few seconds of waiting is far better than a silently
+    // incomplete submission, so stop here and say exactly why.
+    const stillUploading = photos.filter((p) => isTempPhotoId(p.id) && placed.has(p.id)).length;
+    if (stillUploading > 0) {
+      setMessage({
+        kind: 'err',
+        text: `${stillUploading} photo${stillUploading === 1 ? '' : 's'} you've placed ${stillUploading === 1 ? 'is' : 'are'} still uploading. Give ${stillUploading === 1 ? 'it' : 'them'} a moment, then submit — otherwise ${stillUploading === 1 ? 'that page' : 'those pages'} would be sent empty.`,
+      });
+      return;
+    }
     setChecking(true);
     setMessage(null);
     // Flush the debounced cover design + layout so validation reads the CURRENT state, not a stale row.
@@ -896,13 +1314,15 @@ export default function Builder({
     if (albumTitle.trim()) {
       await saveCoverDesign({ albumId, title: albumTitle, coverTemplateId: coverId, config: coverConfig });
     }
-    const saved = await saveLayout({ albumId, blocks: api.serialize() });
+    const { blocks: payload, stripped } = serializeForSave();
+    const saved = await saveLayout({ albumId, blocks: payload });
     setChecking(false);
     if (!saved.ok) {
       setMessage({ kind: 'err', text: saved.error });
       return;
     }
-    api.setDirty(false);
+    api.setDirty(stripped > 0);
+    if (stripped > 0) setMessage({ kind: 'ok', text: `Saved.${strippedNote(stripped)}` });
     // Same central service the server + PDF use; `activeTemplate` = a selected active cover id.
     const report = evaluateAlbum({
       size,
@@ -973,52 +1393,139 @@ export default function Builder({
   const zoomOut = () => setZoomPct((z) => Math.max(50, z - 15));
   const resetZoom = () => setZoomPct(100);
 
-  // ── keyboard shortcuts ────────────────────────────────────────────────────────
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      const typing = el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || !!el?.isContentEditable;
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault();
-        if (e.shiftKey) api.redo();
-        else api.undo();
-        return;
-      }
-      if (mod && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault();
-        // ⌘S saves the RIGHT thing per mode: the blueprint (distil) or the customer layout.
-        if (api.dirty) void (blueprintMode ? saveBlueprint() : save());
-        return;
-      }
-      if (typing) return;
-      if (e.key === '?') {
-        e.preventDefault();
-        setShortcutsOpen((v) => !v);
-      } else if (e.key === 'g' || e.key === 'G') {
-        setShowGuides((v) => !v);
-      } else if (e.key === 'Escape') {
-        setShortcutsOpen(false);
-        setFlipbookOpen(false);
-        setEditingPhoto(null);
-        setQuickCrop(null);
-        setPickedId(null);
-        setExitDialogOpen(false);
-        setSelection(NO_SELECTION);
-      } else if (editLayout === 'focus' && e.key === 'ArrowLeft') {
-        setCurrent((c) => Math.max(0, c - 1));
-      } else if (editLayout === 'focus' && e.key === 'ArrowRight') {
-        setCurrent((c) => Math.min(blocks.length - 1, c + 1));
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [api, save, saveBlueprint, blueprintMode, editLayout, blocks.length]);
+  /**
+   * ── KEYBOARD SHORTCUTS ──────────────────────────────────────────────────────
+   * ONE declarative table, dispatched by the shortcut manager. Every entry that edits invokes a
+   * COMMAND, so the keyboard, the context menu and the buttons cannot drift apart. Modifiers are
+   * platform-resolved (`mod` = ⌘ on Apple, Ctrl elsewhere) and bindings are inert while typing
+   * unless they explicitly opt in.
+   */
+  const shortcuts = useMemo<Shortcut[]>(
+    () => [
+      { combo: "mod+z", label: "Undo", group: "Editing", allowInInput: false, run: () => api.undo() },
+      { combo: "mod+shift+z", label: "Redo", group: "Editing", run: () => api.redo() },
+      {
+        combo: "mod+s",
+        label: "Save",
+        group: "Editing",
+        allowInInput: true,
+        run: () => {
+          if (api.dirty) void (blueprintMode ? saveBlueprint() : save());
+        },
+      },
+      { combo: "mod+a", label: "Select all", group: "Selection", run: () => cmd.commands.selectAll.run() },
+      {
+        combo: "Delete",
+        label: "Remove selection from page",
+        group: "Editing",
+        when: () => cmd.commands.removeFromPage.enabled,
+        run: () => cmd.commands.removeFromPage.run(),
+      },
+      {
+        combo: "Backspace",
+        label: "Remove selection from page",
+        group: "Editing",
+        when: () => cmd.commands.removeFromPage.enabled,
+        run: () => cmd.commands.removeFromPage.run(),
+      },
+      {
+        combo: "mod+d",
+        label: "Duplicate page",
+        group: "Editing",
+        when: () => cmd.commands.duplicatePage.enabled,
+        run: () => cmd.commands.duplicatePage.run(),
+      },
+      { combo: "r", label: "Rotate 90°", group: "Editing", when: () => cmd.commands.rotatePhotos.enabled, run: () => cmd.commands.rotatePhotos.run() },
+      /**
+       * TRIAGE KEYS. 1–4 mark the selected photos, following the convention every photo editor
+       * has used for twenty years — the number IS the mark, and 0 clears it. Each one runs the
+       * corresponding COMMAND, so the key, the context menu and the selection bar can't drift.
+       */
+      ...PHOTO_LABELS.map((key, i) => ({
+        combo: String(i + 1),
+        label: `Mark “${LABEL_META[key].label}”`,
+        group: "Editing" as const,
+        when: () => cmd.commands[`label:${key}`].enabled,
+        run: () => cmd.commands[`label:${key}`].run(),
+      })),
+      {
+        combo: "0",
+        label: "Remove mark",
+        group: "Editing",
+        when: () => cmd.commands['label:clear'].enabled,
+        run: () => cmd.commands['label:clear'].run(),
+      },
+      {
+        combo: "f",
+        label: "Star / unstar",
+        group: "Editing",
+        when: () => cmd.commands.toggleFavourite.enabled,
+        run: () => cmd.commands.toggleFavourite.run(),
+      },
+      {
+        combo: "q",
+        label: "Album quality",
+        group: "View",
+        run: () => setRailTab((t) => (t === 'quality' ? 'images' : 'quality')),
+      },
+      {
+        combo: "v",
+        label: "Review mode",
+        group: "View",
+        when: () => blocks.length > 0,
+        run: () => setReviewOpen(true),
+      },
+      { combo: "mod+=", label: "Zoom in", group: "View", run: zoomIn },
+      { combo: "mod++", label: "Zoom in", group: "View", run: zoomIn },
+      { combo: "mod+-", label: "Zoom out", group: "View", run: zoomOut },
+      { combo: "mod+0", label: "Fit page", group: "View", run: resetZoom },
+      { combo: "g", label: "Toggle guides", group: "View", run: () => setShowGuides((v) => !v) },
+      { combo: "?", label: "Shortcuts", group: "View", run: () => setShortcutsOpen((v) => !v) },
+      {
+        combo: "Escape",
+        label: "Dismiss / deselect",
+        group: "Selection",
+        allowInInput: true,
+        run: () => {
+          contextMenu.close();
+          setShortcutsOpen(false);
+          setFlipbookOpen(false);
+          setEditingPhoto(null);
+          setQuickCrop(null);
+          setPickedId(null);
+          setExitDialogOpen(false);
+          sel.clear();
+          setSelection(NO_SELECTION);
+        },
+      },
+      {
+        combo: "ArrowLeft",
+        label: "Previous spread",
+        group: "Navigation",
+        when: () => editLayout === "focus",
+        run: () => setCurrent((c) => Math.max(0, c - 1)),
+      },
+      {
+        combo: "ArrowRight",
+        label: "Next spread",
+        group: "Navigation",
+        when: () => editLayout === "focus",
+        run: () => setCurrent((c) => Math.min(blocks.length - 1, c + 1)),
+      },
+    ],
+    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu],
+  );
+  /**
+   * Review mode owns the keyboard while it is open (it binds its own capture-phase listener), so
+   * the builder's table stands down entirely rather than competing. ⌘Z on a review screen would
+   * be baffling; nothing on that surface edits.
+   */
+  useShortcuts(shortcuts, !reviewOpen);
 
-  const photoForOverview = (id: string | null | undefined) => {
-    const p = id ? photoMap.get(id) : undefined;
-    return p ? { url: p.url, edit: p.edit } : undefined;
-  };
+  // The grid overview uses the SAME resolver as the preview/flipbook/navigator. It previously
+  // omitted `state`/`since` — the copy that had fallen behind — so overview frames now carry the
+  // same processing badge as every other surface.
+  const photoForOverview = usePhotoFor(photoMap, photoStateFor);
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)]">
@@ -1093,18 +1600,32 @@ export default function Builder({
           <nav className="flex w-[68px] flex-col items-center gap-1 border-r border-border/70 py-3" aria-label="Tools">
             {RAIL.filter((t) => (coverFocused ? t.key !== 'layouts' : t.key !== 'templates')).map((t) => {
               const active = railTab === t.key;
+              // The Quality tab carries a count of what needs attention — the ONLY badge on the
+              // rail, and absent entirely when the album is clean, so it means something.
+              const flagged = t.key === 'quality' ? quality.attention.length : 0;
               return (
                 <button
                   key={t.key}
                   type="button"
                   onClick={() => setRailTab(t.key)}
                   aria-current={active ? 'page' : undefined}
-                  className={`flex w-[56px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+                  aria-label={flagged > 0 ? `${t.label} — ${flagged} needing attention` : undefined}
+                  className={`relative flex w-[56px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
                     active ? 'bg-studio text-studio-foreground shadow-soft' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
                   }`}
                 >
                   <t.Icon className="h-[18px] w-[18px]" />
                   {t.label}
+                  {flagged > 0 && (
+                    <span
+                      aria-hidden
+                      className={`absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9px] font-semibold tabular-nums ${
+                        active ? 'bg-studio-foreground text-studio' : 'bg-warning text-warning-foreground'
+                      }`}
+                    >
+                      {flagged}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -1124,7 +1645,16 @@ export default function Builder({
                       {photos.length} / {photoCap(size)}
                     </span>
                   </div>
-                  <Uploader albumId={albumId} remaining={photoCap(size) - photos.length} onUploaded={onUploaded} ensureWorkerReady={ensureReady} />
+                  <Uploader albumId={albumId} remaining={photoCap(size) - photos.length} uploads={uploads} />
+                  {/* Batch progress, the queue stepper, completion + failure feedback. */}
+                  <SessionStatus
+                    stats={uploads.stats}
+                    activeSessions={uploads.activeSessions}
+                    processing={pendingPhotos}
+                    processingSince={oldestProcessingSince}
+                    failedUploads={uploads.stats.retryable}
+                    rejectedPhotos={rejectedPhotos}
+                  />
                   {/* Live photo indicators — capacity / placed / remaining frames / unused. */}
                   <div className="mt-3 grid grid-cols-2 gap-1.5 text-center">
                     <PhotoStat label="Capacity" value={totalSlots} />
@@ -1132,13 +1662,39 @@ export default function Builder({
                     <PhotoStat label="Empty frames" value={emptyBaseSlots} tone={emptyBaseSlots > 0 ? 'warning' : 'ok'} />
                     <PhotoStat label="Unused" value={readyUnplaced.length} tone={readyUnplaced.length > 0 ? 'muted' : 'ok'} />
                   </div>
+                  {/* Quality, one line, where the photos are — the discoverability path into the
+                      panel for someone who never reads a rail they haven't clicked. */}
+                  <button
+                    type="button"
+                    onClick={() => setRailTab('quality')}
+                    className="mt-2 flex w-full items-center gap-2 rounded-lg border border-border/70 bg-card px-2.5 py-2 text-left transition-all duration-150 ease-glide hover:border-studio-bright/40 hover:shadow-xs active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+                  >
+                    {quality.clean ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 flex-none text-studio" />
+                    ) : (
+                      <AlertTriangle className="h-3.5 w-3.5 flex-none text-warning" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-foreground">
+                      {quality.clean
+                        ? 'Album quality looks good'
+                        : `${quality.attention.length} ${quality.attention.length === 1 ? 'thing' : 'things'} worth fixing`}
+                    </span>
+                    <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground/60" />
+                  </button>
                 </div>
                 <div className="ms-scroll flex-1 overflow-y-auto p-4">
                   <TrayToolbar
-                    search={traySearch}
-                    onSearch={setTraySearch}
-                    filter={trayFilter}
-                    onFilter={setTrayFilter}
+                    filters={tray.filters}
+                    parsedSearch={tray.parsedSearch}
+                    onSearch={tray.setSearch}
+                    onToggleAxis={tray.toggleAxis}
+                    onToggleFavourites={tray.toggleFavouritesOnly}
+                    onReset={tray.reset}
+                    active={tray.active}
+                    matchCount={visiblePhotos.length}
+                    totalCount={photos.length}
+                    favouriteCount={favourites.count}
+                    labelCounts={labels.counts}
                     removableCount={readyUnplaced.length}
                     removing={removingUnused}
                     onRemoveUnused={removeUnused}
@@ -1152,7 +1708,65 @@ export default function Builder({
                       </button>
                     </div>
                   )}
-                  <Tray photos={visiblePhotos} placedIds={placed} pickedId={pickedId} onPick={(id) => setPickedId((c) => (c === id ? null : id))} onEdit={setEditingPhoto} onDeleted={onPhotoDeleted} />
+                  <Tray
+                    photos={visiblePhotos}
+                    taskFor={taskFor}
+                    filtered={tray.active}
+                    placedIds={placed}
+                    pickedId={pickedId}
+                    onPick={(id) => setPickedId((c) => (c === id ? null : id))}
+                    onEdit={setEditingPhoto}
+                    onDeleted={onPhotoDeleted}
+                    onRetryUpload={uploads.retry}
+                    onCancelUpload={uploads.cancel}
+                    onImageError={reportFailure}
+                    isSelected={(id) => sel.has({ kind: 'photo', photoId: id })}
+                    onSelect={(id, mods, orderedIds) =>
+                      sel.pick(
+                        { kind: 'photo', photoId: id },
+                        mods,
+                        orderedIds.map((pid) => ({ kind: 'photo', photoId: pid }) as SelectionTarget),
+                      )
+                    }
+                    onContextMenu={(e, id) => {
+                      // Right-clicking OUTSIDE the current selection re-targets it; right-clicking
+                      // inside keeps it, so a menu can act on the whole group.
+                      if (!sel.has({ kind: 'photo', photoId: id })) sel.pick({ kind: 'photo', photoId: id });
+                      contextMenu.open(e, [
+                        { id: 'mark', commands: [cmd.commands.toggleFavourite] },
+                        // The triage marks, generated from the vocabulary — adding a fifth mark
+                        // never means editing this menu.
+                        {
+                          id: 'labels',
+                          commands: [...PHOTO_LABELS.map((k) => cmd.commands[`label:${k}`]), cmd.commands['label:clear']],
+                        },
+                        { id: 'edit', commands: [cmd.commands.rotatePhotos] },
+                        { id: 'place', commands: [cmd.commands.removeFromPage] },
+                        { id: 'danger', commands: [cmd.commands.deletePhotos] },
+                      ]);
+                    }}
+                    isFavourite={favourites.isFavourite}
+                    onToggleFavourite={favourites.toggle}
+                    labelOf={labels.labelOf}
+                    /* Cross-page drag: the tray publishes its drags and accepts drops back. */
+                    onDragStartPhoto={(id) => drag.begin({ photoIds: [id], origin: { from: 'tray' } })}
+                    onDragEndPhoto={drag.end}
+                    dragActive={drag.dragging}
+                    onDropToTray={(photoId) => {
+                      // Dropping onto the tray means "take it off the page" — expressed as the
+                      // SAME command the keyboard and context menu use, so history behaves
+                      // identically however the user asks for it.
+                      const frame = findFrameHolding(blocks, photoId);
+                      if (frame) api.batch(() => api.clearFrames([frame]));
+                      drag.end();
+                    }}
+                    onEmptyPointerDown={marquee.begin}
+                    marqueeOverlay={<MarqueeBox rect={marquee.rect} />}
+                    onGrid={(el, geom) => {
+                      trayGridRef.current = el;
+                      marqueeGeom.current = geom;
+                    }}
+                  />
                 </div>
               </>
             )}
@@ -1163,6 +1777,19 @@ export default function Builder({
                 canAddTemplate={(t) => canAdd(blocks, size, t)}
                 onAddBlock={addBlock}
                 onApplyPreset={applyPreset}
+                memory={layoutMemory}
+                suggestions={suggestions}
+              />
+            )}
+
+            {/* Album Quality — a dockable panel, never a dialog. Available on the cover too,
+                because a cover has quality problems of its own. */}
+            {railTab === 'quality' && (
+              <QualityPanel
+                report={quality}
+                stats={statistics}
+                onGoToIssue={goToIssue}
+                onOpenReview={() => setReviewOpen(true)}
               />
             )}
 
@@ -1267,7 +1894,14 @@ export default function Builder({
           ) : (
           <div className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10">
             {blocks.length === 0 ? (
-              <EmptyCanvas blueprintMode={blueprintMode} onBuild={() => setBuildMethodOpen(true)} onAdd={() => addBlock('single-pair')} canBuild={enginePhotos.length > 0} />
+              <EmptyCanvas
+                blueprintMode={blueprintMode}
+                onBuild={() => setBuildMethodOpen(true)}
+                onAdd={() => addBlock('single-pair')}
+                canBuild={enginePhotos.length > 0}
+                hasPhotos={photos.length > 0}
+                awaitingShapes={photos.length > 0 && enginePhotos.length === 0}
+              />
             ) : editLayout === 'grid' ? (
               <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2">
                 {blocks.map((b, i) => (
@@ -1298,9 +1932,36 @@ export default function Builder({
                     index={cur}
                     blocks={blocks}
                     photoMap={photoMap}
+                    taskFor={taskFor}
                     availablePhotos={availablePhotos}
                     selection={selection}
                     onSelect={setSelection}
+                    /**
+                     * Multi-selection on the canvas. `onSelectTarget` carries the modifier state
+                     * to the SAME selection store the tray uses; the legacy single `onSelect`
+                     * stays so the inspector keeps describing the primary target unchanged.
+                     */
+                    isTargetSelected={sel.has}
+                    onSelectTarget={(target, mods) => sel.pick(target, mods, allTargets())}
+                    drag={drag}
+                    onFrameContextMenu={(e, target) => {
+                      if (!sel.has(target)) sel.pick(target);
+                      contextMenu.open(e, [
+                        { id: 'photo', commands: [cmd.commands.rotatePhotos, cmd.commands.removeFromPage] },
+                        // Marking works from the CANVAS too — the photo you want to flag is
+                        // usually the one you're looking at, not one you have to find in the tray.
+                        {
+                          id: 'labels',
+                          commands: [
+                            cmd.commands.toggleFavourite,
+                            ...PHOTO_LABELS.map((k) => cmd.commands[`label:${k}`]),
+                            cmd.commands['label:clear'],
+                          ],
+                        },
+                        { id: 'page', commands: [cmd.commands.duplicatePage, cmd.commands.clearPlacement] },
+                        { id: 'danger', commands: [cmd.commands.deletePhotos] },
+                      ]);
+                    }}
                     onEditPhoto={openEditor}
                     onQuickCrop={openQuickCrop}
                     stickerUrlFor={stickerUrlFor}
@@ -1311,6 +1972,7 @@ export default function Builder({
                       setPickedId(null);
                     }}
                     showGuides={showGuides}
+                    readinessOf={readinessOf}
                   />
                 </div>
               )
@@ -1342,6 +2004,48 @@ export default function Builder({
 
           </div>
           )}
+
+          {/* LAYOUT DRIFT — only ever appears when a few photos turned out to be a different
+              shape than the browser judged AND the user has since edited the layout. Their work
+              is never overwritten silently; this simply offers the rebuild and can be dismissed. */}
+          {optimisticLayout.driftedCount > 0 && (
+            <div className="animate-scale-in absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-2 shadow-elevated">
+              <p className="text-[12.5px] leading-tight text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {optimisticLayout.driftedCount} photo{optimisticLayout.driftedCount === 1 ? '' : 's'} turned out a different shape.
+                </span>{' '}
+                Rebuild the layout?
+              </p>
+              <div className="flex flex-none items-center gap-1.5">
+                <Button size="sm" variant="ghost" onClick={() => optimisticLayout.setDriftedCount(0)}>
+                  Keep mine
+                </Button>
+                <Button size="sm" className={STUDIO_PRIMARY} onClick={rebuildFromVerified}>
+                  Rebuild
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/*
+            BULK ACTION BAR — appears only with a multi-selection, and renders the very same
+            command objects the keyboard and context menu invoke. "Fill from tray" is Batch
+            Replace: it zips the selected frames against the currently-selected tray photos (or,
+            failing that, the unplaced ones in tray order) in a single undoable step.
+          */}
+          <SelectionBar
+            count={sel.selection.targets.length}
+            commands={[cmd.commands.rotatePhotos, cmd.commands.removeFromPage, cmd.commands.deletePhotos]}
+            primaryLabel={
+              cmd.occupiedFrames.length < selectedFrames(sel.selection).length ? 'Fill from tray' : undefined
+            }
+            onPrimary={() => {
+              const chosen = selectedPhotoIds(sel.selection);
+              const pool = chosen.length > 0 ? chosen : availablePhotos.map((p) => p.id);
+              cmd.batchReplace(pool);
+            }}
+            onDismiss={sel.clear}
+          />
 
           {/* message toast — over either canvas */}
           {message && (
@@ -1471,13 +2175,33 @@ export default function Builder({
             blocks={blocks}
             photoMap={photoMap}
             stickerUrlFor={stickerUrlFor}
+            photoStateFor={photoStateFor}
             current={coverFocused ? -1 : cur}
             canAddMore={canAddMore}
+            collapsed={navCollapsed}
+            onToggleCollapsed={() => setNavCollapsed((v) => !v)}
+            dragActive={drag.dragging}
+            /**
+             * CROSS-PAGE MOVE. Dropping a photo on a page thumb places it on that spread — into
+             * the first empty base slot, or replacing the first one if the spread is full. It
+             * runs through the SAME `placePhoto` command as every other placement, so
+             * "placed at most once" and the single-undo-entry guarantee both still hold.
+             */
+            onDropPhotoOnPage={(blockKey, photoId) => {
+              const target = blocks.find((b) => b.key === blockKey);
+              if (!target) return;
+              const slots: BaseSlot[] = target.template === 'double-spread' ? ['image'] : ['left', 'right'];
+              const emptyIndex = slots.findIndex((_, i) => !target.photoIds[i]);
+              const slot = slots[emptyIndex >= 0 ? emptyIndex : 0];
+              cmd.placePhoto(photoId, { blockKey, slot });
+              drag.end();
+            }}
             onJump={focusBlock}
             onReorder={api.reorderBlocks}
             onInsertAfter={insertAfter}
             onDuplicate={duplicateBlock}
             onDelete={api.removeBlock}
+            spreadLevels={quality.spreadLevels}
           />
         </div>
 
@@ -1500,65 +2224,59 @@ export default function Builder({
         )}
       </div>
 
-      {/* Modals */}
-      {editingPhoto && (
-        <PhotoEditor
-          photoId={editingPhoto.id}
-          url={editingPhoto.url}
-          filename={editingPhoto.filename}
-          initial={editingPhoto.edit}
-          frameAspect={editPlacement.aspect}
-          showGutter={editPlacement.gutter}
-          onClose={() => setEditingPhoto(null)}
-          onSaved={(edit) => onPhotoSaved(editingPhoto.id, edit)}
-        />
-      )}
-      {coverImageEditor &&
-        (() => {
-          const side = coverImageEditor;
-          const photoId = side === 'front' ? coverConfig.photoId : coverConfig.back.photoId;
-          const photo = photoId ? photoMap.get(photoId) : undefined;
-          if (!photo) return null;
-          const initial = side === 'front' ? coverConfig.imageEdit : coverConfig.back.imageEdit;
-          return (
-            <PhotoEditor
-              photoId={photo.id}
-              url={photo.url}
-              filename={photo.filename}
-              initial={initial}
-              frameAspect={pageA}
-              showGutter={false}
-              onClose={() => setCoverImageEditor(null)}
-              onSaved={(edit) =>
-                side === 'front'
-                  ? updateCover({ config: { imageEdit: edit } })
-                  : updateCover({ config: { back: { ...coverConfig.back, imageEdit: edit } } })
-              }
-            />
-          );
-        })()}
-      {quickCrop && (
-        <QuickCrop
-          photoId={quickCrop.photo.id}
-          url={quickCrop.photo.url}
-          filename={quickCrop.photo.filename}
-          initial={quickCrop.photo.edit}
-          frameAspect={quickCrop.aspect}
-          showGutter={quickCrop.gutter}
-          onClose={() => setQuickCrop(null)}
-          onSaved={(edit) => onPhotoSaved(quickCrop.photo.id, edit)}
-        />
-      )}
+      {/* Modals — grouped in the modal host; this component only decides what is open. */}
+      <PhotoModals
+        editingPhoto={editingPhoto}
+        editPlacement={editPlacement}
+        onCloseEditor={() => setEditingPhoto(null)}
+        onPhotoSaved={onPhotoSaved}
+        coverImageEditor={coverImageEditor}
+        coverConfig={coverConfig}
+        photoMap={photoMap}
+        pageAspect={pageA}
+        onCloseCoverEditor={() => setCoverImageEditor(null)}
+        onCoverImageEdit={(side, edit) =>
+          side === "front"
+            ? updateCover({ config: { imageEdit: edit } })
+            : updateCover({ config: { back: { ...coverConfig.back, imageEdit: edit } } })
+        }
+        quickCrop={quickCrop}
+        onCloseQuickCrop={() => setQuickCrop(null)}
+      />
       {flipbookOpen && (
         <Flipbook
           blocks={blocks}
           photoMap={photoMap}
           stickerUrlFor={stickerUrlFor}
+          photoStateFor={photoStateFor}
           cover={{ imageUrl: coverImageUrl, backImageUrl: backCoverImageUrl, config: coverConfig, title: albumTitle, name: selectedCover?.name ?? albumTitle, size }}
           onClose={() => setFlipbookOpen(false)}
         />
       )}
+      {/* REVIEW MODE — the album with the software taken away. Renders the same spreads through
+          the same `PairContent`, and nothing on that surface can modify anything. */}
+      {reviewOpen && (
+        <ReviewMode
+          blocks={blocks}
+          photoFor={photoForOverview}
+          stickerUrlFor={stickerUrlFor}
+          cover={{
+            config: coverConfig,
+            title: albumTitle,
+            frontImageUrl: coverImageUrl,
+            backImageUrl: backCoverImageUrl,
+          }}
+          report={quality}
+          albumId={albumId}
+          startIndex={cur}
+          onClose={() => setReviewOpen(false)}
+          onGoToIssue={goToIssue}
+        />
+      )}
       {shortcutsOpen && <ShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
+
+      {/* Context menu — pure renderer over the command layer; holds no editing logic. */}
+      <ContextMenu state={contextMenu.menu} onClose={contextMenu.close} />
 
       {/* Submission validation (advisory) — checking overlay while saves flush, then the dialog. */}
       <LoadingOverlay open={checking} message="Checking your album…" />
@@ -1575,28 +2293,7 @@ export default function Builder({
         <ConfirmSubmitDialog submitting={submitting} onCancel={() => setConfirmOpen(false)} onConfirm={doSubmit} />
       )}
       {/* Resubmit confirmation (CHANGE 3) — review returns to Pending Review; album is locked again. */}
-      {resubmitted && (
-        <div className="animate-fade-in fixed inset-0 z-[130] flex items-center justify-center bg-foreground/60 p-4 backdrop-blur-sm">
-          <div className="animate-scale-in w-full max-w-md rounded-2xl border bg-background p-6 text-center shadow-elevated">
-            <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-studio/[0.1] text-studio ring-1 ring-studio/15">
-              <CheckCircle2 className="h-6 w-6" />
-            </span>
-            <h2 className="mt-3 font-display text-xl font-semibold tracking-tight">Resubmitted for review</h2>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-              Thanks — your album is back with our review team. We’ll take another look and email you when it’s ready to
-              print. <span className="font-medium text-foreground">You won’t be charged again.</span>
-            </p>
-            <div className="mt-5 flex flex-col gap-2">
-              <Button className={STUDIO_PRIMARY} onClick={() => router.push('/reviews')}>
-                View review status
-              </Button>
-              <Button variant="ghost" onClick={() => router.push('/dashboard')}>
-                Back to dashboard
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {resubmitted && <ResubmittedDialog />}
 
       {/* Album Settings — the revisitable setup hub (General / Format / Photos / Builder). Reuses the
           builder's own surfaces (cover rail, Photos rail, Build-it-for-me picker) — no duplicate UI. */}
@@ -1628,40 +2325,14 @@ export default function Builder({
 
       {/* Unsaved-changes exit guard (CHANGE 4/5) — Save & Leave (full flush) / Leave / Cancel. */}
       {exitConfirmOpen && (
-        <div className="animate-fade-in fixed inset-0 z-[130] flex items-center justify-center bg-foreground/50 p-4 backdrop-blur-sm" onClick={() => !exiting && setExitConfirmOpen(false)}>
-          <div className="animate-scale-in w-full max-w-md rounded-2xl border bg-background p-6 shadow-elevated" onClick={(e) => e.stopPropagation()}>
-            <span className="grid h-10 w-10 place-items-center rounded-full bg-warning/10 text-warning">
-              <MessageSquareWarning className="h-5 w-5" />
-            </span>
-            <h3 className="mt-3 font-display text-lg font-semibold tracking-tight">
-              {reviewMode ? 'Leave the review for now?' : 'Leave the builder?'}
-            </h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-              {reviewMode ? (
-                <>
-                  You still have requested changes to finish. Save your progress and you can pick up right where you left
-                  off — your album stays in review and <span className="font-medium text-foreground">you won’t pay again.</span>
-                </>
-              ) : (
-                'You have unsaved changes. Save your progress before leaving — if you leave now, your most recent changes may be lost.'
-              )}
-            </p>
-            {message?.kind === 'err' && <p className="mt-3 text-[13px] text-destructive">{message.text}</p>}
-            <div className="mt-5 flex flex-col gap-2">
-              <Button onClick={confirmSaveAndLeave} disabled={exiting} className={STUDIO_PRIMARY}>
-                {exiting ? <InlineLoader /> : <Save className="h-4 w-4" />} Save &amp; leave
-              </Button>
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={confirmLeaveWithout} disabled={exiting}>
-                  Leave without saving
-                </Button>
-                <Button variant="ghost" className="flex-1" onClick={() => setExitConfirmOpen(false)} disabled={exiting}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ExitGuardDialog
+          reviewMode={reviewMode}
+          exiting={exiting}
+          error={message?.kind === "err" ? message.text : null}
+          onSaveAndLeave={confirmSaveAndLeave}
+          onLeaveWithout={confirmLeaveWithout}
+          onCancel={() => setExitConfirmOpen(false)}
+        />
       )}
 
       {/* "Build it for me" — the SAME Auto Create / Choose Blueprint / Custom workflow as the wizard. */}
@@ -1669,6 +2340,7 @@ export default function Builder({
         <BuildMethod
           albumSize={size}
           uploaded={enginePhotos.length}
+          unprocessed={unprocessedCount}
           defaultTarget={defaultBlueprint}
           blueprintCount={blueprints.length}
           onFullAuto={runFullAuto}
@@ -1724,7 +2396,6 @@ export default function Builder({
           onCancel={() => setProposal(null)}
         />
       )}
-      {workerModal}
     </div>
   );
 }
@@ -1741,7 +2412,23 @@ function PhotoStat({ label, value, tone = 'ok' }: { label: string; value: number
   );
 }
 
-function EmptyCanvas({ blueprintMode, onBuild, onAdd, canBuild }: { blueprintMode?: boolean; onBuild: () => void; onAdd: () => void; canBuild: boolean }) {
+function EmptyCanvas({
+  blueprintMode,
+  onBuild,
+  onAdd,
+  canBuild,
+  hasPhotos,
+  awaitingShapes,
+}: {
+  blueprintMode?: boolean;
+  onBuild: () => void;
+  onAdd: () => void;
+  canBuild: boolean;
+  /** Any photos at all in the tray. */
+  hasPhotos?: boolean;
+  /** Photos exist but none has a usable shape yet (HEIC still processing). */
+  awaitingShapes?: boolean;
+}) {
   return (
     <div className="mx-auto mt-6 max-w-md animate-scale-in rounded-2xl border border-dashed border-border bg-card/70 p-12 text-center">
       <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-secondary text-muted-foreground ring-1 ring-border">
@@ -1761,9 +2448,17 @@ function EmptyCanvas({ blueprintMode, onBuild, onAdd, canBuild }: { blueprintMod
         </>
       ) : (
         <>
-          <p className="mt-4 font-display text-xl font-semibold tracking-tight text-foreground">Start your story</p>
+          {/* Three distinct openings, because the right next step differs: no photos yet, photos
+              whose shape we can't know yet, or ready to arrange. */}
+          <p className="mt-4 font-display text-xl font-semibold tracking-tight text-foreground">
+            {!hasPhotos ? 'Start your story' : awaitingShapes ? 'Getting your photos ready' : 'Ready when you are'}
+          </p>
           <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-            Add a single page (a photo on each side) or a double page (one image across the fold) — or let us arrange your photos.
+            {!hasPhotos
+              ? 'Add photos on the left — you can start placing them the moment you pick them, while they upload.'
+              : awaitingShapes
+                ? 'We’re preparing your photos. You can build pages by hand now, and let us arrange them once they’re ready.'
+                : 'Add a single page (a photo on each side) or a double page (one image across the fold) — or let us arrange your photos.'}
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
             <Button size="sm" onClick={onBuild} disabled={!canBuild} className={STUDIO_PRIMARY}>

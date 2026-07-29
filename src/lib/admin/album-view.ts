@@ -2,7 +2,7 @@ import 'server-only';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
 import { resolveStickerUrls } from '@/lib/stickers';
-import { type Photo } from '@/app/(app)/albums/[id]/build/_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import {
   LAYOUT_TEMPLATES,
   type Background,

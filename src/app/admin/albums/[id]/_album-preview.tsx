@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import Preview from '@/app/(app)/albums/[id]/build/_preview';
-import { type Photo } from '@/app/(app)/albums/[id]/build/_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import { type Block } from '@/lib/builder/model';
 
 /** Client wrapper: builds the photo Map from arrays (RSC-serializable) and renders the

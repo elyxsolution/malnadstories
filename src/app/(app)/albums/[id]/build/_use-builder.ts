@@ -7,6 +7,9 @@ import {
   cryptoId,
   makeBlock,
   requiredBaseCount,
+  makeOverlayId,
+  withOverlayIds,
+  stripOverlayIds,
   DEFAULT_OVERLAY_GEOM,
   type Background,
   type Block,
@@ -31,7 +34,7 @@ export type BaseSlot = 'left' | 'right' | 'image';
 export type Selection =
   | { kind: 'none' }
   | { kind: 'base'; slot: BaseSlot }
-  | { kind: 'overlay'; index: number }
+  | { kind: 'overlay'; id: string }
   | { kind: 'text'; id: string }
   | { kind: 'qr'; id: string }
   | { kind: 'sticker'; id: string };
@@ -55,7 +58,8 @@ function stripPhoto(list: Block[], id: string): Block[] {
  * existing `saveLayout`. No new persistence path is introduced here.
  */
 export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
-  const hist = useHistoryState<Block[]>(initial);
+  // Normalize on entry: every overlay inside builder state carries a stable id from here on.
+  const hist = useHistoryState<Block[]>(withOverlayIds(initial));
   const blocks = hist.value;
   const [dirty, setDirty] = useState(false);
 
@@ -167,13 +171,20 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
     );
 
   // ── overlays ───────────────────────────────────────────────────────────────
-  const addOverlay = (key: string, photoId: string) =>
+  // Every operation below addresses an overlay by its STABLE ID rather than its array
+  // position. Behaviour is identical for a single overlay, but an id survives reordering and
+  // deletion — which array indices do not, and which is what made index-based selection unsafe
+  // to build multi-selection on.
+  /** Append an overlay. Returns its new id so the caller can select it immediately. */
+  const addOverlay = (key: string, photoId: string) => {
+    const id = makeOverlayId();
     mutate((prev) =>
       stripPhoto(prev, photoId).map((b) => {
         if (b.key !== key) return b;
         const n = b.overlays.length;
         const { w, h } = DEFAULT_OVERLAY_GEOM;
         const overlay: Overlay = {
+          id,
           photoId,
           x: clamp01(Math.min(DEFAULT_OVERLAY_GEOM.x + (n % 5) * 0.04, 1 - w)),
           y: clamp01(Math.min(DEFAULT_OVERLAY_GEOM.y + (n % 5) * 0.04, 1 - h)),
@@ -183,29 +194,37 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
         return { ...b, overlays: [...b.overlays, overlay] };
       }),
     );
+    return id;
+  };
 
-  const replaceOverlay = (key: string, index: number, photoId: string) =>
+  const replaceOverlay = (key: string, overlayId: string, photoId: string) =>
     mutate((prev) =>
       stripPhoto(prev, photoId).map((b) =>
-        b.key === key ? { ...b, overlays: b.overlays.map((o, i) => (i === index ? { ...o, photoId } : o)) } : b,
+        b.key === key ? { ...b, overlays: b.overlays.map((o) => (o.id === overlayId ? { ...o, photoId } : o)) } : b,
       ),
     );
 
-  const patchOverlays = (key: string, overlays: Overlay[]) => mutate((prev) => patchBlockByKey(prev, key, { overlays }));
-
-  const removeOverlay = (key: string, index: number) =>
+  // Whole-array patch (drag/resize commits the full set). Ids are preserved because the caller
+  // maps over the existing overlays; normalized anyway as a backstop.
+  const patchOverlays = (key: string, overlays: Overlay[]) =>
     mutate((prev) =>
-      prev.map((b) => (b.key === key ? { ...b, overlays: b.overlays.filter((_, i) => i !== index) } : b)),
+      patchBlockByKey(prev, key, { overlays: overlays.map((o) => (o.id ? o : { ...o, id: makeOverlayId() })) }),
     );
 
-  const reorderOverlay = (key: string, index: number, dir: -1 | 1) =>
+  const removeOverlay = (key: string, overlayId: string) =>
+    mutate((prev) =>
+      prev.map((b) => (b.key === key ? { ...b, overlays: b.overlays.filter((o) => o.id !== overlayId) } : b)),
+    );
+
+  const reorderOverlay = (key: string, overlayId: string, dir: -1 | 1) =>
     mutate((prev) =>
       prev.map((b) => {
         if (b.key !== key) return b;
-        const j = index + dir;
-        if (j < 0 || j >= b.overlays.length) return b;
+        const i = b.overlays.findIndex((o) => o.id === overlayId);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= b.overlays.length) return b;
         const ov = [...b.overlays];
-        [ov[index], ov[j]] = [ov[j], ov[index]];
+        [ov[i], ov[j]] = [ov[j], ov[i]];
         return { ...b, overlays: ov };
       }),
     );
@@ -214,25 +233,26 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
    * Duplicate an overlay — copies its frame AND photo, offset slightly, appended on top.
    * Unlike base slots, an overlay may legitimately reuse a photo (it's purely decorative;
    * `saveLayout` has no uniqueness constraint and edits are per-photo), so we deliberately
-   * do NOT stripPhoto here. Returns the new overlay's index.
+   * do NOT stripPhoto here. Returns the new overlay's ID (previously its index).
    */
-  const duplicateOverlay = (key: string, index: number) => {
-    let newIndex: number | undefined;
+  const duplicateOverlay = (key: string, overlayId: string) => {
+    let newId: string | undefined;
     mutate((prev) =>
       prev.map((b) => {
         if (b.key !== key) return b;
-        const src = b.overlays[index];
+        const src = b.overlays.find((o) => o.id === overlayId);
         if (!src) return b;
         const clone: Overlay = {
           ...src,
+          id: makeOverlayId(),
           x: clamp01(Math.min(src.x + 0.03, 1 - src.w)),
           y: clamp01(Math.min(src.y + 0.03, 1 - src.h)),
         };
-        newIndex = b.overlays.length;
+        newId = clone.id;
         return { ...b, overlays: [...b.overlays, clone] };
       }),
     );
-    return newIndex;
+    return newId;
   };
 
   // ── text ─────────────────────────────────────────────────────────────────────
@@ -368,6 +388,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
     // Keep EVERY preset overlay slot — filled from the pool, else an empty placeholder (photoId=null)
     // so the layout's containers stay visible and fillable when photos are insufficient.
     const newOverlays: Overlay[] = preset.overlays.map((slot, i) => ({
+      id: makeOverlayId(),
       photoId: pool[i] ?? null,
       x: slot.x,
       y: slot.y,
@@ -379,8 +400,82 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
     patchBlock(key, { template: preset.base, photoIds: keptBase, overlays: newOverlays, preset: preset.key });
   };
 
+  /**
+   * Run several mutations as ONE undo entry (Phase 6). Every bulk command wraps its work in
+   * this, so "remove 12 photos from their pages" is one ⌘Z, not twelve. Nesting is safe.
+   */
+  const batch = useCallback(
+    (fn: () => void) => {
+      hist.batch(fn);
+      setDirty(true);
+    },
+    [hist],
+  );
+
   // ── photos lifecycle (block side only — photo rows are owned by the orchestrator) ──
   const removePhotoEverywhere = (id: string) => mutate((prev) => stripPhoto(prev, id));
+
+  /**
+   * Clear a set of frames in one pass — the block-side primitive behind "remove from page" and
+   * "clear placement". Doing it as a single `mutate` (rather than N calls) keeps it to one
+   * history entry even outside a batch, and touches each block at most once.
+   */
+  const clearFrames = (frames: readonly { blockKey: string; slot?: BaseSlot; overlayId?: string }[]) =>
+    mutate((prev) =>
+      prev.map((b) => {
+        const mine = frames.filter((f) => f.blockKey === b.key);
+        if (mine.length === 0) return b;
+        let photoIds = b.photoIds;
+        let overlays = b.overlays;
+        for (const f of mine) {
+          if (f.slot) {
+            // Clearing a base slot preserves the OTHER slot's photo — index-safe by construction.
+            const keepLeft = f.slot === 'right';
+            photoIds = keepLeft ? photoIds.slice(0, 1) : photoIds.slice(1);
+          } else if (f.overlayId) {
+            // An overlay keeps its CONTAINER (geometry is the user's layout work); only the
+            // photo reference is cleared — same rule the serialization boundary uses.
+            overlays = overlays.map((o) => (o.id === f.overlayId ? { ...o, photoId: null } : o));
+          }
+        }
+        return { ...b, photoIds, overlays };
+      }),
+    );
+
+  /** Remove a set of photos from every page at once (bulk delete's block-side half). */
+  const removePhotosEverywhere = (ids: readonly string[]) =>
+    mutate((prev) => ids.reduce((acc, id) => stripPhoto(acc, id), prev));
+
+  /**
+   * Swap an optimistic photo id for the real one the server just issued (Phase 3).
+   *
+   * Rewrites the WHOLE history stack, not just the present, and deliberately does NOT go
+   * through `mutate`: a remap is bookkeeping, not an edit. It must not create an undo step,
+   * must not mark the album dirty, and must not be undoable — undoing "the photo got its
+   * real id" is meaningless, and leaving old snapshots on the temp id would make undo
+   * resurrect an id that no longer exists.
+   */
+  const remapPhotoId = useCallback(
+    (fromId: string, toId: string) => {
+      if (fromId === toId) return;
+      hist.rewrite((list) => {
+        let touched = false;
+        const next = list.map((b) => {
+          const inBase = b.photoIds.includes(fromId);
+          const inOverlay = b.overlays.some((o) => o.photoId === fromId);
+          if (!inBase && !inOverlay) return b;
+          touched = true;
+          return {
+            ...b,
+            photoIds: b.photoIds.map((pid) => (pid === fromId ? toId : pid)),
+            overlays: b.overlays.map((o) => (o.photoId === fromId ? { ...o, photoId: toId } : o)),
+          };
+        });
+        return touched ? next : list;
+      });
+    },
+    [hist],
+  );
 
   // ── persistence shape ──────────────────────────────────────────────────────────
   const serialize = () =>
@@ -388,7 +483,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
       template: b.template,
       photoIds: b.photoIds.filter(Boolean),
       caption: b.caption,
-      overlays: b.overlays,
+      // Overlay ids are CLIENT-ONLY identity (like `Block.key`) — stripped here so the payload
+      // reaching `saveLayout` is byte-identical to what it was before overlays gained ids.
+      overlays: stripOverlayIds(b.overlays),
       texts: b.texts,
       qrs: b.qrs,
       stickers: b.stickers,
@@ -396,7 +493,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
       preset: b.preset,
     }));
 
-  const replaceAll = (next: Block[]) => mutate(() => next);
+  const replaceAll = (next: Block[]) => mutate(() => withOverlayIds(next));
 
   return {
     blocks,
@@ -437,7 +534,11 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
     setBackground,
     setBackgroundAll,
     applyPreset,
+    batch,
+    clearFrames,
+    removePhotosEverywhere,
     removePhotoEverywhere,
+    remapPhotoId,
     serialize,
     replaceAll,
   };

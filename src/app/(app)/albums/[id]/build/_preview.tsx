@@ -1,7 +1,9 @@
 'use client';
 
 import PairContent from './_pair-frame';
-import type { Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
+import type { PhotoUiState } from './_photo-state';
+import { usePhotoFor } from './_use-photo-for';
 import { physicalStart, type Block } from '@/lib/builder/model';
 import { useBuilderDimensions } from './_dimensions';
 
@@ -18,17 +20,17 @@ export default function Preview({
   photoMap,
   cover,
   stickerUrlFor,
+  photoStateFor,
 }: {
   blocks: Block[];
   photoMap: Map<string, Photo>;
   cover: { url: string; name: string } | null;
   stickerUrlFor?: (stickerId: string) => string | undefined;
+  /** Optional (builder only): drives the shared processing badge. Absent in admin previews. */
+  photoStateFor?: (photoId: string) => PhotoUiState | undefined;
 }) {
   const { page, pair } = useBuilderDimensions();
-  const photoFor = (id: string | null | undefined) => {
-    const p = id ? photoMap.get(id) : undefined;
-    return p ? { url: p.url, edit: p.edit } : undefined;
-  };
+  const photoFor = usePhotoFor(photoMap, photoStateFor);
 
   return (
     <div className="space-y-8">
@@ -72,7 +74,7 @@ export default function Preview({
                 className="relative mx-auto w-full overflow-hidden rounded-lg border bg-muted shadow-sm"
                 style={{ aspectRatio: pair }}
               >
-                <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
+                <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} badge="compact" />
                 <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/70 mix-blend-difference" />
               </div>
               <figcaption className="mt-2 flex items-center justify-between text-xs text-muted-foreground">

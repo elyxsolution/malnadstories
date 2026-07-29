@@ -7,7 +7,7 @@ import Preview from './_preview';
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
 import type { Block } from '@/lib/builder/model';
-import type { Photo } from './_uploader';
+import type { Photo } from '@/lib/builder/photo';
 import type { CoverOption } from '@/lib/covers';
 import { summarizePlan } from '@/lib/builder/auto-layout';
 
