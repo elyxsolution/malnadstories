@@ -69,15 +69,24 @@ export function IconToggle({
   );
 }
 
-/** Typography editor for one text element. Used on pages AND the cover. */
+/**
+ * Typography editor for one text element. Used on pages AND the cover.
+ *
+ * `advanced` (Pass 3) is the content-page form: the floating text toolbar now owns font,
+ * size, weight, style, alignment and colour, so the panel shows only what the toolbar
+ * doesn't — content, spacing, and finish. Same component, same callbacks, conditional
+ * sections — the cover (which has no text toolbar) keeps the full inspector by default.
+ */
 export function TextInspector({
   el,
   onChange,
   onDelete,
+  advanced = false,
 }: {
   el: TextElement;
   onChange: (patch: Partial<TextElement>) => void;
   onDelete: () => void;
+  advanced?: boolean;
 }) {
   const set = onChange;
   return (
@@ -108,37 +117,41 @@ export function TextInspector({
         />
       </Section>
 
-      <Section title="Font">
-        <FontPicker value={el.font} onChange={(v) => set({ font: v })} />
-        <Row label="Size" hint={`${Math.round(el.size)}`}>
-          <Slider value={el.size} min={10} max={160} step={1} ariaLabel="Font size" onChange={(v) => set({ size: v })} />
-        </Row>
-        <div className="flex items-center gap-1.5">
-          <IconToggle active={el.weight >= 700} label="Bold" onClick={() => set({ weight: el.weight >= 700 ? 400 : 700 })}>
-            <Bold />
-          </IconToggle>
-          <IconToggle active={el.italic} label="Italic" onClick={() => set({ italic: !el.italic })}>
-            <Italic />
-          </IconToggle>
-          <IconToggle active={el.underline} label="Underline" onClick={() => set({ underline: !el.underline })}>
-            <Underline />
-          </IconToggle>
-          <span className="mx-0.5 h-5 w-px bg-border" />
-          <IconToggle active={el.align === 'left'} label="Align left" onClick={() => set({ align: 'left' })}>
-            <AlignLeft />
-          </IconToggle>
-          <IconToggle active={el.align === 'center'} label="Align centre" onClick={() => set({ align: 'center' })}>
-            <AlignCenter />
-          </IconToggle>
-          <IconToggle active={el.align === 'right'} label="Align right" onClick={() => set({ align: 'right' })}>
-            <AlignRight />
-          </IconToggle>
-        </div>
-      </Section>
+      {!advanced && (
+        <Section title="Font">
+          <FontPicker value={el.font} onChange={(v) => set({ font: v })} />
+          <Row label="Size" hint={`${Math.round(el.size)}`}>
+            <Slider value={el.size} min={10} max={160} step={1} ariaLabel="Font size" onChange={(v) => set({ size: v })} />
+          </Row>
+          <div className="flex items-center gap-1.5">
+            <IconToggle active={el.weight >= 700} label="Bold" onClick={() => set({ weight: el.weight >= 700 ? 400 : 700 })}>
+              <Bold />
+            </IconToggle>
+            <IconToggle active={el.italic} label="Italic" onClick={() => set({ italic: !el.italic })}>
+              <Italic />
+            </IconToggle>
+            <IconToggle active={el.underline} label="Underline" onClick={() => set({ underline: !el.underline })}>
+              <Underline />
+            </IconToggle>
+            <span className="mx-0.5 h-5 w-px bg-border" />
+            <IconToggle active={el.align === 'left'} label="Align left" onClick={() => set({ align: 'left' })}>
+              <AlignLeft />
+            </IconToggle>
+            <IconToggle active={el.align === 'center'} label="Align centre" onClick={() => set({ align: 'center' })}>
+              <AlignCenter />
+            </IconToggle>
+            <IconToggle active={el.align === 'right'} label="Align right" onClick={() => set({ align: 'right' })}>
+              <AlignRight />
+            </IconToggle>
+          </div>
+        </Section>
+      )}
 
-      <Section title="Colour">
-        <ColorField value={el.color} onChange={(hex) => set({ color: hex })} />
-      </Section>
+      {!advanced && (
+        <Section title="Colour">
+          <ColorField value={el.color} onChange={(hex) => set({ color: hex })} />
+        </Section>
+      )}
 
       <Section title="Spacing & finish">
         <Row label="Letter spacing" hint={el.letterSpacing.toFixed(2)}>

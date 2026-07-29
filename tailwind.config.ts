@@ -137,12 +137,18 @@ const config: Config = {
           from: { width: '0' },
           to: { width: 'var(--dw, 240px)' },
         },
+        // The docked properties panel sliding in from the right edge (builder Pass 3).
+        'panel-in': {
+          from: { opacity: '0', transform: 'translateX(16px)' },
+          to: { opacity: '1', transform: 'translateX(0)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out both',
         rise: 'rise 0.55s cubic-bezier(0.32, 0.72, 0, 1) both',
         'scale-in': 'scale-in 0.4s cubic-bezier(0.32, 0.72, 0, 1) both',
         shimmer: 'shimmer 1.5s infinite',
+        'panel-in': 'panel-in 0.22s cubic-bezier(0.32, 0.72, 0, 1) both',
       },
       transitionTimingFunction: {
         premium: 'cubic-bezier(0.32, 0.72, 0, 1)',

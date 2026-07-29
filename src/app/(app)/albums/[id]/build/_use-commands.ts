@@ -337,6 +337,65 @@ export function useCommands(deps: CommandDeps) {
     [frames, occupiedFrames, api, onMessage],
   );
 
+  /**
+   * ── LAYER ORDERING, ONE IMPLEMENTATION FOR EVERY MOVABLE OBJECT ───────────────
+   *
+   * The model keeps each element family in its own array (overlays / texts / stickers / QR),
+   * and render order IS array order — later means on top. Every layer operation is therefore
+   * "move this element to index j", expressed as |j − i| adjacent swaps through the SAME
+   * `reorder*` primitives the old up/down buttons called. The swaps run inside `api.batch()`,
+   * so "Bring to front" across a ten-deep stack is ONE undo entry, and the mutation marks the
+   * album dirty exactly like any other edit — the save controller needs nothing new.
+   *
+   * `above`/`below` are the explicit forms: place the element directly on top of (or beneath)
+   * a NAMED sibling. They resolve to the same remove-then-insert index arithmetic, so all six
+   * menu items share one code path.
+   */
+  const moveLayer = useCallback(
+    (
+      target: { kind: 'overlay' | 'text' | 'sticker' | 'qr'; blockKey: string; id: string },
+      action: 'front' | 'forward' | 'backward' | 'back' | { above: string } | { below: string },
+    ) => {
+      const block = blocks.find((b) => b.key === target.blockKey);
+      if (!block) return;
+      const list: { id?: string }[] =
+        target.kind === 'overlay' ? block.overlays : target.kind === 'text' ? block.texts : target.kind === 'sticker' ? block.stickers : block.qrs;
+      const i = list.findIndex((el) => el.id === target.id);
+      if (i < 0) return;
+
+      let j: number;
+      if (action === 'front') j = list.length - 1;
+      else if (action === 'back') j = 0;
+      else if (action === 'forward') j = i + 1;
+      else if (action === 'backward') j = i - 1;
+      else {
+        // Remove-then-insert semantics: "above s" lands directly after s, "below s" directly
+        // before it — accounting for the shift the removal of `i` causes on one side.
+        const sibId = 'above' in action ? action.above : action.below;
+        const s = list.findIndex((el) => el.id === sibId);
+        if (s < 0 || sibId === target.id) return;
+        j = 'above' in action ? (i < s ? s : s + 1) : i < s ? s - 1 : s;
+      }
+      j = Math.max(0, Math.min(list.length - 1, j));
+      if (j === i) return;
+
+      const dir: -1 | 1 = j > i ? 1 : -1;
+      const steps = Math.abs(j - i);
+      const step =
+        target.kind === 'overlay'
+          ? api.reorderOverlay
+          : target.kind === 'text'
+            ? api.reorderText
+            : target.kind === 'sticker'
+              ? api.reorderSticker
+              : api.reorderQr;
+      api.batch(() => {
+        for (let n = 0; n < steps; n++) step(target.blockKey, target.id, dir);
+      });
+    },
+    [blocks, api],
+  );
+
   const doDuplicatePage = useCallback(
     (blockKey?: string) => {
       const key = blockKey ?? blockKeys[0];
@@ -663,6 +722,8 @@ export function useCommands(deps: CommandDeps) {
     deletePage: doDeletePage,
     /** Geometry + tone writes for ONE photo — the floating toolbar's single write path. */
     applyPhotoEdit,
+    /** Layer ordering for any movable object — the Layers menu's single write path. */
+    moveLayer,
     /** Rotate the current selection in either direction (the toolbar's two rotate buttons). */
     rotateBy: doRotatePhotos,
     /** Derived facts the UI needs for labels and enablement. */

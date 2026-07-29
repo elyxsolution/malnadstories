@@ -199,13 +199,20 @@ export function BarPopover({
   icon,
   text,
   width = 268,
+  swatch,
+  overflowVisible,
   children,
 }: {
   label: string;
   icon?: React.ReactNode;
   text?: string;
   width?: number;
-  children: React.ReactNode;
+  /** Render a colour swatch as the trigger's visual (the text-colour control). */
+  swatch?: string;
+  /** Let absolutely-positioned flyouts inside the panel (the colour spectrum) escape its box. */
+  overflowVisible?: boolean;
+  /** Plain content, or a render prop receiving `close` so menu items can dismiss on select. */
+  children: React.ReactNode | ((close: () => void) => React.ReactNode);
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -261,10 +268,17 @@ export function BarPopover({
         aria-controls={open ? `bar-popover-${id}` : undefined}
         onClick={() => setOpen((v) => !v)}
         className={`inline-flex h-7 items-center justify-center gap-1 rounded-lg text-[12px] font-medium transition-colors duration-100 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright [&_svg]:h-3.5 [&_svg]:w-3.5 ${
-          text || icon ? 'px-2' : 'w-7'
+          text || icon || swatch ? 'px-2' : 'w-7'
         } ${open ? 'bg-secondary text-foreground' : 'text-foreground hover:bg-secondary'}`}
       >
         {icon}
+        {swatch && (
+          <span
+            aria-hidden
+            className="h-3.5 w-3.5 flex-none rounded-full ring-1 ring-inset ring-black/15"
+            style={{ background: swatch }}
+          />
+        )}
         {text}
         <ChevronDown className={`!h-3 !w-3 opacity-50 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -277,9 +291,11 @@ export function BarPopover({
           aria-label={label}
           onPointerDown={(e) => e.stopPropagation()}
           style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
-          className="motion-safe:animate-scale-in fixed z-[71] flex max-h-[min(60vh,460px)] flex-col overflow-hidden rounded-xl border border-border/80 bg-card shadow-elevated"
+          className={`motion-safe:animate-scale-in fixed z-[71] flex max-h-[min(60vh,460px)] flex-col rounded-xl border border-border/80 bg-card shadow-elevated ${
+            overflowVisible ? 'overflow-visible' : 'overflow-hidden'
+          }`}
         >
-          {children}
+          {typeof children === 'function' ? children(() => { setOpen(false); btnRef.current?.focus(); }) : children}
         </div>
       )}
     </>

@@ -315,6 +315,19 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
   const removeQr = (key: string, id: string) =>
     mutate((prev) => prev.map((b) => (b.key === key ? { ...b, qrs: b.qrs.filter((q) => q.id !== id) } : b)));
 
+  const reorderQr = (key: string, id: string, dir: -1 | 1) =>
+    mutate((prev) =>
+      prev.map((b) => {
+        if (b.key !== key) return b;
+        const i = b.qrs.findIndex((q) => q.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= b.qrs.length) return b;
+        const qs = [...b.qrs];
+        [qs[i], qs[j]] = [qs[j], qs[i]];
+        return { ...b, qrs: qs };
+      }),
+    );
+
   // ── stickers ───────────────────────────────────────────────────────────────────
   const addSticker = (key: string, stickerId: string, overrides: Partial<StickerElement> = {}) => {
     const el = makeSticker(stickerId, pairRatio, overrides);
@@ -526,6 +539,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
     addQr,
     patchQr,
     removeQr,
+    reorderQr,
     addSticker,
     patchSticker,
     removeSticker,

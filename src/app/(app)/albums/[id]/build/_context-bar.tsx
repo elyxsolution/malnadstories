@@ -13,8 +13,6 @@ import {
   FlipVertical,
   Copy,
   Trash2,
-  ChevronUp,
-  ChevronDown,
   SlidersHorizontal,
   Type as TypeIcon,
   ImagePlus,
@@ -24,18 +22,20 @@ import {
   ArrowUp,
   ArrowDown,
   Check,
-  Sticker as StickerIcon,
+  Bold,
+  Italic,
+  Underline,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
   Lock,
   LockOpen,
 } from 'lucide-react';
 import { CanvasBar, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
-import {
-  TextInspector,
-  StickerInspector,
-  QrInspector,
-  PhotoAdjustInspector,
-} from './_element-inspectors';
-import { MAX_ZOOM, type Block, type EditConfig, type Overlay } from '@/lib/builder/model';
+import LayerMenu, { type LayerSibling } from './_layer-menu';
+import FontPicker from './_font-picker';
+import { ColorField } from './_color-picker';
+import { MAX_ZOOM, type Block, type EditConfig, type Overlay, type TextElement } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
 import type { Anchor } from './_use-anchor-rect';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -54,14 +54,15 @@ import { orientedAspect } from './_photo-state';
  * IT DISPATCHES, IT DOES NOT DECIDE. Delete runs `commands.deleteSelection` — the priority-
  * resolved one, so an overlay's Delete button and the Delete key are the same code path. Rotate
  * runs `rotateBy`. Every geometry action goes through `applyPhotoEdit`, the command layer's
- * single photo-write path. Layer order, duplicate and element removal call the same `api.*`
- * primitives the old inspector called. No editing logic lives in this file — only the decision
- * of which buttons a given selection deserves.
+ * single photo-write path. Layer order goes through `commands.moveLayer` — one batched,
+ * undoable implementation shared by photos, text, stickers and QR. No editing logic lives in
+ * this file — only the decision of which buttons a given selection deserves.
  *
- * DETAIL LIVES IN POPOVERS. Typography, photo tone, sticker adjust and QR settings are not
- * re-authored as bar controls: the existing inspector components render INSIDE a popover,
- * unchanged. That is the whole "relocate, don't remove" contract — the same components, a
- * different host.
+ * ONE EDITING PHILOSOPHY (Pass 3). Every object type follows the same split: COMMON actions
+ * live on the bar itself (text gets its full everyday typography — font, size, weight, style,
+ * alignment, colour — right here), and DETAILED properties open the docked right-hand
+ * properties panel via `onOpenProperties`. The popover-hosted inspectors are gone from content
+ * pages; the same inspector components now render in the panel, unchanged.
  */
 
 export type ContextBarProps = {
@@ -91,9 +92,9 @@ export type ContextBarProps = {
   onAddPhotoOverlay: () => void;
   onAddQr: () => void;
   onOpenLayouts: () => void;
-  /** Live + persisted photo-edit writes (the inspector's original contract). */
-  onPhotoChange: (photoId: string, edit: EditConfig) => void;
-  onPhotoCommit: (photoId: string, edit: EditConfig) => void;
+  /** Open the selected object's detailed controls in the right-hand properties panel. */
+  onOpenProperties: () => void;
+  propertiesOpen: boolean;
   /** Return focus to the canvas when the bar is dismissed with Escape. */
   onEscape: () => void;
 };
@@ -118,6 +119,23 @@ export default function ContextBar(props: ContextBarProps) {
 }
 
 type BarProps = ContextBarProps & { block: Block };
+
+/** Human labels for the Layers menu's "Move above/below…" sibling lists. */
+const overlaySiblings = (block: Block, photoMap: Map<string, Photo>): LayerSibling[] =>
+  block.overlays.map((o, i) => ({
+    id: o.id ?? String(i),
+    label: o.photoId ? (photoMap.get(o.photoId)?.filename || `Photo ${i + 1}`) : `Empty frame ${i + 1}`,
+  }));
+
+const textSiblings = (block: Block): LayerSibling[] =>
+  block.texts.map((t, i) => {
+    const preview = t.text.trim().replace(/\s+/g, ' ');
+    return { id: t.id, label: preview ? (preview.length > 22 ? `${preview.slice(0, 22)}…` : preview) : `Text ${i + 1}` };
+  });
+
+const stickerSiblings = (block: Block): LayerSibling[] => block.stickers.map((s, i) => ({ id: s.id, label: `Sticker ${i + 1}` }));
+
+const qrSiblings = (block: Block): LayerSibling[] => block.qrs.map((q, i) => ({ id: q.id, label: `QR code ${i + 1}` }));
 
 // ── photo (base slot or overlay) ──────────────────────────────────────────────────
 
@@ -207,30 +225,24 @@ function PhotoBar(p: BarProps) {
       <BarBtn label="Flip vertically" icon={<FlipVertical />} active={!!edit.flipV} disabled={!ready} onClick={() => apply({ flipV: !edit.flipV })} />
       <BarSep />
 
-      <BarPopover label="Adjust colour and finish" icon={<SlidersHorizontal />}>
-        {selectedPhoto ? (
-          <PhotoAdjustInspector
-            edit={edit}
-            onChange={(next) => p.onPhotoChange(selectedPhoto.id, next)}
-            onCommit={(next) => p.onPhotoCommit(selectedPhoto.id, next)}
-          />
-        ) : null}
-      </BarPopover>
+      {/* Detailed tone + finish → the docked properties panel (PhotoAdjustInspector). */}
+      <BarBtn
+        label="Adjust colour and finish"
+        icon={<SlidersHorizontal />}
+        text="Adjust"
+        active={p.propertiesOpen}
+        disabled={!ready}
+        onClick={p.onOpenProperties}
+      />
 
       {isOverlay && overlayId && (
         <>
           <BarSep />
-          <BarBtn
-            label="Send backward"
-            icon={<ChevronDown />}
-            disabled={ovIndex <= 0}
-            onClick={() => api.reorderOverlay(block.key, overlayId, -1)}
-          />
-          <BarBtn
-            label="Bring forward"
-            icon={<ChevronUp />}
-            disabled={ovIndex >= block.overlays.length - 1}
-            onClick={() => api.reorderOverlay(block.key, overlayId, 1)}
+          <LayerMenu
+            index={ovIndex}
+            total={block.overlays.length}
+            siblings={overlaySiblings(block, p.photoMap)}
+            onMove={(a) => commands.moveLayer({ kind: 'overlay', blockKey: block.key, id: overlayId }, a)}
           />
           <BarBtn
             label="Duplicate overlay"
@@ -259,8 +271,51 @@ function PhotoBar(p: BarProps) {
 
 // ── text ──────────────────────────────────────────────────────────────────────────
 
+/** Alignment cycles left → centre → right — one compact control showing the current state. */
+const NEXT_ALIGN: Record<TextElement['align'], TextElement['align']> = { left: 'center', center: 'right', right: 'left' };
+const ALIGN_ICON: Record<TextElement['align'], React.ReactNode> = {
+  left: <AlignLeft />,
+  center: <AlignCenter />,
+  right: <AlignRight />,
+};
+
+/**
+ * Editable font size — type a number, press ↑/↓, or use the native spinner. Clamped to the
+ * same 10–160 range the inspector slider uses; writes through the same `patchText` callback.
+ */
+function SizeInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <input
+      type="number"
+      data-bar-item
+      min={10}
+      max={160}
+      step={1}
+      value={Math.round(value)}
+      aria-label="Font size"
+      title="Font size"
+      onChange={(e) => {
+        const v = Math.round(Number(e.target.value));
+        if (Number.isFinite(v)) onChange(Math.max(10, Math.min(160, v)));
+      }}
+      onKeyDown={(e) => {
+        // The bar's roving focus uses ←/→ — keep them for the caret inside the field.
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.stopPropagation();
+      }}
+      className="h-7 w-12 rounded-lg bg-transparent px-1.5 text-center text-[12px] tabular-nums text-foreground outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-studio-bright [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
+  );
+}
+
+/**
+ * THE TEXT TOOLBAR (Pass 3) — everyday typography without leaving the canvas.
+ *
+ * Font, size, weight, style, alignment and colour all live on the bar itself, so normal text
+ * editing never opens a panel. The right-hand properties panel ("Advanced") carries only what
+ * has no business on a toolbar: letter spacing, line height, opacity, rotation, shadow.
+ */
 function TextBar(p: BarProps) {
-  const { api, block, selection, anchor } = p;
+  const { api, block, selection, anchor, commands } = p;
   if (selection.kind !== 'text') return null;
   const el = block.texts.find((t) => t.id === selection.id);
   if (!el) return null;
@@ -269,27 +324,30 @@ function TextBar(p: BarProps) {
 
   return (
     <CanvasBar anchor={anchor} label="Text tools" onEscape={p.onEscape}>
-      <BarPopover label="Typography" icon={<TypeIcon />} text="Type" width={288}>
-        <TextInspector
-          el={el}
-          onChange={set}
-          onDelete={() => {
-            api.removeText(block.key, el.id);
-            p.onSelect({ kind: 'none' });
-          }}
-        />
+      <FontPicker compact value={el.font} onChange={(v) => set({ font: v })} />
+      <SizeInput value={el.size} onChange={(v) => set({ size: v })} />
+      <BarSep />
+      <BarBtn label="Bold" icon={<Bold />} active={el.weight >= 700} onClick={() => set({ weight: el.weight >= 700 ? 400 : 700 })} />
+      <BarBtn label="Italic" icon={<Italic />} active={el.italic} onClick={() => set({ italic: !el.italic })} />
+      <BarBtn label="Underline" icon={<Underline />} active={el.underline} onClick={() => set({ underline: !el.underline })} />
+      <BarBtn
+        label={`Alignment — ${el.align === 'left' ? 'left' : el.align === 'center' ? 'centre' : 'right'}`}
+        icon={ALIGN_ICON[el.align]}
+        onClick={() => set({ align: NEXT_ALIGN[el.align] })}
+      />
+      <BarSep />
+      <BarPopover label="Text colour" swatch={el.color} width={252} overflowVisible>
+        <div className="p-3">
+          <ColorField value={el.color} onChange={(hex) => set({ color: hex })} />
+        </div>
       </BarPopover>
       <BarSep />
-      <BarBtn label="Bold" icon={<span className="text-[13px] font-bold leading-none">B</span>} active={el.weight >= 700} onClick={() => set({ weight: el.weight >= 700 ? 400 : 700 })} />
-      <BarBtn label="Italic" icon={<span className="font-serif text-[13px] italic leading-none">I</span>} active={el.italic} onClick={() => set({ italic: !el.italic })} />
-      <BarBtn label="Underline" icon={<span className="text-[13px] leading-none underline">U</span>} active={el.underline} onClick={() => set({ underline: !el.underline })} />
-      <BarSep />
-      <BarBtn label="Align left" icon={<span className="text-[11px] leading-none">◧</span>} active={el.align === 'left'} onClick={() => set({ align: 'left' })} />
-      <BarBtn label="Align centre" icon={<span className="text-[11px] leading-none">▣</span>} active={el.align === 'center'} onClick={() => set({ align: 'center' })} />
-      <BarBtn label="Align right" icon={<span className="text-[11px] leading-none">◨</span>} active={el.align === 'right'} onClick={() => set({ align: 'right' })} />
-      <BarSep />
-      <BarBtn label="Send backward" icon={<ChevronDown />} disabled={i <= 0} onClick={() => api.reorderText(block.key, el.id, -1)} />
-      <BarBtn label="Bring forward" icon={<ChevronUp />} disabled={i >= block.texts.length - 1} onClick={() => api.reorderText(block.key, el.id, 1)} />
+      <LayerMenu
+        index={i}
+        total={block.texts.length}
+        siblings={textSiblings(block)}
+        onMove={(a) => commands.moveLayer({ kind: 'text', blockKey: block.key, id: el.id }, a)}
+      />
       <BarBtn
         label="Duplicate text"
         icon={<Copy />}
@@ -297,6 +355,12 @@ function TextBar(p: BarProps) {
           const id = api.duplicateText(block.key, el.id);
           if (id) p.onSelect({ kind: 'text', id });
         }}
+      />
+      <BarBtn
+        label="Advanced typography — spacing, opacity, shadow"
+        icon={<SlidersHorizontal />}
+        active={p.propertiesOpen}
+        onClick={p.onOpenProperties}
       />
       <BarSep />
       <BarBtn
@@ -312,7 +376,7 @@ function TextBar(p: BarProps) {
 // ── sticker ───────────────────────────────────────────────────────────────────────
 
 function StickerBar(p: BarProps) {
-  const { api, block, selection, anchor } = p;
+  const { api, block, selection, anchor, commands } = p;
   if (selection.kind !== 'sticker') return null;
   const el = block.stickers.find((s) => s.id === selection.id);
   if (!el) return null;
@@ -321,23 +385,6 @@ function StickerBar(p: BarProps) {
 
   return (
     <CanvasBar anchor={anchor} label="Sticker tools" onEscape={p.onEscape}>
-      <BarPopover label="Sticker settings" icon={<StickerIcon />} text="Adjust">
-        <StickerInspector
-          el={el}
-          onChange={set}
-          onDelete={() => {
-            api.removeSticker(block.key, el.id);
-            p.onSelect({ kind: 'none' });
-          }}
-          onDuplicate={() => {
-            const id = api.duplicateSticker(block.key, el.id);
-            if (id) p.onSelect({ kind: 'sticker', id });
-          }}
-          onForward={i < block.stickers.length - 1 ? () => api.reorderSticker(block.key, el.id, 1) : undefined}
-          onBackward={i > 0 ? () => api.reorderSticker(block.key, el.id, -1) : undefined}
-        />
-      </BarPopover>
-      <BarSep />
       <BarBtn label="Flip horizontally" icon={<FlipHorizontal />} active={!!el.flipH} onClick={() => set({ flipH: !el.flipH })} />
       <BarBtn label="Flip vertically" icon={<FlipVertical />} active={!!el.flipV} onClick={() => set({ flipV: !el.flipV })} />
       <BarBtn
@@ -347,8 +394,20 @@ function StickerBar(p: BarProps) {
         onClick={() => set({ locked: !el.locked })}
       />
       <BarSep />
-      <BarBtn label="Send backward" icon={<ChevronDown />} disabled={i <= 0} onClick={() => api.reorderSticker(block.key, el.id, -1)} />
-      <BarBtn label="Bring forward" icon={<ChevronUp />} disabled={i >= block.stickers.length - 1} onClick={() => api.reorderSticker(block.key, el.id, 1)} />
+      <BarBtn
+        label="Sticker settings — opacity and rotation"
+        icon={<SlidersHorizontal />}
+        text="Adjust"
+        active={p.propertiesOpen}
+        onClick={p.onOpenProperties}
+      />
+      <BarSep />
+      <LayerMenu
+        index={i}
+        total={block.stickers.length}
+        siblings={stickerSiblings(block)}
+        onMove={(a) => commands.moveLayer({ kind: 'sticker', blockKey: block.key, id: el.id }, a)}
+      />
       <BarBtn
         label="Duplicate sticker"
         icon={<Copy />}
@@ -366,23 +425,28 @@ function StickerBar(p: BarProps) {
 // ── QR ────────────────────────────────────────────────────────────────────────────
 
 function QrBar(p: BarProps) {
-  const { api, block, selection, anchor } = p;
+  const { block, selection, anchor, commands } = p;
   if (selection.kind !== 'qr') return null;
   const el = block.qrs.find((q) => q.id === selection.id);
   if (!el) return null;
+  const i = block.qrs.findIndex((q) => q.id === el.id);
 
   return (
     <CanvasBar anchor={anchor} label="QR code tools" onEscape={p.onEscape}>
-      <BarPopover label="QR settings" icon={<QrCode />} text="QR settings">
-        <QrInspector
-          el={el}
-          onChange={(patch) => api.patchQr(block.key, el.id, patch)}
-          onDelete={() => {
-            api.removeQr(block.key, el.id);
-            p.onSelect({ kind: 'none' });
-          }}
-        />
-      </BarPopover>
+      <BarBtn
+        label="QR settings — link, colours, style"
+        icon={<QrCode />}
+        text="QR settings"
+        active={p.propertiesOpen}
+        onClick={p.onOpenProperties}
+      />
+      <BarSep />
+      <LayerMenu
+        index={i}
+        total={block.qrs.length}
+        siblings={qrSiblings(block)}
+        onMove={(a) => commands.moveLayer({ kind: 'qr', blockKey: block.key, id: el.id }, a)}
+      />
       <BarSep />
       <BarBtn label="Delete QR code" icon={<Trash2 />} destructive onClick={() => void p.commands.commands.deleteSelection.run()} />
     </CanvasBar>

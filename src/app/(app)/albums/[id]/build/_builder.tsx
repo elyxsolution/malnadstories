@@ -13,8 +13,6 @@ import {
   Hand,
   Plus,
   Square,
-  BookOpen,
-  Copy,
   LayoutGrid,
   Rows3,
   Wand2,
@@ -60,7 +58,8 @@ import { CoverSpread } from './_cover-render';
 import CoverPanel from './_panel-cover';
 import CoverTemplatesPanel, { type BuilderCoverTemplate } from './_panel-cover-templates';
 import StickersPanel from './_panel-stickers';
-import { TextInspector, StickerInspector, QrInspector, SpineInspector } from './_element-inspectors';
+import { TextInspector, StickerInspector, QrInspector, SpineInspector, PhotoAdjustInspector } from './_element-inspectors';
+import PropertiesPanel from './_properties-panel';
 // `_inspector` (the permanent right-hand panel) was retired in Pass 2 — its photo adjustments
 // moved into `_element-inspectors` beside their siblings, and its page actions became the
 // context bar's page toolbar. Nothing it did was dropped; everything it did moved.
@@ -262,7 +261,13 @@ export default function Builder({
   // summary card, Resubmit-not-Checkout, and review-specific exit copy.
   const reviewMode = !blueprintMode && review?.status === 'changes_requested';
   // `blueprintSaving` / `exitDialogOpen` are owned by the blueprint-mode controller below.
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  /**
+   * THE PROPERTIES PANEL (Pass 3) — whether the docked right panel is open. The flag is
+   * "sticky": it survives selection changes, so a user who works panel-open (the desktop-app
+   * habit) sees each newly selected object's properties without re-opening anything. What the
+   * panel SHOWS is derived from the selection; whether it shows at all is this one bit.
+   */
+  const [propsPanelOpen, setPropsPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false); // customer unsaved-changes guard
   const [resubmitted, setResubmitted] = useState(false); // review-mode resubmit confirmation
@@ -936,6 +941,96 @@ export default function Builder({
   const onPhotoCommit = (photoId: string, edit: EditConfig) => {
     void savePhotoEdit({ photoId, edit });
   };
+
+  /**
+   * WHAT THE PROPERTIES PANEL SHOWS (Pass 3) — derived from the selection, exactly like the
+   * context bar. The same inspector components that used to render inside the bar's popovers
+   * render here instead, with the same callbacks — the panel is a different host, not a
+   * different implementation. Null means "nothing detailed to show" (empty frame, page,
+   * pending photo) and hides the panel without touching the user's open/closed preference.
+   */
+  const propsPanelContent = (() => {
+    if (coverFocused || editLayout !== 'focus' || !block) return null;
+    switch (selection.kind) {
+      case 'base':
+      case 'overlay': {
+        const photo = selectedFramePhoto;
+        // Tone edits are authored against the sanitized master — same gate as the bar's button.
+        if (!photo || photo.status !== 'ready') return null;
+        return {
+          title: 'Photo adjustments',
+          node: (
+            <PhotoAdjustInspector
+              edit={photo.edit ?? {}}
+              onChange={(next) => onPhotoChange(photo.id, next)}
+              onCommit={(next) => onPhotoCommit(photo.id, next)}
+            />
+          ),
+        };
+      }
+      case 'text': {
+        const el = block.texts.find((t) => t.id === selection.id);
+        if (!el) return null;
+        return {
+          title: 'Advanced typography',
+          node: (
+            <TextInspector
+              advanced
+              el={el}
+              onChange={(patch) => api.patchText(block.key, el.id, patch)}
+              onDelete={() => {
+                api.removeText(block.key, el.id);
+                setSelection(NO_SELECTION);
+              }}
+            />
+          ),
+        };
+      }
+      case 'sticker': {
+        const el = block.stickers.find((s) => s.id === selection.id);
+        if (!el) return null;
+        const i = block.stickers.findIndex((s) => s.id === el.id);
+        return {
+          title: 'Sticker',
+          node: (
+            <StickerInspector
+              el={el}
+              onChange={(patch) => api.patchSticker(block.key, el.id, patch)}
+              onDelete={() => {
+                api.removeSticker(block.key, el.id);
+                setSelection(NO_SELECTION);
+              }}
+              onDuplicate={() => {
+                const id = api.duplicateSticker(block.key, el.id);
+                if (id) setSelection({ kind: 'sticker', id });
+              }}
+              onForward={i < block.stickers.length - 1 ? () => api.reorderSticker(block.key, el.id, 1) : undefined}
+              onBackward={i > 0 ? () => api.reorderSticker(block.key, el.id, -1) : undefined}
+            />
+          ),
+        };
+      }
+      case 'qr': {
+        const el = block.qrs.find((q) => q.id === selection.id);
+        if (!el) return null;
+        return {
+          title: 'QR code',
+          node: (
+            <QrInspector
+              el={el}
+              onChange={(patch) => api.patchQr(block.key, el.id, patch)}
+              onDelete={() => {
+                api.removeQr(block.key, el.id);
+                setSelection(NO_SELECTION);
+              }}
+            />
+          ),
+        };
+      }
+      default:
+        return null;
+    }
+  })();
 
   // Crop/edit geometry is authored against the WORKER'S sanitized master (it applies the EXIF
   // rotation, so a raw local preview can report different dimensions). Both editors therefore
@@ -2164,30 +2259,8 @@ export default function Builder({
               )
             )}
 
-            {/* Floating add-page */}
-            {blocks.length > 0 && (
-              <div className="absolute bottom-5 right-5 z-20">
-                {addMenuOpen && (
-                  <div className="animate-scale-in absolute bottom-14 right-0 w-52 overflow-hidden rounded-xl border border-border bg-card p-1 shadow-elevated">
-                    <AddItem icon={<Square />} label="Blank single page" disabled={!canAddMore} onClick={() => { addBlock('single-pair'); setAddMenuOpen(false); }} />
-                    <AddItem icon={<BookOpen />} label="Blank double page" disabled={!canAddMore} onClick={() => { addBlock('double-spread'); setAddMenuOpen(false); }} />
-                    <AddItem icon={<Copy />} label="Duplicate this page" disabled={!canAddMore || !block} onClick={() => { if (block) duplicateBlock(block.key); setAddMenuOpen(false); }} />
-                    <AddItem icon={<LayoutGrid />} label="Choose a layout…" onClick={() => { setRailTab('layouts'); setAddMenuOpen(false); }} />
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setAddMenuOpen((v) => !v)}
-                  disabled={!canAddMore}
-                  aria-label="Add page"
-                  className="grid h-12 w-12 place-items-center rounded-full bg-studio text-studio-foreground shadow-[0_4px_12px_-2px_hsl(150_46%_26%/0.5)] transition-all duration-150 ease-glide hover:bg-[hsl(150_48%_29%)] hover:shadow-[0_8px_22px_-4px_hsl(150_46%_24%/0.6)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-2 disabled:opacity-40"
-                  title={canAddMore ? 'Add a page' : 'Album is full'}
-                >
-                  <Plus className={`h-5 w-5 transition-transform duration-200 ${addMenuOpen ? 'rotate-45' : ''}`} />
-                </button>
-              </div>
-            )}
-
+            {/* The floating add-page button is gone (Pass 3): page creation lives in the page
+                strip's Add tile now, so there is exactly one place pages are managed. */}
           </div>
           )}
 
@@ -2266,8 +2339,8 @@ export default function Builder({
               onAddPhotoOverlay={() => setPickerFor({ kind: 'add' })}
               onAddQr={() => addQr('')}
               onOpenLayouts={() => setRailTab('layouts')}
-              onPhotoChange={onPhotoChange}
-              onPhotoCommit={onPhotoCommit}
+              onOpenProperties={() => setPropsPanelOpen((v) => !v)}
+              propertiesOpen={propsPanelOpen && !!propsPanelContent}
               onEscape={() => {
                 setSelection(NO_SELECTION);
                 sel.clear();
@@ -2282,6 +2355,19 @@ export default function Builder({
             </div>
           )}
         </main>
+
+        {/*
+          RIGHT — the docked properties panel (Pass 3). The detailed controls for whatever is
+          selected: photo adjustments, advanced typography, sticker and QR settings. It exists
+          only while open AND the selection has something detailed to show; the canvas takes
+          the width back the moment it closes. Content pages only — the cover keeps its own
+          panel below.
+        */}
+        {!coverFocused && propsPanelOpen && propsPanelContent && (
+          <PropertiesPanel title={propsPanelContent.title} onClose={() => setPropsPanelOpen(false)}>
+            {propsPanelContent.node}
+          </PropertiesPanel>
+        )}
 
         {/*
           RIGHT — the cover designer, and ONLY the cover designer (Pass 2).
@@ -2429,6 +2515,13 @@ export default function Builder({
             onInsertAfter={insertAfter}
             onDuplicate={duplicateBlock}
             onDelete={api.removeBlock}
+            /**
+             * PAGE MANAGEMENT IN THE STRIP (Pass 3): the Add tile and its menu replace the old
+             * floating add button, dispatching the same addBlock / duplicate / remove paths.
+             */
+            onAddSpread={addBlock}
+            onOpenLayouts={coverFocused ? undefined : () => setRailTab('layouts')}
+            currentKey={coverFocused ? null : (blocks[cur]?.key ?? null)}
             spreadLevels={quality.spreadLevels}
           />
         </div>
@@ -2728,16 +2821,3 @@ function EmptyCanvas({
   );
 }
 
-function AddItem({ icon, label, onClick, disabled }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:text-studio"
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}

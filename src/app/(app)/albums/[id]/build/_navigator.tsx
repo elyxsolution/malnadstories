@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Trash2, Plus, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
+import { Copy, Trash2, Plus, GripVertical, ChevronUp, ChevronDown, Square, BookOpen, LayoutGrid } from 'lucide-react';
 import PairContent from './_pair-frame';
 import type { Photo } from '@/lib/builder/photo';
 import type { PhotoUiState } from './_photo-state';
@@ -15,6 +15,14 @@ import type { ReadinessLevel } from './_quality-model';
  * same `PairContent`, so backgrounds, text and QR all show). Click to focus, drag to
  * reorder, and per-page controls to insert / duplicate / delete. Reordering never changes
  * which photo sits in which slot, so placed-once is preserved.
+ *
+ * PASS 3 makes the strip PAGE MANAGEMENT, not just navigation. An empty album used to render
+ * no strip at all — a dead end where the only way forward was a floating button elsewhere. Now
+ * the strip always exists: an empty album shows a dedicated "Add first spread" tile right after
+ * the cover, and a populated one keeps a persistent Add tile at the end whose menu carries the
+ * page operations (add single/double, duplicate, remove, choose a layout). Every item
+ * dispatches the SAME callbacks the old floating button and per-thumb controls used — the strip
+ * is a new trigger surface, not a new implementation.
  */
 export default function Navigator({
   blocks,
@@ -32,6 +40,9 @@ export default function Navigator({
   onInsertAfter,
   onDuplicate,
   onDelete,
+  onAddSpread,
+  onOpenLayouts,
+  currentKey,
   spreadLevels,
 }: {
   blocks: Block[];
@@ -59,6 +70,12 @@ export default function Navigator({
   onInsertAfter: (index: number) => void;
   onDuplicate: (key: string) => void;
   onDelete: (key: string) => void;
+  /** Append a spread — the Add tile's primary action (same path as the old floating button). */
+  onAddSpread: (template: 'single-pair' | 'double-spread') => void;
+  /** Open the Layouts rail from the Add tile's menu. */
+  onOpenLayouts?: () => void;
+  /** The focused spread's key, so the Add menu can duplicate/remove the current page. */
+  currentKey?: string | null;
 }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
@@ -98,8 +115,6 @@ export default function Navigator({
     autoScroll.current = left < 64 ? -(1 - left / 64) : right < 64 ? 1 - right / 64 : 0;
   };
 
-  if (blocks.length === 0) return null;
-
   if (collapsed) {
     // Collapsed: a single quiet line that still says where you are and lets you get back.
     return (
@@ -113,8 +128,33 @@ export default function Navigator({
           <ChevronUp className="h-3.5 w-3.5" /> Pages
         </button>
         <span className="text-[11px] tabular-nums text-muted-foreground">
-          Spread {Math.max(1, current + 1)} of {blocks.length}
+          {blocks.length === 0 ? 'No pages yet' : `Spread ${Math.max(1, current + 1)} of ${blocks.length}`}
         </span>
+      </div>
+    );
+  }
+
+  // EMPTY ALBUM — the strip's whole content is the invitation to start. Same tile geometry as a
+  // page thumb, so adding the first spread happens exactly where that spread will then live.
+  if (blocks.length === 0) {
+    return (
+      <div className="flex items-end gap-2.5 px-1 py-1">
+        <div className="flex-none">
+          <button
+            type="button"
+            disabled={!canAddMore}
+            onClick={() => onAddSpread('single-pair')}
+            className="group/first flex h-[72px] w-[144px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-card/60 text-muted-foreground transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:border-studio-bright hover:text-studio hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40"
+          >
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-secondary transition-colors group-hover/first:bg-studio-soft">
+              <Plus className="h-3.5 w-3.5" />
+            </span>
+            <span className="text-[10.5px] font-medium">Add first spread</span>
+          </button>
+          <span className="mt-1 block text-center text-[10px] font-medium text-transparent" aria-hidden>
+            ·
+          </span>
+        </div>
       </div>
     );
   }
@@ -235,7 +275,158 @@ export default function Navigator({
           </button>
         </div>
       ))}
+
+      {/* Persistent Add tile — page management lives IN the strip, where pages live. */}
+      <AddSpreadTile
+        canAddMore={canAddMore}
+        currentKey={currentKey ?? null}
+        onAddSpread={onAddSpread}
+        onOpenLayouts={onOpenLayouts}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+      />
     </div>
+  );
+}
+
+/**
+ * The strip's Add tile: click adds a spread; the chevron (or right-click) opens the page menu
+ * with the full set of page operations. The menu is `position: fixed` and measured from the
+ * trigger because the strip is an `overflow-x-auto` scroller — an absolute menu would be
+ * clipped by the very container it needs to escape.
+ */
+function AddSpreadTile({
+  canAddMore,
+  currentKey,
+  onAddSpread,
+  onOpenLayouts,
+  onDuplicate,
+  onDelete,
+}: {
+  canAddMore: boolean;
+  currentKey: string | null;
+  onAddSpread: (template: 'single-pair' | 'double-spread') => void;
+  onOpenLayouts?: () => void;
+  onDuplicate: (key: string) => void;
+  onDelete: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
+
+  // Measure on open; dismiss on outside pointer-down or Escape (returning focus to the tile).
+  useEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) setPos({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 216)), bottom: window.innerHeight - rect.top + 8 });
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      setOpen(false);
+      btnRef.current?.focus();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="flex-none">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Add or manage spreads"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={canAddMore ? 'Add spread' : 'Manage spreads'}
+        className={`flex h-[72px] w-[72px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-muted-foreground transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:border-studio-bright hover:text-studio hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+          open ? 'border-studio-bright bg-studio-soft/60 text-studio' : 'border-border bg-card/60'
+        }`}
+      >
+        <Plus className="h-4 w-4" />
+        <span className="text-[10px] font-medium leading-none">Add</span>
+      </button>
+      <span className="mt-1 block text-center text-[10px] font-medium text-transparent" aria-hidden>
+        ·
+      </span>
+
+      {open && pos && (
+        <div
+          role="menu"
+          aria-label="Page menu"
+          style={{ left: pos.left, bottom: pos.bottom }}
+          className="motion-safe:animate-scale-in fixed z-[70] w-52 origin-bottom-left overflow-hidden rounded-xl border border-border bg-card p-1 shadow-elevated"
+        >
+          <AddItem icon={<Square />} label="Add spread" disabled={!canAddMore} onClick={() => { onAddSpread('single-pair'); setOpen(false); }} />
+          <AddItem icon={<BookOpen />} label="Add double-page spread" disabled={!canAddMore} onClick={() => { onAddSpread('double-spread'); setOpen(false); }} />
+          {onOpenLayouts && (
+            <AddItem icon={<LayoutGrid />} label="Choose a layout…" onClick={() => { onOpenLayouts(); setOpen(false); }} />
+          )}
+          <div className="mx-2 my-1 h-px bg-border/70" aria-hidden />
+          <AddItem
+            icon={<Copy />}
+            label="Duplicate this spread"
+            disabled={!canAddMore || !currentKey}
+            onClick={() => {
+              if (currentKey) onDuplicate(currentKey);
+              setOpen(false);
+            }}
+          />
+          <AddItem
+            icon={<Trash2 />}
+            label="Remove this spread"
+            destructive
+            disabled={!currentKey}
+            onClick={() => {
+              if (currentKey) onDelete(currentKey);
+              setOpen(false);
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One row of the page menu — the same look the old floating add-menu used. */
+function AddItem({
+  icon,
+  label,
+  onClick,
+  disabled,
+  destructive,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-4 [&_svg]:w-4 ${
+        destructive ? 'text-destructive hover:bg-destructive/10 [&_svg]:text-destructive' : 'text-foreground hover:bg-secondary [&_svg]:text-studio'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

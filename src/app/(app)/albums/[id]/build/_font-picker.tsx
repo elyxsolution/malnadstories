@@ -9,7 +9,19 @@ import { FONT_CATALOG, fontStack, fontLabel, type FontKey } from '@/lib/builder/
  * preview), with keyboard navigation + mouse select. The single font control shared by the
  * text inspector AND the cover, so typography is identical on pages and the cover.
  */
-export default function FontPicker({ value, onChange }: { value: string; onChange: (key: FontKey) => void }) {
+export default function FontPicker({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: string;
+  onChange: (key: FontKey) => void;
+  /**
+   * Toolbar form (Pass 3): a 7-high trigger sized for the floating context bar, with the same
+   * live-preview dropdown. One component, two hosts — the panel and the bar never drift.
+   */
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
@@ -61,6 +73,8 @@ export default function FontPicker({ value, onChange }: { value: string; onChang
       choose(FONT_CATALOG[active].key);
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      // Close only the dropdown — never let Escape bubble on to dismiss the hosting toolbar.
+      e.stopPropagation();
       setOpen(false);
     }
   };
@@ -69,16 +83,25 @@ export default function FontPicker({ value, onChange }: { value: string; onChang
     <div ref={ref} className="relative">
       <button
         type="button"
+        data-bar-item={compact ? true : undefined}
+        title={compact ? 'Font' : undefined}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onKeyDown}
+        aria-label="Font"
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-card px-3 text-sm text-foreground shadow-xs outline-none transition-all hover:border-studio-bright/60 focus-visible:border-studio-bright focus-visible:ring-2 focus-visible:ring-studio-bright/40"
+        className={
+          compact
+            ? 'flex h-7 w-[7.5rem] items-center justify-between gap-1.5 rounded-lg px-2 text-[12px] text-foreground outline-none transition-colors duration-100 hover:bg-secondary focus-visible:ring-2 focus-visible:ring-studio-bright'
+            : 'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-card px-3 text-sm text-foreground shadow-xs outline-none transition-all hover:border-studio-bright/60 focus-visible:border-studio-bright focus-visible:ring-2 focus-visible:ring-studio-bright/40'
+        }
       >
         <span className="truncate" style={{ fontFamily: fontStack(value) }}>
           {fontLabel(value)}
         </span>
-        <ChevronDown className={`h-4 w-4 flex-none text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          className={`flex-none text-muted-foreground transition-transform ${compact ? 'h-3 w-3 opacity-70' : 'h-4 w-4'} ${open ? 'rotate-180' : ''}`}
+        />
       </button>
 
       {open && (
@@ -86,7 +109,9 @@ export default function FontPicker({ value, onChange }: { value: string; onChang
           ref={listRef}
           role="listbox"
           aria-label="Font"
-          className="animate-scale-in absolute z-[60] mt-1 max-h-72 w-full origin-top overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-elevated"
+          className={`animate-scale-in absolute z-[80] mt-1 max-h-72 origin-top overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-elevated ${
+            compact ? 'left-0 w-56' : 'w-full'
+          }`}
         >
           {FONT_CATALOG.map((f, i) => {
             const selected = f.key === value;
