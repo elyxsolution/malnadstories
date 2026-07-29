@@ -31,7 +31,10 @@ import type { Photo } from '@/lib/builder/photo';
 import { isTempPhotoId } from '@/lib/uploads';
 import Tray from './_tray';
 import TrayToolbar from './_tray-toolbar';
-import BlockCard from './_block';
+import BlockCard, { PhotoPicker } from './_block';
+import ContextBar from './_context-bar';
+import { useAnchorRect, FULL_PAGE, type NormRect } from './_use-anchor-rect';
+import { useCanvasCrop } from './_use-canvas-crop';
 import SubmitValidationDialog from './_submit-validation-dialog';
 import ConfirmSubmitDialog from './_confirm-submit-dialog';
 import { evaluateAlbum, type AlbumValidationReport, type IssueAction } from '@/lib/albums/validation';
@@ -39,7 +42,6 @@ import { type RenderReadinessReport } from '@/lib/albums/render-readiness';
 import { LoadingOverlay } from '@/components/loading';
 import PairContent from './_pair-frame';
 import Navigator from './_navigator';
-import Inspector from './_inspector';
 import BuilderHeader from './_header';
 import CanvasToolbar from './_toolbar';
 import AlbumSettings from './_album-settings';
@@ -59,6 +61,9 @@ import CoverPanel from './_panel-cover';
 import CoverTemplatesPanel, { type BuilderCoverTemplate } from './_panel-cover-templates';
 import StickersPanel from './_panel-stickers';
 import { TextInspector, StickerInspector, QrInspector, SpineInspector } from './_element-inspectors';
+// `_inspector` (the permanent right-hand panel) was retired in Pass 2 — its photo adjustments
+// moved into `_element-inspectors` beside their siblings, and its page actions became the
+// context bar's page toolbar. Nothing it did was dropped; everything it did moved.
 import { useBlocks, NO_SELECTION, type Selection, type BaseSlot } from './_use-builder';
 import { useSelection } from './_use-selection';
 import { findFrameHolding, selectedFrames, selectedPhotoIds, targetKey, type SelectionTarget } from './_selection-model';
@@ -510,8 +515,10 @@ export default function Builder({
   }, [ctxKey, current, railTab, coverFocused, blueprintMode]);
 
   // Polling, reconciliation, the blob handoff and the processing counts all live in the photo
-  // pipeline now — these are just the values this component renders from.
-  const { pendingPhotos, rejectedPhotos, oldestProcessingSince } = pipeline;
+  // pipeline now — these are just the values this component renders from. (`oldestProcessingSince`
+  // fed the escalating "Processing → Enhancing → Almost there" copy, which the upload-clarity
+  // pass removed; the pipeline still tracks it, nothing in the UI asks for it any more.)
+  const { pendingPhotos, rejectedPhotos } = pipeline;
 
   /**
    * IDLE PRELOAD (Phase 5) — warm the photos on the neighbouring spreads so moving between
@@ -611,6 +618,25 @@ export default function Builder({
   );
   const readinessOf = useCallback((key: string) => quality.readiness.get(key), [quality.readiness]);
 
+  /**
+   * ── CANVAS-FIRST EDITING (Pass 2) ─────────────────────────────────────────────
+   *
+   * Three pieces of state, all of them about WHERE editing happens rather than what it does:
+   * the page element the floating bar anchors against, the frame currently being cropped
+   * in-canvas, and the frame waiting on the photo picker. None of them touch the layout model,
+   * history, or the save pipeline — they are pure view state.
+   */
+  const pageElRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Which frame the photo picker is open for. `add` creates a NEW overlay from the chosen photo,
+   * which is how "Add photo" works from the page toolbar — one picker, three destinations,
+   * dispatching to the `api` primitives that already existed for each.
+   */
+  const [pickerFor, setPickerFor] = useState<
+    { kind: 'base'; slot: BaseSlot } | { kind: 'overlay'; overlayId: string } | { kind: 'add' } | null
+  >(null);
+  // (`useCanvasCrop` is set up below, once the photo-write callbacks it drives exist.)
+
   /** Which layouts this photographer reaches for — remembered across albums, on this device. */
   const layoutMemory = useLayoutMemory();
 
@@ -642,6 +668,32 @@ export default function Builder({
   // Modal editor / quick crop persist via savePhotoEdit; we just sync local state.
   const onPhotoSaved = (photoId: string, edit: EditConfig) =>
     setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit } : p)));
+
+  /**
+   * IN-CANVAS CROP. Reuses `EditConfig`'s existing zoom/offset fields and the existing
+   * `frameOverflow` maths — see `_use-canvas-crop` for why this is a relocation of the Quick Crop
+   * gesture rather than a second crop implementation. The live/persist pair below is the SAME one
+   * the inspector sliders have always used: patch local state per frame, one `savePhotoEdit` on
+   * release.
+   */
+  /**
+   * Both callbacks are stabilized so the crop handlers keep their identity across renders — they
+   * are passed to the canvas on every render, and churning them would invalidate props on a
+   * component that is re-rendering on every frame of a drag.
+   *
+   * Capturing the first `onPhotoSaved` is safe: it closes over nothing but `setPhotos`, which is
+   * a React state setter and therefore stable for the component's lifetime. That is why the
+   * exhaustive-deps warning is suppressed here rather than satisfied — adding the dep would
+   * recreate the callback every render for no behavioural difference.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cropChange = useCallback((photoId: string, edit: EditConfig) => onPhotoSaved(photoId, edit), []);
+  const cropCommit = useCallback((photoId: string, edit: EditConfig) => void savePhotoEdit({ photoId, edit }), []);
+  const crop = useCanvasCrop({
+    photoFor: useCallback((id: string) => photoMap.get(id), [photoMap]),
+    onChange: cropChange,
+    onCommit: cropCommit,
+  });
 
   // ── Phase 6: selection + commands ─────────────────────────────────────────────
   /**
@@ -695,6 +747,23 @@ export default function Builder({
     () => ({ isFavourite: favourites.isFavourite, toggle: favourites.toggle }),
     [favourites.isFavourite, favourites.toggle],
   );
+  /**
+   * Which spread is focused and what is selected ON it. Memoized for the same reason as the two
+   * adapters above: `useCommands` keys its registry on this, so a fresh literal each render
+   * would rebuild every command on every render.
+   *
+   * `blockKey` is null while the cover is focused — the cover has its own element model
+   * (`coverSel`) and its own delete controls, so the ladder simply doesn't apply there.
+   */
+  const clearElementSelection = useCallback(() => setSelection(NO_SELECTION), []);
+  const deleteFocus = useMemo(
+    () => ({
+      blockKey: coverFocused ? null : (block?.key ?? null),
+      element: selection,
+      clearElement: clearElementSelection,
+    }),
+    [coverFocused, block?.key, selection, clearElementSelection],
+  );
   const cmd = useCommands({
     api,
     blocks,
@@ -717,8 +786,67 @@ export default function Builder({
     labels: labelCommandApi,
     favourites: favouriteCommandApi,
     onDuplicatedPreset: layoutMemory.markDuplicated,
+    /**
+     * The focused spread + its single-element selection. Delete needs both stores to resolve
+     * what the user actually means (see `deleteSelection` in the command layer) — text, stickers
+     * and QR only ever live in this one, while overlays can be multi-selected across pages.
+     */
+    focus: deleteFocus,
   });
   const contextMenu = useContextMenu();
+
+  /**
+   * ── WHERE THE CONTEXT BAR POINTS ───────────────────────────────────────────────
+   *
+   * The selected element's NORMALIZED rect. Every canvas object already stores one, so resolving
+   * the bar's anchor is a lookup rather than a measurement — no `getBoundingClientRect` per
+   * element, no ResizeObserver per element. With nothing selected the bar anchors to the whole
+   * spread, which is what makes the page toolbar appear "at the page".
+   */
+  const selectionRect = useMemo<NormRect | null>(() => {
+    if (!block || coverFocused || editLayout !== 'focus') return null;
+    switch (selection.kind) {
+      case 'base': {
+        // A base slot is half the pair (or all of it on a double-spread) — its geometry is the
+        // template's, not the model's, so it is the one case that has to be derived.
+        if (block.template === 'double-spread') return FULL_PAGE;
+        return { x: selection.slot === 'right' ? 0.5 : 0, y: 0, w: 0.5, h: 1 };
+      }
+      case 'overlay':
+        return block.overlays.find((o) => o.id === selection.id) ?? null;
+      case 'text':
+        return block.texts.find((t) => t.id === selection.id) ?? null;
+      case 'qr':
+        return block.qrs.find((q) => q.id === selection.id) ?? null;
+      case 'sticker':
+        return block.stickers.find((s) => s.id === selection.id) ?? null;
+      default:
+        return FULL_PAGE;
+    }
+  }, [block, coverFocused, editLayout, selection]);
+
+  const barAnchor = useAnchorRect(pageElRef, selectionRect);
+
+  /** The photo in the selected frame, if the selection is a photo frame. */
+  const selectedFramePhoto = useMemo(() => {
+    if (!block) return undefined;
+    if (selection.kind === 'base') {
+      const id = selection.slot === 'right' ? block.photoIds[1] : block.photoIds[0];
+      return id ? photoMap.get(id) : undefined;
+    }
+    if (selection.kind === 'overlay') {
+      const id = block.overlays.find((o) => o.id === selection.id)?.photoId;
+      return id ? photoMap.get(id) : undefined;
+    }
+    return undefined;
+  }, [block, selection, photoMap]);
+
+  /** Enter in-canvas crop on whatever photo frame is selected. */
+  const startCrop = useCallback(() => {
+    if (!block || !selectedFramePhoto || selectedFramePhoto.status !== 'ready') return;
+    if (selection.kind === 'base') crop.begin({ blockKey: block.key, slot: selection.slot, photoId: selectedFramePhoto.id });
+    else if (selection.kind === 'overlay') crop.begin({ blockKey: block.key, overlayId: selection.id, photoId: selectedFramePhoto.id });
+  }, [block, selection, selectedFramePhoto, crop]);
 
   /**
    * SMART SUGGESTIONS read the photos the user is about to place: their tray SELECTION when they
@@ -1414,19 +1542,25 @@ export default function Builder({
         },
       },
       { combo: "mod+a", label: "Select all", group: "Selection", run: () => cmd.commands.selectAll.run() },
+      /**
+       * DELETE / BACKSPACE now run the priority-resolved `deleteSelection` rather than the frame
+       * -only `removeFromPage`. Selecting an overlay and pressing Delete removes THAT OVERLAY;
+       * it can no longer leave an empty container behind, and it can never reach the page.
+       * The ladder lives in the command layer — see `deleteSelection`.
+       */
       {
         combo: "Delete",
-        label: "Remove selection from page",
+        label: "Delete selection",
         group: "Editing",
-        when: () => cmd.commands.removeFromPage.enabled,
-        run: () => cmd.commands.removeFromPage.run(),
+        when: () => cmd.commands.deleteSelection.enabled,
+        run: () => cmd.commands.deleteSelection.run(),
       },
       {
         combo: "Backspace",
-        label: "Remove selection from page",
+        label: "Delete selection",
         group: "Editing",
-        when: () => cmd.commands.removeFromPage.enabled,
-        run: () => cmd.commands.removeFromPage.run(),
+        when: () => cmd.commands.deleteSelection.enabled,
+        run: () => cmd.commands.deleteSelection.run(),
       },
       {
         combo: "mod+d",
@@ -1634,55 +1768,75 @@ export default function Builder({
           <aside className="flex w-[284px] flex-col overflow-hidden">
             {railTab === 'images' && (
               <>
-                <div className="border-b border-border/70 p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    <h2 className="text-[13px] font-semibold tracking-tight text-foreground">Photos</h2>
+                {/*
+                  THE HEADER, COMPRESSED. This block used to run ~380px before a single thumbnail
+                  appeared: a 180px dropzone, a four-dot pipeline stepper, four large stat cards
+                  and a bordered quality card. On a laptop that left roughly two rows of photos
+                  visible in a panel whose entire purpose is browsing and dragging photos.
+                  Everything here is now horizontal and hairline-separated — same information,
+                  same controls, same click targets, about a third of the height. Every pixel
+                  saved goes to the grid below, which is the actual objective.
+                */}
+                <div className="space-y-2 border-b border-border/70 px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[12.5px] font-semibold tracking-tight text-foreground">Photos</h2>
                     <span
-                      className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+                      className={`ml-auto rounded-full px-1.5 py-px text-[10.5px] font-semibold tabular-nums ${
                         photos.length >= photoCap(size) ? 'bg-warning/15 text-warning ring-1 ring-warning/25' : 'bg-secondary text-secondary-foreground'
                       }`}
                     >
                       {photos.length} / {photoCap(size)}
                     </span>
                   </div>
+
                   <Uploader albumId={albumId} remaining={photoCap(size) - photos.length} uploads={uploads} />
-                  {/* Batch progress, the queue stepper, completion + failure feedback. */}
+
+                  {/* One line for the whole batch — renders nothing when nothing is in flight. */}
                   <SessionStatus
                     stats={uploads.stats}
                     activeSessions={uploads.activeSessions}
                     processing={pendingPhotos}
-                    processingSince={oldestProcessingSince}
                     failedUploads={uploads.stats.retryable}
                     rejectedPhotos={rejectedPhotos}
                   />
-                  {/* Live photo indicators — capacity / placed / remaining frames / unused. */}
-                  <div className="mt-3 grid grid-cols-2 gap-1.5 text-center">
-                    <PhotoStat label="Capacity" value={totalSlots} />
-                    <PhotoStat label="Placed" value={placedCount} />
-                    <PhotoStat label="Empty frames" value={emptyBaseSlots} tone={emptyBaseSlots > 0 ? 'warning' : 'ok'} />
-                    <PhotoStat label="Unused" value={readyUnplaced.length} tone={readyUnplaced.length > 0 ? 'muted' : 'ok'} />
+
+                  {/*
+                    Stats + quality share ONE bordered container split by hairlines, rather than
+                    five separate cards each paying for its own border, radius and padding. The
+                    numbers are unchanged and all four labels stay — they just read as a spec
+                    sheet (label left, value right) instead of four tiles.
+                  */}
+                  <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+                    <div className="grid grid-cols-2 gap-x-px gap-y-px bg-border/50">
+                      <PhotoStat label="Capacity" value={totalSlots} />
+                      <PhotoStat label="Placed" value={placedCount} />
+                      <PhotoStat label="Empty" value={emptyBaseSlots} tone={emptyBaseSlots > 0 ? 'warning' : 'ok'} />
+                      <PhotoStat label="Unused" value={readyUnplaced.length} tone={readyUnplaced.length > 0 ? 'muted' : 'ok'} />
+                    </div>
+                    {/* Quality — a status ROW attached to the stats, not a card of its own. Same
+                        click behaviour, same destination, ~20px instead of ~46px. */}
+                    <button
+                      type="button"
+                      onClick={() => setRailTab('quality')}
+                      className="flex w-full items-center gap-1.5 border-t border-border/70 px-2 py-1.5 text-left transition-colors duration-150 hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-studio-bright"
+                    >
+                      {quality.clean ? (
+                        <CheckCircle2 className="h-3 w-3 flex-none text-studio" />
+                      ) : (
+                        <AlertTriangle className="h-3 w-3 flex-none text-warning" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
+                        {quality.clean
+                          ? 'Quality looks good'
+                          : `${quality.attention.length} ${quality.attention.length === 1 ? 'thing' : 'things'} worth fixing`}
+                      </span>
+                      <ChevronRight className="h-3 w-3 flex-none text-muted-foreground/60" />
+                    </button>
                   </div>
-                  {/* Quality, one line, where the photos are — the discoverability path into the
-                      panel for someone who never reads a rail they haven't clicked. */}
-                  <button
-                    type="button"
-                    onClick={() => setRailTab('quality')}
-                    className="mt-2 flex w-full items-center gap-2 rounded-lg border border-border/70 bg-card px-2.5 py-2 text-left transition-all duration-150 ease-glide hover:border-studio-bright/40 hover:shadow-xs active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
-                  >
-                    {quality.clean ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 flex-none text-studio" />
-                    ) : (
-                      <AlertTriangle className="h-3.5 w-3.5 flex-none text-warning" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-foreground">
-                      {quality.clean
-                        ? 'Album quality looks good'
-                        : `${quality.attention.length} ${quality.attention.length === 1 ? 'thing' : 'things'} worth fixing`}
-                    </span>
-                    <ChevronRight className="h-3.5 w-3.5 flex-none text-muted-foreground/60" />
-                  </button>
                 </div>
-                <div className="ms-scroll flex-1 overflow-y-auto p-4">
+                {/* The grid gets the reclaimed height AND slightly tighter gutters — the panel is
+                    284px wide, so 4px on each side is another few pixels of thumbnail. */}
+                <div className="ms-scroll flex-1 overflow-y-auto px-3 pb-3 pt-2.5">
                   <TrayToolbar
                     filters={tray.filters}
                     parsedSearch={tray.parsedSearch}
@@ -1892,7 +2046,21 @@ export default function Builder({
               onDuplicateQr={duplicateCoverQr}
             />
           ) : (
-          <div className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10">
+          /**
+           * THE CANVAS, EXPANDED (Pass 2). With the 300px inspector gone the spread has the
+           * width, so the padding tightens (a big page needs less framing, not more) and the
+           * focus view's max width grows from 1100px to 1400px — the reclaimed space becomes
+           * PAGE rather than margin, which was the point of removing the panel.
+           *
+           * A pointer-down anywhere on the empty canvas finishes crop mode: "click outside to
+           * finish" with no modal, no confirm, no Done button required.
+           */
+          <div
+            className="ms-scroll relative min-h-0 flex-1 overflow-auto p-4 lg:p-7"
+            onPointerDown={() => {
+              if (crop.target) crop.end();
+            }}
+          >
             {blocks.length === 0 ? (
               <EmptyCanvas
                 blueprintMode={blueprintMode}
@@ -1925,7 +2093,7 @@ export default function Builder({
               </div>
             ) : (
               block && (
-                <div className="mx-auto" style={{ width: `${zoomPct}%`, maxWidth: zoomPct <= 100 ? '1100px' : 'none' }}>
+                <div className="mx-auto" style={{ width: `${zoomPct}%`, maxWidth: zoomPct <= 100 ? '1400px' : 'none' }}>
                   <BlockCard
                     api={api}
                     block={block}
@@ -1935,7 +2103,20 @@ export default function Builder({
                     taskFor={taskFor}
                     availablePhotos={availablePhotos}
                     selection={selection}
-                    onSelect={setSelection}
+                    /**
+                     * Clicking empty page area clears BOTH stores. Previously it reset only the
+                     * single-element selection, so the multi-select store could keep holding an
+                     * overlay the user had visibly deselected — and a Delete keystroke would
+                     * then act on it. "Deselect" now means deselect.
+                     */
+                    onSelect={(s) => {
+                      setSelection(s);
+                      if (s.kind === 'none') sel.clear();
+                      // Selecting anything else finishes an in-progress crop — the crop layer
+                      // stops propagation while it is active, so this only fires for a
+                      // deliberate click elsewhere, which is exactly "click outside to finish".
+                      if (crop.target) crop.end();
+                    }}
                     /**
                      * Multi-selection on the canvas. `onSelectTarget` carries the modifier state
                      * to the SAME selection store the tray uses; the legacy single `onSelect`
@@ -1973,6 +2154,11 @@ export default function Builder({
                     }}
                     showGuides={showGuides}
                     readinessOf={readinessOf}
+                    onPageEl={(el) => {
+                      pageElRef.current = el;
+                    }}
+                    cropTarget={crop.target}
+                    cropHandlers={crop.handlers}
                   />
                 </div>
               )
@@ -2047,6 +2233,48 @@ export default function Builder({
             onDismiss={sel.clear}
           />
 
+          {/*
+            THE FLOATING CONTEXT BAR — what the right-hand inspector became.
+
+            It renders only in the focus view of a content spread (the grid overview has no
+            single selection to describe, and the cover has its own panel). Everything it
+            triggers is an existing command or `api` primitive; see `_context-bar`.
+          */}
+          {!coverFocused && editLayout === 'focus' && block && (
+            <ContextBar
+              anchor={barAnchor}
+              block={block}
+              index={cur}
+              total={blocks.length}
+              size={size}
+              api={api}
+              commands={cmd}
+              selection={selection}
+              onSelect={setSelection}
+              photoMap={photoMap}
+              selectedPhoto={selectedFramePhoto}
+              pairAspect={pairA}
+              showGuides={showGuides}
+              onToggleGuides={() => setShowGuides((v) => !v)}
+              onReplace={(t) =>
+                setPickerFor(t.overlayId ? { kind: 'overlay', overlayId: t.overlayId } : { kind: 'base', slot: t.slot ?? 'left' })
+              }
+              onCrop={startCrop}
+              cropping={!!crop.target}
+              onEndCrop={crop.end}
+              onAddText={() => addText('heading')}
+              onAddPhotoOverlay={() => setPickerFor({ kind: 'add' })}
+              onAddQr={() => addQr('')}
+              onOpenLayouts={() => setRailTab('layouts')}
+              onPhotoChange={onPhotoChange}
+              onPhotoCommit={onPhotoCommit}
+              onEscape={() => {
+                setSelection(NO_SELECTION);
+                sel.clear();
+              }}
+            />
+          )}
+
           {/* message toast — over either canvas */}
           {message && (
             <div className={`animate-scale-in pointer-events-none absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded-xl border px-3.5 py-2 text-[13px] font-medium shadow-elevated ${message.kind === 'ok' ? 'border-studio/25 bg-studio-soft text-studio' : 'border-destructive/20 bg-destructive/5 text-destructive'}`}>
@@ -2055,7 +2283,22 @@ export default function Builder({
           )}
         </main>
 
-        {/* RIGHT — inspector (cover-aware: cover settings / selected element) */}
+        {/*
+          RIGHT — the cover designer, and ONLY the cover designer (Pass 2).
+
+          The permanent inspector is gone from page editing: every page and element control now
+          lives in the floating context bar on the canvas, and those ~300px went to the spread.
+
+          The cover keeps its panel deliberately, and it is not an exception made out of laziness.
+          A content page is entirely canvas objects, so every control has something on screen to
+          attach to. A cover is not: its title, subtitle, author, spine text, spine colour, layout
+          preset, template gallery and back-cover composition are STRUCTURED FIELDS with no
+          canvas representation to float beside. Relocating them to a bar would mean inventing
+          on-canvas handles for a book spine — which is a redesign of the cover, not this pass.
+          So the rail is now conditional rather than permanent: it exists in cover mode, and does
+          not exist anywhere else.
+        */}
+        {coverFocused && (
         <aside className="flex w-[300px] flex-none flex-col border-l border-border/70 bg-card">
           {coverFocused ? (
             coverSel.kind === 'spine' ? (
@@ -2116,24 +2359,9 @@ export default function Builder({
                 />
               </>
             )
-          ) : (
-            <Inspector
-              api={api}
-              block={block}
-              index={cur}
-              total={blocks.length}
-              size={size}
-              selection={selection}
-              photoMap={photoMap}
-              showGuides={showGuides}
-              onToggleGuides={() => setShowGuides((v) => !v)}
-              onSelect={setSelection}
-              onEditPhoto={openEditor}
-              onPhotoChange={onPhotoChange}
-              onPhotoCommit={onPhotoCommit}
-            />
-          )}
+          ) : null}
         </aside>
+        )}
       </div>
 
       {/* BOTTOM — timeline (the Cover is page 0, then the content spreads) */}
@@ -2278,6 +2506,25 @@ export default function Builder({
       {/* Context menu — pure renderer over the command layer; holds no editing logic. */}
       <ContextMenu state={contextMenu.menu} onClose={contextMenu.close} />
 
+      {/* The canvas's own photo picker, hosted here so the floating toolbar can open it.
+          Same component the canvas has always used — see `PhotoPicker` in `_block`. */}
+      {pickerFor && block && (
+        <PhotoPicker
+          title={pickerFor.kind === 'add' ? 'Add a photo overlay' : 'Choose a photo'}
+          available={availablePhotos}
+          onClose={() => setPickerFor(null)}
+          onPick={(id) => {
+            if (pickerFor.kind === 'base') api.assignBaseSlot(block.key, pickerFor.slot, id);
+            else if (pickerFor.kind === 'overlay') api.replaceOverlay(block.key, pickerFor.overlayId, id);
+            else {
+              const newId = api.addOverlay(block.key, id);
+              if (newId) setSelection({ kind: 'overlay', id: newId });
+            }
+            setPickerFor(null);
+          }}
+        />
+      )}
+
       {/* Submission validation (advisory) — checking overlay while saves flush, then the dialog. */}
       <LoadingOverlay open={checking} message="Checking your album…" />
       {validation && !confirmOpen && (
@@ -2400,14 +2647,21 @@ export default function Builder({
   );
 }
 
-/** Compact photo-placement stat tile (builder Images panel). */
+/**
+ * Compact photo-placement stat (builder Images panel).
+ *
+ * Was a 52px tile with the value stacked over the label; now a ~22px ROW with the label left and
+ * the value right. Same four facts, a quarter of the height, and the numbers line up in a column
+ * (`tabular-nums`) so the set can be scanned as a group rather than read one tile at a time.
+ * Borders come from the parent's hairline grid — each cell pays for none of its own chrome.
+ */
 function PhotoStat({ label, value, tone = 'ok' }: { label: string; value: number; tone?: 'ok' | 'warning' | 'muted' }) {
   const toneCls =
     tone === 'warning' ? 'text-warning' : tone === 'muted' ? 'text-muted-foreground' : 'text-foreground';
   return (
-    <div className="rounded-lg border bg-card px-1.5 py-2">
-      <div className={`text-base font-semibold tabular-nums ${toneCls}`}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="flex items-baseline justify-between gap-1.5 bg-card px-2 py-1">
+      <span className="truncate text-[10.5px] text-muted-foreground">{label}</span>
+      <span className={`flex-none text-[12px] font-semibold tabular-nums ${toneCls}`}>{value}</span>
     </div>
   );
 }

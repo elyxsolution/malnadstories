@@ -113,19 +113,12 @@ export function cropToPixels(
   };
 }
 
-// ── long-processing escalation ────────────────────────────────────────────────────
-
-/** Copy for a photo that has been processing for `elapsedMs`. Never implies failure. */
-export function processingLabel(elapsedMs: number | null): string {
-  if (elapsedMs === null) return 'Processing';
-  if (elapsedMs < 15_000) return 'Processing';
-  if (elapsedMs < 45_000) return 'Enhancing';
-  return 'Almost there';
-}
-
-/** The longer form, for the status strip where there is room for a sentence. */
-export function processingSentence(elapsedMs: number | null): string {
-  if (elapsedMs === null || elapsedMs < 15_000) return 'Processing your photos…';
-  if (elapsedMs < 45_000) return 'Enhancing your photos…';
-  return 'This is taking a little longer than usual — still working.';
-}
+// ── long-processing escalation (REMOVED) ─────────────────────────────────────────
+//
+// `processingLabel` / `processingSentence` used to escalate a photo's copy on a shared clock:
+// "Processing" → "Enhancing" → "Almost there". Real use showed this was narrating OUR pipeline
+// rather than answering the user's question, which is only ever "can I use this photo yet?".
+// The five internal phases now collapse to `uploading | failed | ready` in `badgeState`
+// (`_upload-badge`), and with the copy gone so is the per-badge 5s clock subscription that fed
+// it. The phases themselves are unchanged — see `photoUiState` above; they simply stopped being
+// something the interface talks about.

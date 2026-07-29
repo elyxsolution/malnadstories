@@ -18,17 +18,24 @@ import {
   FlipVertical,
   Lock,
   LockOpen,
+  RotateCcw,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Section, Row, Slider, Toggle } from './_controls';
 import FontPicker from './_font-picker';
 import { ColorField } from './_color-picker';
-import type { QrElement, StickerElement, TextElement } from '@/lib/builder/model';
+import type { EditConfig, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
 /**
  * Generic, callback-driven element inspectors — NOT bound to the page (`BuilderApi`) or the
- * cover hook. Both the page Inspector and the cover Inspector render these with their own
- * `onChange`/`onDelete`, so text styling is byte-for-byte identical on a content page and on
- * the cover (the "one continuous editor" requirement).
+ * cover hook. Every host renders these with its own `onChange`/`onDelete`, so an element's
+ * controls are byte-for-byte identical wherever they appear.
+ *
+ * PASS 2 made this the single home for detailed element controls. The right-hand Inspector
+ * panel is gone; these components now render inside the floating context bar's popovers on
+ * content pages, and inside the right rail on the cover — same components, two hosts. That is
+ * what "relocate, don't remove" means in practice: not one control was rewritten or dropped,
+ * they simply stopped needing a permanent column to live in.
  */
 
 export function fmt(v: number) {
@@ -151,6 +158,97 @@ export function TextInspector({
     </div>
   );
 }
+
+/**
+ * PHOTO ADJUSTMENTS — tone, finish and reset for one placed photo.
+ *
+ * Moved here verbatim from the old right-hand `Inspector` (Pass 2) and made callback-driven so
+ * it matches its siblings above. Nothing about the controls changed: same seven sliders, same
+ * ranges, same live-then-commit contract (`onChange` updates local state on every frame,
+ * `onCommit` persists on release through the existing `savePhotoEdit`). Only its host moved —
+ * from a permanent column to a popover on the canvas context bar.
+ *
+ * GEOMETRY IS DELIBERATELY ABSENT. Crop, zoom, rotate and flip are now direct-manipulation
+ * actions on the canvas itself, so putting duplicates of them in a panel would be exactly the
+ * property-panel habit this pass exists to remove.
+ */
+export function PhotoAdjustInspector({
+  edit,
+  onChange,
+  onCommit,
+}: {
+  edit: EditConfig;
+  onChange: (edit: EditConfig) => void;
+  onCommit: (edit: EditConfig) => void;
+}) {
+  const set = (patch: Partial<EditConfig>) => onChange({ ...edit, ...patch });
+
+  const adj: { key: keyof EditConfig; label: string; min: number; max: number; def: number }[] = [
+    { key: 'brightness', label: 'Brightness', min: 0.4, max: 1.8, def: 1 },
+    { key: 'contrast', label: 'Contrast', min: 0.4, max: 1.8, def: 1 },
+    { key: 'saturation', label: 'Saturation', min: 0, max: 2, def: 1 },
+    { key: 'sharpness', label: 'Sharpness', min: 0, max: 2, def: 0 },
+    { key: 'opacity', label: 'Opacity', min: 0.1, max: 1, def: 1 },
+    { key: 'borderRadius', label: 'Round corners', min: 0, max: 0.5, def: 0 },
+    { key: 'shadow', label: 'Shadow', min: 0, max: 1, def: 0 },
+  ];
+
+  return (
+    <div className="ms-scroll flex-1 overflow-y-auto">
+      <Section title="Adjust">
+        {adj.map((a) => (
+          <Row key={a.key} label={a.label} hint={fmt((edit[a.key] as number) ?? a.def)}>
+            <Slider
+              value={(edit[a.key] as number) ?? a.def}
+              min={a.min}
+              max={a.max}
+              step={0.01}
+              ariaLabel={a.label}
+              onChange={(v) => set({ [a.key]: v } as Partial<EditConfig>)}
+              onCommit={() => onCommit(edit)}
+            />
+          </Row>
+        ))}
+        <Toggle
+          label="Black & white"
+          checked={(edit.grayscale ?? 0) > 0}
+          onChange={(v) => {
+            const next = { ...edit, grayscale: v ? 1 : 0 };
+            onChange(next);
+            onCommit(next);
+          }}
+        />
+      </Section>
+
+      <Section>
+        <button
+          type="button"
+          onClick={() => {
+            const reset = {
+              ...edit,
+              brightness: 1,
+              contrast: 1,
+              saturation: 1,
+              grayscale: 0,
+              sharpness: 0,
+              opacity: 1,
+              borderRadius: 0,
+              shadow: 0,
+            };
+            onChange(reset);
+            onCommit(reset);
+          }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-card py-2 text-[12px] font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+        >
+          <RotateCcw className="h-3.5 w-3.5" /> Reset adjustments
+        </button>
+      </Section>
+    </div>
+  );
+}
+
+/** Icon marker re-exported so the context bar can label the photo popover consistently. */
+export const PhotoAdjustIcon = ImageIcon;
 
 /** Sticker editor (opacity / rotation / layer order / duplicate / delete). Used on pages AND the cover. */
 export function StickerInspector({

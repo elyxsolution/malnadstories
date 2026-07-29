@@ -1,19 +1,12 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import {
-  X,
-  Replace,
-  Crop,
-  SlidersHorizontal,
-  Copy,
-  Pencil,
-  ImagePlus,
-} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Crop, SlidersHorizontal, ImagePlus } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
 import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
-import { ElementControls, CtlBtn, InlineTextEditor } from './_element-bits';
+import { InlineTextEditor } from './_element-bits';
+import type { CropTarget } from './_use-canvas-crop';
 import type { Photo } from '@/lib/builder/photo';
 import type { UploadTask } from '@/lib/uploads';
 import { photoUiState } from './_photo-state';
@@ -56,6 +49,9 @@ export default function BlockCard({
   onTapPlaceBase,
   showGuides = false,
   readinessOf,
+  onPageEl,
+  cropTarget = null,
+  cropHandlers,
 }: {
   /**
    * MULTI-SELECTION (Phase 6). Optional so this component keeps working unchanged for any host
@@ -90,11 +86,25 @@ export default function BlockCard({
    * without a quality report (the admin cover designer) are unaffected.
    */
   readinessOf?: (key: string) => Readiness | undefined;
+  /**
+   * Publishes the page element upward (Pass 2). The floating context bar anchors itself by
+   * measuring THIS box and doing arithmetic against an element's normalized rect — see
+   * `useAnchorRect`. Reporting the node is far cheaper than every element reporting its own.
+   */
+  onPageEl?: (el: HTMLDivElement | null) => void;
+  /** The frame currently in in-canvas crop mode, if any (`useCanvasCrop`). */
+  cropTarget?: CropTarget | null;
+  cropHandlers?: CropHandlers;
 }) {
   const { page, pair } = useBuilderDimensions();
   const baseReadiness = (slot: BaseSlot) => readinessOf?.(frameKey({ kind: 'base', blockKey: block.key, blockIndex: index, slot }));
   const overlayReadiness = (id: string) => readinessOf?.(frameKey({ kind: 'overlay', blockKey: block.key, blockIndex: index, id }));
   const pageRef = useRef<HTMLDivElement>(null);
+
+  // Which frame on THIS spread is being cropped — resolved once rather than per frame.
+  const cropOnThisBlock = cropTarget && cropTarget.blockKey === block.key ? cropTarget : null;
+  const croppingSlot = cropOnThisBlock?.slot ?? null;
+  const croppingOverlay = cropOnThisBlock?.overlayId ?? null;
   const [snap, setSnap] = useState<SnapLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [picking, setPicking] = useState<
@@ -130,7 +140,10 @@ export default function BlockCard({
 
       {/* The page — premium paper with fold, shadow, page numbers. Click empty area = deselect. */}
       <div
-        ref={pageRef}
+        ref={(el) => {
+          (pageRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+          onPageEl?.(el);
+        }}
         onPointerDown={() => onSelect({ kind: 'none' })}
         className="album-page relative w-full select-none overflow-hidden rounded-[14px]"
         style={{ aspectRatio: pair, containerType: 'inline-size' }}
@@ -176,6 +189,8 @@ export default function BlockCard({
             onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], pair, true) : undefined}
             onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
             readiness={baseReadiness('image')}
+            cropping={croppingSlot === 'image'}
+            cropHandlers={cropHandlers}
           />
         ) : (
           <>
@@ -212,6 +227,8 @@ export default function BlockCard({
                 onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], page, false) : undefined}
                 onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
                 readiness={baseReadiness('left')}
+                cropping={croppingSlot === 'left'}
+                cropHandlers={cropHandlers}
               />
             </div>
             <div className="absolute left-1/2 top-0 h-full w-1/2">
@@ -247,13 +264,15 @@ export default function BlockCard({
                 onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], page, false) : undefined}
                 onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
                 readiness={baseReadiness('right')}
+                cropping={croppingSlot === 'right'}
+                cropHandlers={cropHandlers}
               />
             </div>
           </>
         )}
 
         {/* Overlays (floating framed photos — or empty placeholder containers) */}
-        {block.overlays.map((o, i) => {
+        {block.overlays.map((o) => {
           const photo = o.photoId ? photoMap.get(o.photoId) : undefined;
           // Stable client id (guaranteed by `useBlocks`). Used for the React key, for selection
           // and for every mutation, so reordering or deleting a sibling can no longer make a
@@ -276,42 +295,19 @@ export default function BlockCard({
               /* Sibling overlays feed the edge + equal-spacing guides. */
               peers={block.overlays.filter((o) => o.id !== oid).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))}
               className="overflow-hidden rounded-md border-2 border-white shadow-md"
-              controls={
-                <ElementControls
-                  onForward={i < block.overlays.length - 1 ? () => api.reorderOverlay(block.key, oid, 1) : undefined}
-                  onBackward={i > 0 ? () => api.reorderOverlay(block.key, oid, -1) : undefined}
-                  onDelete={() => {
-                    api.removeOverlay(block.key, oid);
-                    onSelect({ kind: 'none' });
-                  }}
-                  extra={
-                    <>
-                      <CtlBtn label="Replace photo" onClick={() => setPicking({ kind: 'replace', overlayId: oid })}>
-                        <Replace />
-                      </CtlBtn>
-                      {photo && o.photoId && (
-                        <CtlBtn label="Edit photo" onClick={() => onEditPhoto(o.photoId!)}>
-                          <SlidersHorizontal />
-                        </CtlBtn>
-                      )}
-                      <CtlBtn
-                        label="Duplicate overlay"
-                        onClick={() => {
-                          const ni = api.duplicateOverlay(block.key, oid);
-                          if (ni !== undefined) onSelect({ kind: 'overlay', id: ni });
-                        }}
-                      >
-                        <Copy />
-                      </CtlBtn>
-                    </>
-                  }
-                />
-              }
+              /**
+               * NO INLINE CONTROL BAR (Pass 2). Replace / edit / duplicate / layer / delete all
+               * live in the floating context bar now, which has room for the full photo toolset
+               * instead of the four buttons that fitted above an overlay. `Movable` still accepts
+               * `controls` — the cover canvas continues to use it, unchanged.
+               */
             >
               <OverlayContent
                 photo={photo}
                 task={photo ? taskFor?.(photo.id) : undefined}
                 readiness={overlayReadiness(oid)}
+                cropping={croppingOverlay === oid}
+                cropHandlers={cropHandlers}
                 onDropPhoto={(id) => api.replaceOverlay(block.key, oid, id)}
               />
             </Movable>
@@ -330,31 +326,23 @@ export default function BlockCard({
             selected={sel({ kind: 'text', id: t.id })}
             containerRef={pageRef}
             ariaLabel="Text"
-            onSelect={() => onSelect({ kind: 'text', id: t.id })}
+            /**
+             * BOTH STORES, ALWAYS. Text / sticker / QR used to update only the single-element
+             * `selection` and leave the multi-select store holding whatever was picked before —
+             * so selecting a text with an overlay still in that store made a Delete keystroke
+             * act on the overlay. `SelectionTarget` has always had these kinds; they were simply
+             * never wired. A plain click replaces, so the two stores now agree by construction.
+             */
+            onSelect={() => {
+              onSelect({ kind: 'text', id: t.id });
+              onSelectTarget?.({ kind: 'text', blockKey: block.key, id: t.id }, { meta: false, shift: false });
+            }}
             onChange={(r) => api.patchText(block.key, t.id, r)}
             onRotate={(deg) => api.patchText(block.key, t.id, { rotation: deg })}
             onSnap={setSnap}
+            /* Double-click still opens the inline editor — the canvas-first way to edit words.
+               Every other text action now lives in the context bar's Text toolbar. */
             onDoubleClick={() => setEditingText(t.id)}
-            controls={
-              <ElementControls
-                onForward={() => api.reorderText(block.key, t.id, 1)}
-                onBackward={() => api.reorderText(block.key, t.id, -1)}
-                onDelete={() => {
-                  api.removeText(block.key, t.id);
-                  onSelect({ kind: 'none' });
-                }}
-                extra={
-                  <>
-                    <CtlBtn label="Edit text" onClick={() => setEditingText(t.id)}>
-                      <Pencil />
-                    </CtlBtn>
-                    <CtlBtn label="Duplicate" onClick={() => api.duplicateText(block.key, t.id)}>
-                      <Copy />
-                    </CtlBtn>
-                  </>
-                }
-              />
-            }
           >
             {editingText === t.id ? (
               <InlineTextEditor
@@ -382,19 +370,12 @@ export default function BlockCard({
             selected={sel({ kind: 'qr', id: q.id })}
             containerRef={pageRef}
             ariaLabel="QR code"
-            onSelect={() => onSelect({ kind: 'qr', id: q.id })}
+            onSelect={() => {
+              onSelect({ kind: 'qr', id: q.id });
+              onSelectTarget?.({ kind: 'qr', blockKey: block.key, id: q.id }, { meta: false, shift: false });
+            }}
             onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w, pair) })}
             onSnap={setSnap}
-            controls={
-              <ElementControls
-                onForward={undefined}
-                onBackward={undefined}
-                onDelete={() => {
-                  api.removeQr(block.key, q.id);
-                  onSelect({ kind: 'none' });
-                }}
-              />
-            }
           >
             <QrContent el={q} />
           </Movable>
@@ -413,31 +394,13 @@ export default function BlockCard({
             selected={sel({ kind: 'sticker', id: s.id })}
             containerRef={pageRef}
             ariaLabel="Sticker"
-            onSelect={() => onSelect({ kind: 'sticker', id: s.id })}
+            onSelect={() => {
+              onSelect({ kind: 'sticker', id: s.id });
+              onSelectTarget?.({ kind: 'sticker', blockKey: block.key, id: s.id }, { meta: false, shift: false });
+            }}
             onChange={(r) => api.patchSticker(block.key, s.id, r)}
             onRotate={(deg) => api.patchSticker(block.key, s.id, { rotation: deg })}
             onSnap={setSnap}
-            controls={
-              <ElementControls
-                onForward={() => api.reorderSticker(block.key, s.id, 1)}
-                onBackward={() => api.reorderSticker(block.key, s.id, -1)}
-                onDelete={() => {
-                  api.removeSticker(block.key, s.id);
-                  onSelect({ kind: 'none' });
-                }}
-                extra={
-                  <CtlBtn
-                    label="Duplicate"
-                    onClick={() => {
-                      const ni = api.duplicateSticker(block.key, s.id);
-                      if (ni) onSelect({ kind: 'sticker', id: ni });
-                    }}
-                  >
-                    <Copy />
-                  </CtlBtn>
-                }
-              />
-            }
           >
             <StickerContent el={s} url={stickerUrlFor?.(s.stickerId)} />
           </Movable>
@@ -508,15 +471,69 @@ export default function BlockCard({
  * exactly like a base slot, so a user fills a placeholder overlay by dragging onto it. Dropping
  * onto a filled overlay replaces its photo. The parent Movable still handles select/drag/resize.
  */
+/** The pointer/keyboard surface `useCanvasCrop` supplies. Passed straight through to the layer. */
+export type CropHandlers = {
+  onPointerDown: (e: React.PointerEvent) => void;
+  onPointerMove: (e: React.PointerEvent) => void;
+  onPointerUp: (e: React.PointerEvent) => void;
+  onWheel: (e: React.WheelEvent) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+};
+
+/**
+ * IN-CANVAS CROP LAYER — a transparent capture surface laid over the frame being cropped.
+ *
+ * It draws nothing but affordance: a bright boundary saying "this is what will print", a
+ * rule-of-thirds grid to compose against, and a dimming scrim over everything else on the page
+ * (rendered by the caller) so the frame is unmistakably the subject. The photo underneath is the
+ * live preview — it is the SAME `PhotoFrame` as always, re-rendering from the same `EditConfig`
+ * the drag is mutating, so what you drag is exactly what prints.
+ *
+ * It takes focus on mount so arrow keys nudge and Escape finishes without touching the mouse.
+ */
+function CropLayer({ handlers }: { handlers?: CropHandlers }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => ref.current?.focus(), []);
+  return (
+    <div
+      ref={ref}
+      role="application"
+      aria-label="Crop: drag to reposition, scroll or +/− to zoom, Escape to finish"
+      tabIndex={0}
+      onPointerDown={handlers?.onPointerDown}
+      onPointerMove={handlers?.onPointerMove}
+      onPointerUp={handlers?.onPointerUp}
+      onPointerCancel={handlers?.onPointerUp}
+      onWheel={handlers?.onWheel}
+      onKeyDown={handlers?.onKeyDown}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="absolute inset-0 z-[9] cursor-move touch-none select-none outline-none ring-2 ring-inset ring-studio-bright"
+    >
+      {/* Rule of thirds — the one compositional aid worth drawing while repositioning. */}
+      <span aria-hidden className="pointer-events-none absolute inset-0">
+        <span className="absolute inset-y-0 left-1/3 w-px bg-white/45" />
+        <span className="absolute inset-y-0 left-2/3 w-px bg-white/45" />
+        <span className="absolute inset-x-0 top-1/3 h-px bg-white/45" />
+        <span className="absolute inset-x-0 top-2/3 h-px bg-white/45" />
+      </span>
+    </div>
+  );
+}
+
 function OverlayContent({
   photo,
   task,
   readiness,
+  cropping,
+  cropHandlers,
   onDropPhoto,
 }: {
   photo?: Photo;
   task?: UploadTask;
   readiness?: Readiness;
+  cropping?: boolean;
+  cropHandlers?: CropHandlers;
   onDropPhoto: (photoId: string) => void;
 }) {
   const [over, setOver] = useState(false);
@@ -542,8 +559,9 @@ function OverlayContent({
           <div className={`h-full w-full ${stateOpacityClass(uiState)}`}>
             <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={photo.edit} alt="overlay" />
           </div>
-          <UploadBadge state={uiState} progress={task?.progress} since={photo?.processingSince ?? null} size="compact" />
+          <UploadBadge state={uiState} progress={task?.progress} size="compact" />
           <ReadinessBadge readiness={readiness} size="compact" />
+          {cropping && <CropLayer handlers={cropHandlers} />}
         </>
       ) : (
         <div className="flex h-full w-full flex-col items-center justify-center gap-1 border border-dashed border-studio/40 bg-studio-soft/60 text-center">
@@ -586,6 +604,8 @@ function BaseSlotView({
   onCrop,
   onEdit,
   readiness,
+  cropping,
+  cropHandlers,
 }: {
   photo?: Photo;
   task?: UploadTask;
@@ -593,6 +613,9 @@ function BaseSlotView({
   selected: boolean;
   /** Print readiness for this frame (Phase 7). Draws nothing unless it says something. */
   readiness?: Readiness;
+  /** This base slot is in in-canvas crop mode (Pass 2). */
+  cropping?: boolean;
+  cropHandlers?: CropHandlers;
   /** Part of a multi-selection (Phase 6) — drawn with the same ring as the tray. */
   multiSelected?: boolean;
   /** Smart Replace: the photo that would land here if dropped now. Null when not hovering. */
@@ -704,11 +727,12 @@ function BaseSlotView({
 
           {/* An optimistic photo on the page says so quietly — the photo stays the hero. */}
           <span className="z-[6]">
-            <UploadBadge state={uiState} progress={task?.progress} since={photo?.processingSince ?? null} size="compact" />
+            <UploadBadge state={uiState} progress={task?.progress} size="compact" />
           </span>
           {/* Bottom-left, so it never collides with the upload pill (top-left) or the slot
               controls (top-right). Hidden mid-drag — a drop preview shouldn't be judged. */}
           {!incomingPreviewUrl && !isDragSource && <ReadinessBadge readiness={readiness} size="compact" />}
+          {cropping && <CropLayer handlers={cropHandlers} />}
           <div className="pointer-events-none absolute inset-x-0 top-0 z-[6] h-14 bg-gradient-to-b from-black/25 to-transparent opacity-0 transition-opacity duration-200 group-hover/base:opacity-100" />
           {/* Filled base slot: dropping REPLACES the current photo — name it, once, small. */}
           {over && (
@@ -804,7 +828,12 @@ function SlotBtn({
 }
 
 // ── Photo picker (base / overlay replace) ─────────────────────────────────────────
-function PhotoPicker({
+/**
+ * Exported (Pass 2) so the floating toolbar's "Replace" opens the SAME picker the canvas has
+ * always used, hosted by the builder rather than by this component's local state. One picker,
+ * two triggers — not a second implementation living next to the toolbar.
+ */
+export function PhotoPicker({
   title,
   available,
   onPick,

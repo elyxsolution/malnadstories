@@ -3,12 +3,13 @@
 import { useCallback, useMemo } from 'react';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
-import type { BuilderApi, BaseSlot } from './_use-builder';
+import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
 import {
   selectedBlockKeys,
   selectedFrames,
   selectedPhotoIds,
   type SelectionState,
+  type SelectionTarget,
 } from './_selection-model';
 import { LABEL_META, PHOTO_LABELS, type PhotoLabel } from './_photo-labels';
 
@@ -63,6 +64,7 @@ export type CommandId =
   | 'undo'
   | 'redo'
   | 'toggleFavourite'
+  | 'deleteSelection'
   | LabelCommandId;
 
 export type Command = {
@@ -107,12 +109,27 @@ export type CommandDeps = {
   };
   /** Told which layout a duplicated page was built on, so layout memory can record it. */
   onDuplicatedPreset?: (presetKey: string | undefined) => void;
+  /**
+   * The FOCUSED spread and the single element selected on it.
+   *
+   * Two selection stores coexist by design: the multi-select store (`selection`, above) spans
+   * pages and holds frames + tray photos, while text / stickers / QR are only ever selected one
+   * at a time on the focused spread and live in the builder's `Selection` union. Delete has to
+   * consult BOTH to know what the user actually means, so the resolution lives here — in the
+   * command layer — rather than in a keyboard handler that would inevitably drift from it.
+   */
+  focus?: {
+    blockKey: string | null;
+    element: Selection;
+    /** Reset the element selection after deleting it, so the inspector isn't left on a dead id. */
+    clearElement: () => void;
+  };
 };
 
-/** Rotate 90° clockwise, wrapping — the same 0/90/180/270 vocabulary `EditConfig` already uses. */
-function nextRotation(current: EditConfig['rotate']): 0 | 90 | 180 | 270 {
+/** Rotate 90° in either direction, wrapping — the 0/90/180/270 vocabulary `EditConfig` uses. */
+function nextRotation(current: EditConfig['rotate'], dir: 1 | -1 = 1): 0 | 90 | 180 | 270 {
   const r = current ?? 0;
-  return (((r + 90) % 360) as 0 | 90 | 180 | 270);
+  return (((r + dir * 90 + 360) % 360) as 0 | 90 | 180 | 270);
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many);
@@ -133,6 +150,7 @@ export function useCommands(deps: CommandDeps) {
     labels,
     favourites,
     onDuplicatedPreset,
+    focus,
   } = deps;
 
   const photoIds = selectedPhotoIds(selection);
@@ -234,18 +252,36 @@ export function useCommands(deps: CommandDeps) {
    * operation rather than a layout one — it does not enter the block history, but it IS applied
    * to all selected photos in one gesture and persisted through the existing action.
    */
-  const doRotatePhotos = useCallback(() => {
-    const ids = targetPhotoIds;
-    if (ids.length === 0) return;
-    for (const id of ids) {
-      const photo = photos.find((p) => p.id === id);
-      // Rotation is authored against the worker's master, like every other edit.
-      if (!photo || photo.status !== 'ready') continue;
-      const edit: EditConfig = { ...(photo.edit ?? {}), rotate: nextRotation(photo.edit?.rotate) };
-      patchPhotoEdit(id, edit);
-      savePhotoEdit(id, edit);
-    }
-  }, [targetPhotoIds, photos, patchPhotoEdit, savePhotoEdit]);
+  /**
+   * THE single write path for a photo edit — patch local state so the canvas updates on the same
+   * frame, then persist through the existing `savePhotoEdit`. Every geometry action in the
+   * floating toolbar (rotate, flip, zoom, fill) funnels through here, which is why none of them
+   * had to reimplement the live-then-persist contract the inspector sliders already had.
+   */
+  const applyPhotoEdit = useCallback(
+    (photoId: string, patch: Partial<EditConfig>) => {
+      const photo = photos.find((p) => p.id === photoId);
+      // Every edit is authored against the worker's sanitized master — the same gate the
+      // editors already enforce, applied once, here.
+      if (!photo || photo.status !== 'ready') return;
+      const edit: EditConfig = { ...(photo.edit ?? {}), ...patch };
+      patchPhotoEdit(photoId, edit);
+      savePhotoEdit(photoId, edit);
+    },
+    [photos, patchPhotoEdit, savePhotoEdit],
+  );
+
+  /** Rotate every selected photo. `dir` is +1 clockwise, −1 anticlockwise. */
+  const doRotatePhotos = useCallback(
+    (dir: 1 | -1 = 1) => {
+      for (const id of targetPhotoIds) {
+        const photo = photos.find((p) => p.id === id);
+        if (!photo || photo.status !== 'ready') continue;
+        applyPhotoEdit(id, { rotate: nextRotation(photo.edit?.rotate, dir) });
+      }
+    },
+    [targetPhotoIds, photos, applyPhotoEdit],
+  );
 
   /**
    * Put `photoId` into a specific frame. THE single implementation behind drag-and-drop, the
@@ -363,6 +399,100 @@ export function useCommands(deps: CommandDeps) {
     }
   }, [targetPhotoIds, favourites]);
 
+  /**
+   * ── DELETE, RESOLVED BY PRIORITY ──────────────────────────────────────────────
+   *
+   * THE BUG THIS FIXES. Delete used to be hard-wired to `removeFromPage`, which is a FRAME
+   * operation: it strips the photo out of whatever holds it and leaves the holder behind. On a
+   * base slot that is exactly right — the page keeps its slot, the photo goes back to the tray.
+   * On an OVERLAY it is wrong twice over: the user asked to delete the overlay they had
+   * selected, and what they got was an empty container still sitting on the page. Worse, an
+   * overlay with no photo in it made the command `enabled === false`, so Delete silently did
+   * nothing at all and the keystroke fell through to the browser.
+   *
+   * THE LADDER. Delete now resolves against the highest-priority ACTIVE selection:
+   *
+   *     overlay → text → sticker → QR → base photo → (stop)
+   *
+   * Each tier is checked in order and the first non-empty one wins; nothing below it runs. The
+   * ladder deliberately STOPS before "page" and "album". Removing a spread destroys layout work
+   * that a keystroke should never be able to reach by accident — it stays an explicit, labelled
+   * action in the Inspector and the page-strip menu, both of which are unchanged. Background is
+   * absent for a different reason: it has no selection state to be "active", so there is nothing
+   * for the ladder to match on (see the deliverable notes).
+   *
+   * MULTI-SELECT IS THE SAME PATH. Twelve overlays selected across four spreads delete in ONE
+   * `api.batch`, so it is one undo entry — the same guarantee every other bulk command gives.
+   */
+  const overlayTargets = useMemo(
+    () => selection.targets.filter((t): t is Extract<SelectionTarget, { kind: 'overlay' }> => t.kind === 'overlay'),
+    [selection.targets],
+  );
+
+  /** Which tier Delete would act on right now — drives both the label and `enabled`. */
+  const deleteTier = useMemo<'overlay' | 'text' | 'sticker' | 'qr' | 'frame' | null>(() => {
+    if (overlayTargets.length > 0) return 'overlay';
+    const el = focus?.element;
+    if (focus?.blockKey && el) {
+      if (el.kind === 'overlay') return 'overlay';
+      if (el.kind === 'text') return 'text';
+      if (el.kind === 'sticker') return 'sticker';
+      if (el.kind === 'qr') return 'qr';
+    }
+    if (occupiedFrames.length > 0) return 'frame';
+    return null;
+  }, [overlayTargets.length, focus?.element, focus?.blockKey, occupiedFrames.length]);
+
+  const doDeleteSelection = useCallback(() => {
+    // 1 — OVERLAYS. The multi-selection wins; it can span pages, so each target carries its own
+    // blockKey. This is the tier the old binding got wrong.
+    if (overlayTargets.length > 0) {
+      api.batch(() => {
+        for (const o of overlayTargets) api.removeOverlay(o.blockKey, o.id);
+      });
+      setSelection({ targets: [], anchor: null });
+      focus?.clearElement();
+      onMessage?.({
+        kind: 'ok',
+        text: `Removed ${overlayTargets.length} ${plural(overlayTargets.length, 'overlay')}.`,
+      });
+      return;
+    }
+
+    // 2–5 — the single-element tiers, all scoped to the focused spread. `key` is null on the
+    // cover (which has its own element model), so the ladder simply doesn't apply there.
+    const key = focus?.blockKey;
+    const el = focus?.element;
+    if (focus && key && el) {
+      switch (el.kind) {
+        case 'overlay':
+          api.batch(() => api.removeOverlay(key, el.id));
+          focus.clearElement();
+          return;
+        case 'text':
+          api.batch(() => api.removeText(key, el.id));
+          focus.clearElement();
+          return;
+        case 'sticker':
+          api.batch(() => api.removeSticker(key, el.id));
+          focus.clearElement();
+          return;
+        case 'qr':
+          api.batch(() => api.removeQr(key, el.id));
+          focus.clearElement();
+          return;
+        default:
+          break; // 'base' / 'none' fall through to the frame tier below
+      }
+    }
+
+    // 6 — BASE PHOTOS. The original behaviour, now reached only when nothing above matched:
+    // the photo returns to the tray and the page keeps its slot.
+    if (occupiedFrames.length > 0) doRemoveFromPage();
+
+    // 7+ — page / album: deliberately unreachable from the keyboard. See the note above.
+  }, [overlayTargets, focus, api, occupiedFrames.length, doRemoveFromPage, setSelection, onMessage]);
+
   // ── the registry ────────────────────────────────────────────────────────────────
 
   const commands = useMemo<Record<CommandId, Command>>(() => {
@@ -429,6 +559,30 @@ export function useCommands(deps: CommandDeps) {
         enabled: nFrames > 0,
         run: doRemoveFromPage,
       },
+      /**
+       * What the Delete key runs. The label names the TIER it would act on, so the shortcuts
+       * overlay and any menu rendering it tell the truth about what is about to happen.
+       */
+      deleteSelection: {
+        id: 'deleteSelection',
+        label:
+          deleteTier === 'overlay'
+            ? overlayTargets.length > 1
+              ? `Delete ${overlayTargets.length} overlays`
+              : 'Delete overlay'
+            : deleteTier === 'text'
+              ? 'Delete text'
+              : deleteTier === 'sticker'
+                ? 'Delete sticker'
+                : deleteTier === 'qr'
+                  ? 'Delete QR code'
+                  : nFrames > 1
+                    ? `Remove ${nFrames} from pages`
+                    : 'Remove from page',
+        enabled: deleteTier !== null,
+        destructive: deleteTier !== null && deleteTier !== 'frame',
+        run: doDeleteSelection,
+      },
       clearPlacement: {
         id: 'clearPlacement',
         label: blockKeys.length > 1 ? 'Clear these pages' : 'Clear this page',
@@ -440,7 +594,7 @@ export function useCommands(deps: CommandDeps) {
         id: 'rotatePhotos',
         label: rotatable > 1 ? `Rotate ${rotatable} photos` : 'Rotate 90°',
         enabled: rotatable > 0,
-        run: doRotatePhotos,
+        run: () => doRotatePhotos(1),
       },
       replacePhoto: {
         id: 'replacePhoto',
@@ -495,6 +649,9 @@ export function useCommands(deps: CommandDeps) {
     doToggleLabel,
     doClearLabels,
     doToggleFavourite,
+    deleteTier,
+    overlayTargets,
+    doDeleteSelection,
   ]);
 
   return {
@@ -504,6 +661,10 @@ export function useCommands(deps: CommandDeps) {
     batchReplace: doBatchReplace,
     duplicatePage: doDuplicatePage,
     deletePage: doDeletePage,
+    /** Geometry + tone writes for ONE photo — the floating toolbar's single write path. */
+    applyPhotoEdit,
+    /** Rotate the current selection in either direction (the toolbar's two rotate buttons). */
+    rotateBy: doRotatePhotos,
     /** Derived facts the UI needs for labels and enablement. */
     targetPhotoIds,
     occupiedFrames,

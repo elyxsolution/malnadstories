@@ -59,7 +59,7 @@ function Framed({
       <div className={`h-full w-full ${show ? stateOpacityClass(state) : ''}`}>
         <PhotoFrame url={photo.url} edit={photo.edit} onReady={onFrameReady} />
       </div>
-      {show && <UploadBadge state={state} since={photo.since ?? null} size={badge as BadgeSize} />}
+      {show && <UploadBadge state={state} size={badge as BadgeSize} />}
     </>
   );
 }

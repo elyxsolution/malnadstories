@@ -158,14 +158,11 @@ export default function Tray({
   // spans rows that virtualization hasn't mounted.
   const orderedIds = photos.map((p) => p.id);
 
-  // Queue positions, so a waiting tile can say "3rd in line" rather than just "Queued".
-  // Counted over the WHOLE list, not just the rendered window, so a tile's position is the same
-  // number whether or not the rows above it happen to be mounted.
-  const queuePositions = new Map<string, number>();
-  let queueSeen = 0;
-  for (const p of photos) {
-    if (photoUiState(p, taskFor?.(p.id)) === 'queued') queuePositions.set(p.id, ++queueSeen);
-  }
+  // NOTE: queue positions ("Queued · 47") used to be computed here, which meant walking the
+  // ENTIRE photo list on every tray render — including every render caused by scrolling a
+  // virtualized grid — to tell someone their place in a line that was moving fine on its own.
+  // The badge no longer distinguishes queued from uploading (see `badgeState`), so the walk is
+  // gone with it.
 
   const windowed = photos.slice(virtual.startIndex, virtual.endIndex);
 
@@ -213,7 +210,6 @@ export default function Tray({
         const placed = placedIds.has(photo.id);
         const picked = pickedId === photo.id;
         const previewUrl = resolvePhotoUrl(photo, 'thumb');
-        const queuePosition = queuePositions.get(photo.id);
         // Editing needs the worker's master (crop geometry is authored against it).
         const canEdit = photo.status === 'ready';
         const label = labelOf?.(photo.id) ?? null;
@@ -261,9 +257,9 @@ export default function Tray({
             }`}
             title={
               state === 'failed'
-                ? `${photo.filename} — ${task?.error ?? 'could not be processed'}`
+                ? `${photo.filename} — ${task?.error ?? 'could not be added'}`
                 : optimistic && !placeable
-                  ? `${photo.filename} — preview available once processing finishes`
+                  ? `${photo.filename} — available in a moment`
                   : label
                     ? `${photo.filename} — ${LABEL_META[label].label}`
                     : photo.filename
@@ -297,22 +293,16 @@ export default function Tray({
                 </span>
               </div>
             ) : (
-              // No local preview (HEIC) and not processed yet — the original placeholder.
+              // No local preview (HEIC can't be decoded by the browser) — a quiet placeholder.
+              // It says "Uploading", not "Processing": the distinction is ours, not the user's.
               <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gradient-to-b from-secondary/60 to-muted text-muted-foreground">
                 <InlineLoader />
-                <span className="text-[10px] font-medium">Processing…</span>
+                <span className="text-[10px] font-medium">Uploading…</span>
               </div>
             )}
 
             {/* State chrome — nothing at all once ready. */}
-            {previewUrl && !placed && (
-              <UploadBadge
-                state={state}
-                progress={task?.progress}
-                queuePosition={queuePosition}
-                since={photo.processingSince ?? null}
-              />
-            )}
+            {previewUrl && !placed && <UploadBadge state={state} progress={task?.progress} />}
 
             {/* hover scrim so the controls always read */}
             <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/35 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
