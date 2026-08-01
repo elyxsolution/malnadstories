@@ -18,6 +18,7 @@ import {
   ImagePlus,
   QrCode,
   LayoutGrid,
+  Shuffle,
   Frame,
   ArrowUp,
   ArrowDown,
@@ -92,6 +93,15 @@ export type ContextBarProps = {
   onAddPhotoOverlay: () => void;
   onAddQr: () => void;
   onOpenLayouts: () => void;
+  /**
+   * Step this spread to the next curated layout in its cycle (Original → 1 → 2 → 3 → Original).
+   * `cyclePosition` is the confirmation — which of the alternatives is currently on screen — and
+   * is shown on the control itself rather than in a separate badge, so the answer to "which
+   * layout am I looking at?" is where the question is asked.
+   */
+  onCycleLayout: () => void;
+  canCycleLayout: boolean;
+  cyclePosition: string | null;
   /** Open the selected object's detailed controls in the right-hand properties panel. */
   onOpenProperties: () => void;
   propertiesOpen: boolean;
@@ -467,6 +477,18 @@ function PageBar(p: BarProps) {
       <BarBtn label="Add text" icon={<TypeIcon />} text="Text" onClick={p.onAddText} />
       <BarBtn label="Add a QR code" icon={<QrCode />} onClick={p.onAddQr} />
       <BarBtn label="Change this spread’s layout" icon={<LayoutGrid />} onClick={p.onOpenLayouts} />
+      <BarBtn
+        label={
+          p.canCycleLayout
+            ? 'Try the next curated layout for this spread — your photos come with it'
+            : 'No alternative layouts are available for this spread'
+        }
+        icon={<Shuffle />}
+        text={p.cyclePosition ?? undefined}
+        disabled={!p.canCycleLayout}
+        active={!!p.cyclePosition}
+        onClick={p.onCycleLayout}
+      />
       <BarSep />
       <BarBtn label="Move spread earlier" icon={<ArrowUp />} disabled={index === 0} onClick={() => api.moveBlock(block.key, -1)} />
       <BarBtn label="Move spread later" icon={<ArrowDown />} disabled={index >= total - 1} onClick={() => api.moveBlock(block.key, 1)} />

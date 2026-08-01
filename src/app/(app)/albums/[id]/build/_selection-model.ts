@@ -14,7 +14,7 @@
  * and the optimistic temp→real id swap.
  */
 
-import type { BaseSlot } from './_use-builder';
+import type { BaseSlot, Selection } from './_use-builder';
 
 /**
  * One selectable thing. `blockKey` is carried explicitly (rather than implied by the focused
@@ -30,6 +30,29 @@ export type SelectionTarget =
   | { kind: 'photo'; photoId: string };
 
 export type SelectionKind = SelectionTarget['kind'];
+
+/**
+ * Narrow a cross-page TARGET down to the focused spread's single `Selection` — the shape the
+ * contextual toolbar and the inspectors read.
+ *
+ * The two stores describe the same thing at different scopes, and every surface that changes one
+ * must change the other or they drift (that drift is what once let Delete act on an element the
+ * user had visibly deselected). Having the conversion in ONE function means a caller can no
+ * longer get it subtly wrong. A tray photo has no on-page selection, so it maps to `none`.
+ */
+export function selectionFromTarget(t: SelectionTarget): Selection {
+  switch (t.kind) {
+    case 'base':
+      return { kind: 'base', slot: t.slot };
+    case 'overlay':
+    case 'text':
+    case 'qr':
+    case 'sticker':
+      return { kind: t.kind, id: t.id };
+    case 'photo':
+      return { kind: 'none' };
+  }
+}
 
 /** A stable, comparable key for set membership. Two targets are the same iff their keys match. */
 export function targetKey(t: SelectionTarget): string {

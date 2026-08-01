@@ -71,7 +71,6 @@ export default function CoverDesign({
   stickerUrlFor,
   renderElements = true,
   onReady,
-  rounded = false,
 }: {
   imageUrl: string | null;
   imageEdit?: EditConfig | null;
@@ -95,7 +94,6 @@ export default function CoverDesign({
   /** When false, the host (the editing cover canvas) renders interactive elements itself. */
   renderElements?: boolean;
   onReady?: () => void;
-  rounded?: boolean;
 }) {
   const fired = useRef(false);
   const ready = () => {
@@ -114,7 +112,7 @@ export default function CoverDesign({
 
   return (
     <div
-      className={`relative h-full w-full select-none overflow-hidden ${rounded ? 'rounded-[14px]' : ''}`}
+      className="relative h-full w-full select-none overflow-hidden"
       style={{ containerType: 'inline-size', ...(imageUrl ? { background: '#1e3a2f' } : coverBackgroundStyle(background)) }}
     >
       {imageUrl && (
@@ -223,14 +221,12 @@ export function BackCoverDesign({
   stickerUrlFor,
   renderElements = true,
   onReady,
-  rounded = false,
 }: {
   back: BackCoverConfig;
   imageUrl: string | null;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   renderElements?: boolean;
   onReady?: () => void;
-  rounded?: boolean;
 }) {
   const fired = useRef(false);
   const ready = () => {
@@ -245,7 +241,7 @@ export function BackCoverDesign({
 
   return (
     <div
-      className={`relative h-full w-full select-none overflow-hidden ${rounded ? 'rounded-[14px]' : ''}`}
+      className="relative h-full w-full select-none overflow-hidden"
       style={{ containerType: 'inline-size', ...(imageUrl ? { background: '#1e3a2f' } : coverBackgroundStyle(back.background)) }}
     >
       {imageUrl && (
@@ -329,7 +325,6 @@ export function CoverSpread({
   pageAspect,
   stickerUrlFor,
   onReady,
-  rounded = false,
 }: {
   config: CoverConfig;
   title: string;
@@ -340,12 +335,11 @@ export function CoverSpread({
   pageAspect?: number;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   onReady?: () => void;
-  rounded?: boolean;
 }) {
   const { pagePct, spinePct, aspect } = coverSpreadMetrics(size, pageAspect);
   return (
     <div
-      className={`relative w-full overflow-hidden ${rounded ? 'rounded-[14px] ring-1 ring-black/10' : ''}`}
+      className="relative w-full overflow-hidden ring-1 ring-black/10"
       style={{ aspectRatio: String(aspect) }}
     >
       <div className="flex h-full w-full">
@@ -394,7 +388,6 @@ export function CoverDesignFromConfig({
   stickerUrlFor,
   renderElements = true,
   onReady,
-  rounded,
 }: {
   config: CoverConfig;
   title: string;
@@ -402,7 +395,6 @@ export function CoverDesignFromConfig({
   stickerUrlFor?: (stickerId: string) => string | undefined;
   renderElements?: boolean;
   onReady?: () => void;
-  rounded?: boolean;
 }) {
   return (
     <CoverDesign
@@ -423,7 +415,6 @@ export function CoverDesignFromConfig({
       stickerUrlFor={stickerUrlFor}
       renderElements={renderElements}
       onReady={onReady}
-      rounded={rounded}
     />
   );
 }

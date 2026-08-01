@@ -225,7 +225,7 @@ export default function Navigator({
             title={`Spread ${i + 1}`}
             aria-current={i === current ? 'true' : undefined}
             /* Larger thumbnails (was 58×116) — legible enough to recognise a spread at a glance. */
-            className={`relative block h-[72px] w-[144px] overflow-hidden rounded-lg bg-white ring-2 transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-studio-bright ${
+            className={`relative block h-[72px] w-[144px] overflow-hidden bg-white ring-2 transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-studio-bright ${
               i === current
                 ? 'ring-studio shadow-card'
                 : photoOver === i

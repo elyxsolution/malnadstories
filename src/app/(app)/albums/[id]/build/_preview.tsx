@@ -1,6 +1,6 @@
 'use client';
 
-import PairContent from './_pair-frame';
+import PairContent, { PrintGutter } from './_pair-frame';
 import type { Photo } from '@/lib/builder/photo';
 import type { PhotoUiState } from './_photo-state';
 import { usePhotoFor } from './_use-photo-for';
@@ -21,11 +21,14 @@ export default function Preview({
   cover,
   stickerUrlFor,
   photoStateFor,
+  showGutter = true,
 }: {
   blocks: Block[];
   photoMap: Map<string, Photo>;
   cover: { url: string; name: string } | null;
   stickerUrlFor?: (stickerId: string) => string | undefined;
+  /** Draw the printed fold (Album Settings → Show print gutter). */
+  showGutter?: boolean;
   /** Optional (builder only): drives the shared processing badge. Absent in admin previews. */
   photoStateFor?: (photoId: string) => PhotoUiState | undefined;
 }) {
@@ -37,7 +40,7 @@ export default function Preview({
       {/* Front matter — fixed, not editable. */}
       <figure className="mx-auto w-full max-w-md">
         <div
-          className="relative mx-auto w-full overflow-hidden rounded-lg border bg-muted shadow-sm"
+          className="relative mx-auto w-full overflow-hidden border bg-muted shadow-sm"
           style={{ aspectRatio: page }}
         >
           {cover ? (
@@ -55,7 +58,7 @@ export default function Preview({
       <div className="mx-auto grid w-full max-w-2xl grid-cols-2 gap-4">
         {[2, 3].map((p) => (
           <figure key={p}>
-            <div className="relative w-full rounded-lg border border-dashed bg-white shadow-sm" style={{ aspectRatio: page }} />
+            <div className="relative w-full border border-dashed bg-white shadow-sm" style={{ aspectRatio: page }} />
             <figcaption className="mt-2 text-xs text-muted-foreground">Page {p} · Blank</figcaption>
           </figure>
         ))}
@@ -71,11 +74,11 @@ export default function Preview({
             <figure key={block.key} className="mx-auto w-full max-w-2xl">
               {/* Open pair: two pages side by side (pair aspect from the product), centre gutter. */}
               <div
-                className="relative mx-auto w-full overflow-hidden rounded-lg border bg-muted shadow-sm"
+                className="relative mx-auto w-full overflow-hidden border bg-muted shadow-sm"
                 style={{ aspectRatio: pair }}
               >
                 <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} badge="compact" />
-                <div className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/70 mix-blend-difference" />
+                {showGutter && <PrintGutter />}
               </div>
               <figcaption className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                 <span>

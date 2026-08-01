@@ -4,8 +4,8 @@ import { forwardRef, useEffect, useRef, useState, type CSSProperties, type React
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — react-pageflip ships its own types via the default export
 import HTMLFlipBook from 'react-pageflip';
-import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Minimize2 } from 'lucide-react';
-import PairContent, { type PairPhoto } from './_pair-frame';
+import { X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Minimize2, Pencil } from 'lucide-react';
+import PairContent, { PrintGutter, type PairPhoto } from './_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from './_cover-render';
 import { useBuilderDimensions } from './_dimensions';
 import type { Photo } from '@/lib/builder/photo';
@@ -89,6 +89,10 @@ export default function Flipbook({
   onClose,
   infoPanel,
   primaryAction,
+  showGutter = true,
+  startPage = 0,
+  onPageChange,
+  onEditAlbum,
 }: {
   blocks: Block[];
   photoMap: Map<string, Photo>;
@@ -96,6 +100,17 @@ export default function Flipbook({
   /** Drives the shared processing badge. Absent outside the builder. */
   photoStateFor?: (photoId: string) => PhotoUiState | undefined;
   cover: FlipCover;
+  /** Draw the printed fold in the flat spread view (Album Settings → Show print gutter). */
+  showGutter?: boolean;
+  /**
+   * Physical page to open on. This is what makes Edit → Preview continuous: the designer lands
+   * on the spread they were working on rather than being sent back to the cover.
+   */
+  startPage?: number;
+  /** Fires as the reader turns pages, so the host can return them to the same place on exit. */
+  onPageChange?: (page: number) => void;
+  /** Present in the builder: swaps the dismiss X for a labelled "Edit album" destination. */
+  onEditAlbum?: () => void;
   onClose: () => void;
   /** Optional right-docked panel (product info in the preview). Overlay — never changes the book. */
   infoPanel?: ReactNode;
@@ -107,7 +122,7 @@ export default function Flipbook({
   const [dims, setDims] = useState({ w: 420, h: 560 });
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(startPage);
   const reduce = usePrefersReducedMotion();
 
   // Friendly position label: the front cover, the content spreads, then the back cover.
@@ -252,16 +267,29 @@ export default function Flipbook({
           <CircleBtn label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} onClick={toggleFullscreen}>
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </CircleBtn>
-          <CircleBtn label="Close preview" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </CircleBtn>
+          {/* The other half of the persistent Edit ↔ Preview toggle. In preview the way back to
+              editing is a real, labelled destination rather than a dismiss affordance — the
+              builder is still mounted underneath, so it costs nothing but a repaint. */}
+          {onEditAlbum ? (
+            <button
+              type="button"
+              onClick={onEditAlbum}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/95 px-3.5 text-[12.5px] font-semibold text-[rgb(16_24_20)] shadow-sm transition-all duration-150 hover:bg-white active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit album
+            </button>
+          ) : (
+            <CircleBtn label="Close preview" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </CircleBtn>
+          )}
         </div>
       </div>
 
       {/* Book */}
       <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center overflow-auto px-4 pb-10">
         {reduce ? (
-          <StaticSpreads blocks={blocks} cover={cover} photoFor={photoFor} stickerUrlFor={stickerUrlFor} width={dims.w} />
+          <StaticSpreads blocks={blocks} cover={cover} photoFor={photoFor} stickerUrlFor={stickerUrlFor} width={dims.w} showGutter={showGutter} />
         ) : (
           <div className="animate-rise relative" style={{ transform: `scale(${zoom})`, transition: 'transform 200ms ease' }}>
             {/* Ambient depth — a soft cast shadow grounds the open book in space. */}
@@ -275,6 +303,7 @@ export default function Flipbook({
               ref={bookRef}
               width={dims.w}
               height={dims.h}
+              startPage={startPage}
               size="fixed"
               minWidth={150}
               maxWidth={620}
@@ -286,7 +315,11 @@ export default function Flipbook({
               maxShadowOpacity={0.55}
               usePortrait={false}
               mobileScrollSupport
-              onFlip={(e: { data: number }) => setPage(e.data)}
+              onFlip={(e: { data: number }) => {
+                setPage(e.data);
+                // Report upward so leaving the preview returns to the spread being looked at.
+                onPageChange?.(e.data);
+              }}
               className="ms-flipbook relative z-[1]"
               style={{}}
             >
@@ -320,32 +353,33 @@ function StaticSpreads({
   photoFor,
   stickerUrlFor,
   width,
+  showGutter,
 }: {
   blocks: Block[];
   cover: FlipCover;
   photoFor: PhotoFor;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   width: number;
+  showGutter: boolean;
 }) {
   const { page: pageRatio, pair: pairRatio } = useBuilderDimensions();
   return (
     <div className="flex max-h-full flex-col items-center gap-6 overflow-y-auto py-4">
       {cover && (
-        <div className="overflow-hidden rounded-md shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
+        <div className="overflow-hidden shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
           <CoverDesignFromConfig config={cover.config} title={cover.title} imageUrl={cover.imageUrl} stickerUrlFor={stickerUrlFor} />
         </div>
       )}
       {blocks.map((b) => (
-        <div key={b.key} className="relative overflow-hidden rounded-md bg-white shadow-elevated" style={{ width: width * 2, aspectRatio: pairRatio, containerType: 'inline-size' as const }}>
+        <div key={b.key} className="relative overflow-hidden bg-white shadow-elevated" style={{ width: width * 2, aspectRatio: pairRatio, containerType: 'inline-size' as const }}>
           <PairContent block={b} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
-          {/* Center-fold shading — both pages darken toward the spine. */}
-          <div className="pointer-events-none absolute inset-y-0 right-1/2 z-[2] w-[7%]" style={{ background: 'linear-gradient(to right, transparent, rgba(18,28,22,0.16))' }} />
-          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[2] w-[7%]" style={{ background: 'linear-gradient(to left, transparent, rgba(18,28,22,0.16))' }} />
-          <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[2] w-px -translate-x-1/2 bg-black/15" />
+          {/* The flat (reduced-motion) spread view shows the SAME fold as the builder canvas.
+              The page-curl view keeps its own lighting, where the fold is inherent to the 3D. */}
+          {showGutter && <PrintGutter />}
         </div>
       ))}
       {cover && (
-        <div className="overflow-hidden rounded-md shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
+        <div className="overflow-hidden shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
           <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
         </div>
       )}

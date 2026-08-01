@@ -67,7 +67,7 @@ export default async function BlueprintPreviewPage({
         {blocks.map((b, i) => (
           <div
             key={i}
-            className="overflow-hidden rounded-md ring-1 ring-black/10"
+            className="overflow-hidden ring-1 ring-black/10"
             style={{ aspectRatio: '3 / 2', containerType: 'inline-size' }}
           >
             <PairContent block={b} photoFor={() => undefined} stickerUrlFor={stickerUrlFor} showPlaceholders />

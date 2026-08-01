@@ -126,7 +126,7 @@ export default function PurchasedAlbum({
 
       {/* Hero — what you ordered */}
       <header className="flex flex-col gap-5 sm:flex-row sm:items-center">
-        <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden rounded-xl bg-muted shadow-paper ring-1 ring-black/10">
+        <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden bg-muted shadow-paper ring-1 ring-black/10">
           {cover ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={cover.url} alt={cover.name} className="absolute inset-0 h-full w-full object-cover" />

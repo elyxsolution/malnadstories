@@ -162,6 +162,40 @@ export default function PairContent({
   );
 }
 
+/**
+ * THE PRINT GUTTER — where the two pages of a spread meet and the paper physically folds.
+ *
+ * ONE component for every surface that shows a spread (canvas, preview, review, the flat
+ * spread view), because a fold that looks different in each place teaches the customer nothing.
+ * It is an EDITING AID and nothing more: it is never rendered by the print route, and it changes
+ * no geometry — export is byte-for-byte what it was.
+ *
+ * The look is deliberately restrained: a soft symmetric shading that falls off toward the centre,
+ * the way an open book darkens into its spine, plus a hairline exactly on the fold. `multiply`
+ * blending means it reads on a white page and on a dark photo without ever becoming a grey stripe
+ * across someone's picture. Purely decorative, so it is `aria-hidden` and inert.
+ */
+export function PrintGutter({ className = '' }: { className?: string }) {
+  return (
+    <span aria-hidden className={`pointer-events-none absolute inset-y-0 left-1/2 z-[6] -translate-x-1/2 ${className}`}>
+      <span
+        className="absolute inset-y-0 left-1/2 -translate-x-1/2"
+        style={{
+          width: '5.5cqw',
+          mixBlendMode: 'multiply',
+          background:
+            'linear-gradient(90deg, rgba(24,32,28,0) 0%, rgba(24,32,28,0.10) 42%, rgba(24,32,28,0.16) 50%, rgba(24,32,28,0.10) 58%, rgba(24,32,28,0) 100%)',
+        }}
+      />
+      {/* The fold itself — a hairline the eye can measure against when placing content. */}
+      <span
+        className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2"
+        style={{ mixBlendMode: 'multiply', background: 'rgba(24,32,28,0.22)' }}
+      />
+    </span>
+  );
+}
+
 /** An unfilled overlay container — a dashed slot outline shown only in template previews. */
 function OverlayPlaceholder({ style }: { style: React.CSSProperties }) {
   return (

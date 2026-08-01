@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Rect } from '@/lib/builder/model';
+import { clampRect, type Bounds } from '@/lib/builder/edit-bounds';
 
 /**
  * A reusable, normalized (0..1) draggable / resizable / rotatable box — the interaction
@@ -111,6 +112,24 @@ const HANDLES: HandleDef[] = [
   { id: 'w', x: -1, y: 0, cursor: 'ew-resize', pos: '-left-1.5 top-1/2 -translate-y-1/2', label: 'Resize from left' },
 ];
 
+/**
+ * THE EDITING LAYER'S TRAVEL RULES.
+ *
+ * `edit` is how far a gesture may go — out onto the pasteboard, past the trim edge. `commit` is
+ * where the element may LAND, and mirrors the persisted schema exactly, so a rect that escaped
+ * during the drag settles somewhere the save pipeline accepts. Omit `escape` entirely and the
+ * component keeps its original behaviour (fully inside the page), which is what the cover canvas
+ * and any other host that has not opted in still get.
+ */
+export type EscapeBounds = { edit: Bounds; commit: Bounds };
+
+/**
+ * Modifier state at the moment of selection. `meta` toggles set membership, `shift` extends a
+ * range, and `alt` asks for the object BENEATH the one that was hit — the standard escape hatch
+ * for reaching something covered, without disturbing the stack.
+ */
+export type SelectMods = { meta: boolean; shift: boolean; alt: boolean };
+
 export default function Movable({
   rect,
   rotation = 0,
@@ -121,6 +140,7 @@ export default function Movable({
   keepSquare = false,
   squareRatio = 1, // h = w * squareRatio for square pixels on a non-square pair
   rotatable = false,
+  escape,
   containerRef,
   onSelect,
   onContextMenu,
@@ -145,9 +165,15 @@ export default function Movable({
   keepSquare?: boolean;
   squareRatio?: number;
   rotatable?: boolean;
+  /** Opt in to editing outside the page. Absent = the element stays fully inside it. */
+  escape?: EscapeBounds;
   containerRef: React.RefObject<HTMLElement>;
-  /** Receives modifier state so the selection store — not this component — decides semantics. */
-  onSelect: (mods?: { meta: boolean; shift: boolean }) => void;
+  /**
+   * Receives modifier state so the selection store — not this component — decides semantics.
+   * `alt` is carried alongside meta/shift so the host can implement "select the object beneath
+   * this one" without Movable knowing anything about stacks.
+   */
+  onSelect: (mods?: SelectMods) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onChange: (rect: Rect) => void;
   onCommit?: () => void;
@@ -176,12 +202,27 @@ export default function Movable({
   /** True while a gesture is in flight — suppresses hover chrome so the drag reads cleanly. */
   const [dragging, setDragging] = useState(false);
 
+  /**
+   * The element is currently somewhere it cannot stay — it will settle back to the edge when the
+   * pointer is released. Saying so DURING the drag is the whole point: a box that silently jumps
+   * on release reads as a bug, whereas a dashed boundary reads as a rule.
+   */
+  const willSettle = !!escape && clampRect(rect, escape.commit) !== rect;
+
   const begin = (mode: 'move' | 'resize' | 'rotate', edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 } = { x: 1, y: 1 }) => (
     e: ReactPointerEvent,
   ) => {
     if (locked) return;
     e.stopPropagation();
-    onSelect();
+    /**
+     * SELECTION HAPPENS EXACTLY ONCE PER GESTURE, HERE.
+     *
+     * It used to fire on pointer-down AND again on the click that followed. That was harmless when
+     * selecting was idempotent, but it is not once a repeated click CYCLES through overlapping
+     * elements — two fires per click would skip every other object in the stack. Pointer-down is
+     * also the moment the user expects the selection to change: it is already when the drag starts.
+     */
+    onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
     const box = containerRef.current?.getBoundingClientRect();
     drag.current = {
       mode,
@@ -197,25 +238,37 @@ export default function Movable({
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
+  /**
+   * The travel box for the CURRENT gesture. Without `escape` this reproduces the original rule
+   * exactly — the element's far edge may not pass the page's — so opting out changes nothing.
+   */
+  const travel = (r: Rect) => ({
+    minX: escape ? escape.edit.minX : 0,
+    maxX: escape ? escape.edit.maxX : 1 - r.w,
+    minY: escape ? escape.edit.minY : 0,
+    maxY: escape ? escape.edit.maxY : 1 - r.h,
+  });
+
   const onMove = (e: ReactPointerEvent) => {
     const d = drag.current;
     const box = containerRef.current?.getBoundingClientRect();
     if (!d || !box) return;
     const dx = (e.clientX - d.sx) / box.width;
     const dy = (e.clientY - d.sy) / box.height;
+    const t = travel(d.start);
 
     if (d.mode === 'move') {
-      let nx = clamp(d.start.x + dx, 0, 1 - d.start.w);
-      let ny = clamp(d.start.y + dy, 0, 1 - d.start.h);
+      let nx = clamp(d.start.x + dx, t.minX, t.maxX);
+      let ny = clamp(d.start.y + dy, t.minY, t.maxY);
       const lines: SnapLine[] = [];
       const sx = snapAxis(nx + d.start.w / 2, d.start.w / 2, candidatesFor('x', peers));
       const sy = snapAxis(ny + d.start.h / 2, d.start.h / 2, candidatesFor('y', peers));
       if (sx.line !== null) {
-        nx = clamp(sx.value, 0, 1 - d.start.w);
+        nx = clamp(sx.value, t.minX, t.maxX);
         lines.push({ axis: 'x', pos: sx.line.pos, kind: sx.line.kind });
       }
       if (sy.line !== null) {
-        ny = clamp(sy.value, 0, 1 - d.start.h);
+        ny = clamp(sy.value, t.minY, t.maxY);
         lines.push({ axis: 'y', pos: sy.line.pos, kind: sy.line.kind });
       }
       onSnap?.(lines);
@@ -229,26 +282,30 @@ export default function Movable({
        * invert through itself.
        */
       let { x, y, w, h } = d.start;
+      // Growing outward is capped by the far edge of the page when the element is confined, and
+      // by the stored maximum (w/h ≤ 1) once it is allowed to bleed off it.
+      const maxW = escape ? 1 : 1 - d.start.x;
+      const maxH = escape ? 1 : 1 - d.start.y;
 
       if (d.ex === 1) {
-        w = clamp(d.start.w + dx, minW, 1 - d.start.x);
+        w = clamp(d.start.w + dx, minW, maxW);
       } else if (d.ex === -1) {
         const right = d.start.x + d.start.w;
-        x = clamp(d.start.x + dx, 0, right - minW);
-        w = right - x;
+        x = clamp(d.start.x + dx, t.minX, right - minW);
+        w = Math.min(right - x, 1);
       }
 
       if (keepSquare) {
         // Square elements (QR) derive height from width, so the vertical edges are ignored.
         h = clamp(w * squareRatio, minH, 1);
-        if (d.ey === -1) y = clamp(d.start.y + d.start.h - h, 0, 1 - h);
-        else y = clamp(y, 0, 1 - h);
+        if (d.ey === -1) y = clamp(d.start.y + d.start.h - h, t.minY, escape ? t.maxY : 1 - h);
+        else y = clamp(y, t.minY, escape ? t.maxY : 1 - h);
       } else if (d.ey === 1) {
-        h = clamp(d.start.h + dy, minH, 1 - d.start.y);
+        h = clamp(d.start.h + dy, minH, maxH);
       } else if (d.ey === -1) {
         const bottom = d.start.y + d.start.h;
-        y = clamp(d.start.y + dy, 0, bottom - minH);
-        h = bottom - y;
+        y = clamp(d.start.y + dy, t.minY, bottom - minH);
+        h = Math.min(bottom - y, 1);
       }
 
       onChange({ x, y, w, h });
@@ -267,66 +324,108 @@ export default function Movable({
     setDragging(false);
     onSnap?.([]);
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    /**
+     * SETTLE. The gesture was free to roam the pasteboard; the resting place is not. Clamping
+     * here — once, on release — is what keeps an off-page position saveable without touching the
+     * server schema. For text and stickers this is almost always a no-op (they may genuinely live
+     * off the page); an overlay or QR that was dragged past the left/top edge comes to rest flush
+     * against it, which is as far out as its stored contract goes.
+     */
+    if (escape) {
+      const settled = clampRect(rect, escape.commit);
+      if (settled !== rect) onChange(settled);
+    }
     onCommit?.();
   };
 
+  /** The element's box geometry — shared verbatim by the element and its selection chrome. */
+  const geometry: React.CSSProperties = {
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.w * 100}%`,
+    height: `${rect.h * 100}%`,
+    transform: rotation ? `rotate(${rotation}deg)` : undefined,
+  };
+
   return (
-    <div
-      role="button"
-      tabIndex={-1}
-      aria-label={ariaLabel}
-      onPointerDown={begin('move')}
-      onPointerMove={onMove}
-      onPointerUp={end}
-      onPointerCancel={end}
-      onContextMenu={onContextMenu}
-      onDoubleClick={onDoubleClick}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-      /**
-       * CURSORS ARE THE AFFORDANCE. `grab` when it can be picked up, `grabbing` while it is being
-       * dragged, `default` when locked — so the pointer answers "can I move this?" before any
-       * commitment. `touch-none` keeps a drag from being stolen by page scrolling on a trackpad
-       * or touchscreen.
-       */
-      className={`group/movable absolute touch-none ${
-        locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab'
-      } ${className}`}
-      style={{
-        left: `${rect.x * 100}%`,
-        top: `${rect.y * 100}%`,
-        width: `${rect.w * 100}%`,
-        height: `${rect.h * 100}%`,
-        transform: rotation ? `rotate(${rotation}deg)` : undefined,
-        zIndex: selected ? 50 : zIndex,
-        outline: selected ? '2px solid hsl(var(--studio-bright))' : undefined,
-        outlineOffset: '1px',
-        // The selected halo softens while dragging so the element itself stays the subject.
-        boxShadow: selected ? `0 0 0 ${dragging ? 2 : 4}px hsl(var(--studio-bright) / ${dragging ? 0.1 : 0.18})` : undefined,
-        borderRadius: '2px',
-      }}
-    >
-      {/* HOVER AFFORDANCE. An unselected element gets a hairline outline on hover — enough to say
-          "this is a thing you can grab", quiet enough to disappear against the page. */}
-      {!selected && !locked && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute -inset-px rounded-[2px] opacity-0 ring-1 ring-inset ring-studio-bright/60 transition-opacity duration-150 group-hover/movable:opacity-100"
-        />
-      )}
+    <>
+      <div
+        role="button"
+        tabIndex={-1}
+        aria-label={ariaLabel}
+        aria-pressed={selected}
+        onPointerDown={begin('move')}
+        onPointerMove={onMove}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onContextMenu={onContextMenu}
+        onDoubleClick={onDoubleClick}
+        /* Selection already happened on pointer-down; this only stops the canvas from treating
+           the same gesture as a click on empty space and deselecting. */
+        onClick={(e) => e.stopPropagation()}
+        /**
+         * CURSORS ARE THE AFFORDANCE. `grab` when it can be picked up, `grabbing` while it is being
+         * dragged, `default` when locked — so the pointer answers "can I move this?" before any
+         * commitment. `touch-none` keeps a drag from being stolen by page scrolling on a trackpad
+         * or touchscreen.
+         */
+        className={`group/movable absolute touch-none ${
+          locked ? 'cursor-default' : dragging ? 'cursor-grabbing' : 'cursor-grab'
+        } ${className}`}
+        style={{
+          ...geometry,
+          /**
+           * SELECTION NEVER TOUCHES STACKING ORDER.
+           *
+           * This used to be `selected ? 50 : zIndex`, which meant clicking an element silently
+           * promoted it above everything it was behind — an invisible edit to the layer order that
+           * the user never asked for and could not undo. Layer order now changes ONLY through the
+           * Layers menu (`commands.moveLayer`). The element keeps its natural position in the
+           * stack whether or not it is selected; its chrome is what rises, below.
+           */
+          zIndex,
+          borderRadius: '2px',
+        }}
+      >
+        {/* HOVER AFFORDANCE. An unselected element gets a hairline outline on hover — enough to say
+            "this is a thing you can grab", quiet enough to disappear against the page. */}
+        {!selected && !locked && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -inset-px rounded-[2px] opacity-0 ring-1 ring-inset ring-studio-bright/60 transition-opacity duration-150 group-hover/movable:opacity-100"
+          />
+        )}
 
-      {children}
+        {children}
+      </div>
 
+      {/*
+        THE SELECTION CHROME — a sibling overlay, not a child.
+
+        It mirrors the element's box exactly but lives at the top of the page's stack, which is the
+        piece that makes editing a COVERED element possible: the outline stays visible and the
+        handles stay grabbable even when the element itself is buried under three others, and none
+        of that requires moving the element forward. It is inert except for the handles, so the
+        element underneath keeps its own double-click, context menu and drop-target behaviour.
+      */}
       {selected && !locked && (
-        <>
+        <div
+          className="pointer-events-none absolute z-[40]"
+          style={{
+            ...geometry,
+            outline: willSettle ? '2px dashed hsl(var(--warning))' : '2px solid hsl(var(--studio-bright))',
+            outlineOffset: '1px',
+            // The selected halo softens while dragging so the element itself stays the subject.
+            boxShadow: `0 0 0 ${dragging ? 2 : 4}px hsl(var(--studio-bright) / ${dragging ? 0.1 : 0.18})`,
+            borderRadius: '2px',
+          }}
+        >
           {/* Legacy inline control bar. The page canvas now uses the floating context bar and
               passes no `controls`; the cover canvas still supplies its own, unchanged. */}
           {controls && (
             <div
               onPointerDown={(e) => e.stopPropagation()}
-              className="motion-safe:animate-scale-in absolute -top-9 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-border bg-card/95 p-0.5 shadow-elevated backdrop-blur-sm"
+              className="motion-safe:animate-scale-in pointer-events-auto absolute -top-9 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-border bg-card/95 p-0.5 shadow-elevated backdrop-blur-sm"
             >
               {controls}
             </div>
@@ -347,7 +446,7 @@ export default function Movable({
                 onPointerUp={end}
                 onPointerCancel={end}
                 style={{ cursor: hd.cursor }}
-                className={`absolute z-[55] border-2 border-card bg-studio shadow-sm transition-transform duration-100 hover:scale-125 ${hd.pos} ${
+                className={`pointer-events-auto absolute border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 ${hd.pos} ${
                   isCorner
                     ? 'h-3 w-3 rounded-full'
                     : hd.x === 0
@@ -361,7 +460,7 @@ export default function Movable({
           {/* Rotate handle, on a visible stem so it doesn't read as a ninth resize dot. */}
           {rotatable && onRotate && (
             <>
-              <span aria-hidden className="pointer-events-none absolute -top-4 left-1/2 z-[54] h-4 w-px -translate-x-1/2 bg-studio/50" />
+              <span aria-hidden className="absolute -top-4 left-1/2 h-4 w-px -translate-x-1/2 bg-studio/50" />
               <span
                 role="presentation"
                 aria-label="Rotate"
@@ -369,13 +468,13 @@ export default function Movable({
                 onPointerMove={onMove}
                 onPointerUp={end}
                 onPointerCancel={end}
-                className="absolute -top-1.5 left-1/2 z-[55] h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab rounded-full border-2 border-card bg-studio shadow-sm transition-transform duration-100 hover:scale-125 active:cursor-grabbing"
+                className="pointer-events-auto absolute -top-1.5 left-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab rounded-full border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 active:cursor-grabbing"
               />
             </>
           )}
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

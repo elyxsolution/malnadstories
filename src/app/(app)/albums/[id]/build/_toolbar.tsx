@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Undo2, Redo2, Frame, Eye, Save, Send, ShoppingCart, ZoomIn, ZoomOut, Maximize2, MoveHorizontal, CheckCircle2, Keyboard, AlignCenterHorizontal, Sparkles, LogOut, Settings2 } from 'lucide-react';
+import { Undo2, Redo2, Frame, Eye, Pencil, Save, Send, ShoppingCart, ZoomIn, ZoomOut, Maximize2, MoveHorizontal, CheckCircle2, Keyboard, AlignCenterHorizontal, Sparkles, LogOut, Settings2 } from 'lucide-react';
 import { InlineLoader } from '@/components/loading';
 
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,8 @@ export default function CanvasToolbar({
   canAutoAlign,
   onBuildForMe,
   onPreview,
+  onExitPreview,
+  previewMode = false,
   onSave,
   saving,
   onSubmit,
@@ -66,6 +68,10 @@ export default function CanvasToolbar({
   canAutoAlign: boolean;
   onBuildForMe: () => void;
   onPreview: () => void;
+  /** Leave the preview and return to editing — the other half of the persistent toggle. */
+  onExitPreview: () => void;
+  /** Which half of the Edit ↔ Preview toggle is active. */
+  previewMode?: boolean;
   onSave: () => void;
   saving: boolean;
   onSubmit: () => void;
@@ -167,6 +173,38 @@ export default function CanvasToolbar({
               <Maximize2 />
             </Button>
           </div>
+
+        {/*
+          THE EDIT ↔ PREVIEW TOGGLE — persistent, always visible, one control.
+
+          Designers live in this switch, so it is a real segmented control rather than a button
+          that opens a thing: both destinations are on screen at all times and the current one is
+          always the highlighted half. Switching is instantaneous because the builder never
+          unmounts — the preview opens over it — so the spread, zoom, scroll position and
+          selection are all exactly where they were on the way back.
+        */}
+        <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs" role="group" aria-label="Edit or preview">
+          <button
+            type="button"
+            onClick={onExitPreview}
+            aria-pressed={!previewMode}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-all duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+              previewMode ? 'text-muted-foreground hover:text-foreground' : 'bg-secondary text-foreground shadow-xs'
+            }`}
+          >
+            <Pencil className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Edit</span>
+          </button>
+          <button
+            type="button"
+            onClick={onPreview}
+            aria-pressed={previewMode}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-all duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+              previewMode ? 'bg-secondary text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Preview</span>
+          </button>
+        </div>
 
         {blueprintMode ? (
           /* BLUEPRINT MODE — no customer actions (no Auto Align, Build-for-me, Submit or Checkout).

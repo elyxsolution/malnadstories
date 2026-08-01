@@ -70,7 +70,7 @@ export default function CoverCanvas(props: CoverCanvasProps) {
     <div className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10">
       <div className="mx-auto flex flex-col items-center gap-4" style={{ width: `min(${Math.round(7.4 * zoomPct)}px, 96%)` }}>
         <div
-          className="relative w-full select-none overflow-hidden rounded-[14px] shadow-[0_2px_4px_rgb(16_24_20/0.06),0_26px_70px_-30px_rgb(16_24_20/0.55)] ring-1 ring-black/10"
+          className="relative w-full select-none overflow-hidden shadow-[0_2px_4px_rgb(16_24_20/0.06),0_26px_70px_-30px_rgb(16_24_20/0.55)] ring-1 ring-black/10"
           style={{ aspectRatio: String(aspect) }}
         >
           <div className="flex h-full w-full">

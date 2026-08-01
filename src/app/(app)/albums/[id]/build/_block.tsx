@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Crop, SlidersHorizontal, ImagePlus } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
-import Movable, { SnapGuides, type SnapLine } from './_movable';
+import Movable, { SnapGuides, type SnapLine, type SelectMods } from './_movable';
+import { PrintGutter } from './_pair-frame';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
 import type { CropTarget } from './_use-canvas-crop';
@@ -14,19 +15,37 @@ import UploadBadge, { stateOpacityClass } from './_upload-badge';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
+import { EDIT_BOUNDS, PASTEBOARD_PCT, commitBounds, type EditableKind } from '@/lib/builder/edit-bounds';
+import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { useBuilderDimensions } from './_dimensions';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
 import type { DragApi } from './_use-drag';
-import type { SelectionTarget } from './_selection-model';
+import { selectionFromTarget, type SelectionTarget } from './_selection-model';
 import ReadinessBadge from './_readiness-badge';
 import { frameKey, type Readiness } from './_quality-model';
 
+/** A gesture that carried no modifier keys. */
+const NO_MODS: SelectMods = { meta: false, shift: false, alt: false };
+
 /**
- * The premium open-book editing canvas for ONE spread (open pair, 3:2). Renders the page
- * with a centre fold, soft paper shadow, page numbers, optional guides, and every editable
- * element — base photos, floating photo overlays, text, and QR — each selectable, draggable,
- * resizable (and text rotatable) through the shared `Movable` engine. All mutations flow
- * through the builder hook (`api`), so persistence is unchanged.
+ * The premium open-book editing canvas for ONE spread (open pair). Renders the page with a
+ * centre fold, soft paper shadow, page numbers, optional guides, and every editable element —
+ * base photos, floating photo overlays, text, and QR — each selectable, draggable, resizable
+ * (and text rotatable) through the shared `Movable` engine. All mutations flow through the
+ * builder hook (`api`), so persistence is unchanged.
+ *
+ * TWO LAYERS, ONE PAGE BOX:
+ *
+ *   RENDER LAYER  — the page's own content (background + base photo slots), clipped to the trim
+ *                   box exactly as the preview, flipbook, review mode and the PDF clip it. This
+ *                   is the "what prints" layer and its behaviour is unchanged.
+ *   EDITING LAYER — the free elements (photo overlays, text, QR, stickers). NOT clipped, so an
+ *                   element can be dragged out onto the pasteboard around the page and left
+ *                   deliberately hanging off the edge. Only the editor shows this; every render
+ *                   surface still clips at the trim, so the printed result is untouched.
+ *
+ * The page geometry itself is a true rectangle — real printed albums have sharp 90° corners, so
+ * the canvas does too. Depth comes from the layered paper shadow (`.album-page`), not a radius.
  */
 export default function BlockCard({
   api,
@@ -48,6 +67,7 @@ export default function BlockCard({
   pickActive = false,
   onTapPlaceBase,
   showGuides = false,
+  showGutter = true,
   readinessOf,
   onPageEl,
   cropTarget = null,
@@ -79,6 +99,8 @@ export default function BlockCard({
   pickActive?: boolean;
   onTapPlaceBase?: (slot: BaseSlot) => void;
   showGuides?: boolean;
+  /** Draw the printed fold across the spread (Album Settings → Show print gutter). */
+  showGutter?: boolean;
   /**
    * Print-readiness for one frame, keyed by `frameKey` (Phase 7). Computed ONCE per edit by the
    * quality engine and looked up here — never recalculated per frame, which is what keeps the
@@ -115,6 +137,70 @@ export default function BlockCard({
   const start = physicalStart(blocks, index);
   const cost = PAGE_COST[block.template];
 
+  /**
+   * Travel rules for the editing layer, per element kind. `edit` is the pasteboard the gesture
+   * may roam; `commit` is where the element may land, and mirrors the stored schema — see
+   * `lib/builder/edit-bounds`. Memo-free: these are two object literals per render, and hoisting
+   * them would cost more in indirection than it saves.
+   */
+  const escapeFor = (kind: EditableKind) => ({ edit: EDIT_BOUNDS, commit: commitBounds(kind) });
+
+  /**
+   * REACHING WHAT IS UNDERNEATH.
+   *
+   * A pointer-down only ever lands on the topmost element, so the last click's position is
+   * recorded in the capture phase — before any element's own handler runs — and `resolveHit` uses
+   * it to decide whether this click means "select the thing I hit" or "step one level down". Two
+   * refs, no state: nothing here should cause a render, and the value is only ever read inside the
+   * gesture that immediately follows.
+   */
+  const lastPoint = useRef<HitPoint | null>(null);
+  const pendingPoint = useRef<HitPoint | null>(null);
+
+  const recordPoint = (e: React.PointerEvent) => {
+    const box = pageRef.current?.getBoundingClientRect();
+    if (!box || box.width === 0 || box.height === 0) return;
+    pendingPoint.current = { x: (e.clientX - box.left) / box.width, y: (e.clientY - box.top) / box.height };
+  };
+
+  /**
+   * Translate a click on `fallback` into the element the user actually meant.
+   *
+   * Plain clicks resolve to exactly what was hit, so ordinary editing is untouched. Alt-click and
+   * a repeated click at the same spot walk DOWN the stack instead — and either way the element
+   * stays exactly where it is in the layer order. Selecting has no side effect on stacking.
+   */
+  const resolveTarget = (fallback: SelectionTarget, mods: SelectMods): SelectionTarget => {
+    const point = pendingPoint.current;
+    // Modifier-free clicks, multi-select and range-extension all mean the literal thing hit.
+    if (!point || mods.meta || mods.shift) {
+      lastPoint.current = point;
+      return fallback;
+    }
+    const repeat = isSamePoint(lastPoint.current, point);
+    lastPoint.current = point;
+    const stack = hitStack(block, point);
+    /**
+     * The step is measured from WHAT IS SELECTED, not from what the pointer hit. Those are the
+     * same thing on the first click and different on every one after it — the pointer keeps
+     * landing on the topmost element no matter how deep the selection has walked, so taking the
+     * hit as the origin would bounce between the top two forever instead of descending.
+     */
+    const current: HitTarget | null =
+      selection.kind === 'overlay' || selection.kind === 'text' || selection.kind === 'qr' || selection.kind === 'sticker'
+        ? { kind: selection.kind, id: selection.id }
+        : null;
+    const hit = resolveHit(stack, current, { alt: mods.alt, repeat });
+    return hit ? { ...hit, blockKey: block.key } : fallback;
+  };
+
+  /** Fire both selection stores for a resolved target — the single place the two are kept in step. */
+  const selectResolved = (fallback: SelectionTarget, mods: SelectMods) => {
+    const t = resolveTarget(fallback, mods);
+    onSelect(selectionFromTarget(t));
+    onSelectTarget?.(t, { meta: mods.meta, shift: mods.shift });
+  };
+
   const leftPhoto = block.photoIds[0] ? photoMap.get(block.photoIds[0]) : undefined;
   const rightPhoto = block.photoIds[1] ? photoMap.get(block.photoIds[1]) : undefined;
 
@@ -138,299 +224,305 @@ export default function BlockCard({
         </button>
       </div>
 
-      {/* The page — premium paper with fold, shadow, page numbers. Click empty area = deselect. */}
+      {/*
+        THE PASTEBOARD. A margin of working space around the page, so an element pushed past the
+        trim edge has somewhere to sit and stays visible while you position it. It is scenery, not
+        a container: it never clips, and nothing in it prints. A pointer-down out here means the
+        same thing as one on an empty part of the page — deselect.
+      */}
       <div
-        ref={(el) => {
-          (pageRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-          onPageEl?.(el);
-        }}
+        className="relative"
+        style={{ padding: `${PASTEBOARD_PCT}%` }}
         onPointerDown={() => onSelect({ kind: 'none' })}
-        className="album-page relative w-full select-none overflow-hidden rounded-[14px]"
-        style={{ aspectRatio: pair, containerType: 'inline-size' }}
+        /* Capture phase: record WHERE the gesture landed before any element consumes it. */
+        onPointerDownCapture={recordPoint}
       >
-        {/* Background layer */}
-        {block.background ? (
-          <div className="absolute inset-0" style={backgroundStyle(block.background)} />
-        ) : (
-          <div className="absolute inset-0 bg-white" />
-        )}
+        {/* The page — premium paper with fold, shadow, page numbers, sharp printed corners. */}
+        <div
+          ref={(el) => {
+            (pageRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+            onPageEl?.(el);
+          }}
+          className="album-page relative w-full select-none"
+          style={{ aspectRatio: pair, containerType: 'inline-size' }}
+        >
+          {/* ── RENDER LAYER ────────────────────────────────────────────────────────────────
+              The page's own content. It clips itself by construction — the background and both
+              base slots are geometrically pinned to the page box, and `PhotoFrame` clips its own
+              zoom/crop overflow — so this layer needs no clip of its own and nothing here can
+              escape the trim. Unchanged from before. */}
+          {block.background ? (
+            <div className="absolute inset-0" style={backgroundStyle(block.background)} />
+          ) : (
+            <div className="absolute inset-0 bg-white" />
+          )}
 
-        {/* Base photo slots */}
-        {isDouble ? (
-          <BaseSlotView
-            photo={leftPhoto}
-            task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
-            label="Click or drop the image (spans both pages)"
-            selected={sel({ kind: 'base', slot: 'image' })}
-            pickActive={pickActive}
-            onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('image') : undefined}
-            onSelect={(mods) => {
-              onSelect({ kind: 'base', slot: 'image' });
-              onSelectTarget?.({ kind: 'base', blockKey: block.key, slot: 'image' }, mods);
-            }}
-            onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'image' })}
-            multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'image' })}
-            onPick={() => setPicking({ kind: 'base', slot: 'image' })}
-            onDrop={(id) => {
-              api.assignBaseSlot(block.key, 'image', id);
-              drag?.end();
-            }}
-            onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'image' })}
-            incomingPreviewUrl={(() => {
-              const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'image' });
-              return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
-            })()}
-            isDragSource={drag?.isSource(block.key, 'image')}
-            onDragStartFrame={(photoId) =>
-              drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'image' } })
-            }
-            onDragEndFrame={() => drag?.end()}
-            onClear={() => api.clearBaseSlot(block.key, 'image')}
-            onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], pair, true) : undefined}
-            onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
-            readiness={baseReadiness('image')}
-            cropping={croppingSlot === 'image'}
-            cropHandlers={cropHandlers}
-          />
-        ) : (
-          <>
-            <div className="absolute left-0 top-0 h-full w-1/2">
-              <BaseSlotView
-                photo={leftPhoto}
-                task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
-                label="Left page"
-                selected={sel({ kind: 'base', slot: 'left' })}
-                pickActive={pickActive}
-                onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('left') : undefined}
-                onSelect={(mods) => {
-                  onSelect({ kind: 'base', slot: 'left' });
-                  onSelectTarget?.({ kind: 'base', blockKey: block.key, slot: 'left' }, mods);
-                }}
-                onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'left' })}
-                multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'left' })}
-                onPick={() => setPicking({ kind: 'base', slot: 'left' })}
-                onDrop={(id) => {
-                  api.assignBaseSlot(block.key, 'left', id);
-                  drag?.end();
-                }}
-                onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'left' })}
-                incomingPreviewUrl={(() => {
-                  const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'left' });
-                  return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
-                })()}
-                isDragSource={drag?.isSource(block.key, 'left')}
-                onDragStartFrame={(photoId) =>
-                  drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'left' } })
-                }
-                onDragEndFrame={() => drag?.end()}
-                onClear={() => api.clearBaseSlot(block.key, 'left')}
-                onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], page, false) : undefined}
-                onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
-                readiness={baseReadiness('left')}
-                cropping={croppingSlot === 'left'}
-                cropHandlers={cropHandlers}
-              />
-            </div>
-            <div className="absolute left-1/2 top-0 h-full w-1/2">
-              <BaseSlotView
-                photo={rightPhoto}
-                task={rightPhoto ? taskFor?.(rightPhoto.id) : undefined}
-                label="Right page"
-                selected={sel({ kind: 'base', slot: 'right' })}
-                pickActive={pickActive}
-                onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('right') : undefined}
-                onSelect={(mods) => {
-                  onSelect({ kind: 'base', slot: 'right' });
-                  onSelectTarget?.({ kind: 'base', blockKey: block.key, slot: 'right' }, mods);
-                }}
-                onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'right' })}
-                multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'right' })}
-                onPick={() => setPicking({ kind: 'base', slot: 'right' })}
-                onDrop={(id) => {
-                  api.assignBaseSlot(block.key, 'right', id);
-                  drag?.end();
-                }}
-                onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'right' })}
-                incomingPreviewUrl={(() => {
-                  const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'right' });
-                  return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
-                })()}
-                isDragSource={drag?.isSource(block.key, 'right')}
-                onDragStartFrame={(photoId) =>
-                  drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'right' } })
-                }
-                onDragEndFrame={() => drag?.end()}
-                onClear={() => api.clearBaseSlot(block.key, 'right')}
-                onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], page, false) : undefined}
-                onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
-                readiness={baseReadiness('right')}
-                cropping={croppingSlot === 'right'}
-                cropHandlers={cropHandlers}
-              />
-            </div>
-          </>
-        )}
-
-        {/* Overlays (floating framed photos — or empty placeholder containers) */}
-        {block.overlays.map((o) => {
-          const photo = o.photoId ? photoMap.get(o.photoId) : undefined;
-          // Stable client id (guaranteed by `useBlocks`). Used for the React key, for selection
-          // and for every mutation, so reordering or deleting a sibling can no longer make a
-          // stored reference point at a different overlay.
-          const oid = o.id as string;
-          return (
-            <Movable
-              key={oid}
-              rect={o}
-              selected={sel({ kind: 'overlay', id: oid }) || (isTargetSelected?.({ kind: 'overlay', blockKey: block.key, id: oid }) ?? false)}
-              containerRef={pageRef}
-              ariaLabel="Photo overlay"
-              onSelect={(mods) => {
-                onSelect({ kind: 'overlay', id: oid });
-                onSelectTarget?.({ kind: 'overlay', blockKey: block.key, id: oid }, mods ?? { meta: false, shift: false });
+          {/* Base photo slots */}
+          {isDouble ? (
+            <BaseSlotView
+              photo={leftPhoto}
+              task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
+              label="Click or drop the image (spans both pages)"
+              selected={sel({ kind: 'base', slot: 'image' })}
+              pickActive={pickActive}
+              onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('image') : undefined}
+              onSelect={(mods) => selectResolved({ kind: 'base', blockKey: block.key, slot: 'image' }, mods)}
+              onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'image' })}
+              multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'image' })}
+              onPick={() => setPicking({ kind: 'base', slot: 'image' })}
+              onDrop={(id) => {
+                api.assignBaseSlot(block.key, 'image', id);
+                drag?.end();
               }}
-              onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
-              onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
-              onSnap={setSnap}
-              /* Sibling overlays feed the edge + equal-spacing guides. */
-              peers={block.overlays.filter((o) => o.id !== oid).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))}
-              className="overflow-hidden rounded-md border-2 border-white shadow-md"
+              onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'image' })}
+              incomingPreviewUrl={(() => {
+                const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'image' });
+                return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+              })()}
+              isDragSource={drag?.isSource(block.key, 'image')}
+              onDragStartFrame={(photoId) =>
+                drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'image' } })
+              }
+              onDragEndFrame={() => drag?.end()}
+              onClear={() => api.clearBaseSlot(block.key, 'image')}
+              onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], pair, true) : undefined}
+              onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
+              readiness={baseReadiness('image')}
+              cropping={croppingSlot === 'image'}
+              cropHandlers={cropHandlers}
+            />
+          ) : (
+            <>
+              <div className="absolute left-0 top-0 h-full w-1/2">
+                <BaseSlotView
+                  photo={leftPhoto}
+                  task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
+                  label="Left page"
+                  selected={sel({ kind: 'base', slot: 'left' })}
+                  pickActive={pickActive}
+                  onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('left') : undefined}
+                  onSelect={(mods) => selectResolved({ kind: 'base', blockKey: block.key, slot: 'left' }, mods)}
+                  onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'left' })}
+                  multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'left' })}
+                  onPick={() => setPicking({ kind: 'base', slot: 'left' })}
+                  onDrop={(id) => {
+                    api.assignBaseSlot(block.key, 'left', id);
+                    drag?.end();
+                  }}
+                  onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'left' })}
+                  incomingPreviewUrl={(() => {
+                    const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'left' });
+                    return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+                  })()}
+                  isDragSource={drag?.isSource(block.key, 'left')}
+                  onDragStartFrame={(photoId) =>
+                    drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'left' } })
+                  }
+                  onDragEndFrame={() => drag?.end()}
+                  onClear={() => api.clearBaseSlot(block.key, 'left')}
+                  onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], page, false) : undefined}
+                  onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
+                  readiness={baseReadiness('left')}
+                  cropping={croppingSlot === 'left'}
+                  cropHandlers={cropHandlers}
+                />
+              </div>
+              <div className="absolute left-1/2 top-0 h-full w-1/2">
+                <BaseSlotView
+                  photo={rightPhoto}
+                  task={rightPhoto ? taskFor?.(rightPhoto.id) : undefined}
+                  label="Right page"
+                  selected={sel({ kind: 'base', slot: 'right' })}
+                  pickActive={pickActive}
+                  onTapPlace={onTapPlaceBase ? () => onTapPlaceBase('right') : undefined}
+                  onSelect={(mods) => selectResolved({ kind: 'base', blockKey: block.key, slot: 'right' }, mods)}
+                  onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'right' })}
+                  multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'right' })}
+                  onPick={() => setPicking({ kind: 'base', slot: 'right' })}
+                  onDrop={(id) => {
+                    api.assignBaseSlot(block.key, 'right', id);
+                    drag?.end();
+                  }}
+                  onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'right' })}
+                  incomingPreviewUrl={(() => {
+                    const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'right' });
+                    return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+                  })()}
+                  isDragSource={drag?.isSource(block.key, 'right')}
+                  onDragStartFrame={(photoId) =>
+                    drag?.begin({ photoIds: [photoId], origin: { from: 'frame', blockKey: block.key, slot: 'right' } })
+                  }
+                  onDragEndFrame={() => drag?.end()}
+                  onClear={() => api.clearBaseSlot(block.key, 'right')}
+                  onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], page, false) : undefined}
+                  onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
+                  readiness={baseReadiness('right')}
+                  cropping={croppingSlot === 'right'}
+                  cropHandlers={cropHandlers}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Overlays (floating framed photos — or empty placeholder containers) */}
+          {block.overlays.map((o) => {
+            const photo = o.photoId ? photoMap.get(o.photoId) : undefined;
+            // Stable client id (guaranteed by `useBlocks`). Used for the React key, for selection
+            // and for every mutation, so reordering or deleting a sibling can no longer make a
+            // stored reference point at a different overlay.
+            const oid = o.id as string;
+            return (
+              <Movable
+                key={oid}
+                rect={o}
+                selected={sel({ kind: 'overlay', id: oid }) || (isTargetSelected?.({ kind: 'overlay', blockKey: block.key, id: oid }) ?? false)}
+                containerRef={pageRef}
+                escape={escapeFor('overlay')}
+                ariaLabel="Photo overlay"
+                onSelect={(mods) => selectResolved({ kind: 'overlay', blockKey: block.key, id: oid }, mods ?? NO_MODS)}
+                onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
+                onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
+                onSnap={setSnap}
+                /* Sibling overlays feed the edge + equal-spacing guides. */
+                peers={block.overlays.filter((o) => o.id !== oid).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))}
+                className="overflow-hidden rounded-md border-2 border-white shadow-md"
+                /**
+                 * NO INLINE CONTROL BAR (Pass 2). Replace / edit / duplicate / layer / delete all
+                 * live in the floating context bar now, which has room for the full photo toolset
+                 * instead of the four buttons that fitted above an overlay. `Movable` still accepts
+                 * `controls` — the cover canvas continues to use it, unchanged.
+                 */
+              >
+                <OverlayContent
+                  photo={photo}
+                  task={photo ? taskFor?.(photo.id) : undefined}
+                  readiness={overlayReadiness(oid)}
+                  cropping={croppingOverlay === oid}
+                  cropHandlers={cropHandlers}
+                  onDropPhoto={(id) => api.replaceOverlay(block.key, oid, id)}
+                />
+              </Movable>
+            );
+          })}
+
+          {/* Text elements */}
+          {block.texts.map((t) => (
+            <Movable
+              key={t.id}
+              rect={t}
+              rotation={t.rotation}
+              rotatable
+              minW={0.06}
+              minH={0.03}
+              selected={sel({ kind: 'text', id: t.id })}
+              containerRef={pageRef}
+              escape={escapeFor('text')}
+              ariaLabel="Text"
               /**
-               * NO INLINE CONTROL BAR (Pass 2). Replace / edit / duplicate / layer / delete all
-               * live in the floating context bar now, which has room for the full photo toolset
-               * instead of the four buttons that fitted above an overlay. `Movable` still accepts
-               * `controls` — the cover canvas continues to use it, unchanged.
+               * BOTH STORES, ALWAYS. Text / sticker / QR used to update only the single-element
+               * `selection` and leave the multi-select store holding whatever was picked before —
+               * so selecting a text with an overlay still in that store made a Delete keystroke
+               * act on the overlay. `SelectionTarget` has always had these kinds; they were simply
+               * never wired. A plain click replaces, so the two stores now agree by construction.
                */
+              onSelect={(mods) => selectResolved({ kind: 'text', blockKey: block.key, id: t.id }, mods ?? NO_MODS)}
+              onChange={(r) => api.patchText(block.key, t.id, r)}
+              onRotate={(deg) => api.patchText(block.key, t.id, { rotation: deg })}
+              onSnap={setSnap}
+              /* Double-click still opens the inline editor — the canvas-first way to edit words.
+                 Every other text action now lives in the context bar's Text toolbar. */
+              onDoubleClick={() => setEditingText(t.id)}
             >
-              <OverlayContent
-                photo={photo}
-                task={photo ? taskFor?.(photo.id) : undefined}
-                readiness={overlayReadiness(oid)}
-                cropping={croppingOverlay === oid}
-                cropHandlers={cropHandlers}
-                onDropPhoto={(id) => api.replaceOverlay(block.key, oid, id)}
-              />
+              {editingText === t.id ? (
+                <InlineTextEditor
+                  initial={t.text}
+                  el={t}
+                  onCommit={(text) => {
+                    api.patchText(block.key, t.id, { text });
+                    setEditingText(null);
+                  }}
+                />
+              ) : (
+                <TextContent el={t} />
+              )}
             </Movable>
-          );
-        })}
+          ))}
 
-        {/* Text elements */}
-        {block.texts.map((t) => (
-          <Movable
-            key={t.id}
-            rect={t}
-            rotation={t.rotation}
-            rotatable
-            minW={0.06}
-            minH={0.03}
-            selected={sel({ kind: 'text', id: t.id })}
-            containerRef={pageRef}
-            ariaLabel="Text"
-            /**
-             * BOTH STORES, ALWAYS. Text / sticker / QR used to update only the single-element
-             * `selection` and leave the multi-select store holding whatever was picked before —
-             * so selecting a text with an overlay still in that store made a Delete keystroke
-             * act on the overlay. `SelectionTarget` has always had these kinds; they were simply
-             * never wired. A plain click replaces, so the two stores now agree by construction.
-             */
-            onSelect={() => {
-              onSelect({ kind: 'text', id: t.id });
-              onSelectTarget?.({ kind: 'text', blockKey: block.key, id: t.id }, { meta: false, shift: false });
-            }}
-            onChange={(r) => api.patchText(block.key, t.id, r)}
-            onRotate={(deg) => api.patchText(block.key, t.id, { rotation: deg })}
-            onSnap={setSnap}
-            /* Double-click still opens the inline editor — the canvas-first way to edit words.
-               Every other text action now lives in the context bar's Text toolbar. */
-            onDoubleClick={() => setEditingText(t.id)}
-          >
-            {editingText === t.id ? (
-              <InlineTextEditor
-                initial={t.text}
-                el={t}
-                onCommit={(text) => {
-                  api.patchText(block.key, t.id, { text });
-                  setEditingText(null);
-                }}
-              />
-            ) : (
-              <TextContent el={t} />
-            )}
-          </Movable>
-        ))}
+          {/* QR elements */}
+          {block.qrs.map((q) => (
+            <Movable
+              key={q.id}
+              rect={q}
+              keepSquare
+              squareRatio={pair}
+              minW={0.06}
+              selected={sel({ kind: 'qr', id: q.id })}
+              containerRef={pageRef}
+              escape={escapeFor('qr')}
+              ariaLabel="QR code"
+              onSelect={(mods) => selectResolved({ kind: 'qr', blockKey: block.key, id: q.id }, mods ?? NO_MODS)}
+              onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w, pair) })}
+              onSnap={setSnap}
+            >
+              <QrContent el={q} />
+            </Movable>
+          ))}
 
-        {/* QR elements */}
-        {block.qrs.map((q) => (
-          <Movable
-            key={q.id}
-            rect={q}
-            keepSquare
-            squareRatio={pair}
-            minW={0.06}
-            selected={sel({ kind: 'qr', id: q.id })}
-            containerRef={pageRef}
-            ariaLabel="QR code"
-            onSelect={() => {
-              onSelect({ kind: 'qr', id: q.id });
-              onSelectTarget?.({ kind: 'qr', blockKey: block.key, id: q.id }, { meta: false, shift: false });
-            }}
-            onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w, pair) })}
-            onSnap={setSnap}
-          >
-            <QrContent el={q} />
-          </Movable>
-        ))}
+          {/* Stickers */}
+          {block.stickers.map((s) => (
+            <Movable
+              key={s.id}
+              rect={s}
+              rotation={s.rotation}
+              rotatable
+              locked={s.locked}
+              minW={0.04}
+              minH={0.04}
+              selected={sel({ kind: 'sticker', id: s.id })}
+              containerRef={pageRef}
+              escape={escapeFor('sticker')}
+              ariaLabel="Sticker"
+              onSelect={(mods) => selectResolved({ kind: 'sticker', blockKey: block.key, id: s.id }, mods ?? NO_MODS)}
+              onChange={(r) => api.patchSticker(block.key, s.id, r)}
+              onRotate={(deg) => api.patchSticker(block.key, s.id, { rotation: deg })}
+              onSnap={setSnap}
+            >
+              <StickerContent el={s} url={stickerUrlFor?.(s.stickerId)} />
+            </Movable>
+          ))}
 
-        {/* Stickers */}
-        {block.stickers.map((s) => (
-          <Movable
-            key={s.id}
-            rect={s}
-            rotation={s.rotation}
-            rotatable
-            locked={s.locked}
-            minW={0.04}
-            minH={0.04}
-            selected={sel({ kind: 'sticker', id: s.id })}
-            containerRef={pageRef}
-            ariaLabel="Sticker"
-            onSelect={() => {
-              onSelect({ kind: 'sticker', id: s.id });
-              onSelectTarget?.({ kind: 'sticker', blockKey: block.key, id: s.id }, { meta: false, shift: false });
-            }}
-            onChange={(r) => api.patchSticker(block.key, s.id, r)}
-            onRotate={(deg) => api.patchSticker(block.key, s.id, { rotation: deg })}
-            onSnap={setSnap}
-          >
-            <StickerContent el={s} url={stickerUrlFor?.(s.stickerId)} />
-          </Movable>
-        ))}
+          {/* Snap guides while dragging */}
+          <SnapGuides lines={snap} />
 
-        {/* Snap guides while dragging */}
-        <SnapGuides lines={snap} />
+          {/* Guides — margins + safe-zone + bleed (client-only; never printed). */}
+          {showGuides && (
+            <div className="pointer-events-none absolute inset-0 z-[8]">
+              <div className="absolute inset-[1.5%] border border-dashed border-destructive/40" />
+              <div className="absolute left-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
+              <div className="absolute right-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
+            </div>
+          )}
 
-        {/* Guides — margins + safe-zone + bleed (client-only; never printed). */}
-        {showGuides && (
-          <div className="pointer-events-none absolute inset-0 z-[8]">
-            <div className="absolute inset-[1.5%] border border-dashed border-destructive/40" />
-            <div className="absolute left-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
-            <div className="absolute right-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
-          </div>
-        )}
+          {/* The physical fold. Same component the preview, review and flat-spread views use, so
+              the gutter a customer designs around is the gutter they are shown everywhere. */}
+          {showGutter && <PrintGutter />}
 
-        {/* Centre fold — bound spine groove with a faint running stitch. */}
-        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-[6] -translate-x-1/2">
-          <div className="album-binding h-full" />
-          <div className="album-stitch absolute inset-y-0 left-1/2 -translate-x-1/2" />
+          {/* Page numbers */}
+          <span className="pointer-events-none absolute bottom-2 left-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
+            {start}
+          </span>
+          <span className="pointer-events-none absolute bottom-2 right-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
+            {start + cost - 1}
+          </span>
+
+          {/*
+            THE TRIM EDGE. Now that elements may hang off the page, the boundary has to stay
+            legible through them — this hairline is the answer to "where does the paper actually
+            end?", drawn above the element layer so an escaped photo is visibly cut by it. It sits
+            below a SELECTED element (z-50) so it never fights the handles you are working with.
+          */}
+          <span aria-hidden className="pointer-events-none absolute inset-0 z-[10] ring-1 ring-inset ring-foreground/[0.09]" />
         </div>
-
-        {/* Page numbers */}
-        <span className="pointer-events-none absolute bottom-2 left-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
-          {start}
-        </span>
-        <span className="pointer-events-none absolute bottom-2 right-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
-          {start + cost - 1}
-        </span>
       </div>
 
       {picking && (
@@ -630,7 +722,7 @@ function BaseSlotView({
   pickActive?: boolean;
   onTapPlace?: () => void;
   /** Receives the modifier state so the SELECTION STORE decides what a modifier means. */
-  onSelect: (mods: { meta: boolean; shift: boolean }) => void;
+  onSelect: (mods: SelectMods) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
   onPick: () => void;
   onDrop: (photoId: string) => void;
@@ -648,7 +740,7 @@ function BaseSlotView({
     <div
       onPointerDown={(e) => {
         e.stopPropagation();
-        if (photo) onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey });
+        if (photo) onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
       }}
       onContextMenu={(e) => {
         e.stopPropagation();
@@ -658,7 +750,7 @@ function BaseSlotView({
         e.stopPropagation();
         if (tapToPlace) onTapPlace?.();
         else if (!photo) onPick();
-        else onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey });
+        else onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();

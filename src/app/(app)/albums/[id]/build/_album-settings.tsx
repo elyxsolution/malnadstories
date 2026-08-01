@@ -60,6 +60,8 @@ export default function AlbumSettings({
   onEditCover,
   onOpenPhotos,
   onOpenBuildMethods,
+  showGutter,
+  onShowGutterChange,
 }: {
   albumId: string;
   title: string;
@@ -80,6 +82,9 @@ export default function AlbumSettings({
   onEditCover: () => void;
   onOpenPhotos: () => void;
   onOpenBuildMethods: () => void;
+  /** Canvas guide: draw the printed fold across every spread. Per-device, never persisted server-side. */
+  showGutter: boolean;
+  onShowGutterChange: (v: boolean) => void;
 }) {
   const [section, setSection] = useState<Section>('general');
 
@@ -343,6 +348,29 @@ export default function AlbumSettings({
                   <Button variant="outline" size="sm" className="mt-3" onClick={onClose}>
                     Back to the builder
                   </Button>
+                </div>
+
+                {/*
+                  A VIEWING preference, deliberately grouped with the other builder options rather
+                  than with Format: it changes nothing that is saved, printed or priced. It only
+                  decides whether the canvas shows you where the paper folds.
+                */}
+                <div className="rounded-xl border bg-card p-5">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={showGutter}
+                      onChange={(e) => onShowGutterChange(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 flex-none accent-[hsl(var(--studio))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-display text-base font-semibold tracking-tight">Show print gutter</span>
+                      <span className="mt-1 block text-[13px] leading-relaxed text-muted-foreground">
+                        Marks where the two pages of a spread meet and the paper physically folds, so you can keep faces
+                        and text clear of it. An on-screen guide only — it is never printed and never changes your layout.
+                      </span>
+                    </span>
+                  </label>
                 </div>
               </div>
             )}

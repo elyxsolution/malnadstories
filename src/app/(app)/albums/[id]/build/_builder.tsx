@@ -38,7 +38,7 @@ import ConfirmSubmitDialog from './_confirm-submit-dialog';
 import { evaluateAlbum, type AlbumValidationReport, type IssueAction } from '@/lib/albums/validation';
 import { type RenderReadinessReport } from '@/lib/albums/render-readiness';
 import { LoadingOverlay } from '@/components/loading';
-import PairContent from './_pair-frame';
+import PairContent, { PrintGutter } from './_pair-frame';
 import Navigator from './_navigator';
 import BuilderHeader from './_header';
 import CanvasToolbar from './_toolbar';
@@ -109,6 +109,8 @@ import {
   type TextVariant,
 } from '@/lib/builder/model';
 import { makeText, makeSticker, makeQr, type LayoutPreset } from '@/lib/builder/elements';
+import { layoutCycleSteps, nextCycleIndex } from '@/lib/builder/layout-cycle';
+import { clampRect, commitBounds, type EditableKind } from '@/lib/builder/edit-bounds';
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
@@ -253,6 +255,13 @@ export default function Builder({
   const [editLayout, setEditLayout] = useState<'focus' | 'grid'>('focus');
   const [zoomPct, setZoomPct] = useState(100);
   const [showGuides, setShowGuides] = useState(false);
+  /**
+   * Show the printed fold across every spread. A viewing preference, not album data — it changes
+   * nothing that is saved or exported — so it lives with the rest of the per-device builder
+   * context in localStorage. On by default: knowing where the fold falls is the sort of thing a
+   * customer should have to turn OFF, not discover.
+   */
+  const [showGutter, setShowGutter] = useState(true);
 
   // ── Blueprint Mode (0046) — editing a reusable blueprint, not a customer album ──
   const blueprintMode = !!blueprintDraftOf;
@@ -278,6 +287,8 @@ export default function Builder({
   const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
   const [quickCrop, setQuickCrop] = useState<{ photo: Photo; aspect: number; gutter: boolean } | null>(null);
   const [flipbookOpen, setFlipbookOpen] = useState(false);
+  /** The physical page the preview was last showing — read once, on the way back to editing. */
+  const previewPageRef = useRef<number | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   /** Distraction-free review (Phase 7). A view, never an editor — see `_review-mode`. */
@@ -303,6 +314,12 @@ export default function Builder({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  /**
+   * Where this spread sits in its curated layout cycle, plus the snapshot to return to. Cleared
+   * whenever the spread is edited some other way, because "Original" would no longer mean the
+   * thing the user remembers.
+   */
+  const [layoutCycle, setLayoutCycle] = useState<{ blockKey: string; original: Block; index: number } | null>(null);
 
   /**
    * THE PHOTO PIPELINE — optimistic photos, the upload manager's lifecycle, the progressive
@@ -411,6 +428,13 @@ export default function Builder({
   const remaining = size - consumed;
   const cur = Math.min(current, Math.max(0, blocks.length - 1));
   const block = blocks[cur];
+
+  // A layout cycle belongs to ONE spread: leaving it ends the rotation, so "Original" can never
+  // refer to a spread the user is no longer looking at.
+  const focusedKey = block?.key;
+  useEffect(() => {
+    setLayoutCycle((c) => (c && c.blockKey === focusedKey ? c : null));
+  }, [focusedKey]);
   const canAddMore = remaining >= 2;
 
   // Reset element selection whenever the focused spread changes.
@@ -493,7 +517,8 @@ export default function Builder({
     try {
       const raw = localStorage.getItem(ctxKey);
       if (!raw) return;
-      const s = JSON.parse(raw) as { current?: number; railTab?: RailTab; coverFocused?: boolean };
+      const s = JSON.parse(raw) as { current?: number; railTab?: RailTab; coverFocused?: boolean; showGutter?: boolean };
+      if (typeof s.showGutter === 'boolean') setShowGutter(s.showGutter);
       const cf = s.coverFocused === true;
       setCoverFocused(cf);
       let rt: RailTab = s.railTab && RAIL.some((r) => r.key === s.railTab) ? s.railTab : 'images';
@@ -513,11 +538,11 @@ export default function Builder({
   useEffect(() => {
     if (blueprintMode) return;
     try {
-      localStorage.setItem(ctxKey, JSON.stringify({ current, railTab, coverFocused }));
+      localStorage.setItem(ctxKey, JSON.stringify({ current, railTab, coverFocused, showGutter }));
     } catch {
       /* storage full/unavailable — non-fatal */
     }
-  }, [ctxKey, current, railTab, coverFocused, blueprintMode]);
+  }, [ctxKey, current, railTab, coverFocused, showGutter, blueprintMode]);
 
   // Polling, reconciliation, the blob handoff and the processing counts all live in the photo
   // pipeline now — these are just the values this component renders from. (`oldestProcessingSince`
@@ -949,6 +974,7 @@ export default function Builder({
    * different implementation. Null means "nothing detailed to show" (empty frame, page,
    * pending photo) and hides the panel without touching the user's open/closed preference.
    */
+
   const propsPanelContent = (() => {
     if (coverFocused || editLayout !== 'focus' || !block) return null;
     switch (selection.kind) {
@@ -1072,7 +1098,122 @@ export default function Builder({
     // THE single place a preset is applied, so it is also the single place layout memory learns
     // from — no other call site can forget to record it.
     layoutMemory.markUsed(preset.key);
+    setLayoutCycle(null); // a deliberate choice ends any cycle in progress
     setMessage({ kind: 'ok', text: 'Layout applied — review it, then Save.' });
+  };
+
+  /**
+   * LAYOUT CYCLE — step this spread through its curated alternatives and back.
+   *
+   * The alternatives come from the administrator-configured catalog (`layoutTemplates`, the same
+   * active rows the Layouts panel offers) and are ranked deterministically, so the cycle is a
+   * fixed rotation rather than a shuffle — pressing the button four times on a spread with three
+   * alternatives returns you to exactly what you started with.
+   *
+   * It owns no layout logic. Stepping FORWARD is the existing `applyPreset` command, with all of
+   * its photo-preservation behaviour; stepping back to Original re-applies the snapshot taken
+   * when the cycle began through the existing `patchBlock`. Both are ordinary mutations, so undo,
+   * the dirty flag and Save behave exactly as they do for any other edit. Per-photo edits live on
+   * the photo, not the slot, so they survive every step untouched.
+   */
+  /**
+   * KEYBOARD NUDGE — move the selected object without touching the pointer, and without touching
+   * its layer order.
+   *
+   * It dispatches the SAME `api.patch*` primitives the drag gesture uses, so it lands in the same
+   * history entry shape, marks the album dirty the same way and saves through the same pipeline —
+   * there is no second movement path. The result is clamped through `commitBounds`, exactly like a
+   * released drag, so a nudge can never push an object somewhere the save would reject.
+   */
+  const NUDGE = 0.002;
+  const NUDGE_COARSE = 0.02;
+
+  const canNudge = !coverFocused && !!block && selection.kind !== 'none' && selection.kind !== 'base';
+
+  /**
+   * EDIT ↔ PREVIEW, WITHOUT LOSING YOUR PLACE.
+   *
+   * The preview is an overlay, so the builder underneath is never unmounted: zoom, scroll, the
+   * open rail tab, the selection and every bit of editing state are simply still there when it
+   * closes. The one thing that would otherwise be lost is WHICH SPREAD you were on, because the
+   * flipbook counts physical pages while the builder counts spreads — so the two are translated
+   * here, in both directions. The cover is physical page 0; spread `i` starts at `1 + i * 2`.
+   */
+  const previewStartPage = coverFocused ? 0 : 1 + cur * 2;
+
+  const openPreview = useCallback(() => setFlipbookOpen(true), []);
+
+  const closePreview = useCallback(() => {
+    setFlipbookOpen(false);
+    const page = previewPageRef.current;
+    if (page === null) return;
+    if (page <= 0) setCoverFocused(true);
+    else {
+      setCoverFocused(false);
+      setCurrent(Math.max(0, Math.min(api.blocks.length - 1, Math.floor((page - 1) / 2))));
+    }
+  }, [api.blocks.length]);
+
+  const nudgeSelection = useCallback(
+    (dx: number, dy: number) => {
+      if (!block) return;
+      const shift = <T extends { x: number; y: number; w: number; h: number }>(el: T, kind: EditableKind): T => ({
+        ...el,
+        ...clampRect({ x: el.x + dx, y: el.y + dy, w: el.w, h: el.h }, commitBounds(kind)),
+      });
+      if (selection.kind === 'overlay') {
+        api.patchOverlays(
+          block.key,
+          block.overlays.map((o) => (o.id === selection.id ? shift(o, 'overlay') : o)),
+        );
+      } else if (selection.kind === 'text') {
+        const el = block.texts.find((t) => t.id === selection.id);
+        if (el) api.patchText(block.key, el.id, shift(el, 'text'));
+      } else if (selection.kind === 'qr') {
+        const el = block.qrs.find((q) => q.id === selection.id);
+        if (el) api.patchQr(block.key, el.id, shift(el, 'qr'));
+      } else if (selection.kind === 'sticker') {
+        const el = block.stickers.find((s) => s.id === selection.id);
+        if (el && !el.locked) api.patchSticker(block.key, el.id, shift(el, 'sticker'));
+      }
+    },
+    [api, block, selection],
+  );
+
+  const cycleSteps = useMemo(
+    () => (block ? layoutCycleSteps(block, layoutTemplates) : []),
+    // The steps are derived from the ORIGINAL spread, so they must not be recomputed as the cycle
+    // rewrites the block — hence the snapshot, not `block`, once a cycle is running.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layoutCycle?.original ?? block, layoutTemplates],
+  );
+  const canCycleLayout = !!block && cycleSteps.length > 1;
+
+  const cycleLayout = () => {
+    if (!block || cycleSteps.length < 2) return;
+    const original = layoutCycle?.blockKey === block.key ? layoutCycle.original : block;
+    const at = layoutCycle?.blockKey === block.key ? layoutCycle.index : 0;
+    const next = nextCycleIndex(at, cycleSteps);
+    const step = cycleSteps[next];
+
+    if (step.preset) {
+      /**
+       * No `layoutMemory.markUsed` here. Favourites and "recently used" are a record of layouts
+       * the customer deliberately CHOSE from the panel; a cycle step is exploratory, and logging
+       * every press would fill that list with layouts they only glanced at and rejected.
+       */
+      api.applyPreset(block.key, step.preset, availableIds);
+    } else {
+      // Back to Original — restore the geometry AND the photo placement exactly as it was.
+      api.patchBlock(block.key, {
+        template: original.template,
+        photoIds: original.photoIds,
+        overlays: original.overlays,
+        preset: original.preset,
+      });
+    }
+    setLayoutCycle({ blockKey: block.key, original, index: next });
+    setMessage({ kind: 'ok', text: `${step.label} — layout ${next + 1} of ${cycleSteps.length}.` });
   };
   const addText = (variant: TextVariant) => {
     if (!block) return;
@@ -1344,6 +1485,117 @@ export default function Builder({
     coverSel.kind === 'sticker' ? sideArrays(coverSel.side).stickers.find((s) => s.id === coverSel.id) ?? null : null;
   const coverSelectedQr =
     coverSel.kind === 'qr' ? sideArrays(coverSel.side).qrs.find((q) => q.id === coverSel.id) ?? null : null;
+
+  /**
+   * THE COVER'S DETAILED CONTROLS — the same inspectors, in the same panel as everything else.
+   *
+   * The cover used to own a PERMANENT 300px sidebar that no other surface had: always present
+   * whether or not you needed it, and the last place the builder still behaved like two separate
+   * applications. The controls themselves were never the problem — `SpineInspector`,
+   * `TextInspector`, `StickerInspector`, `QrInspector` and `CoverPanel` are already the shared,
+   * callback-driven components — so unifying meant changing the HOST, not the editing logic.
+   *
+   * They now render in `PropertiesPanel`, the same docked panel a content page uses, opened
+   * CONTEXTUALLY. Background, the template gallery and the title block live under the cover-level
+   * entry (nothing selected), which is the same rule a page follows.
+   */
+  const coverPanelContent = (() => {
+    if (!coverFocused) return null;
+    if (coverSel.kind === 'spine') {
+      return {
+        title: 'Spine',
+        node: (
+          <SpineInspector
+            spineTitle={coverConfig.spineTitle}
+            spineColor={coverConfig.spineColor}
+            fallbackTitle={albumTitle}
+            onChange={(patch) => updateCover({ config: patch })}
+          />
+        ),
+      };
+    }
+    if (coverSelectedText && coverSelSide) {
+      return {
+        title: 'Text',
+        node: (
+          <TextInspector
+            el={coverSelectedText}
+            onChange={(patch) => patchCoverText(coverSelSide, coverSelectedText.id, patch)}
+            onDelete={() => {
+              removeCoverText(coverSelSide, coverSelectedText.id);
+              setCoverSel(COVER_NO_SELECTION);
+            }}
+          />
+        ),
+      };
+    }
+    if (coverSelectedSticker && coverSelSide) {
+      return {
+        title: 'Sticker',
+        node: (
+          <StickerInspector
+            el={coverSelectedSticker}
+            onChange={(patch) => patchCoverSticker(coverSelSide, coverSelectedSticker.id, patch)}
+            onDelete={() => {
+              removeCoverSticker(coverSelSide, coverSelectedSticker.id);
+              setCoverSel(COVER_NO_SELECTION);
+            }}
+            onDuplicate={() => duplicateCoverSticker(coverSelSide, coverSelectedSticker.id)}
+            onForward={() => reorderCoverSticker(coverSelSide, coverSelectedSticker.id, 1)}
+            onBackward={() => reorderCoverSticker(coverSelSide, coverSelectedSticker.id, -1)}
+          />
+        ),
+      };
+    }
+    if (coverSelectedQr && coverSelSide) {
+      return {
+        title: 'QR code',
+        node: (
+          <QrInspector
+            el={coverSelectedQr}
+            onChange={(patch) => patchCoverQr(coverSelSide, coverSelectedQr.id, patch)}
+            onDelete={() => {
+              removeCoverQr(coverSelSide, coverSelectedQr.id);
+              setCoverSel(COVER_NO_SELECTION);
+            }}
+          />
+        ),
+      };
+    }
+    return {
+      title: 'Cover design',
+      node: (
+        <CoverPanel
+          title={albumTitle}
+          coverId={coverId}
+          config={coverConfig}
+          covers={covers}
+          photos={photos}
+          photoMap={photoMap}
+          activeSide={activeSide}
+          onActiveSide={setActiveSide}
+          onUpdate={updateCover}
+          onEditImage={setCoverImageEditor}
+          showPreview={false}
+        />
+      ),
+    };
+  })();
+
+  /**
+   * ONE panel, one decision about what it shows. The surface picks the content; the host renders
+   * it. Nothing downstream needs to know whether it is looking at a cover or a spread.
+   */
+  const panelContent = coverFocused ? coverPanelContent : propsPanelContent;
+
+  /**
+   * Contextual, not permanent: the panel opens for what you just selected on the cover and stays
+   * closed once you dismiss it. Keyed on the selection so picking a different object brings its
+   * controls back — which is the job the permanent sidebar was doing badly.
+   */
+  useEffect(() => {
+    if (coverFocused) setPropsPanelOpen(true);
+  }, [coverFocused, coverSel]);
 
   // ── Auto Align (toolbar) — tidies the active cover page / focused spread (text + stickers).
   const activeArrays = sideArrays(activeSide);
@@ -1727,22 +1979,46 @@ export default function Builder({
           setSelection(NO_SELECTION);
         },
       },
-      {
-        combo: "ArrowLeft",
-        label: "Previous spread",
-        group: "Navigation",
-        when: () => editLayout === "focus",
-        run: () => setCurrent((c) => Math.max(0, c - 1)),
-      },
-      {
-        combo: "ArrowRight",
-        label: "Next spread",
-        group: "Navigation",
-        when: () => editLayout === "focus",
-        run: () => setCurrent((c) => Math.min(blocks.length - 1, c + 1)),
-      },
+      /**
+       * ARROWS DO THE OBVIOUS THING FOR WHAT IS SELECTED.
+       *
+       * With an object selected they nudge it; with nothing selected they turn the page. One
+       * binding per key, branching inside `run`, because the shortcut table is keyed by combo and
+       * two rows for `ArrowLeft` would mean one silently shadowing the other.
+       *
+       * Nudging is also what makes a COVERED object fully editable. Its handles are reachable
+       * (they are drawn above the stack) but its body may be entirely hidden, so there is nowhere
+       * to grab for a drag — the keyboard is the way, and it is the accessible way regardless.
+       */
+      ...(
+        [
+          ['ArrowLeft', -1, 0],
+          ['ArrowRight', 1, 0],
+          ['ArrowUp', 0, -1],
+          ['ArrowDown', 0, 1],
+        ] as const
+      ).flatMap(([key, sx, sy]) => [
+        {
+          combo: key,
+          label: key === 'ArrowLeft' || key === 'ArrowRight' ? 'Nudge selection / change spread' : 'Nudge selection',
+          group: 'Navigation' as const,
+          when: () => canNudge || (editLayout === 'focus' && (key === 'ArrowLeft' || key === 'ArrowRight')),
+          run: () => {
+            if (canNudge) return nudgeSelection(sx * NUDGE, sy * NUDGE);
+            if (key === 'ArrowLeft') setCurrent((c) => Math.max(0, c - 1));
+            else if (key === 'ArrowRight') setCurrent((c) => Math.min(blocks.length - 1, c + 1));
+          },
+        },
+        {
+          combo: `shift+${key}`,
+          label: 'Nudge selection further',
+          group: 'Editing' as const,
+          when: () => canNudge,
+          run: () => nudgeSelection(sx * NUDGE_COARSE, sy * NUDGE_COARSE),
+        },
+      ]),
     ],
-    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu],
+    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection],
   );
   /**
    * Review mode owns the keyboard while it is open (it binds its own capture-phase listener), so
@@ -1790,7 +2066,9 @@ export default function Builder({
         onAutoAlign={autoAlignCurrent}
         canAutoAlign={canAutoAlign}
         onBuildForMe={() => setBuildMethodOpen(true)}
-        onPreview={() => setFlipbookOpen(true)}
+        onPreview={openPreview}
+        onExitPreview={closePreview}
+        previewMode={flipbookOpen}
         onSave={save}
         saving={saving}
         onSubmit={onSubmitClick}
@@ -2175,12 +2453,12 @@ export default function Builder({
                       setCurrent(i);
                       setEditLayout('focus');
                     }}
-                    className={`group relative overflow-hidden rounded-xl bg-white shadow-[0_2px_4px_rgb(16_24_20/0.06),0_18px_44px_-24px_rgb(16_24_20/0.4)] ring-1 transition-all duration-200 hover:-translate-y-1 ${i === cur ? 'ring-2 ring-studio' : 'ring-black/[0.04] hover:ring-studio-bright/50'}`}
+                    className={`group relative overflow-hidden bg-white shadow-[0_2px_4px_rgb(16_24_20/0.06),0_18px_44px_-24px_rgb(16_24_20/0.4)] ring-1 transition-all duration-200 hover:-translate-y-1 ${i === cur ? 'ring-2 ring-studio' : 'ring-black/[0.04] hover:ring-studio-bright/50'}`}
                     style={{ containerType: 'inline-size' }}
                   >
                     <div className="relative w-full" style={{ aspectRatio: pairA }}>
                       <PairContent block={b} photoFor={photoForOverview} stickerUrlFor={stickerUrlFor} />
-                      <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-black/10" />
+                      {showGutter && <PrintGutter />}
                     </div>
                     <span className="absolute left-2 top-2 grid h-6 w-6 place-items-center rounded-md bg-foreground/55 text-[11px] font-semibold text-white backdrop-blur-sm">{i + 1}</span>
                   </button>
@@ -2248,6 +2526,7 @@ export default function Builder({
                       setPickedId(null);
                     }}
                     showGuides={showGuides}
+                    showGutter={showGutter}
                     readinessOf={readinessOf}
                     onPageEl={(el) => {
                       pageElRef.current = el;
@@ -2339,6 +2618,13 @@ export default function Builder({
               onAddPhotoOverlay={() => setPickerFor({ kind: 'add' })}
               onAddQr={() => addQr('')}
               onOpenLayouts={() => setRailTab('layouts')}
+              onCycleLayout={cycleLayout}
+              canCycleLayout={canCycleLayout}
+              cyclePosition={
+                layoutCycle?.blockKey === block.key && layoutCycle.index > 0
+                  ? `${layoutCycle.index + 1}/${cycleSteps.length}`
+                  : null
+              }
               onOpenProperties={() => setPropsPanelOpen((v) => !v)}
               propertiesOpen={propsPanelOpen && !!propsPanelContent}
               onEscape={() => {
@@ -2357,96 +2643,22 @@ export default function Builder({
         </main>
 
         {/*
-          RIGHT — the docked properties panel (Pass 3). The detailed controls for whatever is
-          selected: photo adjustments, advanced typography, sticker and QR settings. It exists
-          only while open AND the selection has something detailed to show; the canvas takes
-          the width back the moment it closes. Content pages only — the cover keeps its own
-          panel below.
+          RIGHT — ONE docked properties panel, for every surface.
+
+          It hosts the detailed controls for whatever is selected — photo adjustments, advanced
+          typography, sticker and QR settings on a content page; spine, text, sticker, QR and the
+          whole cover design on the cover. It exists only while open AND the selection has
+          something detailed to show, and the canvas takes the width back the moment it closes.
+
+          The cover's permanent 300px sidebar is gone. It was the last place the builder still
+          behaved like two applications, and nothing about it was load-bearing: the inspectors it
+          rendered were already the shared, callback-driven ones, so unifying was a change of HOST,
+          not of editing logic.
         */}
-        {!coverFocused && propsPanelOpen && propsPanelContent && (
-          <PropertiesPanel title={propsPanelContent.title} onClose={() => setPropsPanelOpen(false)}>
-            {propsPanelContent.node}
+        {propsPanelOpen && panelContent && (
+          <PropertiesPanel title={panelContent.title} onClose={() => setPropsPanelOpen(false)}>
+            {panelContent.node}
           </PropertiesPanel>
-        )}
-
-        {/*
-          RIGHT — the cover designer, and ONLY the cover designer (Pass 2).
-
-          The permanent inspector is gone from page editing: every page and element control now
-          lives in the floating context bar on the canvas, and those ~300px went to the spread.
-
-          The cover keeps its panel deliberately, and it is not an exception made out of laziness.
-          A content page is entirely canvas objects, so every control has something on screen to
-          attach to. A cover is not: its title, subtitle, author, spine text, spine colour, layout
-          preset, template gallery and back-cover composition are STRUCTURED FIELDS with no
-          canvas representation to float beside. Relocating them to a bar would mean inventing
-          on-canvas handles for a book spine — which is a redesign of the cover, not this pass.
-          So the rail is now conditional rather than permanent: it exists in cover mode, and does
-          not exist anywhere else.
-        */}
-        {coverFocused && (
-        <aside className="flex w-[300px] flex-none flex-col border-l border-border/70 bg-card">
-          {coverFocused ? (
-            coverSel.kind === 'spine' ? (
-              <SpineInspector
-                spineTitle={coverConfig.spineTitle}
-                spineColor={coverConfig.spineColor}
-                fallbackTitle={albumTitle}
-                onChange={(patch) => updateCover({ config: patch })}
-              />
-            ) : coverSelectedText && coverSelSide ? (
-              <TextInspector
-                el={coverSelectedText}
-                onChange={(patch) => patchCoverText(coverSelSide, coverSelectedText.id, patch)}
-                onDelete={() => {
-                  removeCoverText(coverSelSide, coverSelectedText.id);
-                  setCoverSel(COVER_NO_SELECTION);
-                }}
-              />
-            ) : coverSelectedSticker && coverSelSide ? (
-              <StickerInspector
-                el={coverSelectedSticker}
-                onChange={(patch) => patchCoverSticker(coverSelSide, coverSelectedSticker.id, patch)}
-                onDelete={() => {
-                  removeCoverSticker(coverSelSide, coverSelectedSticker.id);
-                  setCoverSel(COVER_NO_SELECTION);
-                }}
-                onDuplicate={() => duplicateCoverSticker(coverSelSide, coverSelectedSticker.id)}
-                onForward={() => reorderCoverSticker(coverSelSide, coverSelectedSticker.id, 1)}
-                onBackward={() => reorderCoverSticker(coverSelSide, coverSelectedSticker.id, -1)}
-              />
-            ) : coverSelectedQr && coverSelSide ? (
-              <QrInspector
-                el={coverSelectedQr}
-                onChange={(patch) => patchCoverQr(coverSelSide, coverSelectedQr.id, patch)}
-                onDelete={() => {
-                  removeCoverQr(coverSelSide, coverSelectedQr.id);
-                  setCoverSel(COVER_NO_SELECTION);
-                }}
-              />
-            ) : (
-              <>
-                <div className="border-b border-border/70 px-4 py-3.5">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Cover designer</p>
-                  <h2 className="mt-0.5 font-display text-[17px] font-semibold tracking-tight text-foreground">Design your cover</h2>
-                </div>
-                <CoverPanel
-                  title={albumTitle}
-                  coverId={coverId}
-                  config={coverConfig}
-                  covers={covers}
-                  photos={photos}
-                  photoMap={photoMap}
-                  activeSide={activeSide}
-                  onActiveSide={setActiveSide}
-                  onUpdate={updateCover}
-                  onEditImage={setCoverImageEditor}
-                  showPreview={false}
-                />
-              </>
-            )
-          ) : null}
-        </aside>
         )}
       </div>
 
@@ -2571,7 +2783,13 @@ export default function Builder({
           stickerUrlFor={stickerUrlFor}
           photoStateFor={photoStateFor}
           cover={{ imageUrl: coverImageUrl, backImageUrl: backCoverImageUrl, config: coverConfig, title: albumTitle, name: selectedCover?.name ?? albumTitle, size }}
-          onClose={() => setFlipbookOpen(false)}
+          showGutter={showGutter}
+          startPage={previewStartPage}
+          onPageChange={(p) => {
+            previewPageRef.current = p;
+          }}
+          onEditAlbum={closePreview}
+          onClose={closePreview}
         />
       )}
       {/* REVIEW MODE — the album with the software taken away. Renders the same spreads through
@@ -2590,6 +2808,7 @@ export default function Builder({
           report={quality}
           albumId={albumId}
           startIndex={cur}
+          showGutter={showGutter}
           onClose={() => setReviewOpen(false)}
           onGoToIssue={goToIssue}
         />
@@ -2660,6 +2879,8 @@ export default function Builder({
           onEditCover={focusCoverForEditing}
           onOpenPhotos={() => { setCoverFocused(false); setRailTab('images'); }}
           onOpenBuildMethods={() => setBuildMethodOpen(true)}
+          showGutter={showGutter}
+          onShowGutterChange={setShowGutter}
         />
       )}
 

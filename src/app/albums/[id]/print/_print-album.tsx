@@ -1,11 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { CoverConfig } from '@/lib/builder/cover';
-import { printPageCss, type ProductDimensions } from '@/lib/products/model';
+import { cmToIn, printPageCss, type ProductDimensions } from '@/lib/products/model';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
 /** The custom cover design: front rendered on page 1, back on the final physical page. */
@@ -32,19 +32,72 @@ export type PrintCover = { imageUrl: string | null; backImageUrl: string | null;
  * hardcoded constant — so every product prints at its own physical size (CSS supports `cm`).
  * The layout math below is percentage-based (200%-wide pair, ±100% clip), so it scales to
  * any page size without change.
+ *
+ * ── PAGE-BOUNDARY EXACTNESS (why the page is sized in px, not cm) ──────────────────────────
+ *
+ * Symptoms this addresses: a hairline white band along the bottom edge of an exported page, and
+ * — on some pages — a thin sliver of the NEXT page appearing in that same band.
+ *
+ * Both come from ONE geometric fact, measured against real headless Chromium rather than
+ * assumed. Chromium lays a printed page out in a fragmentainer whose size is the CEILING of the
+ * `@page` size in CSS px, while a page element sized in the same cm units is the exact fraction:
+ *
+ *      @page height   29.7cm  =  1122.5197 px   ← what a cm-sized element measures
+ *      fragmentainer                 1123    px   ← ceil(); the sheet Chromium actually paints
+ *
+ * So the page element stopped 0.48px short of the sheet on every page, and 0.30px short on the
+ * right edge (21cm = 793.7008px, fragmentainer 794px). That shortfall IS the white line — the
+ * strip of sheet no element ever covered. Note it is size-dependent: the legacy 6in × 8in album
+ * lands on 576 × 768 px exactly and never showed the fault, which is why this only appeared once
+ * products introduced centimetre sizes.
+ *
+ * The same shortfall explains the sliver. Where the page's forced break was in effect, the gap
+ * showed the sheet (white line). Where it was NOT — see (2) — the following page element began
+ * 0.48px before the sheet ended, so its first half-pixel painted at the bottom of the current
+ * sheet: a thin band of the next page.
+ *
+ * (1) FIX — size the page element at `ceil(cm → px)`, the fragmentainer's own value, so it
+ *     covers the sheet exactly. `@page size` stays in cm, so the PDF's physical page size is
+ *     unchanged and still exact; the sub-pixel of overscan falls outside the media box and is
+ *     clipped. Nothing is hidden: the gap is filled by the page rather than painted over.
+ *
+ * (2) FIX — a forced break that had silently switched itself off. Pages carried
+ *     `break-after: page` with `.pdf-page:last-child { break-after: auto }` to avoid a trailing
+ *     blank sheet. But each content pair wrapped its two pages in a `display: contents` element,
+ *     and `:last-child` is structural — it does not see through `display: contents`. The
+ *     RIGHT-hand page of every pair was therefore the last child of its wrapper and lost its
+ *     break, which is why the sliver appeared on alternating pages rather than all of them. The
+ *     wrappers are now real fragments, and the rule is inverted to `break-before` on every page
+ *     after the first: it cannot produce a trailing blank, and it does not depend on where a
+ *     page sits among its siblings.
+ *
+ * `print-color-adjust: exact` states in CSS what Puppeteer already asks for with
+ * `printBackground` — backgrounds and photos print at full density.
  */
+
+/** CSS px for a physical length, rounded UP to match Chromium's print fragmentainer exactly. */
+const pageAxisPx = (cm: number): number => Math.ceil(cmToIn(cm) * 96);
+
 function buildPrintCss(dimensions: ProductDimensions): string {
-  const page = printPageCss(dimensions); // e.g. { w: '21cm', h: '29.7cm' }
+  const page = printPageCss(dimensions); // e.g. { w: '21cm', h: '29.7cm' } — the PHYSICAL size
+  const w = pageAxisPx(dimensions.printWidthCm);
+  const h = pageAxisPx(dimensions.printHeightCm);
   return `
   @page { size: ${page.w} ${page.h}; margin: 0; }
-  html, body { margin: 0; padding: 0; background: #fff; }
-  .pdf-page {
-    position: relative; width: ${page.w}; height: ${page.h};
-    overflow: hidden; background: #fff;
-    break-after: page; page-break-after: always;
+  html, body {
+    margin: 0; padding: 0; background: #fff;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  .pdf-page:last-child { break-after: auto; page-break-after: auto; }
-  /* The open pair is 2 pages wide (200%); each physical page is a clip window onto it. */
+  .pdf-page {
+    position: relative;
+    /* The fragmentainer's own dimensions — an exact fit, so no strip of sheet is left bare. */
+    width: ${w}px; height: ${h}px;
+    overflow: hidden; background: #fff;
+  }
+  .pdf-page + .pdf-page { break-before: page; page-break-before: always; }
+  /* The open pair is 2 pages wide (200%); each physical page is a clip window onto it. The
+     integer page width keeps the fold at a whole pixel (and a whole device pixel at the
+     worker's deviceScaleFactor: 2), so the two halves meet with no sub-pixel seam. */
   .pair-clip { position: absolute; top: 0; height: 100%; width: 200%; }
   .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 `;
@@ -162,12 +215,18 @@ export default function PrintAlbum({
       <div className="pdf-page" />
       <div className="pdf-page" />
 
-      {/* Content — each pair → two physical pages (left half, right half). */}
+      {/*
+        Content — each pair → two physical pages (left half, right half).
+
+        A React Fragment, NOT a `display: contents` element: every `.pdf-page` must be a true
+        sibling of every other one, or the CSS fragmentation rules that key off sibling position
+        (`.pdf-page + .pdf-page`) silently skip pages. See the note on `buildPrintCss`.
+      */}
       {blocks.map((block) => (
-        <div key={block.key} style={{ display: 'contents' }}>
+        <Fragment key={block.key}>
           <PhysicalPage side="left" block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} />
           <PhysicalPage side="right" block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} />
-        </div>
+        </Fragment>
       ))}
 
       {/* Back matter — blank inside-back cover (left, right) then the Back cover (final page). */}

@@ -15,7 +15,7 @@ import {
   MessageSquare,
   Trash2,
 } from 'lucide-react';
-import PairContent, { type PairPhoto } from './_pair-frame';
+import PairContent, { PrintGutter, type PairPhoto } from './_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from './_cover-render';
 import { useBuilderDimensions } from './_dimensions';
 import type { Block } from '@/lib/builder/model';
@@ -59,12 +59,15 @@ export default function ReviewMode({
   report,
   albumId,
   startIndex = 0,
+  showGutter = true,
   onClose,
   onGoToIssue,
 }: {
   blocks: Block[];
   photoFor: PhotoFor;
   stickerUrlFor?: (stickerId: string) => string | undefined;
+  /** Draw the printed fold (Album Settings → Show print gutter). */
+  showGutter?: boolean;
   cover: { config: CoverConfig; title: string; frontImageUrl: string | null; backImageUrl: string | null };
   report: QualityReport;
   albumId: string;
@@ -320,8 +323,9 @@ export default function ReviewMode({
               ) : current ? (
                 <>
                   <PairContent block={current.block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} badge="compact" />
-                  {/* The centre fold — the one piece of chrome that makes a spread read as a book. */}
-                  <span className="pointer-events-none absolute inset-y-0 left-1/2 z-[3] w-px -translate-x-1/2 bg-black/12" />
+                  {/* The same fold the builder canvas draws — reviewing a spread should show the
+                      customer exactly the gutter they designed around. */}
+                  {showGutter && <PrintGutter />}
                 </>
               ) : null}
             </div>
