@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pencil, Trash2, Check, AlertTriangle, Image as ImageIcon, RotateCw, X, Star } from 'lucide-react';
 import { InlineLoader } from '@/components/loading';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
+import { acceptPhotoDrag, readPhotoDrag, startPhotoDrag } from '@/lib/builder/photo-dnd';
 import { isTempPhotoId, type UploadTask } from '@/lib/uploads';
 
 import PhotoFrame from './_photo-frame';
@@ -181,13 +182,12 @@ export default function Tray({
        */
       onDragOver={(e) => {
         if (!onDropToTray) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
+        acceptPhotoDrag(e);
       }}
       onDrop={(e) => {
         if (!onDropToTray) return;
         e.preventDefault();
-        const id = e.dataTransfer.getData('text/photo-id');
+        const id = readPhotoDrag(e);
         if (id) onDropToTray(id);
       }}
       onPointerDown={(e) => {
@@ -223,8 +223,7 @@ export default function Tray({
             draggable={placeable}
             onDragStart={(e) => {
               if (!placeable) return;
-              e.dataTransfer.setData('text/photo-id', photo.id);
-              e.dataTransfer.effectAllowed = 'copy';
+                    startPhotoDrag(e, photo.id);
               // Publish the drag so destinations can preview it (Smart Replace).
               onDragStartPhoto?.(photo.id);
             }}

@@ -31,7 +31,7 @@ import Tray from './_tray';
 import TrayToolbar from './_tray-toolbar';
 import BlockCard, { PhotoPicker } from './_block';
 import ContextBar from './_context-bar';
-import { useAnchorRect, FULL_PAGE, type NormRect } from './_use-anchor-rect';
+import { useAnchorRect, FULL_PAGE } from './_use-anchor-rect';
 import { useCanvasCrop } from './_use-canvas-crop';
 import SubmitValidationDialog from './_submit-validation-dialog';
 import ConfirmSubmitDialog from './_confirm-submit-dialog';
@@ -105,7 +105,7 @@ import {
   type TextVariant,
 } from '@/lib/builder/model';
 import { type LayoutPreset } from '@/lib/builder/elements';
-import { layoutCycleSteps, nextCycleIndex } from '@/lib/builder/layout-cycle';
+import { layoutCycleSteps, nextCycleIndex, layoutByDensity, currentLayoutLabel } from '@/lib/builder/layout-cycle';
 import { clampRect, EDIT_BOUNDS } from '@/lib/builder/edit-bounds';
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
@@ -922,45 +922,22 @@ export default function Builder({
    * publishes it), so the identical anchor hook positions the identical bar — the cover needed no
    * second measurement path, only a rect.
    */
-  const coverSelectionRect = useMemo<NormRect | null>(() => {
-    if (!coverFocused) return null;
-    const s = cover.selection;
-    switch (s.kind) {
-      case 'text':
-        return cover.elements.texts.find((t) => t.id === s.id) ?? null;
-      case 'qr':
-        return cover.elements.qrs.find((q) => q.id === s.id) ?? null;
-      case 'sticker':
-        return cover.elements.stickers.find((st) => st.id === s.id) ?? null;
-      // The backdrop and the base photo both fill the face, so both anchor to the whole of it.
-      default:
-        return FULL_PAGE;
-    }
-  }, [coverFocused, cover.selection, cover.elements]);
-
-  const selectionRect = useMemo<NormRect | null>(() => {
-    if (!block || coverFocused || editLayout !== 'focus') return null;
-    switch (selection.kind) {
-      case 'base': {
-        // A base slot is half the pair (or all of it on a double-spread) — its geometry is the
-        // template's, not the model's, so it is the one case that has to be derived.
-        if (block.template === 'double-spread') return FULL_PAGE;
-        return { x: selection.slot === 'right' ? 0.5 : 0, y: 0, w: 0.5, h: 1 };
-      }
-      case 'overlay':
-        return block.overlays.find((o) => o.id === selection.id) ?? null;
-      case 'text':
-        return block.texts.find((t) => t.id === selection.id) ?? null;
-      case 'qr':
-        return block.qrs.find((q) => q.id === selection.id) ?? null;
-      case 'sticker':
-        return block.stickers.find((s) => s.id === selection.id) ?? null;
-      default:
-        return FULL_PAGE;
-    }
-  }, [block, coverFocused, editLayout, selection]);
-
-  const barAnchor = useAnchorRect(pageElRef, coverFocused ? coverSelectionRect : selectionRect);
+  /**
+   * WHERE THE TOOLBAR STACK SITS — the SPREAD, not the selection.
+   *
+   * It used to follow whatever was selected, so the bar leapt across the canvas on every click.
+   * That was tolerable while it was a single bar that appeared and disappeared with the object it
+   * described; it is not, now that the page row is permanent — a persistent toolbar that teleports
+   * is worse than one that vanishes. Anchoring to the spread makes the page row genuinely fixed:
+   * the ONLY movement in the whole system is the upward shift when the contextual row appears
+   * beneath it, which is the motion the design calls for and nothing else.
+   *
+   * The same rect serves the cover, whose faces share one anchor box for the same reason.
+   */
+  const barAnchor = useAnchorRect(
+    pageElRef,
+    (coverFocused || (!!block && editLayout === 'focus')) ? FULL_PAGE : null,
+  );
 
   /** The photo backing the focused cover face's image, when it has one. */
   const coverSelectedPhoto = useMemo(() => {
@@ -1327,6 +1304,26 @@ export default function Builder({
     setLayoutCycle({ blockKey: block.key, original, index: next });
     setMessage({ kind: 'ok', text: `${step.label} — layout ${next + 1} of ${cycleSteps.length}.` });
   };
+
+  /**
+   * FEWER / MORE PHOTOS — the other half of the consolidated Layout control.
+   *
+   * `layoutByDensity` picks the nearest curated layout in the requested direction using the same
+   * catalog and the same capacity maths the cycle uses; applying it is the SAME `applyPreset`
+   * command a panel click runs, so photo preservation, history, the dirty flag and the save
+   * pipeline are all the existing ones. This adds a trigger, not a layout system.
+   */
+  const densityOption = useCallback(
+    (dir: -1 | 1) => (block ? layoutByDensity(block, layoutTemplates, dir) : null),
+    [block, layoutTemplates],
+  );
+  const stepLayoutDensity = (dir: -1 | 1) => {
+    const preset = densityOption(dir);
+    if (!preset) return;
+    applyPreset(preset);
+    setMessage({ kind: 'ok', text: `${preset.label} — ${dir < 0 ? 'fewer' : 'more'} photos on this spread.` });
+  };
+  const layoutLabel = block ? currentLayoutLabel(block, layoutTemplates) : '';
   const addText = (variant: TextVariant) => {
     if (!block) return;
     const id = api.addText(block.key, variant);
@@ -2668,6 +2665,10 @@ export default function Builder({
               onAddQr={() => addQr('')}
               onOpenLayouts={() => setRailTab('layouts')}
               onCycleLayout={cycleLayout}
+              layoutLabel={layoutLabel}
+              onLayoutDensity={stepLayoutDensity}
+              canFewerPhotos={!!densityOption(-1)}
+              canMorePhotos={!!densityOption(1)}
               canCycleLayout={canCycleLayout}
               cyclePosition={
                 layoutCycle?.blockKey === block.key && layoutCycle.index > 0

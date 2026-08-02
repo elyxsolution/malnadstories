@@ -17,6 +17,7 @@ import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
 import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
+import { acceptPhotoDrag, leftDropTarget, readPhotoDrag, startPhotoDrag } from '@/lib/builder/photo-dnd';
 import { useBuilderDimensions } from './_dimensions';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
 import type { DragApi } from './_use-drag';
@@ -710,22 +711,24 @@ function OverlayContent({
   const uiState = photo ? photoUiState(photo, task) : 'ready';
   return (
     <div
+      /* An occupied overlay is as valid a target as an empty one — dropping onto it replaces.
+         See `photo-dnd`: the effect must be declared identically on both sides or the browser
+         cancels the drop before any handler runs. */
       onDragOver={(e) => {
-        e.preventDefault();
-        // `move` when this overlay already holds something (the drop takes its place), `copy`
-        // into an empty container — the same language the base slots speak.
-        e.dataTransfer.dropEffect = photo ? 'move' : 'copy';
+        acceptPhotoDrag(e);
         if (!over) {
           setOver(true);
           onDragEnterTarget?.();
         }
       }}
-      onDragLeave={() => setOver(false)}
+      onDragLeave={(e) => {
+        if (leftDropTarget(e)) setOver(false);
+      }}
       onDrop={(e) => {
         e.preventDefault();
         e.stopPropagation();
         setOver(false);
-        const id = e.dataTransfer.getData('text/photo-id');
+        const id = readPhotoDrag(e);
         if (id) onDropPhoto(id);
       }}
       className="relative h-full w-full"
@@ -864,26 +867,26 @@ function BaseSlotView({
       onDragStart={(e) => {
         if (!photo) return;
         e.stopPropagation();
-        e.dataTransfer.setData('text/photo-id', photo.id);
-        e.dataTransfer.effectAllowed = 'move';
+        startPhotoDrag(e, photo.id);
         onDragStartFrame?.(photo.id);
       }}
       onDragEnd={() => onDragEndFrame?.()}
+      /* Occupied or empty, this slot accepts the drop — a photo landing on a filled slot is a
+         replacement, which is a legitimate outcome and must not be refused by the browser. */
       onDragOver={(e) => {
-        e.preventDefault();
-        // `move` when the photo comes from another frame, `copy` from the tray — the cursor then
-        // tells the truth about whether the source keeps its photo.
-        e.dataTransfer.dropEffect = photo ? 'move' : 'copy';
+        acceptPhotoDrag(e);
         if (!over) {
           setOver(true);
           onDragEnterTarget?.();
         }
       }}
-      onDragLeave={() => setOver(false)}
+      onDragLeave={(e) => {
+        if (leftDropTarget(e)) setOver(false);
+      }}
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        const id = e.dataTransfer.getData('text/photo-id');
+        const id = readPhotoDrag(e);
         if (id) onDrop(id);
       }}
       className={`group/base absolute inset-0 cursor-pointer transition-all duration-200 ${

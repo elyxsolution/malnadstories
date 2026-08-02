@@ -32,7 +32,7 @@ import {
   Lock,
   LockOpen,
 } from 'lucide-react';
-import { CanvasBar, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
+import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
 import LayerMenu, { type LayerSibling } from './_layer-menu';
 import FontPicker from './_font-picker';
 import { ColorField } from './_color-picker';
@@ -152,6 +152,12 @@ export type ContextBarProps = {
   onCycleLayout: () => void;
   canCycleLayout: boolean;
   cyclePosition: string | null;
+  /** The name of the curated layout this spread currently sits on — shown in the Layout menu. */
+  layoutLabel: string;
+  /** Step to the nearest curated layout holding fewer (-1) or more (+1) photos. */
+  onLayoutDensity: (dir: -1 | 1) => void;
+  canFewerPhotos: boolean;
+  canMorePhotos: boolean;
   /** Open the selected object's detailed controls in the right-hand properties panel. */
   onOpenProperties: () => void;
   propertiesOpen: boolean;
@@ -169,35 +175,47 @@ export function pageBarCommands(commands: CommandsApi): BarCommands {
   };
 }
 
+/**
+ * THE STACK — a persistent page row, plus a contextual object row when something is selected.
+ *
+ * The page toolbar used to be an ALTERNATIVE to the object toolbars: selecting a photo replaced
+ * it wholesale, so the entire control surface changed identity on every click and the UI jumped.
+ * They are different scopes, not different states of one thing — page-level actions (add, arrange,
+ * layout, guides, delete spread) remain equally relevant while a photo is selected — so both are
+ * rendered, stacked, in one shell.
+ *
+ * The shell is bottom-anchored (see `_canvas-bar`), which is what makes the page row appear to
+ * shift upward as the object row appears beneath it. Nothing is swapped and nothing is remounted:
+ * `PageRowControls` keeps the same position in the tree whatever is selected, so its popovers and
+ * roving focus survive a selection change.
+ */
 export default function ContextBar(props: ContextBarProps) {
   const { anchor, block, selection } = props;
   if (!anchor || !block) return null;
   const bar: BarProps = { ...props, block, commands: pageBarCommands(props.commands) };
+  const object = objectControls(bar);
 
-  switch (selection.kind) {
-    case 'base':
-    case 'overlay':
-      return <PhotoBar {...bar} />;
-    case 'text':
-      return <TextBar {...bar} />;
-    case 'sticker':
-      return <StickerBar {...bar} />;
-    case 'qr':
-      return <QrBar {...bar} />;
-    default:
-      return <PageBar {...props} block={block} />;
-  }
+  return (
+    <CanvasBar anchor={anchor} label={`Spread ${props.index + 1} tools`} onEscape={props.onEscape}>
+      <BarRow tone="page">
+        <PageBar {...props} block={block} />
+      </BarRow>
+      {/* Keyed on the selection KIND so switching from a photo to a text replays the entrance
+          animation; moving between two photos does not, because nothing about the row changed. */}
+      {object && <BarRow key={selection.kind}>{object}</BarRow>}
+    </CanvasBar>
+  );
 }
 
 /**
- * THE OBJECT BARS, addressable on their own.
+ * The controls for whatever is selected — or null when nothing is.
  *
- * `ContextBar` above is the PAGE entry point (it also owns `PageBar`, which needs block ordering
- * and layout cycling). The cover enters here instead, with the same `BarProps`, so both surfaces
- * reach the identical `PhotoBar` / `TextBar` / `StickerBar` / `QrBar` — one implementation of
- * "what tools does a text object get", not two that agree today.
+ * `ContextBar` above is the PAGE entry point (it also owns the page row). The cover enters through
+ * `ObjectBar` with the same `BarProps`, so both surfaces reach the identical `PhotoBar` /
+ * `TextBar` / `StickerBar` / `QrBar` — one implementation of "what tools does a text object get",
+ * not two that agree today.
  */
-export function ObjectBar(p: BarProps) {
+function objectControls(p: BarProps): React.ReactNode {
   switch (p.selection.kind) {
     case 'base':
     case 'overlay':
@@ -211,6 +229,11 @@ export function ObjectBar(p: BarProps) {
     default:
       return null;
   }
+}
+
+/** The object row on its own, for a host that supplies its own shell (the cover). */
+export function ObjectBar(p: BarProps) {
+  return <>{objectControls(p)}</>;
 }
 
 type PageBarProps = ContextBarProps & { block: Block };
@@ -235,7 +258,7 @@ const qrSiblings = (block: Block): LayerSibling[] => block.qrs.map((q, i) => ({ 
 // ── photo (base slot or overlay) ──────────────────────────────────────────────────
 
 function PhotoBar(p: BarProps) {
-  const { api, block, commands, selection, selectedPhoto, anchor, pairAspect } = p;
+  const { api, block, commands, selection, selectedPhoto, pairAspect } = p;
   const isOverlay = selection.kind === 'overlay';
   const overlayId = isOverlay ? selection.id : null;
   const ovIndex = overlayId ? block.overlays.findIndex((o) => o.id === overlayId) : -1;
@@ -279,7 +302,7 @@ function PhotoBar(p: BarProps) {
     // CROP MODE gets its own minimal bar: the only thing you can do is adjust and finish, so
     // showing twelve unrelated buttons would be noise at the exact moment focus matters most.
     return (
-      <CanvasBar anchor={anchor} label="Crop photo" onEscape={p.onEndCrop}>
+        <>
         <BarLabel>Drag to reposition · scroll to zoom</BarLabel>
         <BarSep />
         <BarBtn label="Zoom out" icon={<ZoomOut />} disabled={zoom <= 1} onClick={() => apply({ zoom: Math.max(1, zoom - 0.15) })} />
@@ -288,12 +311,12 @@ function PhotoBar(p: BarProps) {
         <BarSep />
         <BarBtn label="Reset position" icon={<RotateCcw />} onClick={() => apply({ zoom: 1, offsetX: 0, offsetY: 0 })} />
         <BarBtn label="Done" icon={<Check />} text="Done" onClick={p.onEndCrop} />
-      </CanvasBar>
+      </>
     );
   }
 
   return (
-    <CanvasBar anchor={anchor} label={isOverlay ? 'Overlay photo tools' : 'Photo tools'} onEscape={p.onEscape}>
+    <>
       <BarBtn
         label="Replace photo"
         icon={<Replace />}
@@ -360,7 +383,7 @@ function PhotoBar(p: BarProps) {
         disabled={!commands.deleteSelection.enabled}
         onClick={() => void commands.deleteSelection.run()}
       />
-    </CanvasBar>
+    </>
   );
 }
 
@@ -410,7 +433,7 @@ function SizeInput({ value, onChange }: { value: number; onChange: (v: number) =
  * has no business on a toolbar: letter spacing, line height, opacity, rotation, shadow.
  */
 function TextBar(p: BarProps) {
-  const { api, block, selection, anchor, commands } = p;
+  const { api, block, selection, commands } = p;
   if (selection.kind !== 'text') return null;
   const el = block.texts.find((t) => t.id === selection.id);
   if (!el) return null;
@@ -418,7 +441,7 @@ function TextBar(p: BarProps) {
   const set = (patch: Partial<typeof el>) => api.patchText(block.key, el.id, patch);
 
   return (
-    <CanvasBar anchor={anchor} label="Text tools" onEscape={p.onEscape}>
+    <>
       <FontPicker compact value={el.font} onChange={(v) => set({ font: v })} />
       <SizeInput value={el.size} onChange={(v) => set({ size: v })} />
       <BarSep />
@@ -464,14 +487,14 @@ function TextBar(p: BarProps) {
         destructive
         onClick={() => void p.commands.deleteSelection.run()}
       />
-    </CanvasBar>
+    </>
   );
 }
 
 // ── sticker ───────────────────────────────────────────────────────────────────────
 
 function StickerBar(p: BarProps) {
-  const { api, block, selection, anchor, commands } = p;
+  const { api, block, selection, commands } = p;
   if (selection.kind !== 'sticker') return null;
   const el = block.stickers.find((s) => s.id === selection.id);
   if (!el) return null;
@@ -479,7 +502,7 @@ function StickerBar(p: BarProps) {
   const set = (patch: Partial<typeof el>) => api.patchSticker(block.key, el.id, patch);
 
   return (
-    <CanvasBar anchor={anchor} label="Sticker tools" onEscape={p.onEscape}>
+    <>
       <BarBtn label="Flip horizontally" icon={<FlipHorizontal />} active={!!el.flipH} onClick={() => set({ flipH: !el.flipH })} />
       <BarBtn label="Flip vertically" icon={<FlipVertical />} active={!!el.flipV} onClick={() => set({ flipV: !el.flipV })} />
       <BarBtn
@@ -513,21 +536,21 @@ function StickerBar(p: BarProps) {
       />
       <BarSep />
       <BarBtn label="Delete sticker" icon={<Trash2 />} destructive onClick={() => void p.commands.deleteSelection.run()} />
-    </CanvasBar>
+    </>
   );
 }
 
 // ── QR ────────────────────────────────────────────────────────────────────────────
 
 function QrBar(p: BarProps) {
-  const { block, selection, anchor, commands } = p;
+  const { block, selection, commands } = p;
   if (selection.kind !== 'qr') return null;
   const el = block.qrs.find((q) => q.id === selection.id);
   if (!el) return null;
   const i = block.qrs.findIndex((q) => q.id === el.id);
 
   return (
-    <CanvasBar anchor={anchor} label="QR code tools" onEscape={p.onEscape}>
+    <>
       <BarBtn
         label="QR settings — link, colours, style"
         icon={<QrCode />}
@@ -544,16 +567,92 @@ function QrBar(p: BarProps) {
       />
       <BarSep />
       <BarBtn label="Delete QR code" icon={<Trash2 />} destructive onClick={() => void p.commands.deleteSelection.run()} />
-    </CanvasBar>
+    </>
   );
 }
 
 // ── page (nothing selected) ───────────────────────────────────────────────────────
 
-function PageBar(p: PageBarProps) {
-  const { api, block, index, total, size, anchor } = p;
+/**
+ * THE LAYOUT CONTROL — one button where there were four.
+ *
+ * Layout, Shuffle, Fewer and More are all the same question ("arrange this spread differently")
+ * asked at different granularities, and spreading them across four always-visible buttons spent a
+ * third of the page toolbar on one concept. They collapse into a single `Layout ▾` whose popover
+ * states the current layout, offers the three quick actions, and hands off to the existing
+ * Layouts panel for browsing.
+ *
+ * IT OWNS NO LAYOUT LOGIC. Shuffle is the existing `onCycleLayout`; fewer/more are
+ * `layoutByDensity` (built on the same catalog, capacity and geometry-key maths the cycle uses)
+ * applied through the same `applyPreset` command; Browse opens the same rail panel. Every one of
+ * them lands in history as an ordinary layout change, so undo and redo are unchanged.
+ */
+function LayoutMenu(p: PageBarProps) {
+  const quick = (label: string, hint: string, icon: React.ReactNode, enabled: boolean, run: () => void, close: () => void) => (
+    <button
+      type="button"
+      disabled={!enabled}
+      title={hint}
+      onClick={() => {
+        run();
+        close();
+      }}
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-secondary disabled:pointer-events-none disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:text-muted-foreground"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
-    <CanvasBar anchor={anchor} label={`Spread ${index + 1} tools`} onEscape={p.onEscape}>
+    <BarPopover label="Layout for this spread" icon={<LayoutGrid />} text="Layout" width={232}>
+      {(close) => (
+        <div className="p-1.5">
+          <div className="px-2.5 pb-1.5 pt-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Current layout</p>
+            <p className="truncate text-[12.5px] font-medium text-foreground">{p.layoutLabel}</p>
+          </div>
+          <div className="my-1 h-px bg-border/70" />
+          {quick(
+            p.cyclePosition ? `Shuffle layout · ${p.cyclePosition}` : 'Shuffle layout',
+            p.canCycleLayout
+              ? 'Try the next curated layout for this spread — your photos come with it'
+              : 'No alternative layouts are available for this spread',
+            <Shuffle />,
+            p.canCycleLayout,
+            p.onCycleLayout,
+            close,
+          )}
+          {quick(
+            'Fewer photos',
+            p.canFewerPhotos ? 'Switch to the nearest layout that holds fewer photos' : 'No simpler layout is available',
+            <Minimize />,
+            p.canFewerPhotos,
+            () => p.onLayoutDensity(-1),
+            close,
+          )}
+          {quick(
+            'More photos',
+            p.canMorePhotos ? 'Switch to the nearest layout that holds more photos' : 'No denser layout is available',
+            <Maximize />,
+            p.canMorePhotos,
+            () => p.onLayoutDensity(1),
+            close,
+          )}
+          <div className="my-1 h-px bg-border/70" />
+          {/* The Layouts rail remains the single source of truth for choosing a layout — this is a
+              hand-off to it, never a second gallery. */}
+          {quick('Browse all layouts…', 'Open the Layouts panel', <LayoutGrid />, true, p.onOpenLayouts, close)}
+        </div>
+      )}
+    </BarPopover>
+  );
+}
+
+function PageBar(p: PageBarProps) {
+  const { api, block, index, total, size } = p;
+  return (
+    <>
       <BarLabel>
         Spread {index + 1} / {total}
       </BarLabel>
@@ -561,19 +660,7 @@ function PageBar(p: PageBarProps) {
       <BarBtn label="Add a photo overlay" icon={<ImagePlus />} text="Photo" onClick={p.onAddPhotoOverlay} />
       <BarBtn label="Add text" icon={<TypeIcon />} text="Text" onClick={p.onAddText} />
       <BarBtn label="Add a QR code" icon={<QrCode />} onClick={p.onAddQr} />
-      <BarBtn label="Change this spread’s layout" icon={<LayoutGrid />} onClick={p.onOpenLayouts} />
-      <BarBtn
-        label={
-          p.canCycleLayout
-            ? 'Try the next curated layout for this spread — your photos come with it'
-            : 'No alternative layouts are available for this spread'
-        }
-        icon={<Shuffle />}
-        text={p.cyclePosition ?? undefined}
-        disabled={!p.canCycleLayout}
-        active={!!p.cyclePosition}
-        onClick={p.onCycleLayout}
-      />
+      <LayoutMenu {...p} />
       <BarSep />
       <BarBtn label="Move spread earlier" icon={<ArrowUp />} disabled={index === 0} onClick={() => api.moveBlock(block.key, -1)} />
       <BarBtn label="Move spread later" icon={<ArrowDown />} disabled={index >= total - 1} onClick={() => api.moveBlock(block.key, 1)} />
@@ -586,6 +673,6 @@ function PageBar(p: PageBarProps) {
       <BarSep />
       <BarBtn label={p.showGuides ? 'Hide guides' : 'Show guides'} icon={<Frame />} active={p.showGuides} onClick={p.onToggleGuides} />
       <BarBtn label="Delete this spread" icon={<Trash2 />} destructive onClick={() => api.removeBlock(block.key)} />
-    </CanvasBar>
+    </>
   );
 }

@@ -118,3 +118,48 @@ export function layoutCycleSteps(block: Block, catalog: readonly CatalogTemplate
 export function nextCycleIndex(current: number, steps: readonly CycleStep[]): number {
   return steps.length === 0 ? 0 : (current + 1) % steps.length;
 }
+
+/**
+ * THE NEAREST CURATED LAYOUT THAT HOLDS FEWER / MORE PHOTOS.
+ *
+ * "Less photos" and "More photos" are a different question from the cycle — not "arrange this
+ * differently" but "arrange this with a different number of frames" — and they are the two people
+ * reach for most. They are NOT a second layout system: the pool, the geometry key and the
+ * capacity maths are the ones above, and the result is an ordinary `LayoutPreset` applied through
+ * the same `applyPreset` command with the same photo preservation, history and save pipeline.
+ *
+ * `dir` is -1 for fewer and +1 for more. The answer is the candidate whose capacity is CLOSEST in
+ * that direction, so repeated presses walk the catalog one density step at a time rather than
+ * jumping to the extreme. Null when nothing lies that way — which is what disables the control
+ * instead of offering a press that does nothing.
+ */
+export function layoutByDensity(
+  block: Block,
+  catalog: readonly CatalogTemplate[],
+  dir: -1 | 1,
+): LayoutPreset | null {
+  const pool: LayoutPreset[] = catalog.length > 0 ? catalog.map(fromCatalog) : LAYOUT_PRESETS;
+  const currentKey = geometryKey(block.template, block.overlays);
+  // The spread's own capacity, by the SAME definition presets are measured with.
+  const current = requiredBaseCount(block.template) + block.overlays.length;
+
+  const candidates = pool
+    .filter((p) => geometryKey(p.base, p.overlays) !== currentKey)
+    .map((preset, i) => ({ preset, i, capacity: capacityOf(preset) }))
+    .filter((c) => (dir < 0 ? c.capacity < current : c.capacity > current));
+  if (candidates.length === 0) return null;
+
+  // Closest capacity in the requested direction; catalog order breaks ties, so the choice is
+  // deterministic and pressing the opposite button returns you the way you came.
+  candidates.sort((a, b) => Math.abs(a.capacity - current) - Math.abs(b.capacity - current) || a.i - b.i);
+  return candidates[0].preset;
+}
+
+/** The label for whichever curated layout this spread is currently sitting on. */
+export function currentLayoutLabel(block: Block, catalog: readonly CatalogTemplate[]): string {
+  const pool: LayoutPreset[] = catalog.length > 0 ? catalog.map(fromCatalog) : LAYOUT_PRESETS;
+  const key = geometryKey(block.template, block.overlays);
+  const match = pool.find((p) => geometryKey(p.base, p.overlays) === key);
+  if (match) return match.label;
+  return block.template === 'double-spread' ? 'Double page' : 'Single page';
+}

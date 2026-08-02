@@ -13,7 +13,7 @@ import {
   Sparkles,
   AlignVerticalSpaceAround,
 } from 'lucide-react';
-import { CanvasBar, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
+import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
 import { ColorField } from './_color-picker';
 import { ObjectBar, type BarProps } from './_context-bar';
 import { BACKGROUNDS } from '@/lib/builder/elements';
@@ -90,20 +90,27 @@ export default function CoverContextBar(p: CoverBarProps) {
     onEscape: p.onEscape,
   };
 
-  switch (cover.selection.kind) {
-    case 'text':
-    case 'sticker':
-    case 'qr':
-    case 'base':
-      // The shared object bars, unchanged. `ObjectBar` routes on `selection.kind` exactly as it
-      // does for a spread; `background` and `none` are intercepted below because a cover answers
-      // those two differently from a page.
-      return <ObjectBar {...bar} />;
-    case 'background':
-      return <BackgroundBar {...p} />;
-    default:
-      return <CoverBar {...p} />;
-  }
+  /**
+   * The contextual row, or null when nothing is selected. `background` gets a cover-specific bar
+   * (a page has no equivalent); everything else is the SHARED object bar a content spread uses.
+   */
+  const object =
+    cover.selection.kind === 'background' ? (
+      <BackgroundBar {...p} />
+    ) : cover.selection.kind === 'none' ? null : (
+      <ObjectBar {...bar} />
+    );
+
+  /* The same persistent stack a content spread has: the cover row never leaves, the object row
+     appears beneath it, and the shell's bottom-anchoring shifts the cover row up to make room. */
+  return (
+    <CanvasBar anchor={anchor} label="Cover tools" onEscape={p.onEscape}>
+      <BarRow tone="page">
+        <CoverBar {...p} />
+      </BarRow>
+      {object && <BarRow key={cover.selection.kind}>{object}</BarRow>}
+    </CanvasBar>
+  );
 }
 
 // ── background ────────────────────────────────────────────────────────────────────
@@ -114,12 +121,12 @@ export default function CoverContextBar(p: CoverBarProps) {
  * so each click is one history entry and rides the existing debounced save.
  */
 function BackgroundBar(p: CoverBarProps) {
-  const { cover, anchor } = p;
+  const { cover } = p;
   const side = cover.side;
   const bg = cover.background;
 
   return (
-    <CanvasBar anchor={anchor} label={`${COVER_SIDE_LABEL[side]} background`} onEscape={p.onEscape}>
+    <>
       <BarLabel>{COVER_SIDE_LABEL[side]}</BarLabel>
       <BarSep />
 
@@ -168,7 +175,7 @@ function BackgroundBar(p: CoverBarProps) {
           <BarBtn label="Clear the background" icon={<Trash2 />} destructive onClick={() => cover.setBackground(null)} />
         </>
       )}
-    </CanvasBar>
+    </>
   );
 }
 
@@ -205,9 +212,9 @@ function swatchToBackground(key: string, kind: Background['kind']): Background {
  * contract `PageBar` has on a content spread.
  */
 function CoverBar(p: CoverBarProps) {
-  const { cover, anchor } = p;
+  const { cover } = p;
   return (
-    <CanvasBar anchor={anchor} label="Cover tools" onEscape={p.onEscape}>
+    <>
       {/* WHICH FACE. Clicking a face on the canvas focuses it too; this is the keyboard-reachable
           equivalent and the label that says which one you are on. */}
       <div className="flex items-center gap-0.5 rounded-lg bg-secondary/60 p-0.5">
@@ -285,6 +292,6 @@ function CoverBar(p: CoverBarProps) {
           />
         </>
       )}
-    </CanvasBar>
+    </>
   );
 }

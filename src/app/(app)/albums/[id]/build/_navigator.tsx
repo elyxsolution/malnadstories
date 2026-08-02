@@ -7,6 +7,7 @@ import type { Photo } from '@/lib/builder/photo';
 import type { PhotoUiState } from './_photo-state';
 import { usePhotoFor } from './_use-photo-for';
 import type { Block } from '@/lib/builder/model';
+import { acceptPhotoDrag, leftDropTarget, readPhotoDrag } from '@/lib/builder/photo-dnd';
 import { ReadinessDot } from './_readiness-badge';
 import type { ReadinessLevel } from './_quality-model';
 
@@ -193,17 +194,20 @@ export default function Navigator({
             if (dragFrom !== null) {
               if (dragOver !== i) setDragOver(i);
             } else if (onDropPhotoOnPage) {
-              e.dataTransfer.dropEffect = 'move';
+              // The same declared effect every other photo target uses — see `photo-dnd`.
+              acceptPhotoDrag(e);
               if (photoOver !== i) setPhotoOver(i);
             }
           }}
-          onDragLeave={() => setPhotoOver(null)}
+          onDragLeave={(e) => {
+            if (leftDropTarget(e)) setPhotoOver(null);
+          }}
           onDrop={(e) => {
             e.preventDefault();
             if (dragFrom !== null && dragFrom !== i) {
               onReorder(dragFrom, i);
             } else {
-              const photoId = e.dataTransfer.getData('text/photo-id');
+              const photoId = readPhotoDrag(e);
               if (photoId && onDropPhotoOnPage) onDropPhotoOnPage(b.key, photoId);
             }
             setDragFrom(null);

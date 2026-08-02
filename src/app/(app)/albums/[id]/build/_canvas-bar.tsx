@@ -27,6 +27,15 @@ import type { Anchor } from './_use-anchor-rect';
  * MOTION. A 120ms scale-from-anchor on appear, and nothing else — no slide, no bounce, no exit
  * animation (a bar that lingers after you deselect reads as lag). `motion-safe:` throughout, so
  * reduced-motion users get an instant swap.
+ *
+ * ── IT IS A COLUMN, NOT A BAR ──────────────────────────────────────────────────────────────
+ *
+ * The shell hosts one or more `BarRow` pills stacked vertically, and it is positioned by its
+ * BOTTOM edge (`top = anchor.top − height − GAP`). That one fact is what delivers the persistent
+ * page toolbar: the page row is always the first child, and when an object is selected a second
+ * row is appended below it. The shell grows, its bottom stays put, and the page row therefore
+ * SHIFTS UP by exactly the height of the row that appeared — no swap, no disappearing toolbar,
+ * and no second positioner. The upward shift is a `top` transition; the new row scales in.
  */
 
 const GAP = 10; // px between the anchor and the bar
@@ -47,12 +56,20 @@ export function CanvasBar({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null);
+  /**
+   * True once the shell has been placed at least once. The `top` transition is enabled only after
+   * that, so the FIRST appearance snaps into position while every later change — a row appearing
+   * or leaving, the selection moving — animates. Without the gate the bar would visibly slide in
+   * from wherever the pre-measurement fallback put it.
+   */
+  const [settled, setSettled] = useState(false);
 
   /** Place the bar before paint, so it never appears in the wrong spot and jumps. */
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !anchor) {
       setPos(null);
+      setSettled(false);
       return;
     }
     const box = el.getBoundingClientRect();
@@ -66,6 +83,9 @@ export function CanvasBar({
     setPos((prev) =>
       prev && prev.left === left && prev.top === top && prev.below === below ? prev : { left, top, below },
     );
+    // One frame later, so the browser has painted this placement before transitions turn on.
+    const raf = requestAnimationFrame(() => setSettled(true));
+    return () => cancelAnimationFrame(raf);
   }, [anchor, children]);
 
   /** Roving tabindex over whatever the caller rendered. */
@@ -126,7 +146,40 @@ export function CanvasBar({
         // Hidden until placed, so the first paint is never in the wrong position.
         visibility: pos ? 'visible' : 'hidden',
       }}
-      className="motion-safe:animate-scale-in fixed z-[70] flex items-center gap-0.5 rounded-xl border border-border/80 bg-card/95 p-1 shadow-elevated backdrop-blur-sm"
+      /**
+       * The shell itself is invisible — no background, no border, no padding. Each `BarRow` is its
+       * own pill, so a two-row stack reads as two toolbars rather than one tall slab. `items-end`
+       * keeps the rows right-aligned to each other when they differ in width, which is what stops
+       * the page row appearing to shuffle sideways as the object row changes.
+       */
+      className={`motion-safe:animate-scale-in fixed z-[70] flex flex-col items-center gap-1.5 ${
+        settled ? 'motion-safe:transition-[top] motion-safe:duration-200 motion-safe:ease-glide' : ''
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * ONE PILL in the stack — the visual container the shell used to be.
+ *
+ * Split out so the shell can hold more than one. `tone="page"` is the persistent page/cover row:
+ * very slightly recessed, because it is always present and should not compete for attention with
+ * the contextual row that appears in response to what you just clicked.
+ */
+export function BarRow({
+  children,
+  tone = 'object',
+}: {
+  children: React.ReactNode;
+  tone?: 'page' | 'object';
+}) {
+  return (
+    <div
+      className={`motion-safe:animate-scale-in flex max-w-[min(94vw,1100px)] flex-wrap items-center justify-center gap-0.5 rounded-xl border p-1 shadow-elevated backdrop-blur-sm ${
+        tone === 'page' ? 'border-border/70 bg-card/90' : 'border-border/80 bg-card/95'
+      }`}
     >
       {children}
     </div>
