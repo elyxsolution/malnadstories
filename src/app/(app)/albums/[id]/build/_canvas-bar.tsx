@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import type { Anchor } from './_use-anchor-rect';
 
@@ -336,21 +337,43 @@ export function BarPopover({
         <ChevronDown className={`!h-3 !w-3 opacity-50 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div
-          ref={panelRef}
-          id={`bar-popover-${id}`}
-          role="dialog"
-          aria-label={label}
-          onPointerDown={(e) => e.stopPropagation()}
-          style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
-          className={`motion-safe:animate-scale-in fixed z-[71] flex max-h-[min(60vh,460px)] flex-col rounded-xl border border-border/80 bg-card shadow-elevated ${
-            overflowVisible ? 'overflow-visible' : 'overflow-hidden'
-          }`}
-        >
-          {typeof children === 'function' ? children(() => { setOpen(false); btnRef.current?.focus(); }) : children}
-        </div>
-      )}
+      {open &&
+        /**
+         * PORTALLED TO `document.body` — and this is a correctness requirement, not tidiness.
+         *
+         * The panel is `position: fixed` and positioned with VIEWPORT coordinates measured by
+         * `getBoundingClientRect`. That only works if its containing block is the viewport. Every
+         * box it used to render inside breaks that: the toolbar shell and each `BarRow` carry
+         * `animate-scale-in`, which is declared with `animation-fill-mode: both`, so the final
+         * keyframe's `transform: scale(1)` PERSISTS after the animation finishes — and any
+         * non-`none` transform (like `backdrop-filter`, also present) makes that element the
+         * containing block for fixed-position descendants.
+         *
+         * The result was a panel offset by the toolbar's own position, i.e. off-screen: every
+         * dropdown "stopped opening" while in fact opening somewhere nobody could see. Rendering
+         * into `body` puts the viewport back in charge, and no future styling of the toolbar can
+         * reintroduce the fault.
+         *
+         * React events still bubble through the PORTAL PARENT, so the shell's `onPointerDown`
+         * guard continues to stop a click inside the panel from reaching the canvas, and the
+         * outside-click check (`panelRef.contains`) works because the ref points at the real node.
+         */
+        createPortal(
+          <div
+            ref={panelRef}
+            id={`bar-popover-${id}`}
+            role="dialog"
+            aria-label={label}
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, width, visibility: pos ? 'visible' : 'hidden' }}
+            className={`motion-safe:animate-scale-in fixed z-[95] flex max-h-[min(60vh,460px)] flex-col rounded-xl border border-border/80 bg-card shadow-elevated ${
+              overflowVisible ? 'overflow-visible' : 'overflow-hidden'
+            }`}
+          >
+            {typeof children === 'function' ? children(() => { setOpen(false); btnRef.current?.focus(); }) : children}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

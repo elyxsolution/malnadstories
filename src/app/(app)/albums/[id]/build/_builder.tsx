@@ -31,7 +31,7 @@ import Tray from './_tray';
 import TrayToolbar from './_tray-toolbar';
 import BlockCard, { PhotoPicker } from './_block';
 import ContextBar from './_context-bar';
-import { useAnchorRect, FULL_PAGE } from './_use-anchor-rect';
+import { useAnchorRect, FULL_PAGE, type NormRect } from './_use-anchor-rect';
 import { useCanvasCrop } from './_use-canvas-crop';
 import SubmitValidationDialog from './_submit-validation-dialog';
 import ConfirmSubmitDialog from './_confirm-submit-dialog';
@@ -938,6 +938,20 @@ export default function Builder({
     pageElRef,
     (coverFocused || (!!block && editLayout === 'focus')) ? FULL_PAGE : null,
   );
+
+  /**
+   * The selected OVERLAY's box — the one selection whose tools follow the object (see `ContextBar`).
+   *
+   * Memoized on the overlay itself, so the anchor is recomputed exactly when the overlay's
+   * geometry changes and not once more. During a drag that is every frame, which is precisely
+   * what makes the toolbar track it; when nothing is moving the rect keeps its identity and the
+   * measurement hook stays idle.
+   */
+  const overlayRect = useMemo<NormRect | null>(() => {
+    if (coverFocused || editLayout !== 'focus' || !block || selection.kind !== 'overlay') return null;
+    return block.overlays.find((o) => o.id === selection.id) ?? null;
+  }, [coverFocused, editLayout, block, selection]);
+  const overlayAnchor = useAnchorRect(pageElRef, overlayRect);
 
   /** The photo backing the focused cover face's image, when it has one. */
   const coverSelectedPhoto = useMemo(() => {
@@ -2641,6 +2655,7 @@ export default function Builder({
           {!coverFocused && editLayout === 'focus' && block && (
             <ContextBar
               anchor={barAnchor}
+              overlayAnchor={overlayAnchor}
               block={block}
               index={cur}
               total={blocks.length}

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { InlineLoader } from '@/components/loading';
 import { FileDown, RefreshCw, FileText, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,7 +25,10 @@ export default function AdminPdfControls({
   printReady?: boolean;
   blockingIssues?: string[];
 }) {
+  const router = useRouter();
   const [status, setStatus] = useState<PdfStatus>('idle');
+  /** The last status the poll saw — so a terminal transition is detected without an impure updater. */
+  const statusRef = useRef<PdfStatus>('idle');
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -36,11 +40,29 @@ export default function AdminPdfControls({
   const [stage, setStage] = useState<string | null>(null);
   const [failureCode, setFailureCode] = useState<string | null>(null);
 
+  /**
+   * THE SERVER SNAPSHOT HAS TO BE TOLD.
+   *
+   * This component polls and is always right. The rest of the admin page is NOT: the diagnostics
+   * panel is server-rendered from a single `album_pdfs` read taken when the page was requested, so
+   * once generation finishes it goes on saying "Rendering pages…" next to a working Download
+   * button — two sources of truth, one of them frozen. The worker's completion write is a single
+   * atomic statement and was never the problem.
+   *
+   * `router.refresh()` on the terminal transition re-runs the server components with the real row.
+   * It fires ONCE per completion (guarded by the previous status), not per poll.
+   */
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/albums/${albumId}/pdf`, { cache: 'no-store' });
       if (!res.ok) return;
       const body = (await res.json()) as { status: PdfStatus; error?: string | null; stage?: string | null; failureCode?: string | null };
+      // generating → ready/failed is the moment the rest of the page goes stale. Read the previous
+      // value from a ref rather than a state updater: an updater must stay pure (React is free to
+      // call it twice), and this is a side effect.
+      const prev = statusRef.current;
+      statusRef.current = body.status;
+      if (prev === 'generating' && body.status !== 'generating') router.refresh();
       setStatus(body.status);
       setStage(body.stage ?? null);
       setFailureCode(body.status === 'failed' ? body.failureCode ?? null : null);
@@ -48,7 +70,7 @@ export default function AdminPdfControls({
     } catch {
       /* transient */
     }
-  }, [albumId]);
+  }, [albumId, router]);
 
   // Initial read + poll while generating.
   useEffect(() => {
@@ -65,8 +87,11 @@ export default function AdminPdfControls({
     setErr(null);
     const res = await adminGenerateAlbumPdf(albumId);
     setBusy(false);
-    if (res.ok) setStatus('generating');
-    else setErr(res.error);
+    if (res.ok) {
+      statusRef.current = 'generating';
+      setStatus('generating');
+      router.refresh(); // keep the server-rendered diagnostics panel in step from the first frame
+    } else setErr(res.error);
   };
 
   const forceGenerate = async () => {
@@ -77,7 +102,9 @@ export default function AdminPdfControls({
     if (res.ok) {
       setForceOpen(false);
       setReason('');
+      statusRef.current = 'generating';
       setStatus('generating');
+      router.refresh();
     } else {
       setErr(res.error);
     }

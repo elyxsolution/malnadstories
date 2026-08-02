@@ -118,6 +118,12 @@ export type BarProps = {
 
 export type ContextBarProps = {
   anchor: Anchor | null;
+  /**
+   * The SELECTED OVERLAY's measured box, when one is selected. Present ⇒ the overlay's tools
+   * detach from the persistent stack and float above the overlay itself. Absent (or any other
+   * selection) ⇒ the row stays in the stack. See the note in `ContextBar`.
+   */
+  overlayAnchor?: Anchor | null;
   block: Block | undefined;
   index: number;
   total: number;
@@ -190,20 +196,44 @@ export function pageBarCommands(commands: CommandsApi): BarCommands {
  * roving focus survive a selection change.
  */
 export default function ContextBar(props: ContextBarProps) {
-  const { anchor, block, selection } = props;
+  const { anchor, block, selection, overlayAnchor } = props;
   if (!anchor || !block) return null;
   const bar: BarProps = { ...props, block, commands: pageBarCommands(props.commands) };
   const object = objectControls(bar);
 
+  /**
+   * THE ONE EXCEPTION: A SELECTED PHOTO OVERLAY.
+   *
+   * Every other selection is edited in place on a fixed spread — a base slot IS half the page, a
+   * background is the whole of it — so tools that sit at a known spot are faster than tools that
+   * chase the pointer. A floating overlay is different: it is small, it moves, and the whole job
+   * is nudging it against the photo underneath. Tools three hundred pixels away turn that into a
+   * round trip per adjustment.
+   *
+   * So an overlay's row detaches into its own shell anchored to the OVERLAY, and the page row
+   * stays exactly where it always is. Same `CanvasBar`, same `useAnchorRect` — the flip-below,
+   * viewport-clamping and scroll tracking all come for free, and the row follows the overlay
+   * through a drag because the anchor is recomputed from its live rect.
+   */
+  const detached = selection.kind === 'overlay' && !!overlayAnchor;
+
   return (
-    <CanvasBar anchor={anchor} label={`Spread ${props.index + 1} tools`} onEscape={props.onEscape}>
-      <BarRow tone="page">
-        <PageBar {...props} block={block} />
-      </BarRow>
-      {/* Keyed on the selection KIND so switching from a photo to a text replays the entrance
-          animation; moving between two photos does not, because nothing about the row changed. */}
-      {object && <BarRow key={selection.kind}>{object}</BarRow>}
-    </CanvasBar>
+    <>
+      <CanvasBar anchor={anchor} label={`Spread ${props.index + 1} tools`} onEscape={props.onEscape}>
+        <BarRow tone="page">
+          <PageBar {...props} block={block} />
+        </BarRow>
+        {/* Keyed on the selection KIND so switching from a photo to a text replays the entrance
+            animation; moving between two photos does not, because nothing about the row changed. */}
+        {object && !detached && <BarRow key={selection.kind}>{object}</BarRow>}
+      </CanvasBar>
+
+      {detached && object && (
+        <CanvasBar anchor={overlayAnchor} label="Overlay photo tools" onEscape={props.onEscape}>
+          <BarRow>{object}</BarRow>
+        </CanvasBar>
+      )}
+    </>
   );
 }
 

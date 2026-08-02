@@ -18,6 +18,19 @@ import AdminPdfControls from './_pdf-controls';
 import AlbumPreview from './_album-preview';
 import { builderFontVars } from '@/lib/fonts';
 
+/**
+ * LIVE READS ONLY.
+ *
+ * This page reports the state of a background job (`album_pdfs`), so a cached read is a wrong
+ * read. `requireAdmin()` already makes it dynamic, but the per-fetch Data Cache is separate:
+ * supabase-js issues the same PostgREST GET every time, and Next will happily serve the earlier
+ * response — which is how a `router.refresh()` after generation finishes could re-render with the
+ * very snapshot it was refreshing to escape. Exactly the fix `/albums/[id]/print` already carries,
+ * for exactly the same reason.
+ */
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
 export default async function AdminAlbumDetail({ params }: { params: { id: string } }) {
   await requireAdmin();
 
