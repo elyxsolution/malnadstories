@@ -164,10 +164,40 @@ export type TextVariant = 'heading' | 'subtitle' | 'paragraph';
 export type TextFontKey = FontKey;
 export type TextAlign = 'left' | 'center' | 'right';
 
+/**
+ * A text object that is BOUND TO ALBUM METADATA rather than free-floating.
+ *
+ * The cover's title, subtitle, author and spine text are ordinary movable text objects — but
+ * their words are not theirs to own: `albums.title` is the canonical album title, printed on the
+ * dashboard, the order, the invoice and the PDF filename, and the cover must show that exact
+ * string. A role is the binding. It says "this object renders metadata field X", which is what
+ * lets the object be dragged, restyled and rotated like any other while its `text` stays
+ * synchronised in both directions (see `lib/builder/cover-objects`).
+ *
+ * Absent (the overwhelmingly common case) = an ordinary text object that owns its own words.
+ */
+export const COVER_TEXT_ROLES = ['title', 'subtitle', 'author', 'spine'] as const;
+export type CoverTextRole = (typeof COVER_TEXT_ROLES)[number];
+
+/**
+ * Text objects the customer AUTHORED, as opposed to metadata views.
+ *
+ * Lives here (with the type) rather than beside the cover model, because every "has this cover
+ * been designed?" predicate needs it and those are spread across validation, readiness and
+ * checkout. Migration guarantees a title object on every cover, so a bare `texts.length > 0` now
+ * reports a pristine album as custom-designed — a metadata view is not a design decision.
+ */
+export const freeTexts = (texts: { role?: CoverTextRole }[]) => texts.filter((t) => !t.role);
+
 /** A free text element placed on the open pair (normalized rect, like an overlay). */
 export type TextElement = {
   id: string;
   text: string;
+  /**
+   * Metadata binding (cover objects only). Additive + optional, so every existing text element
+   * — on pages and on covers — is unchanged and untouched by this.
+   */
+  role?: CoverTextRole;
   x: number;
   y: number;
   w: number;

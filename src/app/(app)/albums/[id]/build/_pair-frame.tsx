@@ -170,27 +170,59 @@ export default function PairContent({
  * It is an EDITING AID and nothing more: it is never rendered by the print route, and it changes
  * no geometry — export is byte-for-byte what it was.
  *
- * The look is deliberately restrained: a soft symmetric shading that falls off toward the centre,
- * the way an open book darkens into its spine, plus a hairline exactly on the fold. `multiply`
- * blending means it reads on a white page and on a dark photo without ever becoming a grey stripe
- * across someone's picture. Purely decorative, so it is `aria-hidden` and inert.
+ * ── WHY IT IS BUILT THIS WAY ───────────────────────────────────────────────────────────────
+ *
+ * The first version was a single `multiply` shading. That is the obvious choice and it has one
+ * fatal property: multiply can only ever DARKEN, so the moment a full-bleed photo covers the
+ * spread the fold stops existing exactly where the customer needs it most — over their picture.
+ * A dark stripe on a dark photograph is not a stripe.
+ *
+ * So the gutter carries light AND dark, and no blend modes at all:
+ *
+ *   • a soft shadow that deepens toward the spine, the way an open book falls into its binding —
+ *     this is what reads on white paper and on bright photos;
+ *   • a pair of pale crests just outside the shadow, where the paper lifts back up and catches
+ *     the light — this is what reads on dark photos, where the shadow cannot;
+ *   • an ENGRAVED fold: one dark hairline with a lighter hairline either side of it. Whichever
+ *     way the content behind it goes, one half of that pair is always in contrast with it.
+ *
+ * Plain alpha compositing (no `mix-blend-mode`) keeps it deterministic: nothing here depends on
+ * blend isolation, which changes with every stacking context a caller happens to introduce.
+ * Purely decorative, so it is `aria-hidden` and inert.
  */
 export function PrintGutter({ className = '' }: { className?: string }) {
   return (
     <span aria-hidden className={`pointer-events-none absolute inset-y-0 left-1/2 z-[6] -translate-x-1/2 ${className}`}>
+      {/* Shadow into the spine + the crests where the paper lifts. One gradient: the crossover
+          from pale to dark happens inside the ramp, so it stays a single soft falloff rather
+          than reading as two separate bands. */}
       <span
         className="absolute inset-y-0 left-1/2 -translate-x-1/2"
         style={{
-          width: '5.5cqw',
-          mixBlendMode: 'multiply',
-          background:
-            'linear-gradient(90deg, rgba(24,32,28,0) 0%, rgba(24,32,28,0.10) 42%, rgba(24,32,28,0.16) 50%, rgba(24,32,28,0.10) 58%, rgba(24,32,28,0) 100%)',
+          width: '7cqw',
+          background: [
+            'linear-gradient(90deg,',
+            'rgba(20,28,24,0) 0%,',
+            'rgba(255,255,255,0.10) 20%,',
+            'rgba(20,28,24,0.07) 36%,',
+            'rgba(20,28,24,0.20) 47%,',
+            'rgba(20,28,24,0.26) 50%,',
+            'rgba(20,28,24,0.20) 53%,',
+            'rgba(20,28,24,0.07) 64%,',
+            'rgba(255,255,255,0.10) 80%,',
+            'rgba(20,28,24,0) 100%)',
+          ].join(' '),
         }}
       />
-      {/* The fold itself — a hairline the eye can measure against when placing content. */}
+      {/* THE FOLD ITSELF — engraved, so it survives any background. The dark core carries it on
+          light paper; the two pale flanks carry it on a dark photograph. Kept to device pixels
+          (not `cqw`) so it stays a hairline at every zoom instead of thickening into a band. */}
       <span
         className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2"
-        style={{ mixBlendMode: 'multiply', background: 'rgba(24,32,28,0.22)' }}
+        style={{
+          background: 'rgba(14,20,17,0.42)',
+          boxShadow: '-1px 0 0 rgba(255,255,255,0.26), 1px 0 0 rgba(255,255,255,0.26)',
+        }}
       />
     </span>
   );

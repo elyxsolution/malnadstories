@@ -37,6 +37,7 @@ import LayerMenu, { type LayerSibling } from './_layer-menu';
 import FontPicker from './_font-picker';
 import { ColorField } from './_color-picker';
 import { MAX_ZOOM, type Block, type EditConfig, type Overlay, type TextElement } from '@/lib/builder/model';
+import type { LayerAction } from '@/lib/builder/elements';
 import type { Photo } from '@/lib/builder/photo';
 import type { Anchor } from './_use-anchor-rect';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -65,6 +66,55 @@ import { orientedAspect } from './_photo-state';
  * properties panel via `onOpenProperties`. The popover-hosted inspectors are gone from content
  * pages; the same inspector components now render in the panel, unchanged.
  */
+
+/**
+ * ── WHAT A TOOLBAR ACTUALLY NEEDS (Cover Editor 2.0) ───────────────────────────────────────
+ *
+ * The object bars used to take the whole `BuilderApi` and the whole `CommandsApi`, both of which
+ * are bound to `Block[]`. That was fine while the only surface with objects was a content spread.
+ * The cover has objects but no blocks — its text lives in `cover_config`, its photo crop lives in
+ * `cover_config.imageEdit` rather than on the photo row — so the wide types were the only thing
+ * standing between "the cover reuses the Text toolbar" and "the cover gets a second Text toolbar
+ * that will drift."
+ *
+ * So the bars now ask for exactly what they use. `BuilderApi` satisfies `BarApi` by construction
+ * (it is a `Pick` of it), and the cover supplies a small adapter of the same shape — which is why
+ * `TextBar`, `StickerBar`, `QrBar` and `PhotoBar` below are literally the same components on both
+ * surfaces rather than lookalikes.
+ */
+export type BarApi = Pick<
+  BuilderApi,
+  'patchText' | 'patchSticker' | 'patchQr' | 'patchOverlays' | 'duplicateText' | 'duplicateSticker' | 'duplicateOverlay' | 'batch'
+>;
+
+export type BarCommands = {
+  /** Write a photo edit. Pages write `photos.edit_config`; the cover writes `imageEdit`. */
+  applyPhotoEdit: (photoId: string, patch: Partial<EditConfig>) => void;
+  rotateBy: (dir: 1 | -1) => void;
+  moveLayer: (target: { kind: 'overlay' | 'text' | 'sticker' | 'qr'; blockKey: string; id: string }, action: LayerAction) => void;
+  /** The priority-resolved delete for the current selection — the same one the Delete key runs. */
+  deleteSelection: { label: string; enabled: boolean; run: () => void | Promise<void> };
+};
+
+/** Everything an object bar needs, on either surface. */
+export type BarProps = {
+  anchor: Anchor | null;
+  block: Block;
+  api: BarApi;
+  commands: BarCommands;
+  selection: Selection;
+  onSelect: (s: Selection) => void;
+  photoMap: Map<string, Photo>;
+  selectedPhoto: Photo | undefined;
+  pairAspect: number;
+  onReplace: (target: { slot?: BaseSlot; overlayId?: string }) => void;
+  onCrop: () => void;
+  cropping: boolean;
+  onEndCrop: () => void;
+  onOpenProperties: () => void;
+  propertiesOpen: boolean;
+  onEscape: () => void;
+};
 
 export type ContextBarProps = {
   anchor: Anchor | null;
@@ -109,26 +159,61 @@ export type ContextBarProps = {
   onEscape: () => void;
 };
 
+/** Adapt the page surface's wide `CommandsApi` to the narrow shape the object bars consume. */
+export function pageBarCommands(commands: CommandsApi): BarCommands {
+  return {
+    applyPhotoEdit: commands.applyPhotoEdit,
+    rotateBy: commands.rotateBy,
+    moveLayer: commands.moveLayer,
+    deleteSelection: commands.commands.deleteSelection,
+  };
+}
+
 export default function ContextBar(props: ContextBarProps) {
   const { anchor, block, selection } = props;
   if (!anchor || !block) return null;
+  const bar: BarProps = { ...props, block, commands: pageBarCommands(props.commands) };
 
   switch (selection.kind) {
     case 'base':
     case 'overlay':
-      return <PhotoBar {...props} block={block} />;
+      return <PhotoBar {...bar} />;
     case 'text':
-      return <TextBar {...props} block={block} />;
+      return <TextBar {...bar} />;
     case 'sticker':
-      return <StickerBar {...props} block={block} />;
+      return <StickerBar {...bar} />;
     case 'qr':
-      return <QrBar {...props} block={block} />;
+      return <QrBar {...bar} />;
     default:
       return <PageBar {...props} block={block} />;
   }
 }
 
-type BarProps = ContextBarProps & { block: Block };
+/**
+ * THE OBJECT BARS, addressable on their own.
+ *
+ * `ContextBar` above is the PAGE entry point (it also owns `PageBar`, which needs block ordering
+ * and layout cycling). The cover enters here instead, with the same `BarProps`, so both surfaces
+ * reach the identical `PhotoBar` / `TextBar` / `StickerBar` / `QrBar` — one implementation of
+ * "what tools does a text object get", not two that agree today.
+ */
+export function ObjectBar(p: BarProps) {
+  switch (p.selection.kind) {
+    case 'base':
+    case 'overlay':
+      return <PhotoBar {...p} />;
+    case 'text':
+      return <TextBar {...p} />;
+    case 'sticker':
+      return <StickerBar {...p} />;
+    case 'qr':
+      return <QrBar {...p} />;
+    default:
+      return null;
+  }
+}
+
+type PageBarProps = ContextBarProps & { block: Block };
 
 /** Human labels for the Layers menu's "Move above/below…" sibling lists. */
 const overlaySiblings = (block: Block, photoMap: Map<string, Photo>): LayerSibling[] =>
@@ -269,11 +354,11 @@ function PhotoBar(p: BarProps) {
       {/* The SAME priority-resolved command the Delete key runs — an overlay's Delete removes
           the overlay, a base slot's returns the photo to the tray. One implementation. */}
       <BarBtn
-        label={commands.commands.deleteSelection.label}
+        label={commands.deleteSelection.label}
         icon={<Trash2 />}
         destructive
-        disabled={!commands.commands.deleteSelection.enabled}
-        onClick={() => void commands.commands.deleteSelection.run()}
+        disabled={!commands.deleteSelection.enabled}
+        onClick={() => void commands.deleteSelection.run()}
       />
     </CanvasBar>
   );
@@ -377,7 +462,7 @@ function TextBar(p: BarProps) {
         label="Delete text"
         icon={<Trash2 />}
         destructive
-        onClick={() => void p.commands.commands.deleteSelection.run()}
+        onClick={() => void p.commands.deleteSelection.run()}
       />
     </CanvasBar>
   );
@@ -427,7 +512,7 @@ function StickerBar(p: BarProps) {
         }}
       />
       <BarSep />
-      <BarBtn label="Delete sticker" icon={<Trash2 />} destructive onClick={() => void p.commands.commands.deleteSelection.run()} />
+      <BarBtn label="Delete sticker" icon={<Trash2 />} destructive onClick={() => void p.commands.deleteSelection.run()} />
     </CanvasBar>
   );
 }
@@ -458,14 +543,14 @@ function QrBar(p: BarProps) {
         onMove={(a) => commands.moveLayer({ kind: 'qr', blockKey: block.key, id: el.id }, a)}
       />
       <BarSep />
-      <BarBtn label="Delete QR code" icon={<Trash2 />} destructive onClick={() => void p.commands.commands.deleteSelection.run()} />
+      <BarBtn label="Delete QR code" icon={<Trash2 />} destructive onClick={() => void p.commands.deleteSelection.run()} />
     </CanvasBar>
   );
 }
 
 // ── page (nothing selected) ───────────────────────────────────────────────────────
 
-function PageBar(p: BarProps) {
+function PageBar(p: PageBarProps) {
   const { api, block, index, total, size, anchor } = p;
   return (
     <CanvasBar anchor={anchor} label={`Spread ${index + 1} tools`} onEscape={p.onEscape}>

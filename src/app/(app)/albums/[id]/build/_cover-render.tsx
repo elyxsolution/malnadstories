@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Sprig } from '@/components/brand';
 import { fontStack } from '@/lib/builder/elements';
 import PhotoFrame from './_photo-frame';
@@ -12,29 +12,32 @@ import {
   type BackCoverConfig,
   type CoverConfig,
   type CoverLayout,
+  type SpineConfig,
 } from '@/lib/builder/cover';
-import type {
-  Background,
-  EditConfig,
-  QrElement,
-  StickerElement,
-  TextAlign,
-  TextElement,
-  TextFontKey,
-} from '@/lib/builder/model';
+import { migrateCoverConfig } from '@/lib/builder/cover-objects';
+import type { Background, EditConfig, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
 /**
- * The cover renderers — shared by the builder canvas, the flipbook preview, and the PDF print
- * route, so a customer's cover design prints exactly as drawn (WYSIWYG by construction, the way
- * `_photo-frame` unifies photos). A printed cover is a spread: BACK (last physical page) · SPINE
- * (binding) · FRONT (physical page 1). `CoverDesign` renders the front, `BackCoverDesign` the
- * back, and `CoverSpread` composes all three for a read-only preview / thumbnail.
+ * The cover renderers — shared by the builder canvas, the flipbook preview, review mode, the admin
+ * preview and the PDF print route, so a customer's cover design prints exactly as drawn (WYSIWYG
+ * by construction, the way `_photo-frame` unifies photos). A printed cover is a spread: BACK (last
+ * physical page) · SPINE (binding) · FRONT (physical page 1).
+ *
+ * ── ONE PATH, AFTER COVER EDITOR 2.0 ───────────────────────────────────────────────────────
+ *
+ * These components draw ONLY objects. The structured title column (title / subtitle / author,
+ * anchored at `posY` and styled by `font`/`color`/`align`) and the bespoke spine `<span>` used to
+ * be rendered here from scalar config fields — which is precisely why the cover could not be
+ * edited like a page: the renderer, not the model, owned their position. `migrateCoverConfig`
+ * turns those scalars into ordinary `TextElement`s, and it runs HERE, at every entry point, so an
+ * album that has not been re-saved since the change renders identically in every surface without
+ * any database backfill.
  *
  * Image sources are resolved by the CALLER (uploaded photo → cover template → none) and passed as
  * `imageUrl`; `background` is the CSS backdrop when there is no image. Cover images go through
- * `PhotoFrame` so crop/zoom/rotate (`imageEdit`) applies just like a page photo. Title sizing uses
- * container queries (cqw against each page's own `container-type: inline-size`) so the same ratio
- * renders at any size with no measurement.
+ * `PhotoFrame` so crop/zoom/rotate (`imageEdit`) applies just like a page photo. Text sizing uses
+ * container queries (`cqw` against each face's own `container-type: inline-size`, `cqh` for the
+ * spine) so the same ratio renders at any size with no measurement.
  */
 
 /**
@@ -53,18 +56,19 @@ export function coverSpreadMetrics(size: number, pageAspectRatio: number = 0.75)
   };
 }
 
+/**
+ * ONE FACE of the cover: a backdrop (photo or CSS), an optional legibility scrim, and objects.
+ *
+ * Front and back differ only in what the caller passes — which is the point. The back used to
+ * have its own component because the front had a title block the back did not; with the title as
+ * an object there is nothing structural left to differ about, and `BackCoverDesign` is now a thin
+ * wrapper kept for its existing call sites.
+ */
 export default function CoverDesign({
   imageUrl,
   imageEdit = null,
   background,
-  title,
-  subtitle,
-  author = '',
-  font,
-  color,
-  align,
-  layout,
-  posY,
+  layout = 'classic',
   texts = [],
   stickers = [],
   qrs = [],
@@ -75,19 +79,11 @@ export default function CoverDesign({
   imageUrl: string | null;
   imageEdit?: EditConfig | null;
   background: Background | null;
-  title: string;
-  subtitle: string;
-  author?: string;
-  font: TextFontKey;
-  color: string;
-  align: TextAlign;
-  layout: CoverLayout;
-  posY: number;
-  /** Free text elements on the cover (same type as page text). Default none. */
+  /** The cover THEME — chooses the scrim that keeps text legible over a photo. */
+  layout?: CoverLayout;
+  /** Text objects on this face — including the title / subtitle / author metadata views. */
   texts?: TextElement[];
-  /** Sticker elements on the cover (same type as page stickers). Default none. */
   stickers?: StickerElement[];
-  /** QR elements on the cover (same type as page QR). Default none. */
   qrs?: QrElement[];
   /** Resolve a sticker id → presigned URL (parallel to photoFor on pages). */
   stickerUrlFor?: (stickerId: string) => string | undefined;
@@ -108,7 +104,6 @@ export default function CoverDesign({
   }, [imageUrl]);
 
   const framing = coverLayoutFraming(layout, !!imageUrl);
-  const justify = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
 
   return (
     <div
@@ -123,84 +118,6 @@ export default function CoverDesign({
 
       {framing.scrim && <div className="pointer-events-none absolute inset-0" style={framing.scrim} />}
 
-      {/* Title block — anchored at posY, nudged onto the page with safe side padding. */}
-      <div
-        className="pointer-events-none absolute inset-x-0 flex flex-col px-[9%]"
-        style={{ top: `${posY * 100}%`, transform: 'translateY(-50%)', alignItems: justify }}
-      >
-        <div
-          className={framing.band ? 'w-full' : ''}
-          style={
-            framing.band
-              ? {
-                  background: 'rgba(12,18,15,0.42)',
-                  padding: '4cqw 6cqw',
-                  borderRadius: '1.5cqw',
-                  backdropFilter: 'blur(2px)',
-                }
-              : undefined
-          }
-        >
-          {title.trim() && (
-            <h1
-              style={{
-                fontFamily: fontStack(font),
-                color,
-                textAlign: align,
-                fontSize: '8.5cqw',
-                fontWeight: 600,
-                lineHeight: 1.04,
-                letterSpacing: '-0.01em',
-                textShadow: imageUrl ? '0 0.4cqw 2cqw rgba(8,12,10,0.4)' : 'none',
-                margin: 0,
-                wordBreak: 'break-word',
-              }}
-            >
-              {title}
-            </h1>
-          )}
-          {subtitle.trim() && (
-            <p
-              style={{
-                fontFamily: fontStack(font),
-                color,
-                textAlign: align,
-                fontSize: '3.6cqw',
-                fontWeight: 400,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                opacity: 0.92,
-                marginTop: '2.4cqw',
-                textShadow: imageUrl ? '0 0.3cqw 1.5cqw rgba(8,12,10,0.4)' : 'none',
-                wordBreak: 'break-word',
-              }}
-            >
-              {subtitle}
-            </p>
-          )}
-          {author.trim() && (
-            <p
-              style={{
-                fontFamily: fontStack(font),
-                color,
-                textAlign: align,
-                fontSize: '2.9cqw',
-                fontWeight: 400,
-                letterSpacing: '0.04em',
-                opacity: 0.82,
-                marginTop: '3cqw',
-                textShadow: imageUrl ? '0 0.3cqw 1.5cqw rgba(8,12,10,0.4)' : 'none',
-                wordBreak: 'break-word',
-              }}
-            >
-              {author}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Free elements (same types as page elements) — drawn above the title block. The
-          editing canvas passes renderElements={false} and draws interactive versions itself. */}
       {renderElements && texts.map((t) => <TextBox key={t.id} el={t} />)}
       {renderElements && qrs.map((q) => <QrBox key={q.id} el={q} />)}
       {renderElements &&
@@ -210,10 +127,8 @@ export default function CoverDesign({
 }
 
 /**
- * The BACK cover (the left page of the printed spread / the final physical page). A composition
- * of an image-or-background backdrop + free elements + an optional studio mark — no structured
- * title block (that belongs to the front). Mirrors `CoverDesign`'s readiness contract so the PDF
- * gate waits for the back image + stickers.
+ * The BACK cover (the left page of the printed spread / the final physical page): the same face
+ * renderer plus the optional studio mark, which is the one thing only the back has.
  */
 export function BackCoverDesign({
   back,
@@ -228,37 +143,23 @@ export function BackCoverDesign({
   renderElements?: boolean;
   onReady?: () => void;
 }) {
-  const fired = useRef(false);
-  const ready = () => {
-    if (fired.current) return;
-    fired.current = true;
-    onReady?.();
-  };
-  useEffect(() => {
-    if (!imageUrl) ready();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [imageUrl]);
-
   return (
-    <div
-      className="relative h-full w-full select-none overflow-hidden"
-      style={{ containerType: 'inline-size', ...(imageUrl ? { background: '#1e3a2f' } : coverBackgroundStyle(back.background)) }}
-    >
-      {imageUrl && (
-        <div className="absolute inset-0">
-          <PhotoFrame url={imageUrl} edit={back.imageEdit} onReady={ready} />
-        </div>
-      )}
-
-      {renderElements && back.texts.map((t) => <TextBox key={t.id} el={t} />)}
-      {renderElements && back.qrs.map((q) => <QrBox key={q.id} el={q} />)}
-      {renderElements &&
-        back.stickers.map((s) => <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onReady} />)}
-
+    <div className="relative h-full w-full">
+      <CoverDesign
+        imageUrl={imageUrl}
+        imageEdit={back.imageEdit}
+        background={back.background}
+        texts={back.texts}
+        stickers={back.stickers}
+        qrs={back.qrs}
+        stickerUrlFor={stickerUrlFor}
+        renderElements={renderElements}
+        onReady={onReady}
+      />
       {back.showLogo && (
         <div
           className="pointer-events-none absolute bottom-[6%] left-1/2 flex -translate-x-1/2 flex-col items-center gap-[1.5cqw]"
-          style={{ color: imageUrl || back.background ? '#ffffff' : '#1e3a2f' }}
+          style={{ color: imageUrl || back.background ? '#ffffff' : '#1e3a2f', containerType: 'inline-size' }}
         >
           <Sprig style={{ width: '10cqw', height: '10cqw', opacity: 0.9 }} />
           <span
@@ -278,35 +179,29 @@ export function BackCoverDesign({
   );
 }
 
-/** The book spine — a thin bound edge carrying the title vertically. Pure CSS (no load wait). */
-function Spine({ title, color }: { title: string; color: string }) {
+/**
+ * THE SPINE — the bound edge, now a surface with objects rather than a hardcoded label.
+ *
+ * `container-type: size` (not `inline-size`) because a spine object is sized in `cqh`: the edge is
+ * a few percent of a page wide and many times that tall, so height is the only axis that can
+ * carry a legible measurement. See `textFontSize`.
+ */
+export function SpineDesign({
+  spine,
+  renderElements = true,
+}: {
+  spine: SpineConfig;
+  renderElements?: boolean;
+}) {
   return (
     <div
-      className="relative h-full overflow-hidden"
+      className="relative h-full w-full overflow-hidden"
       style={{
-        flex: '0 0 auto',
         background: 'linear-gradient(90deg, rgba(0,0,0,0.22), rgba(0,0,0,0.04) 40%, rgba(0,0,0,0.04) 60%, rgba(0,0,0,0.22)), #1e3a2f',
         containerType: 'size',
       }}
     >
-      {title.trim() && (
-        <span
-          className="absolute left-1/2 top-1/2"
-          style={{
-            transform: 'translate(-50%, -50%)',
-            writingMode: 'vertical-rl',
-            whiteSpace: 'nowrap',
-            color,
-            fontFamily: fontStack('serif'),
-            fontSize: '5cqh',
-            letterSpacing: '0.12em',
-            opacity: 0.92,
-            textShadow: '0 0.4cqh 1cqh rgba(0,0,0,0.35)',
-          }}
-        >
-          {title}
-        </span>
-      )}
+      {renderElements && spine.texts.map((t) => <TextBox key={t.id} el={t} />)}
     </div>
   );
 }
@@ -336,35 +231,27 @@ export function CoverSpread({
   stickerUrlFor?: (stickerId: string) => string | undefined;
   onReady?: () => void;
 }) {
-  const { pagePct, spinePct, aspect } = coverSpreadMetrics(size, pageAspect);
+  const aspectRatio = pageAspect ?? 0.75;
+  const { pagePct, spinePct, aspect } = coverSpreadMetrics(size, aspectRatio);
+  const c = useMemo(() => migrateCoverConfig(config, { title }, aspectRatio), [config, title, aspectRatio]);
   return (
-    <div
-      className="relative w-full overflow-hidden ring-1 ring-black/10"
-      style={{ aspectRatio: String(aspect) }}
-    >
+    <div className="relative w-full overflow-hidden ring-1 ring-black/10" style={{ aspectRatio: String(aspect) }}>
       <div className="flex h-full w-full">
         <div className="relative h-full" style={{ width: `${pagePct}%` }}>
-          <BackCoverDesign back={config.back} imageUrl={backImageUrl} stickerUrlFor={stickerUrlFor} onReady={onReady} />
+          <BackCoverDesign back={c.back} imageUrl={backImageUrl} stickerUrlFor={stickerUrlFor} onReady={onReady} />
         </div>
         <div className="relative h-full" style={{ width: `${spinePct}%` }}>
-          <Spine title={config.spineTitle || title} color={config.spineColor} />
+          <SpineDesign spine={c.spine} />
         </div>
         <div className="relative h-full" style={{ width: `${pagePct}%` }}>
           <CoverDesign
             imageUrl={frontImageUrl}
-            imageEdit={config.imageEdit}
-            background={config.background}
-            title={title}
-            subtitle={config.subtitle}
-            author={config.author}
-            font={config.font}
-            color={config.color}
-            align={config.align}
-            layout={config.layout}
-            posY={config.posY}
-            texts={config.texts}
-            stickers={config.stickers}
-            qrs={config.qrs}
+            imageEdit={c.imageEdit}
+            background={c.background}
+            layout={c.layout}
+            texts={c.texts}
+            stickers={c.stickers}
+            qrs={c.qrs}
             stickerUrlFor={stickerUrlFor}
             onReady={onReady}
           />
@@ -380,11 +267,19 @@ export function CoverSpread({
   );
 }
 
-/** Convenience: render the FRONT cover straight from a CoverConfig + resolved image URL. */
+/**
+ * Render the FRONT cover straight from a CoverConfig + resolved image URL.
+ *
+ * THE migration entry point for every read-only surface: the flipbook, the in-app preview, review
+ * mode, the template galleries, the admin preview and the PDF print route all come through here,
+ * so a legacy cover is converted in memory before it is drawn and every one of them shows the same
+ * thing. Pure and memoized — a v2 config returns the same reference and costs one comparison.
+ */
 export function CoverDesignFromConfig({
   config,
   title,
   imageUrl,
+  pageAspect = 0.75,
   stickerUrlFor,
   renderElements = true,
   onReady,
@@ -392,26 +287,22 @@ export function CoverDesignFromConfig({
   config: CoverConfig;
   title: string;
   imageUrl: string | null;
+  /** One cover page's width/height — migration needs it to place a legacy title block. */
+  pageAspect?: number;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   renderElements?: boolean;
   onReady?: () => void;
 }) {
+  const c = useMemo(() => migrateCoverConfig(config, { title }, pageAspect), [config, title, pageAspect]);
   return (
     <CoverDesign
       imageUrl={imageUrl}
-      imageEdit={config.imageEdit}
-      background={config.background}
-      title={title}
-      subtitle={config.subtitle}
-      author={config.author}
-      font={config.font}
-      color={config.color}
-      align={config.align}
-      layout={config.layout}
-      posY={config.posY}
-      texts={config.texts}
-      stickers={config.stickers}
-      qrs={config.qrs}
+      imageEdit={c.imageEdit}
+      background={c.background}
+      layout={c.layout}
+      texts={c.texts}
+      stickers={c.stickers}
+      qrs={c.qrs}
       stickerUrlFor={stickerUrlFor}
       renderElements={renderElements}
       onReady={onReady}

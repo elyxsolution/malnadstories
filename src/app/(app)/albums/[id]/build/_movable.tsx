@@ -1,8 +1,9 @@
 'use client';
 
 import { useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { Rect } from '@/lib/builder/model';
-import { clampRect, type Bounds } from '@/lib/builder/edit-bounds';
+import { clampRect, isFullyOffPage, type Bounds } from '@/lib/builder/edit-bounds';
 
 /**
  * A reusable, normalized (0..1) draggable / resizable / rotatable box — the interaction
@@ -25,9 +26,28 @@ export type SnapLine = { axis: 'x' | 'y'; pos: number; kind?: 'center' | 'edge' 
 export type PeerRect = { x: number; y: number; w: number; h: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-const SNAP_T = 0.012; // snap threshold (fraction of the pair)
-// Structural targets: page centres (0.25 / 0.75), the centre fold (0.5), and the safe margins.
-const CENTER_X = [0.25, 0.5, 0.75];
+
+/**
+ * SNAP THRESHOLD, IN PIXELS — not in fractions of the page.
+ *
+ * It used to be `0.012` of the box on BOTH axes, which quietly made snapping behave differently
+ * in every direction and at every zoom: on a 1200 × 500 spread that is 14px horizontally and 6px
+ * vertically, and both grow as the user zooms in — exactly when they are trying to place
+ * something precisely. Corners were the worst case, because two over-eager axes agree to pin the
+ * element to one intersection and fine positioning near an edge becomes impossible.
+ *
+ * A fixed pixel radius is what every desktop editor uses: the pull feels the same everywhere on
+ * the page, the same at 50% zoom and at 200%, and small enough that ordinary dragging is free.
+ */
+const SNAP_PX = 6;
+/**
+ * Structural targets, per surface. On an open PAIR the meaningful vertical lines are the two page
+ * centres (0.25 / 0.75) and the fold between them (0.5). A single page — the cover — has exactly
+ * one centre, and offering it 0.25/0.75 as "page centres" drawn in the strongest guide style was
+ * simply untrue: they are quarter marks on that surface, and a guide that misnames itself is
+ * worse than no guide.
+ */
+const CENTER_X: Record<1 | 2, number[]> = { 1: [0.5], 2: [0.25, 0.5, 0.75] };
 const CENTER_Y = [0.5];
 const EDGE_X = [0.05, 0.95];
 const EDGE_Y = [0.06, 0.94];
@@ -35,15 +55,21 @@ const EDGE_Y = [0.06, 0.94];
 type Candidate = { pos: number; kind: 'center' | 'edge' | 'spacing' };
 
 /**
- * Snap `centre` to the nearest candidate within threshold.
+ * Snap `centre` to the nearest candidate within `threshold` (a fraction of the box on this axis,
+ * derived per gesture from `SNAP_PX` and the live container size).
  *
  * Candidates are tried in the order given, so structural guides (page centres) win ties against
  * peer edges — being centred on the page is almost always the intent when both are within a
  * pixel of each other.
  */
-function snapAxis(centre: number, half: number, candidates: Candidate[]): { value: number; line: Candidate | null } {
+function snapAxis(
+  centre: number,
+  half: number,
+  candidates: Candidate[],
+  threshold: number,
+): { value: number; line: Candidate | null } {
   let best: Candidate | null = null;
-  let bestDist = SNAP_T;
+  let bestDist = threshold;
   for (const c of candidates) {
     const d = Math.abs(centre - c.pos);
     if (d <= bestDist) {
@@ -61,12 +87,19 @@ function snapAxis(centre: number, half: number, candidates: Candidate[]): { valu
  * Build the candidate set for one axis: structural guides first, then alignment with the CENTRES
  * of sibling elements, then equal-spacing positions between the two nearest siblings.
  *
- * Peers are only considered when there are any, so a page with a single overlay shows exactly the
- * guides it did before — the system gets richer only where richness is meaningful.
+ * `structural` is false once the element's centre has left the page on this axis. Page centres
+ * and safe margins describe the PRINTED page, so an element being deliberately pushed onto the
+ * pasteboard has no business being tugged back onto a margin it is no longer near — that pull is
+ * the second half of "the page reclaims the object". Peer alignment survives, because lining two
+ * off-page elements up with each other is still meaningful.
  */
-function candidatesFor(axis: 'x' | 'y', peers: PeerRect[]): Candidate[] {
-  const structural: Candidate[] = (axis === 'x' ? CENTER_X : CENTER_Y).map((pos) => ({ pos, kind: 'center' as const }));
-  const edges: Candidate[] = (axis === 'x' ? EDGE_X : EDGE_Y).map((pos) => ({ pos, kind: 'edge' as const }));
+function candidatesFor(axis: 'x' | 'y', peers: PeerRect[], structural: boolean, span: 1 | 2): Candidate[] {
+  const centres: Candidate[] = structural
+    ? (axis === 'x' ? CENTER_X[span] : CENTER_Y).map((pos) => ({ pos, kind: 'center' as const }))
+    : [];
+  const edges: Candidate[] = structural
+    ? (axis === 'x' ? EDGE_X : EDGE_Y).map((pos) => ({ pos, kind: 'edge' as const }))
+    : [];
   const peerCentres: Candidate[] = peers.map((p) =>
     axis === 'x' ? { pos: p.x + p.w / 2, kind: 'edge' as const } : { pos: p.y + p.h / 2, kind: 'edge' as const },
   );
@@ -76,7 +109,7 @@ function candidatesFor(axis: 'x' | 'y', peers: PeerRect[]): Candidate[] {
   for (let i = 0; i < sorted.length - 1; i += 1) {
     spacing.push({ pos: (sorted[i] + sorted[i + 1]) / 2, kind: 'spacing' });
   }
-  return [...structural, ...edges, ...peerCentres, ...spacing];
+  return [...centres, ...edges, ...peerCentres, ...spacing];
 }
 
 /**
@@ -116,10 +149,13 @@ const HANDLES: HandleDef[] = [
  * THE EDITING LAYER'S TRAVEL RULES.
  *
  * `edit` is how far a gesture may go — out onto the pasteboard, past the trim edge. `commit` is
- * where the element may LAND, and mirrors the persisted schema exactly, so a rect that escaped
- * during the drag settles somewhere the save pipeline accepts. Omit `escape` entirely and the
- * component keeps its original behaviour (fully inside the page), which is what the cover canvas
- * and any other host that has not opted in still get.
+ * where the element may LAND. Hosts now pass `travelBounds(kind)` / `commitBounds(kind)`, which
+ * are the SAME box: a gesture can only reach places the element may stay, so releasing never
+ * moves anything. `commit` is still applied on release as a defensive backstop (a host could
+ * legitimately pass a wider `edit`), it simply has nothing left to correct.
+ *
+ * Omit `escape` entirely and the component keeps its original behaviour — the element stays
+ * fully inside the page — which is what a host that has not opted in gets.
  */
 export type EscapeBounds = { edit: Bounds; commit: Bounds };
 
@@ -141,6 +177,7 @@ export default function Movable({
   squareRatio = 1, // h = w * squareRatio for square pixels on a non-square pair
   rotatable = false,
   escape,
+  chromeContainer,
   containerRef,
   onSelect,
   onContextMenu,
@@ -149,6 +186,7 @@ export default function Movable({
   onRotate,
   onSnap,
   peers = [],
+  pageSpan = 2,
   onDoubleClick,
   className = '',
   zIndex,
@@ -167,6 +205,18 @@ export default function Movable({
   rotatable?: boolean;
   /** Opt in to editing outside the page. Absent = the element stays fully inside it. */
   escape?: EscapeBounds;
+  /**
+   * WHERE THE SELECTION CHROME IS DRAWN — the other half of "separate editing from rendering".
+   *
+   * The host clips its element layer to the trim box, so an element that hangs off the page is
+   * cut exactly where the paper ends (what prints is what you see). That clip would take the
+   * outline and the resize handles with it, leaving an off-page element impossible to grab. So
+   * the chrome is portalled OUT of the clipped layer into this unclipped one, which the host
+   * overlays on the same page box. Same geometry, same percentages — only the clipping differs.
+   *
+   * Absent → chrome renders inline, exactly as before (used by hosts with no clip layer).
+   */
+  chromeContainer?: HTMLElement | null;
   containerRef: React.RefObject<HTMLElement>;
   /**
    * Receives modifier state so the selection store — not this component — decides semantics.
@@ -181,6 +231,11 @@ export default function Movable({
   onSnap?: (lines: SnapLine[]) => void;
   /** Sibling boxes on the same page — enables edge + equal-spacing guides. Empty is fine. */
   peers?: PeerRect[];
+  /**
+   * How many printed pages the container spans: 2 for an open spread (default), 1 for a single
+   * page such as a cover side. It only selects which structural guides are true for the surface.
+   */
+  pageSpan?: 1 | 2;
   onDoubleClick?: () => void;
   className?: string;
   zIndex?: number;
@@ -203,11 +258,19 @@ export default function Movable({
   const [dragging, setDragging] = useState(false);
 
   /**
-   * The element is currently somewhere it cannot stay — it will settle back to the edge when the
-   * pointer is released. Saying so DURING the drag is the whole point: a box that silently jumps
-   * on release reads as a bug, whereas a dashed boundary reads as a rule.
+   * The pointer is asking for a position the element is not allowed to occupy, and the drag is
+   * being held against that limit. Nothing jumps — the element simply stops — but a wall you
+   * cannot see reads as a stuck interface, so the outline says "this is the boundary" for as long
+   * as you push on it. It replaces the old `willSettle` warning, which existed to pre-announce a
+   * snap-back that can no longer happen.
    */
-  const willSettle = !!escape && clampRect(rect, escape.commit) !== rect;
+  const [atLimit, setAtLimit] = useState(false);
+
+  /**
+   * No part of this element is over the page, so the clipped element layer draws nothing for it.
+   * Its chrome becomes its only handle — see `chromeContainer`.
+   */
+  const fullyOffPage = !!escape && isFullyOffPage(rect);
 
   const begin = (mode: 'move' | 'resize' | 'rotate', edges: { x: -1 | 0 | 1; y: -1 | 0 | 1 } = { x: 1, y: 1 }) => (
     e: ReactPointerEvent,
@@ -249,27 +312,49 @@ export default function Movable({
     maxY: escape ? escape.edit.maxY : 1 - r.h,
   });
 
+  const flagLimit = (v: boolean) => setAtLimit((prev) => (prev === v ? prev : v));
+
   const onMove = (e: ReactPointerEvent) => {
     const d = drag.current;
     const box = containerRef.current?.getBoundingClientRect();
-    if (!d || !box) return;
+    if (!d || !box || box.width === 0 || box.height === 0) return;
     const dx = (e.clientX - d.sx) / box.width;
     const dy = (e.clientY - d.sy) / box.height;
     const t = travel(d.start);
 
     if (d.mode === 'move') {
-      let nx = clamp(d.start.x + dx, t.minX, t.maxX);
-      let ny = clamp(d.start.y + dy, t.minY, t.maxY);
+      const wantX = d.start.x + dx;
+      const wantY = d.start.y + dy;
+      let nx = clamp(wantX, t.minX, t.maxX);
+      let ny = clamp(wantY, t.minY, t.maxY);
+      // Held against a boundary — say so, don't just stop dead. Tolerance is a hair over a
+      // device pixel so ordinary rounding never lights the warning up.
+      const eps = 1 / Math.max(box.width, box.height);
+      flagLimit(Math.abs(wantX - nx) > eps || Math.abs(wantY - ny) > eps);
+
       const lines: SnapLine[] = [];
-      const sx = snapAxis(nx + d.start.w / 2, d.start.w / 2, candidatesFor('x', peers));
-      const sy = snapAxis(ny + d.start.h / 2, d.start.h / 2, candidatesFor('y', peers));
-      if (sx.line !== null) {
-        nx = clamp(sx.value, t.minX, t.maxX);
-        lines.push({ axis: 'x', pos: sx.line.pos, kind: sx.line.kind });
-      }
-      if (sy.line !== null) {
-        ny = clamp(sy.value, t.minY, t.maxY);
-        lines.push({ axis: 'y', pos: sy.line.pos, kind: sy.line.kind });
+      /**
+       * ALT SUSPENDS SNAPPING for as long as it is held — the escape hatch every layout tool
+       * has, and the honest answer to "I want it EXACTLY here". Read live from the event rather
+       * than captured at pointer-down, so it can be pressed and released mid-drag.
+       */
+      if (!e.altKey) {
+        const cx = nx + d.start.w / 2;
+        const cy = ny + d.start.h / 2;
+        // Pixel radius → fraction, per axis, from the live box: identical pull in both
+        // directions and at every zoom level.
+        const thX = SNAP_PX / box.width;
+        const thY = SNAP_PX / box.height;
+        const sx = snapAxis(cx, d.start.w / 2, candidatesFor('x', peers, cx >= 0 && cx <= 1, pageSpan), thX);
+        const sy = snapAxis(cy, d.start.h / 2, candidatesFor('y', peers, cy >= 0 && cy <= 1, pageSpan), thY);
+        if (sx.line !== null) {
+          nx = clamp(sx.value, t.minX, t.maxX);
+          lines.push({ axis: 'x', pos: sx.line.pos, kind: sx.line.kind });
+        }
+        if (sy.line !== null) {
+          ny = clamp(sy.value, t.minY, t.maxY);
+          lines.push({ axis: 'y', pos: sy.line.pos, kind: sy.line.kind });
+        }
       }
       onSnap?.(lines);
       onChange({ ...d.start, x: nx, y: ny });
@@ -322,14 +407,21 @@ export default function Movable({
     if (!drag.current) return;
     drag.current = null;
     setDragging(false);
+    flagLimit(false);
     onSnap?.([]);
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    // A cancelled pointer (browser gesture, tab switch, the node re-keyed mid-drag) can already
+    // have lost capture; releasing it then throws and would strand `onCommit`.
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* the pointer is gone — nothing to release */
+    }
     /**
-     * SETTLE. The gesture was free to roam the pasteboard; the resting place is not. Clamping
-     * here — once, on release — is what keeps an off-page position saveable without touching the
-     * server schema. For text and stickers this is almost always a no-op (they may genuinely live
-     * off the page); an overlay or QR that was dragged past the left/top edge comes to rest flush
-     * against it, which is as far out as its stored contract goes.
+     * BACKSTOP, NOT A SETTLE. The gesture travelled inside the commit box (see `edit-bounds`), so
+     * this clamp finds nothing to correct and the element does not move on release — which is the
+     * whole point: an object stays exactly where it was put. It is kept because a host is free to
+     * pass a wider `edit` box, and because a rect that arrived from somewhere other than a drag
+     * should still be brought inside the persisted contract before it is saved.
      */
     if (escape) {
       const settled = clampRect(rect, escape.commit);
@@ -346,6 +438,116 @@ export default function Movable({
     height: `${rect.h * 100}%`,
     transform: rotation ? `rotate(${rotation}deg)` : undefined,
   };
+
+  /*
+    THE SELECTION CHROME — a sibling overlay, not a child.
+
+    It mirrors the element's box exactly but lives at the top of the page's stack, which is the
+    piece that makes editing a COVERED element possible: the outline stays visible and the
+    handles stay grabbable even when the element itself is buried under three others, and none
+    of that requires moving the element forward. It is inert except for the handles, so the
+    element underneath keeps its own double-click, context menu and drop-target behaviour.
+
+    When the host supplies a `chromeContainer` it is also what makes an OFF-PAGE element usable:
+    the element itself is clipped at the trim, but its outline and handles are drawn on the
+    pasteboard, unclipped, so it can always be seen and dragged back.
+  */
+  const chrome =
+    !locked && (selected || fullyOffPage) ? (
+      <div
+        className="pointer-events-none absolute z-[40]"
+        style={{
+          ...geometry,
+          ...(selected
+            ? {
+                outline: atLimit ? '2px dashed hsl(var(--warning))' : '2px solid hsl(var(--studio-bright))',
+                outlineOffset: '1px',
+                // The selected halo softens while dragging so the element itself stays the subject.
+                boxShadow: `0 0 0 ${dragging ? 2 : 4}px hsl(var(--studio-bright) / ${dragging ? 0.1 : 0.18})`,
+              }
+            : null),
+          borderRadius: '2px',
+        }}
+      >
+        {/*
+          THE OFF-PAGE GHOST. Once nothing of the element overlaps the paper it draws nothing at
+          all, so this stands in for it: a quiet dashed box on the pasteboard that carries the
+          SAME `begin('move')` gesture as the element itself — one movement implementation, two
+          surfaces. Without it, pushing something fully off the page would lose it for good.
+        */}
+        {fullyOffPage && (
+          <span
+            role="presentation"
+            aria-label={`${ariaLabel ?? 'Element'}, outside the page`}
+            title="Outside the page — this will not print"
+            onPointerDown={begin('move')}
+            onPointerMove={onMove}
+            onPointerUp={end}
+            onPointerCancel={end}
+            className={`pointer-events-auto absolute inset-0 rounded-[2px] border border-dashed bg-studio/[0.07] ${
+              dragging ? 'cursor-grabbing' : 'cursor-grab'
+            } ${selected ? 'border-transparent' : 'border-studio-bright/70'}`}
+          />
+        )}
+
+        {selected && (
+          <>
+            {/* Legacy inline control bar. The page canvas now uses the floating context bar and
+                passes no `controls`; the cover canvas still supplies its own, unchanged. */}
+            {controls && (
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                className="motion-safe:animate-scale-in pointer-events-auto absolute -top-9 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-border bg-card/95 p-0.5 shadow-elevated backdrop-blur-sm"
+              >
+                {controls}
+              </div>
+            )}
+
+            {/* EIGHT HANDLES. Corners are dots, edges are short bars — the shape tells you which
+                axes it will move before the cursor does. Squares (QR) expose corners only, since
+                their height is derived and an edge handle would be a lie. */}
+            {HANDLES.filter((hd) => !keepSquare || (hd.x !== 0 && hd.y !== 0)).map((hd) => {
+              const isCorner = hd.x !== 0 && hd.y !== 0;
+              return (
+                <span
+                  key={hd.id}
+                  role="presentation"
+                  aria-label={hd.label}
+                  onPointerDown={begin('resize', { x: hd.x, y: hd.y })}
+                  onPointerMove={onMove}
+                  onPointerUp={end}
+                  onPointerCancel={end}
+                  style={{ cursor: hd.cursor }}
+                  className={`pointer-events-auto absolute border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 ${hd.pos} ${
+                    isCorner
+                      ? 'h-3 w-3 rounded-full'
+                      : hd.x === 0
+                        ? 'h-2 w-5 rounded-full'
+                        : 'h-5 w-2 rounded-full'
+                  }`}
+                />
+              );
+            })}
+
+            {/* Rotate handle, on a visible stem so it doesn't read as a ninth resize dot. */}
+            {rotatable && onRotate && (
+              <>
+                <span aria-hidden className="absolute -top-4 left-1/2 h-4 w-px -translate-x-1/2 bg-studio/50" />
+                <span
+                  role="presentation"
+                  aria-label="Rotate"
+                  onPointerDown={begin('rotate')}
+                  onPointerMove={onMove}
+                  onPointerUp={end}
+                  onPointerCancel={end}
+                  className="pointer-events-auto absolute -top-1.5 left-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab rounded-full border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 active:cursor-grabbing"
+                />
+              </>
+            )}
+          </>
+        )}
+      </div>
+    ) : null;
 
   return (
     <>
@@ -399,81 +601,8 @@ export default function Movable({
         {children}
       </div>
 
-      {/*
-        THE SELECTION CHROME — a sibling overlay, not a child.
-
-        It mirrors the element's box exactly but lives at the top of the page's stack, which is the
-        piece that makes editing a COVERED element possible: the outline stays visible and the
-        handles stay grabbable even when the element itself is buried under three others, and none
-        of that requires moving the element forward. It is inert except for the handles, so the
-        element underneath keeps its own double-click, context menu and drop-target behaviour.
-      */}
-      {selected && !locked && (
-        <div
-          className="pointer-events-none absolute z-[40]"
-          style={{
-            ...geometry,
-            outline: willSettle ? '2px dashed hsl(var(--warning))' : '2px solid hsl(var(--studio-bright))',
-            outlineOffset: '1px',
-            // The selected halo softens while dragging so the element itself stays the subject.
-            boxShadow: `0 0 0 ${dragging ? 2 : 4}px hsl(var(--studio-bright) / ${dragging ? 0.1 : 0.18})`,
-            borderRadius: '2px',
-          }}
-        >
-          {/* Legacy inline control bar. The page canvas now uses the floating context bar and
-              passes no `controls`; the cover canvas still supplies its own, unchanged. */}
-          {controls && (
-            <div
-              onPointerDown={(e) => e.stopPropagation()}
-              className="motion-safe:animate-scale-in pointer-events-auto absolute -top-9 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-border bg-card/95 p-0.5 shadow-elevated backdrop-blur-sm"
-            >
-              {controls}
-            </div>
-          )}
-
-          {/* EIGHT HANDLES. Corners are dots, edges are short bars — the shape tells you which
-              axes it will move before the cursor does. Squares (QR) expose corners only, since
-              their height is derived and an edge handle would be a lie. */}
-          {HANDLES.filter((hd) => !keepSquare || (hd.x !== 0 && hd.y !== 0)).map((hd) => {
-            const isCorner = hd.x !== 0 && hd.y !== 0;
-            return (
-              <span
-                key={hd.id}
-                role="presentation"
-                aria-label={hd.label}
-                onPointerDown={begin('resize', { x: hd.x, y: hd.y })}
-                onPointerMove={onMove}
-                onPointerUp={end}
-                onPointerCancel={end}
-                style={{ cursor: hd.cursor }}
-                className={`pointer-events-auto absolute border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 ${hd.pos} ${
-                  isCorner
-                    ? 'h-3 w-3 rounded-full'
-                    : hd.x === 0
-                      ? 'h-2 w-5 rounded-full'
-                      : 'h-5 w-2 rounded-full'
-                }`}
-              />
-            );
-          })}
-
-          {/* Rotate handle, on a visible stem so it doesn't read as a ninth resize dot. */}
-          {rotatable && onRotate && (
-            <>
-              <span aria-hidden className="absolute -top-4 left-1/2 h-4 w-px -translate-x-1/2 bg-studio/50" />
-              <span
-                role="presentation"
-                aria-label="Rotate"
-                onPointerDown={begin('rotate')}
-                onPointerMove={onMove}
-                onPointerUp={end}
-                onPointerCancel={end}
-                className="pointer-events-auto absolute -top-1.5 left-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab rounded-full border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 active:cursor-grabbing"
-              />
-            </>
-          )}
-        </div>
-      )}
+      {/* Chrome goes to the host's unclipped layer when it has one, otherwise stays inline. */}
+      {chromeContainer ? createPortal(chrome, chromeContainer) : chrome}
     </>
   );
 }

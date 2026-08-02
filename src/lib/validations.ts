@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { nameSchema, passwordSchema } from '@/lib/auth/policy';
 import { FONT_KEYS } from '@/lib/builder/fonts-catalog';
+import { COVER_TEXT_ROLES } from '@/lib/builder/model';
 
 export const SignupSchema = z.object({
   // Password (8–25) + display-name (2–60, normalised) policy lives in one place
@@ -144,6 +145,12 @@ const HexOrTransparent = z.union([HexColor, z.literal('transparent')]);
 const TextElementSchema = z.object({
   id: z.string().min(1).max(64),
   text: z.string().max(600).default(''),
+  /**
+   * Cover metadata binding (Cover Editor 2.0). Optional + additive: a page text element and every
+   * existing cover text element parse exactly as before. Bounded to a closed vocabulary so a
+   * forged client cannot invent a role the renderer would have to interpret.
+   */
+  role: z.enum(COVER_TEXT_ROLES).optional(),
   x: z.number().min(-0.5).max(1),
   y: z.number().min(-0.5).max(1),
   w: z.number().gt(0).max(1),
@@ -259,6 +266,21 @@ const BackCoverConfigSchema = z.object({
 // Exported so the admin cover-DESIGN-template schemas (0040) reuse the exact same bounded
 // shape — an admin template IS a CoverConfig snapshot, so there is one validation source.
 export const CoverConfigSchema = z.object({
+  /**
+   * Object-model schema version (Cover Editor 2.0). Optional so every existing row still parses;
+   * absent is read as 1 and migrated in memory on the next load. Bounded rather than free — it
+   * selects a code path, so an arbitrary integer from a forged client has no meaning.
+   */
+  v: z.number().int().min(1).max(2).optional(),
+  /**
+   * The SPINE's own objects. Previously the spine was two scalars (`spineTitle`/`spineColor`,
+   * both retained below); it is a printable surface, so it now carries elements like the other
+   * two faces. Capped like any element array.
+   */
+  spine: z
+    .object({ texts: z.array(TextElementSchema).max(10).optional().default([]) })
+    .optional()
+    .default({ texts: [] }),
   subtitle: z.string().max(120).optional().default(''),
   author: z.string().max(80).optional().default(''),
   spineTitle: z.string().max(80).optional().default(''),

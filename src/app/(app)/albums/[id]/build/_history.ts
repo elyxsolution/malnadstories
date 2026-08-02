@@ -12,8 +12,18 @@ const CAP = 60;
 
 type History<T> = { past: T[]; present: T; future: T[] };
 
-export function useHistoryState<T>(initial: T) {
-  const [h, setH] = useState<History<T>>({ past: [], present: initial, future: [] });
+/**
+ * `initial` accepts a THUNK as well as a value. The cover passes one because its initial state is
+ * the result of a migration: computing that on every render only to have `useState` discard it is
+ * waste, and — more importantly — the migrated config must be the very first history entry, so
+ * undo can never rewind into the pre-migration shape.
+ */
+export function useHistoryState<T>(initial: T | (() => T)) {
+  const [h, setH] = useState<History<T>>(() => ({
+    past: [],
+    present: typeof initial === 'function' ? (initial as () => T)() : initial,
+    future: [],
+  }));
 
   /**
    * Depth of the open `batch()`. While > 0, `set` still applies its update but does NOT push a

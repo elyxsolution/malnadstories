@@ -5,7 +5,7 @@ import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { CoverConfig } from '@/lib/builder/cover';
-import { cmToIn, printPageCss, type ProductDimensions } from '@/lib/products/model';
+import { cmToIn, pageAspect, printPageCss, type ProductDimensions } from '@/lib/products/model';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
 /** The custom cover design: front rendered on page 1, back on the final physical page. */
@@ -203,6 +203,10 @@ export default function PrintAlbum({
             config={cover.config}
             title={cover.title}
             imageUrl={cover.imageUrl}
+            /* Migration geometry is aspect-dependent, so the PDF must migrate against the SAME
+               page proportions the builder did — otherwise a legacy cover that has not been
+               re-saved would print its title stack a hair off where the canvas showed it. */
+            pageAspect={pageAspect(dimensions)}
             stickerUrlFor={stickerUrlFor}
             onReady={onFrameReady}
           />

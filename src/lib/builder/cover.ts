@@ -12,11 +12,15 @@
  */
 import type { CSSProperties } from 'react';
 import { backgroundStyle } from './elements';
+import { freeTexts } from './model';
 import type { Background, EditConfig, QrElement, StickerElement, TextAlign, TextElement, TextFontKey } from './model';
 
 /** Premium cover layouts — each is a tasteful default placement + framing of the title. */
 export const COVER_LAYOUTS = ['classic', 'spotlight', 'banner', 'minimal'] as const;
 export type CoverLayout = (typeof COVER_LAYOUTS)[number];
+
+/** The object-model schema version this build writes. See `CoverConfig.v`. */
+export const COVER_SCHEMA_VERSION = 2;
 
 export const COVER_LAYOUT_LABEL: Record<CoverLayout, string> = {
   classic: 'Classic',
@@ -52,6 +56,21 @@ export const DEFAULT_BACK_COVER: BackCoverConfig = {
 };
 
 /**
+ * The SPINE as a printable surface with its own objects.
+ *
+ * It used to be two scalar fields (`spineTitle` + `spineColor`) rendered by a bespoke `<span>`
+ * with a hardcoded font, size and position — the last thing on the cover that could not be moved,
+ * restyled or duplicated. It is a real page of the printed cover (the bound edge), so it gets a
+ * real element array like the front and the back. One text object with `role: 'spine'` is what
+ * migration puts here; nothing stops a customer adding a second.
+ */
+export type SpineConfig = {
+  texts: TextElement[];
+};
+
+export const DEFAULT_SPINE: SpineConfig = { texts: [] };
+
+/**
  * The persisted custom-cover design. Top-level fields describe the FRONT cover (the book's
  * face — rendered as physical page 1); `back` describes the back cover (printed as the last
  * physical page); `spine*` describe the binding shown between them in the editor + preview.
@@ -62,15 +81,40 @@ export const DEFAULT_BACK_COVER: BackCoverConfig = {
  * solid backdrop behind the title for image-less covers.
  */
 export type CoverConfig = {
+  /**
+   * OBJECT-MODEL SCHEMA VERSION.
+   *
+   *   absent / 1 — legacy: the title, subtitle, author and spine are SCALAR FIELDS rendered by a
+   *                bespoke, unmovable title block.
+   *   2          — object model: those four are ordinary `TextElement`s carrying a `role`, living
+   *                in `texts` / `spine.texts` like every other object.
+   *
+   * It exists because migration must be able to answer "has this cover been converted?" exactly
+   * once. Without it, a lazy migration either re-runs on every load — duplicating the title
+   * object each time — or the renderer cannot tell whether drawing the structured block would
+   * paint the title twice. One integer removes both failure modes; see `migrateCoverConfig`.
+   */
+  v?: number;
+
+  // ── canonical metadata (see `lib/builder/cover-objects` for the two-way binding) ──
+  // These remain the album's metadata of record and are NOT replaced by the objects: readiness,
+  // validation, checkout and the admin console all read them. In v2 they are kept in lockstep
+  // with the corresponding role-tagged text objects, in both directions.
   subtitle: string; // tagline under the title (the title itself is albums.title)
   author: string; // author / customer name printed on the cover (e.g. "by Asha R.")
-  spineTitle: string; // text printed vertically on the book spine (falls back to the album title)
+  spineTitle: string; // text printed on the book spine (falls back to the album title)
+
+  // ── legacy structured typography (v1) ──
+  // Kept so a v1 row can still be read and migrated, and so a config that never re-enters the
+  // builder keeps its meaning. In v2 they are inputs to migration only; `layout` additionally
+  // survives as the cover's THEME (it drives the legibility scrim over photos).
   spineColor: string; // spine text colour hex
-  font: TextFontKey; // 'serif' | 'sans' | 'script'
+  font: TextFontKey;
   color: string; // title/subtitle hex
-  align: TextAlign; // 'left' | 'center' | 'right'
+  align: TextAlign;
   layout: CoverLayout;
-  posY: number; // 0..1 vertical anchor of the text block centre
+  posY: number; // 0..1 vertical anchor of the legacy text block centre
+
   background: Background | null; // CSS backdrop (used when no image source)
   photoId: string | null; // uploaded album photo used as the cover image (overrides template)
   imageEdit: EditConfig | null; // crop/zoom/rotate for the front image (independent of page placement)
@@ -79,10 +123,12 @@ export type CoverConfig = {
   texts: TextElement[];
   stickers: StickerElement[];
   qrs: QrElement[];
+  spine: SpineConfig; // the bound edge — its own objects (v2)
   back: BackCoverConfig; // the back cover composition
 };
 
 export const DEFAULT_COVER_CONFIG: CoverConfig = {
+  v: COVER_SCHEMA_VERSION,
   subtitle: '',
   author: '',
   spineTitle: '',
@@ -98,6 +144,7 @@ export const DEFAULT_COVER_CONFIG: CoverConfig = {
   texts: [],
   stickers: [],
   qrs: [],
+  spine: { ...DEFAULT_SPINE },
   back: { ...DEFAULT_BACK_COVER },
 };
 
@@ -128,10 +175,20 @@ export function normalizeBackCover(b: Partial<BackCoverConfig> | null | undefine
 /** Reference cover width (px) the title size is authored against (for cqw scaling). */
 export const REF_COVER_W = 600;
 
-/** Normalize a partial/legacy cover_config jsonb to a full CoverConfig. */
+/**
+ * Normalize a partial/legacy cover_config jsonb to a full CoverConfig.
+ *
+ * NOTE: this fills in shape, not semantics — a legacy row comes back with `v` absent, its
+ * structured fields intact and `spine.texts` empty. Turning that into objects is
+ * `migrateCoverConfig` (`lib/builder/cover-objects`), which every renderer and the builder call
+ * next. The two are deliberately separate: normalization is total and cheap, migration needs the
+ * album title and the page aspect and is the thing that must run exactly once.
+ */
 export function normalizeCoverConfig(c: Partial<CoverConfig> | null | undefined): CoverConfig {
   if (!c) return { ...DEFAULT_COVER_CONFIG };
   return {
+    v: typeof c.v === 'number' ? c.v : 1,
+    spine: c.spine && Array.isArray(c.spine.texts) ? { texts: c.spine.texts } : { ...DEFAULT_SPINE },
     subtitle: typeof c.subtitle === 'string' ? c.subtitle : '',
     author: typeof c.author === 'string' ? c.author : '',
     spineTitle: typeof c.spineTitle === 'string' ? c.spineTitle : '',
@@ -153,7 +210,13 @@ export function normalizeCoverConfig(c: Partial<CoverConfig> | null | undefined)
   };
 }
 
-/** A cover is "custom" (worth persisting/rendering) when it diverges from plain defaults. */
+/**
+ * A cover is "custom" (worth persisting/rendering) when it diverges from plain defaults.
+ *
+ * Text is counted through `freeTexts`: since Cover Editor 2.0 every cover carries a title object
+ * (and a spine object) as a VIEW of album metadata, so counting all of `texts` would call a
+ * pristine album custom.
+ */
 export function isCustomCover(c: CoverConfig): boolean {
   return (
     c.subtitle.trim() !== '' ||
@@ -163,7 +226,7 @@ export function isCustomCover(c: CoverConfig): boolean {
     c.background !== null ||
     c.photoId !== null ||
     c.font !== DEFAULT_COVER_CONFIG.font ||
-    c.texts.length > 0 ||
+    freeTexts(c.texts).length > 0 ||
     c.stickers.length > 0 ||
     c.qrs.length > 0 ||
     c.back.photoId !== null ||

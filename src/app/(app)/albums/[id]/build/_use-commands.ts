@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
+import { resolveLayerIndex, type LayerAction } from '@/lib/builder/elements';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -354,7 +355,7 @@ export function useCommands(deps: CommandDeps) {
   const moveLayer = useCallback(
     (
       target: { kind: 'overlay' | 'text' | 'sticker' | 'qr'; blockKey: string; id: string },
-      action: 'front' | 'forward' | 'backward' | 'back' | { above: string } | { below: string },
+      action: LayerAction,
     ) => {
       const block = blocks.find((b) => b.key === target.blockKey);
       if (!block) return;
@@ -362,22 +363,10 @@ export function useCommands(deps: CommandDeps) {
         target.kind === 'overlay' ? block.overlays : target.kind === 'text' ? block.texts : target.kind === 'sticker' ? block.stickers : block.qrs;
       const i = list.findIndex((el) => el.id === target.id);
       if (i < 0) return;
-
-      let j: number;
-      if (action === 'front') j = list.length - 1;
-      else if (action === 'back') j = 0;
-      else if (action === 'forward') j = i + 1;
-      else if (action === 'backward') j = i - 1;
-      else {
-        // Remove-then-insert semantics: "above s" lands directly after s, "below s" directly
-        // before it — accounting for the shift the removal of `i` causes on one side.
-        const sibId = 'above' in action ? action.above : action.below;
-        const s = list.findIndex((el) => el.id === sibId);
-        if (s < 0 || sibId === target.id) return;
-        j = 'above' in action ? (i < s ? s : s + 1) : i < s ? s - 1 : s;
-      }
-      j = Math.max(0, Math.min(list.length - 1, j));
-      if (j === i) return;
+      // The index arithmetic is shared with the cover canvas (`lib/builder/elements`), which has
+      // element arrays but no blocks — one definition of what "forward" means on either surface.
+      const j = resolveLayerIndex(list, target.id, action);
+      if (j === null) return;
 
       const dir: -1 | 1 = j > i ? 1 : -1;
       const steps = Math.abs(j - i);

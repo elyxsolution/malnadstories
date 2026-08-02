@@ -15,7 +15,7 @@ import UploadBadge, { stateOpacityClass } from './_upload-badge';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
-import { EDIT_BOUNDS, PASTEBOARD_PCT, commitBounds, type EditableKind } from '@/lib/builder/edit-bounds';
+import { PASTEBOARD_PCT, commitBounds, travelBounds, type EditableKind } from '@/lib/builder/edit-bounds';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { useBuilderDimensions } from './_dimensions';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -36,13 +36,20 @@ const NO_MODS: SelectMods = { meta: false, shift: false, alt: false };
  *
  * TWO LAYERS, ONE PAGE BOX:
  *
- *   RENDER LAYER  — the page's own content (background + base photo slots), clipped to the trim
- *                   box exactly as the preview, flipbook, review mode and the PDF clip it. This
- *                   is the "what prints" layer and its behaviour is unchanged.
- *   EDITING LAYER — the free elements (photo overlays, text, QR, stickers). NOT clipped, so an
- *                   element can be dragged out onto the pasteboard around the page and left
- *                   deliberately hanging off the edge. Only the editor shows this; every render
- *                   surface still clips at the trim, so the printed result is untouched.
+ *   RENDER LAYER  — everything that draws: the page's own content (background + base photo
+ *                   slots) AND the free elements (photo overlays, text, QR, stickers). It is
+ *                   clipped to the trim box, exactly as the preview, flipbook, review mode and
+ *                   the PDF clip it. An element pushed past the edge is CUT at the paper's edge
+ *                   while you drag it, so the canvas answers "what will print" continuously,
+ *                   with no second surface to reconcile it against.
+ *   EDITING LAYER — the selection chrome: outlines, the eight handles, the rotate handle, and
+ *                   the ghost that stands in for an element pushed entirely off the page. It is
+ *                   NOT clipped, so it stays visible and grabbable out on the pasteboard.
+ *
+ * That split is the whole idea: MOVEMENT is unrestricted (an element may live off the page),
+ * RENDERING is clipped (only the part over the paper draws). `Movable` portals its chrome into
+ * the second layer — see its `chromeContainer` prop — so there is still exactly one movement
+ * implementation and one set of geometry maths.
  *
  * The page geometry itself is a true rectangle — real printed albums have sharp 90° corners, so
  * the canvas does too. Depth comes from the layered paper shadow (`.album-page`), not a radius.
@@ -63,6 +70,7 @@ export default function BlockCard({
   drag,
   onEditPhoto,
   onQuickCrop,
+  onPlacePhoto,
   stickerUrlFor,
   pickActive = false,
   onTapPlaceBase,
@@ -95,6 +103,12 @@ export default function BlockCard({
   onSelect: (s: Selection) => void;
   onEditPhoto: (photoId: string) => void;
   onQuickCrop: (photoId: string, frameAspect: number, showGutter: boolean) => void;
+  /**
+   * Put a photo into one of this spread's frames, through the host's command layer. Optional:
+   * a host without one (the admin cover designer) falls back to the local `api` calls, which
+   * behave identically minus the batching and the swap notice.
+   */
+  onPlacePhoto?: (photoId: string, target: { blockKey: string; slot?: BaseSlot; overlayId?: string }) => void;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   pickActive?: boolean;
   onTapPlaceBase?: (slot: BaseSlot) => void;
@@ -122,6 +136,12 @@ export default function BlockCard({
   const baseReadiness = (slot: BaseSlot) => readinessOf?.(frameKey({ kind: 'base', blockKey: block.key, blockIndex: index, slot }));
   const overlayReadiness = (id: string) => readinessOf?.(frameKey({ kind: 'overlay', blockKey: block.key, blockIndex: index, id }));
   const pageRef = useRef<HTMLDivElement>(null);
+  /**
+   * The unclipped chrome layer, as STATE rather than a ref: `Movable` portals into this node, and
+   * a portal target must exist at render time. A ref would still be null on the first pass, so
+   * the chrome would silently not mount until something else caused a re-render.
+   */
+  const [chromeEl, setChromeEl] = useState<HTMLDivElement | null>(null);
 
   // Which frame on THIS spread is being cropped — resolved once rather than per frame.
   const cropOnThisBlock = cropTarget && cropTarget.blockKey === block.key ? cropTarget : null;
@@ -138,12 +158,37 @@ export default function BlockCard({
   const cost = PAGE_COST[block.template];
 
   /**
-   * Travel rules for the editing layer, per element kind. `edit` is the pasteboard the gesture
-   * may roam; `commit` is where the element may land, and mirrors the stored schema — see
-   * `lib/builder/edit-bounds`. Memo-free: these are two object literals per render, and hoisting
-   * them would cost more in indirection than it saves.
+   * Travel rules for the editing layer, per element kind — see `lib/builder/edit-bounds`. `edit`
+   * and `commit` are deliberately the same box now: a gesture can only reach positions the
+   * element is allowed to keep, so releasing near an edge never moves anything. Memo-free: two
+   * object literals per render, and hoisting them would cost more in indirection than it saves.
    */
-  const escapeFor = (kind: EditableKind) => ({ edit: EDIT_BOUNDS, commit: commitBounds(kind) });
+  const escapeFor = (kind: EditableKind) => ({ edit: travelBounds(kind), commit: commitBounds(kind) });
+
+  /**
+   * REPLACE ON DROP — the ONE placement path on this spread.
+   *
+   * Every way a photo can land in a frame (dropping on a base slot, dropping on an overlay,
+   * picking from the modal) resolves here, so "what happens when the frame is already occupied"
+   * is answered once. The answer is: it is replaced, immediately, with no confirmation — the
+   * displaced photo is simply no longer referenced by any frame, and the tray is derived from
+   * exactly that, so it reappears there on the same render. There is no delete, no second store
+   * to keep in step, and undo restores both halves because it is one mutation.
+   *
+   * `onPlacePhoto` routes through the host's command layer (`commands.placePhoto` → `api.batch`),
+   * which is what keeps a replacement a single history entry and lets the host report the swap.
+   * Without it the local `api` calls are used, so any host without a command layer still works.
+   *
+   * Ending the drag here rather than in each handler is the fix for a real leak: the overlay drop
+   * never called `drag.end()`, so after dropping onto an overlay the store kept believing a drag
+   * was in flight and other frames went on showing replace previews.
+   */
+  const place = (photoId: string, target: { slot?: BaseSlot; overlayId?: string }) => {
+    if (onPlacePhoto) onPlacePhoto(photoId, { blockKey: block.key, ...target });
+    else if (target.slot) api.assignBaseSlot(block.key, target.slot, photoId);
+    else if (target.overlayId) api.replaceOverlay(block.key, target.overlayId, photoId);
+    drag?.end();
+  };
 
   /**
    * REACHING WHAT IS UNDERNEATH.
@@ -201,6 +246,23 @@ export default function BlockCard({
     onSelectTarget?.(t, { meta: mods.meta, shift: mods.shift });
   };
 
+  /**
+   * ALIGNMENT PEERS — every movable box on this spread, regardless of family.
+   *
+   * Peer guides used to be wired for overlays only, and only against other OVERLAYS: a sticker
+   * could not be lined up with a photo, and text could not be lined up with anything at all. That
+   * is not a rule anyone would choose, it is just where the feature stopped. An element is an
+   * element — a caption should snap to the overlay above it exactly as one overlay snaps to
+   * another — so all four families feed one list and each element aligns to every other.
+   */
+  const peerBoxes = [
+    ...block.overlays.map((o) => ({ id: o.id as string, x: o.x, y: o.y, w: o.w, h: o.h })),
+    ...block.texts.map((t) => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })),
+    ...block.stickers.map((s) => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h })),
+    ...block.qrs.map((q) => ({ id: q.id, x: q.x, y: q.y, w: q.w, h: q.h })),
+  ];
+  const peersExcept = (id: string) => peerBoxes.filter((p) => p.id !== id);
+
   const leftPhoto = block.photoIds[0] ? photoMap.get(block.photoIds[0]) : undefined;
   const rightPhoto = block.photoIds[1] ? photoMap.get(block.photoIds[1]) : undefined;
 
@@ -247,10 +309,15 @@ export default function BlockCard({
           style={{ aspectRatio: pair, containerType: 'inline-size' }}
         >
           {/* ── RENDER LAYER ────────────────────────────────────────────────────────────────
-              The page's own content. It clips itself by construction — the background and both
-              base slots are geometrically pinned to the page box, and `PhotoFrame` clips its own
-              zoom/crop overflow — so this layer needs no clip of its own and nothing here can
-              escape the trim. Unchanged from before. */}
+              EVERYTHING THAT DRAWS, CLIPPED AT THE TRIM. The page's own content was always
+              geometrically pinned inside the box; what this clip adds is the free elements —
+              an overlay, text, sticker or QR pushed past the edge is now cut exactly where the
+              paper ends, live, while you drag it. That makes the canvas agree with the preview,
+              the flipbook and the PDF by construction instead of by inspection.
+
+              Movement is untouched: the gesture still travels out onto the pasteboard, and the
+              handles that follow it live in the unclipped chrome layer below. */}
+          <div className="absolute inset-0 overflow-hidden">
           {block.background ? (
             <div className="absolute inset-0" style={backgroundStyle(block.background)} />
           ) : (
@@ -270,10 +337,7 @@ export default function BlockCard({
               onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'image' })}
               multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'image' })}
               onPick={() => setPicking({ kind: 'base', slot: 'image' })}
-              onDrop={(id) => {
-                api.assignBaseSlot(block.key, 'image', id);
-                drag?.end();
-              }}
+              onDrop={(id) => place(id, { slot: 'image' })}
               onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'image' })}
               incomingPreviewUrl={(() => {
                 const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'image' });
@@ -305,10 +369,7 @@ export default function BlockCard({
                   onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'left' })}
                   multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'left' })}
                   onPick={() => setPicking({ kind: 'base', slot: 'left' })}
-                  onDrop={(id) => {
-                    api.assignBaseSlot(block.key, 'left', id);
-                    drag?.end();
-                  }}
+                  onDrop={(id) => place(id, { slot: 'left' })}
                   onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'left' })}
                   incomingPreviewUrl={(() => {
                     const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'left' });
@@ -339,10 +400,7 @@ export default function BlockCard({
                   onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'base', blockKey: block.key, slot: 'right' })}
                   multiSelected={isTargetSelected?.({ kind: 'base', blockKey: block.key, slot: 'right' })}
                   onPick={() => setPicking({ kind: 'base', slot: 'right' })}
-                  onDrop={(id) => {
-                    api.assignBaseSlot(block.key, 'right', id);
-                    drag?.end();
-                  }}
+                  onDrop={(id) => place(id, { slot: 'right' })}
                   onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, slot: 'right' })}
                   incomingPreviewUrl={(() => {
                     const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, slot: 'right' });
@@ -377,14 +435,14 @@ export default function BlockCard({
                 rect={o}
                 selected={sel({ kind: 'overlay', id: oid }) || (isTargetSelected?.({ kind: 'overlay', blockKey: block.key, id: oid }) ?? false)}
                 containerRef={pageRef}
+                chromeContainer={chromeEl}
                 escape={escapeFor('overlay')}
                 ariaLabel="Photo overlay"
                 onSelect={(mods) => selectResolved({ kind: 'overlay', blockKey: block.key, id: oid }, mods ?? NO_MODS)}
                 onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
                 onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
                 onSnap={setSnap}
-                /* Sibling overlays feed the edge + equal-spacing guides. */
-                peers={block.overlays.filter((o) => o.id !== oid).map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h }))}
+                peers={peersExcept(oid)}
                 className="overflow-hidden rounded-md border-2 border-white shadow-md"
                 /**
                  * NO INLINE CONTROL BAR (Pass 2). Replace / edit / duplicate / layer / delete all
@@ -399,7 +457,14 @@ export default function BlockCard({
                   readiness={overlayReadiness(oid)}
                   cropping={croppingOverlay === oid}
                   cropHandlers={cropHandlers}
-                  onDropPhoto={(id) => api.replaceOverlay(block.key, oid, id)}
+                  /* Same three drag hooks a base slot has, so an overlay previews an incoming
+                     photo and reports its hover identically — see `place()`. */
+                  onDropPhoto={(id) => place(id, { overlayId: oid })}
+                  onDragEnterTarget={() => drag?.hover({ kind: 'frame', blockKey: block.key, overlayId: oid })}
+                  incomingPreviewUrl={(() => {
+                    const pid = drag?.incomingPhotoId({ kind: 'frame', blockKey: block.key, overlayId: oid });
+                    return pid ? (resolvePhotoUrl(photoMap.get(pid), 'full') ?? null) : null;
+                  })()}
                 />
               </Movable>
             );
@@ -416,6 +481,7 @@ export default function BlockCard({
               minH={0.03}
               selected={sel({ kind: 'text', id: t.id })}
               containerRef={pageRef}
+              chromeContainer={chromeEl}
               escape={escapeFor('text')}
               ariaLabel="Text"
               /**
@@ -429,6 +495,7 @@ export default function BlockCard({
               onChange={(r) => api.patchText(block.key, t.id, r)}
               onRotate={(deg) => api.patchText(block.key, t.id, { rotation: deg })}
               onSnap={setSnap}
+              peers={peersExcept(t.id)}
               /* Double-click still opens the inline editor — the canvas-first way to edit words.
                  Every other text action now lives in the context bar's Text toolbar. */
               onDoubleClick={() => setEditingText(t.id)}
@@ -458,11 +525,13 @@ export default function BlockCard({
               minW={0.06}
               selected={sel({ kind: 'qr', id: q.id })}
               containerRef={pageRef}
+              chromeContainer={chromeEl}
               escape={escapeFor('qr')}
               ariaLabel="QR code"
               onSelect={(mods) => selectResolved({ kind: 'qr', blockKey: block.key, id: q.id }, mods ?? NO_MODS)}
               onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w, pair) })}
               onSnap={setSnap}
+              peers={peersExcept(q.id)}
             >
               <QrContent el={q} />
             </Movable>
@@ -480,19 +549,18 @@ export default function BlockCard({
               minH={0.04}
               selected={sel({ kind: 'sticker', id: s.id })}
               containerRef={pageRef}
+              chromeContainer={chromeEl}
               escape={escapeFor('sticker')}
               ariaLabel="Sticker"
               onSelect={(mods) => selectResolved({ kind: 'sticker', blockKey: block.key, id: s.id }, mods ?? NO_MODS)}
               onChange={(r) => api.patchSticker(block.key, s.id, r)}
               onRotate={(deg) => api.patchSticker(block.key, s.id, { rotation: deg })}
               onSnap={setSnap}
+              peers={peersExcept(s.id)}
             >
               <StickerContent el={s} url={stickerUrlFor?.(s.stickerId)} />
             </Movable>
           ))}
-
-          {/* Snap guides while dragging */}
-          <SnapGuides lines={snap} />
 
           {/* Guides — margins + safe-zone + bleed (client-only; never printed). */}
           {showGuides && (
@@ -514,14 +582,26 @@ export default function BlockCard({
           <span className="pointer-events-none absolute bottom-2 right-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
             {start + cost - 1}
           </span>
+          </div>
+          {/* ── end of the clipped render layer ─────────────────────────────────────────── */}
 
           {/*
-            THE TRIM EDGE. Now that elements may hang off the page, the boundary has to stay
-            legible through them — this hairline is the answer to "where does the paper actually
-            end?", drawn above the element layer so an escaped photo is visibly cut by it. It sits
-            below a SELECTED element (z-50) so it never fights the handles you are working with.
+            THE TRIM EDGE. The clip already cuts content here, so this hairline names the cut:
+            it is the answer to "where does the paper actually end?" for the part of an element
+            that vanished. Above the render layer, below the chrome, so it never fights the
+            handles you are working with.
           */}
           <span aria-hidden className="pointer-events-none absolute inset-0 z-[10] ring-1 ring-inset ring-foreground/[0.09]" />
+
+          {/* ── EDITING LAYER ───────────────────────────────────────────────────────────────
+              Selection chrome only — outlines, handles, and the ghost that stands in for an
+              element pushed fully off the paper. Deliberately OUTSIDE the clip so all of that
+              survives out on the pasteboard, and `pointer-events-none` so it never steals a
+              click from the page underneath; the handles re-enable pointer events themselves. */}
+          <div ref={setChromeEl} className="pointer-events-none absolute inset-0 z-[30]" />
+
+          {/* Snap guides while dragging — chrome too, so they read across the full spread. */}
+          <SnapGuides lines={snap} />
         </div>
       </div>
 
@@ -538,8 +618,8 @@ export default function BlockCard({
           }
           available={availablePhotos}
           onPick={(id) => {
-            if (picking.kind === 'base') api.assignBaseSlot(block.key, picking.slot, id);
-            else if (picking.kind === 'replace') api.replaceOverlay(block.key, picking.overlayId, id);
+            if (picking.kind === 'base') place(id, { slot: picking.slot });
+            else if (picking.kind === 'replace') place(id, { overlayId: picking.overlayId });
             else {
               // `addOverlay` appends, so the new overlay's id is discoverable from the block
               // only after the mutation commits. Minting it here keeps selection immediate and
@@ -619,6 +699,8 @@ function OverlayContent({
   readiness,
   cropping,
   cropHandlers,
+  incomingPreviewUrl,
+  onDragEnterTarget,
   onDropPhoto,
 }: {
   photo?: Photo;
@@ -626,6 +708,10 @@ function OverlayContent({
   readiness?: Readiness;
   cropping?: boolean;
   cropHandlers?: CropHandlers;
+  /** Smart Replace: the photo that would land here if dropped now. Null when not hovering. */
+  incomingPreviewUrl?: string | null;
+  /** The pointer entered this overlay during a drag — publishes the hover to the drag store. */
+  onDragEnterTarget?: () => void;
   onDropPhoto: (photoId: string) => void;
 }) {
   const [over, setOver] = useState(false);
@@ -634,7 +720,13 @@ function OverlayContent({
     <div
       onDragOver={(e) => {
         e.preventDefault();
-        if (!over) setOver(true);
+        // `move` when this overlay already holds something (the drop takes its place), `copy`
+        // into an empty container — the same language the base slots speak.
+        e.dataTransfer.dropEffect = photo ? 'move' : 'copy';
+        if (!over) {
+          setOver(true);
+          onDragEnterTarget?.();
+        }
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
@@ -648,11 +740,20 @@ function OverlayContent({
     >
       {photo ? (
         <>
-          <div className={`h-full w-full ${stateOpacityClass(uiState)}`}>
+          <div className={`h-full w-full ${stateOpacityClass(uiState)} ${incomingPreviewUrl ? 'opacity-30' : ''}`}>
             <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={photo.edit} alt="overlay" />
           </div>
+          {/* THE REPLACEMENT PREVIEW, exactly as a base slot draws it: the incoming photo
+              rendered in place through the same `PhotoFrame`, inert so it can never intercept
+              the drop. An overlay is a frame like any other — it should answer "what will this
+              look like?" with the picture, not with a word. */}
+          {incomingPreviewUrl && (
+            <div className="pointer-events-none absolute inset-0 z-[5] motion-safe:animate-fade-in">
+              <PhotoFrame url={incomingPreviewUrl} alt="" />
+            </div>
+          )}
           <UploadBadge state={uiState} progress={task?.progress} size="compact" />
-          <ReadinessBadge readiness={readiness} size="compact" />
+          {!incomingPreviewUrl && <ReadinessBadge readiness={readiness} size="compact" />}
           {cropping && <CropLayer handlers={cropHandlers} />}
         </>
       ) : (
@@ -661,10 +762,16 @@ function OverlayContent({
           <span className="px-1 text-[10px] font-medium leading-tight text-studio/80">Empty overlay — drop a photo</span>
         </div>
       )}
-      {/* Drop feedback (CHANGE 10): a filled overlay shows a clear "Replace" affordance so the user
-          knows the drop will swap the existing photo; an empty one just glows as a valid target. */}
+      {/* Drop feedback: a filled overlay shows a clear "Replace" affordance so the user knows the
+          drop will swap the existing photo; an empty one just glows as a valid target. The tint is
+          dropped once the incoming photo is previewing underneath — muddying the answer to "what
+          will this look like?" with a wash of accent colour defeats the preview. */}
       {over && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-studio/15 ring-2 ring-inset ring-studio-bright">
+        <div
+          className={`pointer-events-none absolute inset-0 z-[6] flex items-end justify-center pb-1.5 ring-2 ring-inset ring-studio-bright ${
+            incomingPreviewUrl ? '' : 'bg-studio/15'
+          }`}
+        >
           {photo && (
             <span className="rounded-full bg-studio px-2 py-0.5 text-[10px] font-semibold text-studio-foreground shadow-sm">Replace</span>
           )}

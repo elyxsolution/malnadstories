@@ -14,8 +14,18 @@ import type { QrElement, StickerElement, TextElement } from '@/lib/builder/model
  * the element itself — resolution-independent across canvas, preview, and PDF.
  */
 
-/** Inner text content (fills its positioned box). */
+/**
+ * Inner text content (fills its positioned box).
+ *
+ * ONE special case, and it is geometric rather than cosmetic: a `role: 'spine'` object sits on the
+ * bound edge of the book, which is a tall sliver a few percent of a page wide. Text runs ALONG it,
+ * so it is set vertically — and its size has to be measured against the surface's height (`cqh`)
+ * instead of its width, or a 5% size would resolve against ~8% of a page and render invisibly
+ * small. `textFontSize` makes that decision from the role, so canvas, preview and PDF cannot
+ * disagree about it.
+ */
 export function TextContent({ el }: { el: TextElement }) {
+  const spine = el.role === 'spine';
   const items = el.align === 'left' ? 'flex-start' : el.align === 'right' ? 'flex-end' : 'center';
   return (
     <div
@@ -24,13 +34,21 @@ export function TextContent({ el }: { el: TextElement }) {
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        alignItems: items,
+        alignItems: spine ? 'center' : items,
         width: '100%',
         height: '100%',
         overflow: 'hidden',
       }}
     >
-      <span style={{ width: '100%' }}>{el.text || ''}</span>
+      <span
+        style={
+          spine
+            ? { writingMode: 'vertical-rl', whiteSpace: 'nowrap', textAlign: 'center' }
+            : { width: '100%' }
+        }
+      >
+        {el.text || ''}
+      </span>
     </div>
   );
 }

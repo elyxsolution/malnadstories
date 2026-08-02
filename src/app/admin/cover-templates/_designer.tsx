@@ -1,22 +1,20 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Save, ArrowLeft, Type as TypeIcon, Sticker as StickerIcon, Palette, QrCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import CoverCanvas, { COVER_NO_SELECTION, type CoverSelection, type CoverSide } from '@/app/(app)/albums/[id]/build/_cover-canvas';
-import CoverPanel from '@/app/(app)/albums/[id]/build/_panel-cover';
+import CoverCanvas from '@/app/(app)/albums/[id]/build/_cover-canvas';
+import { useCover } from '@/app/(app)/albums/[id]/build/_use-cover';
 import TextPanel from '@/app/(app)/albums/[id]/build/_panel-text';
 import StickersPanel from '@/app/(app)/albums/[id]/build/_panel-stickers';
 import BackgroundsPanel from '@/app/(app)/albums/[id]/build/_panel-backgrounds';
 import QrPanel from '@/app/(app)/albums/[id]/build/_panel-qr';
-import { TextInspector, StickerInspector, QrInspector, SpineInspector } from '@/app/(app)/albums/[id]/build/_element-inspectors';
-import type { Photo } from '@/lib/builder/photo';
-import { makeText, makeQr, makeSticker } from '@/lib/builder/elements';
-import { cryptoId, type Background, type QrElement, type StickerElement, type TextElement, type TextVariant } from '@/lib/builder/model';
+import { TextInspector, StickerInspector, QrInspector } from '@/app/(app)/albums/[id]/build/_element-inspectors';
+import { isPermanentRole, roleLabel } from '@/lib/builder/cover-objects';
 import { normalizeCoverConfig, type CoverConfig } from '@/lib/builder/cover';
 import type { StickerCategory } from '@/lib/stickers';
 import {
@@ -27,31 +25,33 @@ import {
 import { saveCoverTemplate } from '@/lib/actions/admin/cover-templates';
 
 /**
- * Admin cover-template DESIGNER. Reuses the EXACT customer cover editor components — `CoverCanvas`
- * (interactive spread), `CoverPanel` (image/title/typography), the add-element panels, and the
- * element inspectors — so this is NOT a second editor: it is the same editor, driving a local
- * CoverConfig that is saved as a template (0040). A template carries no album photos, so the
- * photo/artwork sources are empty here; admins compose with backgrounds + text + stickers + QR.
- * The element-op handlers mirror _builder.tsx's cover handlers verbatim (over local state).
+ * Admin cover-template DESIGNER — the SAME editor customers use, driving a local `CoverConfig`
+ * that is saved as a template (0040) instead of onto an album.
+ *
+ * ── WHAT COVER EDITOR 2.0 CHANGED HERE ─────────────────────────────────────────────────────
+ *
+ * This file used to carry a verbatim copy of the builder's ~20 cover handlers (`writeSide`,
+ * `patchCoverText`, `duplicateCoverSticker`, …), described in its own comment as "mirroring
+ * _builder.tsx". Two copies of the same logic are two things to keep in step. Both are now the
+ * one `useCover` hook, so an admin template is composed with exactly the machinery a customer
+ * cover is — the object model, the metadata roles, undo/redo and the shared movement engine.
+ *
+ * A template carries no album photos, so the photo sources are empty; admins compose with
+ * backgrounds, text, stickers and QR. There is no `DimensionsProvider` here on purpose: the
+ * context's own fallback is the house 3:4 cover page, which is what a template is authored
+ * against — it is applied to albums of every product size.
  */
-type RailTab = 'cover' | 'text' | 'stickers' | 'backgrounds' | 'qr';
+type RailTab = 'text' | 'stickers' | 'backgrounds' | 'qr';
 const RAIL: { key: RailTab; label: string; Icon: typeof TypeIcon }[] = [
-  { key: 'cover', label: 'Cover', Icon: Palette },
   { key: 'text', label: 'Text', Icon: TypeIcon },
   { key: 'stickers', label: 'Stickers', Icon: StickerIcon },
   { key: 'backgrounds', label: 'Background', Icon: Palette },
   { key: 'qr', label: 'QR', Icon: QrCode },
 ];
 
-const nudge = <T extends { x: number; y: number }>(el: T): T => ({ ...el, x: Math.min(1, el.x + 0.03), y: Math.min(1, el.y + 0.03) });
-const reorderArr = <T extends { id: string }>(arr: T[], id: string, dir: -1 | 1): T[] | null => {
-  const next = [...arr];
-  const i = next.findIndex((e) => e.id === id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= next.length) return null;
-  [next[i], next[j]] = [next[j], next[i]];
-  return next;
-};
+/** Templates are authored against the house 3:4 cover page. */
+const TEMPLATE_PAGE_ASPECT = 3 / 4;
+const SAMPLE_TITLE = 'Your Title';
 
 export default function CoverTemplateDesigner({
   initial,
@@ -74,13 +74,25 @@ export default function CoverTemplateDesigner({
   const [featured, setFeatured] = useState(initial.featured);
   const [popular, setPopular] = useState(initial.popular);
   const [pinned, setPinned] = useState(initial.pinned);
-  const [config, setConfig] = useState<CoverConfig>(() => normalizeCoverConfig(initial.config));
-  const [sampleTitle, setSampleTitle] = useState('Your Title');
-  const [selection, setSelection] = useState<CoverSelection>(COVER_NO_SELECTION);
-  const [activeSide, setActiveSide] = useState<CoverSide>('front');
-  const [railTab, setRailTab] = useState<RailTab>('cover');
+  const [railTab, setRailTab] = useState<RailTab>('text');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const initialConfig = useMemo(() => normalizeCoverConfig(initial.config), [initial.config]);
+
+  /**
+   * The same cover-canvas state the builder uses. Nothing is persisted until Save, so `onChange`
+   * is a no-op — the hook still owns the config, the history and the metadata binding, and this
+   * component simply reads `cover.config` when the admin clicks Save.
+   */
+  const noop = useCallback(() => {}, []);
+  const cover = useCover({
+    initialConfig,
+    title: SAMPLE_TITLE,
+    pageAspect: TEMPLATE_PAGE_ASPECT,
+    onChange: noop,
+    onTitleChange: noop,
+  });
 
   // Sticker id → presigned url, from the active catalog (for canvas + preview rendering).
   const stickerUrl = useMemo(() => {
@@ -90,103 +102,11 @@ export default function CoverTemplateDesigner({
   }, [stickerCatalog]);
   const stickerUrlFor = (id: string) => stickerUrl.get(id);
 
-  // Templates carry no customer photos — the photo/artwork sources are intentionally empty.
-  const photos: Photo[] = [];
-  const photoMap = useMemo(() => new Map<string, Photo>(), []);
-
-  // ── local cover mutation (no persistence until Save) ─────────────────────────
-  const updateCover = (patch: { title?: string; config?: Partial<CoverConfig> }) => {
-    if (patch.title !== undefined) setSampleTitle(patch.title); // title is per-album; preview only here
-    if (patch.config) setConfig((c) => ({ ...c, ...patch.config }));
-  };
-
-  type SideArrays = { texts: TextElement[]; stickers: StickerElement[]; qrs: QrElement[] };
-  const sideArrays = (side: CoverSide): SideArrays =>
-    side === 'front'
-      ? { texts: config.texts, stickers: config.stickers, qrs: config.qrs }
-      : { texts: config.back.texts, stickers: config.back.stickers, qrs: config.back.qrs };
-  const writeSide = (side: CoverSide, patch: Partial<SideArrays>) =>
-    side === 'front'
-      ? setConfig((c) => ({ ...c, ...patch }))
-      : setConfig((c) => ({ ...c, back: { ...c.back, ...patch } }));
-
-  // Text
-  const addCoverText = (variant: TextVariant) => {
-    const el = makeText(variant);
-    writeSide(activeSide, { texts: [...sideArrays(activeSide).texts, el] });
-    setSelection({ kind: 'text', side: activeSide, id: el.id });
-  };
-  const patchCoverText = (side: CoverSide, id: string, patch: Partial<TextElement>) =>
-    writeSide(side, { texts: sideArrays(side).texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
-  const removeCoverText = (side: CoverSide, id: string) =>
-    writeSide(side, { texts: sideArrays(side).texts.filter((t) => t.id !== id) });
-  const duplicateCoverText = (side: CoverSide, id: string) => {
-    const src = sideArrays(side).texts.find((t) => t.id === id);
-    if (!src) return;
-    const clone = nudge<TextElement>({ ...src, id: cryptoId() });
-    writeSide(side, { texts: [...sideArrays(side).texts, clone] });
-    setSelection({ kind: 'text', side, id: clone.id });
-  };
-  const reorderCoverText = (side: CoverSide, id: string, dir: -1 | 1) => {
-    const next = reorderArr(sideArrays(side).texts, id, dir);
-    if (next) writeSide(side, { texts: next });
-  };
-
-  // Stickers (3:4 cover → square default)
-  const addCoverSticker = (stickerId: string) => {
-    const el = makeSticker(stickerId, 3 / 4);
-    writeSide(activeSide, { stickers: [...sideArrays(activeSide).stickers, el] });
-    setSelection({ kind: 'sticker', side: activeSide, id: el.id });
-  };
-  const patchCoverSticker = (side: CoverSide, id: string, patch: Partial<StickerElement>) =>
-    writeSide(side, { stickers: sideArrays(side).stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
-  const removeCoverSticker = (side: CoverSide, id: string) =>
-    writeSide(side, { stickers: sideArrays(side).stickers.filter((s) => s.id !== id) });
-  const duplicateCoverSticker = (side: CoverSide, id: string) => {
-    const src = sideArrays(side).stickers.find((s) => s.id === id);
-    if (!src) return;
-    const clone = nudge<StickerElement>({ ...src, id: cryptoId() });
-    writeSide(side, { stickers: [...sideArrays(side).stickers, clone] });
-    setSelection({ kind: 'sticker', side, id: clone.id });
-  };
-  const reorderCoverSticker = (side: CoverSide, id: string, dir: -1 | 1) => {
-    const next = reorderArr(sideArrays(side).stickers, id, dir);
-    if (next) writeSide(side, { stickers: next });
-  };
-
-  // QR (square on the 3:4 cover page)
-  const addCoverQr = (data: string) => {
-    const el = makeQr(data, { h: Math.min(1, 0.14 * (3 / 4)) });
-    writeSide(activeSide, { qrs: [...sideArrays(activeSide).qrs, el] });
-    setSelection({ kind: 'qr', side: activeSide, id: el.id });
-  };
-  const patchCoverQr = (side: CoverSide, id: string, patch: Partial<QrElement>) =>
-    writeSide(side, { qrs: sideArrays(side).qrs.map((q) => (q.id === id ? { ...q, ...patch } : q)) });
-  const removeCoverQr = (side: CoverSide, id: string) =>
-    writeSide(side, { qrs: sideArrays(side).qrs.filter((q) => q.id !== id) });
-  const duplicateCoverQr = (side: CoverSide, id: string) => {
-    const src = sideArrays(side).qrs.find((q) => q.id === id);
-    if (!src) return;
-    const clone = nudge<QrElement>({ ...src, id: cryptoId() });
-    writeSide(side, { qrs: [...sideArrays(side).qrs, clone] });
-    setSelection({ kind: 'qr', side, id: clone.id });
-  };
-  const reorderCoverQr = (side: CoverSide, id: string, dir: -1 | 1) => {
-    const next = reorderArr(sideArrays(side).qrs, id, dir);
-    if (next) writeSide(side, { qrs: next });
-  };
-
-  const applyCoverBackground = (side: CoverSide, bg: Background | null) =>
-    side === 'front'
-      ? setConfig((c) => (bg ? { ...c, background: bg, photoId: null } : { ...c, background: null }))
-      : setConfig((c) => ({ ...c, back: { ...c.back, background: bg, photoId: bg ? null : c.back.photoId } }));
-
-  // Selected element (for the inspector).
-  const selSide: CoverSide | null =
-    selection.kind === 'text' || selection.kind === 'sticker' || selection.kind === 'qr' ? selection.side : null;
-  const selText = selection.kind === 'text' ? sideArrays(selection.side).texts.find((t) => t.id === selection.id) ?? null : null;
-  const selSticker = selection.kind === 'sticker' ? sideArrays(selection.side).stickers.find((s) => s.id === selection.id) ?? null : null;
-  const selQr = selection.kind === 'qr' ? sideArrays(selection.side).qrs.find((q) => q.id === selection.id) ?? null : null;
+  const key = `cover:${cover.side}`;
+  const sel = cover.selection;
+  const selText = sel.kind === 'text' ? cover.elements.texts.find((t) => t.id === sel.id) ?? null : null;
+  const selSticker = sel.kind === 'sticker' ? cover.elements.stickers.find((s) => s.id === sel.id) ?? null : null;
+  const selQr = sel.kind === 'qr' ? cover.elements.qrs.find((q) => q.id === sel.id) ?? null : null;
 
   const save = async () => {
     setError(null);
@@ -199,7 +119,7 @@ export default function CoverTemplateDesigner({
       featured,
       popular,
       pinned,
-      config,
+      config: cover.config,
     });
     setSaving(false);
     if (!res.ok) return setError(res.error);
@@ -263,106 +183,84 @@ export default function CoverTemplateDesigner({
             ))}
           </div>
           <div className="ms-scroll min-h-0 flex-1 overflow-y-auto p-3">
-            {railTab === 'cover' && (
-              <CoverPanel
-                title={sampleTitle}
-                coverId={null}
-                config={config}
-                covers={[]}
-                photos={photos}
-                photoMap={photoMap}
-                activeSide={activeSide}
-                onActiveSide={setActiveSide}
-                onUpdate={updateCover}
-                onEditImage={() => {}}
-                showPreview={false}
-              />
+            {railTab === 'text' && <TextPanel hasTarget onAdd={cover.addText} />}
+            {railTab === 'stickers' && (
+              <StickersPanel catalog={stickerCatalog} hasTarget={cover.side !== 'spine'} onAdd={cover.addSticker} />
             )}
-            {railTab === 'text' && <TextPanel hasTarget onAdd={addCoverText} />}
-            {railTab === 'stickers' && <StickersPanel catalog={stickerCatalog} hasTarget onAdd={addCoverSticker} />}
             {railTab === 'backgrounds' && (
               <BackgroundsPanel
-                current={activeSide === 'front' ? config.background : config.back.background}
-                hasTarget
-                onApply={(bg) => applyCoverBackground(activeSide, bg)}
-                onApplyAll={(bg) => applyCoverBackground(activeSide, bg)}
+                current={cover.background}
+                hasTarget={cover.side !== 'spine'}
+                onApply={(bg) => cover.setBackground(bg)}
+                onApplyAll={(bg) => cover.setBackground(bg)}
               />
             )}
-            {railTab === 'qr' && <QrPanel hasTarget onAdd={addCoverQr} />}
+            {railTab === 'qr' && <QrPanel hasTarget={cover.side !== 'spine'} onAdd={cover.addQr} />}
           </div>
         </aside>
 
         {/* Center — the SAME interactive cover spread customers use */}
-        <main className="min-w-0 flex-1 bg-muted/30">
-          <CoverCanvas
-            title={sampleTitle}
-            config={config}
-            frontImageUrl={null}
-            backImageUrl={null}
-            size={36}
-            stickerUrlFor={stickerUrlFor}
-            selection={selection}
-            onSelect={setSelection}
-            activeSide={activeSide}
-            onActiveSide={setActiveSide}
-            onChangeText={patchCoverText}
-            onReorderText={reorderCoverText}
-            onDeleteText={removeCoverText}
-            onDuplicateText={duplicateCoverText}
-            onChangeSticker={patchCoverSticker}
-            onReorderSticker={reorderCoverSticker}
-            onDeleteSticker={removeCoverSticker}
-            onDuplicateSticker={duplicateCoverSticker}
-            onChangeQr={patchCoverQr}
-            onReorderQr={reorderCoverQr}
-            onDeleteQr={removeCoverQr}
-            onDuplicateQr={duplicateCoverQr}
-          />
+        <main className="flex min-w-0 flex-1 flex-col bg-muted/30">
+          <CoverCanvas cover={cover} frontImageUrl={null} backImageUrl={null} size={36} stickerUrlFor={stickerUrlFor} />
         </main>
 
-        {/* Right — element inspector (else the spine editor / hint) */}
+        {/* Right — element inspector. An ADMIN affordance: this tool has no floating toolbar (no
+            anchor plumbing, no album), so the inspectors stay docked. The permanent sidebar that
+            was removed is the CUSTOMER builder's cover panel, not this. */}
         <aside className="ms-scroll w-72 flex-none overflow-y-auto border-l bg-card">
-          {selText && selSide ? (
-            <TextInspector
-              el={selText}
-              onChange={(patch) => patchCoverText(selSide, selText.id, patch)}
-              onDelete={() => {
-                removeCoverText(selSide, selText.id);
-                setSelection(COVER_NO_SELECTION);
-              }}
-            />
-          ) : selSticker && selSide ? (
+          {selText ? (
+            <>
+              <TextInspector
+                el={selText}
+                onChange={(patch) => cover.patchText(key, selText.id, patch)}
+                onDelete={
+                  isPermanentRole(selText.role)
+                    ? undefined
+                    : () => {
+                        cover.removeText(key, selText.id);
+                        cover.setSelection({ kind: 'none' });
+                      }
+                }
+              />
+              {roleLabel(selText.role) && (
+                <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+                  This is the <strong className="font-medium text-foreground">{roleLabel(selText.role)}</strong> object —
+                  its words come from each customer&rsquo;s album metadata. Position and styling are yours.
+                </p>
+              )}
+            </>
+          ) : selSticker ? (
             <StickerInspector
               el={selSticker}
-              onChange={(patch) => patchCoverSticker(selSide, selSticker.id, patch)}
+              onChange={(patch) => cover.patchSticker(key, selSticker.id, patch)}
               onDelete={() => {
-                removeCoverSticker(selSide, selSticker.id);
-                setSelection(COVER_NO_SELECTION);
+                cover.removeSticker(key, selSticker.id);
+                cover.setSelection({ kind: 'none' });
               }}
-              onDuplicate={() => duplicateCoverSticker(selSide, selSticker.id)}
-              onForward={() => reorderCoverSticker(selSide, selSticker.id, 1)}
-              onBackward={() => reorderCoverSticker(selSide, selSticker.id, -1)}
+              onDuplicate={() => cover.duplicateSticker(key, selSticker.id)}
+              onForward={() => cover.moveLayer({ kind: 'sticker', blockKey: key, id: selSticker.id }, 'forward')}
+              onBackward={() => cover.moveLayer({ kind: 'sticker', blockKey: key, id: selSticker.id }, 'backward')}
             />
-          ) : selQr && selSide ? (
+          ) : selQr ? (
             <QrInspector
               el={selQr}
-              onChange={(patch) => patchCoverQr(selSide, selQr.id, patch)}
+              onChange={(patch) => cover.patchQr(key, selQr.id, patch)}
               onDelete={() => {
-                removeCoverQr(selSide, selQr.id);
-                setSelection(COVER_NO_SELECTION);
+                cover.removeQr(key, selQr.id);
+                cover.setSelection({ kind: 'none' });
               }}
             />
-          ) : selection.kind === 'spine' ? (
-            <SpineInspector
-              spineTitle={config.spineTitle}
-              spineColor={config.spineColor}
-              fallbackTitle={sampleTitle}
-              onChange={(patch) => setConfig((c) => ({ ...c, ...patch }))}
-            />
           ) : (
-            <div className="p-4 text-sm text-muted-foreground">
-              Select an element on the cover to edit it, or use the panels on the left to add text, stickers, a background,
-              or a QR code. The title shown is a placeholder — each customer&rsquo;s album title fills it automatically.
+            <div className="space-y-2 p-4 text-sm text-muted-foreground">
+              <p>
+                Select an object on the cover to edit it, or use the panels on the left to add text, stickers, a
+                background, or a QR code.
+              </p>
+              <p>
+                The title, subtitle, author and spine are objects too — move and restyle them freely. Their words are
+                placeholders here; each customer&rsquo;s album metadata fills them when the template is applied.
+              </p>
+              {sel.kind === 'background' && <p>Editing the {cover.sideLabel.toLowerCase()} background.</p>}
             </div>
           )}
         </aside>

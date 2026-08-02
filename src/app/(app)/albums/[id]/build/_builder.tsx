@@ -53,12 +53,13 @@ import ShortcutsOverlay from './_shortcuts';
 import BuildMethod, { type BuilderBlueprint } from './_build-method';
 import BlueprintPicker from '../../new/_blueprint-picker';
 import Proposal from './_proposal';
-import CoverCanvas, { COVER_NO_SELECTION, type CoverSelection, type CoverSide } from './_cover-canvas';
+import CoverCanvas from './_cover-canvas';
+import CoverContextBar from './_cover-bar';
+import { useCover } from './_use-cover';
 import { CoverSpread } from './_cover-render';
-import CoverPanel from './_panel-cover';
 import CoverTemplatesPanel, { type BuilderCoverTemplate } from './_panel-cover-templates';
 import StickersPanel from './_panel-stickers';
-import { TextInspector, StickerInspector, QrInspector, SpineInspector, PhotoAdjustInspector } from './_element-inspectors';
+import { TextInspector, StickerInspector, QrInspector, PhotoAdjustInspector } from './_element-inspectors';
 import PropertiesPanel from './_properties-panel';
 // `_inspector` (the permanent right-hand panel) was retired in Pass 2 — its photo adjustments
 // moved into `_element-inspectors` beside their siblings, and its page actions became the
@@ -98,23 +99,20 @@ import {
   requiredBaseCount,
   isBlockComplete,
   PAGE_COST,
-  cryptoId,
-  type Background,
   type Block,
   type EditConfig,
   type LayoutTemplate,
-  type QrElement,
-  type StickerElement,
-  type TextElement,
   type TextVariant,
 } from '@/lib/builder/model';
-import { makeText, makeSticker, makeQr, type LayoutPreset } from '@/lib/builder/elements';
+import { type LayoutPreset } from '@/lib/builder/elements';
 import { layoutCycleSteps, nextCycleIndex } from '@/lib/builder/layout-cycle';
 import { clampRect, commitBounds, type EditableKind } from '@/lib/builder/edit-bounds';
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
 import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
+import { freeTexts } from '@/lib/builder/model';
+import { COVER_SIDE_LABEL, isPermanentRole, type CoverSide } from '@/lib/builder/cover-objects';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
 import { Button } from '@/components/ui/button';
@@ -237,7 +235,6 @@ export default function Builder({
   const [review, setReview] = useState(initialReview);
   const [coverId, setCoverId] = useState<string | null>(initialCoverId);
   const [albumTitle, setAlbumTitle] = useState(title);
-  const [coverConfig, setCoverConfig] = useState<CoverConfig>(initialCoverConfig);
   const coverSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Blueprint Mode opens on Layouts (blueprints carry no photos); customer albums open on Images.
@@ -245,11 +242,10 @@ export default function Builder({
   // Cover is page 0 of one continuous editor: `coverFocused` swaps the canvas + inspector to
   // the cover; `current` is the focused content spread otherwise.
   const [coverFocused, setCoverFocused] = useState(false);
-  const [coverSel, setCoverSel] = useState<CoverSelection>(COVER_NO_SELECTION);
-  // Which cover page (front/back) the rail "add" + background controls target.
-  const [activeSide, setActiveSide] = useState<CoverSide>('front');
   // Open the photo editor on the front/back cover image (crop/zoom/rotate stored in cover_config).
   const [coverImageEditor, setCoverImageEditor] = useState<CoverSide | null>(null);
+  /** Which cover face a photo picked from the modal should land on. */
+  const [coverPhotoPicker, setCoverPhotoPicker] = useState<CoverSide | null>(null);
   const [current, setCurrent] = useState(0);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   const [editLayout, setEditLayout] = useState<'focus' | 'grid'>('focus');
@@ -609,6 +605,57 @@ export default function Builder({
   const visiblePhotosRef = useRef<Photo[]>(visiblePhotos);
   visiblePhotosRef.current = visiblePhotos;
 
+  // ── cover ─────────────────────────────────────────────────────────────────────
+  // Persist the whole cover design (debounced) — title + base template + config jsonb.
+  const persistCover = useCallback(
+    (next: { title: string; coverId: string | null; config: CoverConfig }) => {
+      if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
+      coverSaveTimer.current = setTimeout(async () => {
+        if (!next.title.trim()) return; // title is required server-side; skip until typed
+        const res = await saveCoverDesign({ albumId, title: next.title, coverTemplateId: next.coverId, config: next.config });
+        if (!res.ok) setMessage({ kind: 'err', text: res.error });
+      }, 500);
+    },
+    [albumId],
+  );
+
+  /**
+   * THE COVER, AS A CANVAS (Cover Editor 2.0).
+   *
+   * `useCover` owns the whole surface the way `useBlocks` owns pages — history, selection,
+   * object mutations and the metadata binding. What used to be ~200 lines of bespoke handlers on
+   * this component (`writeSide`, `patchCoverText`, `duplicateCoverSticker`, …) and a
+   * `CoverSelection` union nothing else understood is gone; the cover now speaks the builder's
+   * own `Selection`, so the shared toolbars and shortcuts work on it without knowing it exists.
+   *
+   * Persistence is deliberately unchanged: every change lands in the same debounced
+   * `saveCoverDesign` call this component already made.
+   */
+  const coverIdRef = useRef(coverId);
+  coverIdRef.current = coverId;
+
+  const cover = useCover({
+    initialConfig: initialCoverConfig,
+    title,
+    pageAspect: pageA,
+    onChange: useCallback(
+      ({ config, title: nextTitle }: { config: CoverConfig; title: string }) =>
+        persistCover({ title: nextTitle, coverId: coverIdRef.current, config }),
+      [persistCover],
+    ),
+    // The canvas renamed the album — keep the header, the settings dialog and validation in step
+    // with what the cover now says. This is the write half of the two-way metadata binding.
+    onTitleChange: setAlbumTitle,
+  });
+  const coverConfig = cover.config;
+
+  /** Choose the base cover artwork (an admin template) — the one cover write that isn't an object. */
+  const setCoverTemplate = (id: string | null, config?: Partial<CoverConfig>) => {
+    setCoverId(id);
+    if (config) cover.update(config);
+    else persistCover({ title: albumTitle, coverId: id, config: cover.config });
+  };
+
   /**
    * ── ALBUM QUALITY (Phase 7) ───────────────────────────────────────────────────
    *
@@ -826,6 +873,43 @@ export default function Builder({
   const contextMenu = useContextMenu();
 
   /**
+   * REPLACE ON DROP — placement on the canvas, with the swap narrated.
+   *
+   * Every canvas placement (drop on a base slot, drop on an overlay, pick from the modal) comes
+   * through here so the behaviour is described once. The placement itself is the existing
+   * `commands.placePhoto` — one `api.batch`, so a replacement is a SINGLE undo entry, dirty-marks
+   * the album like any other edit, and rides the existing debounced save. Nothing new is written.
+   *
+   * What is added is the sentence. `assignBaseSlot` / `replaceOverlay` displace the previous
+   * occupant by simply no longer referencing it, and the tray is derived from "not referenced
+   * anywhere" — so the old photo is already back in the tray by the next render, with its own
+   * edits intact. That is silent unless someone says so, and a photo quietly vanishing from a
+   * page is exactly the kind of thing a customer reads as data loss. Hence one quiet line, and
+   * still no dialog, no confirm, no extra click.
+   */
+  const placeOnCanvas = useCallback(
+    (photoId: string, target: { blockKey: string; slot?: BaseSlot; overlayId?: string }) => {
+      const b = blocks.find((x) => x.key === target.blockKey);
+      const displaced = !b
+        ? undefined
+        : target.overlayId
+          ? b.overlays.find((o) => o.id === target.overlayId)?.photoId ?? undefined
+          : b.photoIds[target.slot === 'right' ? 1 : 0];
+
+      cmd.placePhoto(photoId, target);
+
+      if (displaced && displaced !== photoId) {
+        const name = photoMap.get(displaced)?.filename;
+        setMessage({
+          kind: 'ok',
+          text: name ? `Replaced — “${name}” is back in your tray.` : 'Replaced — the previous photo is back in your tray.',
+        });
+      }
+    },
+    [blocks, cmd, photoMap],
+  );
+
+  /**
    * ── WHERE THE CONTEXT BAR POINTS ───────────────────────────────────────────────
    *
    * The selected element's NORMALIZED rect. Every canvas object already stores one, so resolving
@@ -833,6 +917,27 @@ export default function Builder({
    * element, no ResizeObserver per element. With nothing selected the bar anchors to the whole
    * spread, which is what makes the page toolbar appear "at the page".
    */
+  /**
+   * The cover's answer to the same question. `pageElRef` follows the FOCUSED FACE (the canvas
+   * publishes it), so the identical anchor hook positions the identical bar — the cover needed no
+   * second measurement path, only a rect.
+   */
+  const coverSelectionRect = useMemo<NormRect | null>(() => {
+    if (!coverFocused) return null;
+    const s = cover.selection;
+    switch (s.kind) {
+      case 'text':
+        return cover.elements.texts.find((t) => t.id === s.id) ?? null;
+      case 'qr':
+        return cover.elements.qrs.find((q) => q.id === s.id) ?? null;
+      case 'sticker':
+        return cover.elements.stickers.find((st) => st.id === s.id) ?? null;
+      // The backdrop and the base photo both fill the face, so both anchor to the whole of it.
+      default:
+        return FULL_PAGE;
+    }
+  }, [coverFocused, cover.selection, cover.elements]);
+
   const selectionRect = useMemo<NormRect | null>(() => {
     if (!block || coverFocused || editLayout !== 'focus') return null;
     switch (selection.kind) {
@@ -855,7 +960,13 @@ export default function Builder({
     }
   }, [block, coverFocused, editLayout, selection]);
 
-  const barAnchor = useAnchorRect(pageElRef, selectionRect);
+  const barAnchor = useAnchorRect(pageElRef, coverFocused ? coverSelectionRect : selectionRect);
+
+  /** The photo backing the focused cover face's image, when it has one. */
+  const coverSelectedPhoto = useMemo(() => {
+    const id = cover.image.photoId;
+    return id ? photoMap.get(id) : undefined;
+  }, [cover.image.photoId, photoMap]);
 
   /** The photo in the selected frame, if the selection is a photo frame. */
   const selectedFramePhoto = useMemo(() => {
@@ -1226,30 +1337,6 @@ export default function Builder({
     setSelection({ kind: 'qr', id });
   };
 
-  // ── cover ─────────────────────────────────────────────────────────────────────
-  // Persist the whole cover design (debounced) — title + base template + config jsonb.
-  const persistCover = useCallback(
-    (next: { title: string; coverId: string | null; config: CoverConfig }) => {
-      if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
-      coverSaveTimer.current = setTimeout(async () => {
-        if (!next.title.trim()) return; // title is required server-side; skip until typed
-        const res = await saveCoverDesign({ albumId, title: next.title, coverTemplateId: next.coverId, config: next.config });
-        if (!res.ok) setMessage({ kind: 'err', text: res.error });
-      }, 500);
-    },
-    [albumId],
-  );
-
-  const updateCover = (patch: { title?: string; coverId?: string | null; config?: Partial<CoverConfig> }) => {
-    const nextTitle = patch.title ?? albumTitle;
-    const nextCoverId = patch.coverId !== undefined ? patch.coverId : coverId;
-    const nextConfig = patch.config ? { ...coverConfig, ...patch.config } : coverConfig;
-    if (patch.title !== undefined) setAlbumTitle(patch.title);
-    if (patch.coverId !== undefined) setCoverId(patch.coverId);
-    if (patch.config) setCoverConfig(nextConfig);
-    persistCover({ title: nextTitle, coverId: nextCoverId, config: nextConfig });
-  };
-
   // "Edit Cover" (CHANGE 1) — RESUME the user's cover work rather than restarting selection.
   //   • A cover already exists (template chosen OR any custom content) → focus the cover canvas
   //     and keep the current rail (swapping the content-only 'layouts' rail for 'images'), so the
@@ -1259,14 +1346,17 @@ export default function Builder({
     !!coverId ||
     !!coverConfig.photoId ||
     !!coverConfig.background ||
-    coverConfig.texts.length > 0 ||
+    // `freeTexts`, not `texts`: every cover now carries a title object as a view of album
+    // metadata, so counting all of them would call a pristine cover "started" and skip the
+    // artwork gallery that a first-time customer is meant to land on.
+    freeTexts(coverConfig.texts).length > 0 ||
     coverConfig.stickers.length > 0 ||
     !!coverConfig.back.photoId ||
     !!coverConfig.back.background ||
     coverConfig.back.texts.length > 0 ||
     coverConfig.back.stickers.length > 0;
   const focusCoverForEditing = () => {
-    setActiveSide('front');
+    cover.setSide('front');
     setCoverFocused(true);
     setRailTab((t) => (coverStarted ? (t === 'layouts' ? 'images' : t) : 'templates'));
   };
@@ -1302,7 +1392,7 @@ export default function Builder({
     const loc = issue.location;
     if (loc.kind === 'cover') {
       setCoverFocused(true);
-      setActiveSide('front');
+      cover.setSide('front');
       return;
     }
     if (loc.kind === 'tray' || loc.kind === 'photo') {
@@ -1348,103 +1438,6 @@ export default function Builder({
     [coverConfig.back.photoId, photoMap],
   );
 
-  // ── cover elements — SIDE-aware (front = top-level config, back = config.back). All flow
-  // through the existing debounced `updateCover` → saveCoverDesign, so persistence is unchanged.
-  type SideArrays = { texts: TextElement[]; stickers: StickerElement[]; qrs: QrElement[] };
-  const sideArrays = (side: CoverSide): SideArrays =>
-    side === 'front'
-      ? { texts: coverConfig.texts, stickers: coverConfig.stickers, qrs: coverConfig.qrs }
-      : { texts: coverConfig.back.texts, stickers: coverConfig.back.stickers, qrs: coverConfig.back.qrs };
-  const writeSide = (side: CoverSide, patch: Partial<SideArrays>) =>
-    side === 'front'
-      ? updateCover({ config: patch })
-      : updateCover({ config: { back: { ...coverConfig.back, ...patch } } });
-
-  const nudge = <T extends { x: number; y: number }>(el: T): T => ({ ...el, x: Math.min(1, el.x + 0.03), y: Math.min(1, el.y + 0.03) });
-  const reorder = <T extends { id: string }>(arr: T[], id: string, dir: -1 | 1): T[] | null => {
-    const next = [...arr];
-    const i = next.findIndex((e) => e.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= next.length) return null;
-    [next[i], next[j]] = [next[j], next[i]];
-    return next;
-  };
-
-  // Text
-  const addCoverText = (variant: TextVariant) => {
-    const side = activeSide;
-    const el = makeText(variant);
-    writeSide(side, { texts: [...sideArrays(side).texts, el] });
-    setCoverSel({ kind: 'text', side, id: el.id });
-  };
-  const patchCoverText = (side: CoverSide, id: string, patch: Partial<TextElement>) =>
-    writeSide(side, { texts: sideArrays(side).texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
-  const removeCoverText = (side: CoverSide, id: string) =>
-    writeSide(side, { texts: sideArrays(side).texts.filter((t) => t.id !== id) });
-  const duplicateCoverText = (side: CoverSide, id: string) => {
-    const src = sideArrays(side).texts.find((t) => t.id === id);
-    if (!src) return;
-    const clone = nudge<TextElement>({ ...src, id: cryptoId() });
-    writeSide(side, { texts: [...sideArrays(side).texts, clone] });
-    setCoverSel({ kind: 'text', side, id: clone.id });
-  };
-  const reorderCoverText = (side: CoverSide, id: string, dir: -1 | 1) => {
-    const next = reorder(sideArrays(side).texts, id, dir);
-    if (next) writeSide(side, { texts: next });
-  };
-
-  // Stickers (cover page → square default via makeSticker at the product's page aspect)
-  const addCoverSticker = (stickerId: string) => {
-    const side = activeSide;
-    const el = makeSticker(stickerId, pageA);
-    writeSide(side, { stickers: [...sideArrays(side).stickers, el] });
-    setCoverSel({ kind: 'sticker', side, id: el.id });
-  };
-  const patchCoverSticker = (side: CoverSide, id: string, patch: Partial<StickerElement>) =>
-    writeSide(side, { stickers: sideArrays(side).stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
-  const removeCoverSticker = (side: CoverSide, id: string) =>
-    writeSide(side, { stickers: sideArrays(side).stickers.filter((s) => s.id !== id) });
-  const duplicateCoverSticker = (side: CoverSide, id: string) => {
-    const src = sideArrays(side).stickers.find((s) => s.id === id);
-    if (!src) return;
-    const clone = nudge<StickerElement>({ ...src, id: cryptoId() });
-    writeSide(side, { stickers: [...sideArrays(side).stickers, clone] });
-    setCoverSel({ kind: 'sticker', side, id: clone.id });
-  };
-  const reorderCoverSticker = (side: CoverSide, id: string, dir: -1 | 1) => {
-    const next = reorder(sideArrays(side).stickers, id, dir);
-    if (next) writeSide(side, { stickers: next });
-  };
-
-  // QR (square on the cover page — the product's page aspect)
-  const addCoverQr = (data: string) => {
-    const side = activeSide;
-    const el = makeQr(data, { h: Math.min(1, 0.14 * pageA) }, pageA);
-    writeSide(side, { qrs: [...sideArrays(side).qrs, el] });
-    setCoverSel({ kind: 'qr', side, id: el.id });
-  };
-  const patchCoverQr = (side: CoverSide, id: string, patch: Partial<QrElement>) =>
-    writeSide(side, { qrs: sideArrays(side).qrs.map((q) => (q.id === id ? { ...q, ...patch } : q)) });
-  const removeCoverQr = (side: CoverSide, id: string) =>
-    writeSide(side, { qrs: sideArrays(side).qrs.filter((q) => q.id !== id) });
-  const duplicateCoverQr = (side: CoverSide, id: string) => {
-    const src = sideArrays(side).qrs.find((q) => q.id === id);
-    if (!src) return;
-    const clone = nudge<QrElement>({ ...src, id: cryptoId() });
-    writeSide(side, { qrs: [...sideArrays(side).qrs, clone] });
-    setCoverSel({ kind: 'qr', side, id: clone.id });
-  };
-  const reorderCoverQr = (side: CoverSide, id: string, dir: -1 | 1) => {
-    const next = reorder(sideArrays(side).qrs, id, dir);
-    if (next) writeSide(side, { qrs: next });
-  };
-
-  // Background applied to the active cover page (image takes precedence over a colour).
-  const applyCoverBackground = (side: CoverSide, bg: Background | null) =>
-    side === 'front'
-      ? updateCover({ config: bg ? { background: bg, photoId: null } : { background: null } })
-      : updateCover({ config: { back: { ...coverConfig.back, background: bg, photoId: bg ? null : coverConfig.back.photoId } } });
-
   // ── page sticker add (from the Stickers rail) ──────────────────────────────────
   const addPageSticker = (stickerId: string) => {
     if (!block) return;
@@ -1460,7 +1453,7 @@ export default function Builder({
   };
   const focusBlock = (i: number) => {
     setCoverFocused(false);
-    setCoverSel(COVER_NO_SELECTION);
+    cover.setSelection(NO_SELECTION);
     setRailTab((t) => (t === 'templates' ? 'images' : t)); // templates is cover-only
     setCurrent(i);
   };
@@ -1476,143 +1469,127 @@ export default function Builder({
     }
     setCurrent((c) => Math.min(blocks.length - 1, c + 1));
   };
-  // The side a selected element lives on (text/sticker/qr); null for none/spine.
-  const coverSelSide: CoverSide | null =
-    coverSel.kind === 'text' || coverSel.kind === 'sticker' || coverSel.kind === 'qr' ? coverSel.side : null;
-  const coverSelectedText =
-    coverSel.kind === 'text' ? sideArrays(coverSel.side).texts.find((t) => t.id === coverSel.id) ?? null : null;
-  const coverSelectedSticker =
-    coverSel.kind === 'sticker' ? sideArrays(coverSel.side).stickers.find((s) => s.id === coverSel.id) ?? null : null;
-  const coverSelectedQr =
-    coverSel.kind === 'qr' ? sideArrays(coverSel.side).qrs.find((q) => q.id === coverSel.id) ?? null : null;
 
   /**
-   * THE COVER'S DETAILED CONTROLS — the same inspectors, in the same panel as everything else.
+   * ── THE PROPERTIES PANEL, AFTER THE COVER SIDEBAR ──────────────────────────────
    *
-   * The cover used to own a PERMANENT 300px sidebar that no other surface had: always present
-   * whether or not you needed it, and the last place the builder still behaved like two separate
-   * applications. The controls themselves were never the problem — `SpineInspector`,
-   * `TextInspector`, `StickerInspector`, `QrInspector` and `CoverPanel` are already the shared,
-   * callback-driven components — so unifying meant changing the HOST, not the editing logic.
+   * There is no cover branch here any more, and that absence is the deliverable. The cover used
+   * to force this panel open on focus (`useEffect(() => setPropsPanelOpen(true))`) and fill it
+   * with `CoverPanel` — a permanent 300px column of sliders that no other surface had, and the
+   * last place the builder behaved like two applications. Both are deleted.
    *
-   * They now render in `PropertiesPanel`, the same docked panel a content page uses, opened
-   * CONTEXTUALLY. Background, the template gallery and the title block live under the cover-level
-   * entry (nothing selected), which is the same rule a page follows.
+   * The cover's detailed controls now live exactly where a page's do: on the floating toolbar for
+   * everyday actions, and in THIS panel — opened deliberately, never automatically — for the
+   * advanced ones. `propsPanelContent` already routes by `selection.kind`, and the cover speaks
+   * the same `Selection`, so it needed no cover-shaped copy.
    */
-  const coverPanelContent = (() => {
+  const coverPropsPanelContent = (() => {
     if (!coverFocused) return null;
-    if (coverSel.kind === 'spine') {
-      return {
-        title: 'Spine',
-        node: (
-          <SpineInspector
-            spineTitle={coverConfig.spineTitle}
-            spineColor={coverConfig.spineColor}
-            fallbackTitle={albumTitle}
-            onChange={(patch) => updateCover({ config: patch })}
-          />
-        ),
-      };
+    const key = `cover:${cover.side}`;
+    // Narrowed once into a local: TypeScript cannot follow `cover.selection.kind` through a
+    // property access, and the alternative is a cast per branch.
+    const csel = cover.selection;
+    switch (csel.kind) {
+      case 'text': {
+        const el = cover.elements.texts.find((t) => t.id === csel.id);
+        if (!el) return null;
+        return {
+          title: 'Advanced typography',
+          node: (
+            <TextInspector
+              advanced
+              el={el}
+              onChange={(patch) => cover.patchText(key, el.id, patch)}
+              // The title and the spine are the album's metadata made visible — they always
+              // print, so the inspector offers no Delete for them (`useCover` refuses it too).
+              onDelete={
+                isPermanentRole(el.role)
+                  ? undefined
+                  : () => {
+                      cover.removeText(key, el.id);
+                      cover.setSelection(NO_SELECTION);
+                    }
+              }
+            />
+          ),
+        };
+      }
+      case 'sticker': {
+        const el = cover.elements.stickers.find((s) => s.id === csel.id);
+        if (!el) return null;
+        return {
+          title: 'Sticker',
+          node: (
+            <StickerInspector
+              el={el}
+              onChange={(patch) => cover.patchSticker(key, el.id, patch)}
+              onDelete={() => {
+                cover.removeSticker(key, el.id);
+                cover.setSelection(NO_SELECTION);
+              }}
+              onDuplicate={() => cover.duplicateSticker(key, el.id)}
+              onForward={() => cover.moveLayer({ kind: 'sticker', blockKey: key, id: el.id }, 'forward')}
+              onBackward={() => cover.moveLayer({ kind: 'sticker', blockKey: key, id: el.id }, 'backward')}
+            />
+          ),
+        };
+      }
+      case 'qr': {
+        const el = cover.elements.qrs.find((q) => q.id === csel.id);
+        if (!el) return null;
+        return {
+          title: 'QR code',
+          node: (
+            <QrInspector
+              el={el}
+              onChange={(patch) => cover.patchQr(key, el.id, patch)}
+              onDelete={() => {
+                cover.removeQr(key, el.id);
+                cover.setSelection(NO_SELECTION);
+              }}
+            />
+          ),
+        };
+      }
+      case 'base': {
+        const photo = coverConfig.photoId && cover.side === 'front' ? photoMap.get(coverConfig.photoId) : coverConfig.back.photoId && cover.side === 'back' ? photoMap.get(coverConfig.back.photoId) : undefined;
+        if (!photo || photo.status !== 'ready') return null;
+        return {
+          title: 'Photo adjustments',
+          node: (
+            <PhotoAdjustInspector
+              edit={cover.image.edit ?? {}}
+              // A cover crop is independent of how the same photo is cropped on a page, so this
+              // writes `cover_config.imageEdit` — not the photo row. Same inspector, one seam.
+              onChange={(next) => cover.patchImageEdit(next)}
+              onCommit={(next) => cover.patchImageEdit(next)}
+            />
+          ),
+        };
+      }
+      default:
+        return null;
     }
-    if (coverSelectedText && coverSelSide) {
-      return {
-        title: 'Text',
-        node: (
-          <TextInspector
-            el={coverSelectedText}
-            onChange={(patch) => patchCoverText(coverSelSide, coverSelectedText.id, patch)}
-            onDelete={() => {
-              removeCoverText(coverSelSide, coverSelectedText.id);
-              setCoverSel(COVER_NO_SELECTION);
-            }}
-          />
-        ),
-      };
-    }
-    if (coverSelectedSticker && coverSelSide) {
-      return {
-        title: 'Sticker',
-        node: (
-          <StickerInspector
-            el={coverSelectedSticker}
-            onChange={(patch) => patchCoverSticker(coverSelSide, coverSelectedSticker.id, patch)}
-            onDelete={() => {
-              removeCoverSticker(coverSelSide, coverSelectedSticker.id);
-              setCoverSel(COVER_NO_SELECTION);
-            }}
-            onDuplicate={() => duplicateCoverSticker(coverSelSide, coverSelectedSticker.id)}
-            onForward={() => reorderCoverSticker(coverSelSide, coverSelectedSticker.id, 1)}
-            onBackward={() => reorderCoverSticker(coverSelSide, coverSelectedSticker.id, -1)}
-          />
-        ),
-      };
-    }
-    if (coverSelectedQr && coverSelSide) {
-      return {
-        title: 'QR code',
-        node: (
-          <QrInspector
-            el={coverSelectedQr}
-            onChange={(patch) => patchCoverQr(coverSelSide, coverSelectedQr.id, patch)}
-            onDelete={() => {
-              removeCoverQr(coverSelSide, coverSelectedQr.id);
-              setCoverSel(COVER_NO_SELECTION);
-            }}
-          />
-        ),
-      };
-    }
-    return {
-      title: 'Cover design',
-      node: (
-        <CoverPanel
-          title={albumTitle}
-          coverId={coverId}
-          config={coverConfig}
-          covers={covers}
-          photos={photos}
-          photoMap={photoMap}
-          activeSide={activeSide}
-          onActiveSide={setActiveSide}
-          onUpdate={updateCover}
-          onEditImage={setCoverImageEditor}
-          showPreview={false}
-        />
-      ),
-    };
   })();
 
-  /**
-   * ONE panel, one decision about what it shows. The surface picks the content; the host renders
-   * it. Nothing downstream needs to know whether it is looking at a cover or a spread.
-   */
-  const panelContent = coverFocused ? coverPanelContent : propsPanelContent;
+  const panelContent = coverFocused ? coverPropsPanelContent : propsPanelContent;
 
-  /**
-   * Contextual, not permanent: the panel opens for what you just selected on the cover and stays
-   * closed once you dismiss it. Keyed on the selection so picking a different object brings its
-   * controls back — which is the job the permanent sidebar was doing badly.
-   */
-  useEffect(() => {
-    if (coverFocused) setPropsPanelOpen(true);
-  }, [coverFocused, coverSel]);
-
-  // ── Auto Align (toolbar) — tidies the active cover page / focused spread (text + stickers).
-  const activeArrays = sideArrays(activeSide);
+  // ── Auto Align (toolbar) — tidies the focused cover face / spread (text + stickers).
   const canAutoAlign = coverFocused
-    ? activeArrays.texts.length + activeArrays.stickers.length > 0
+    ? cover.elements.texts.length + cover.elements.stickers.length > 0
     : !!block && block.texts.length + block.stickers.length > 0;
   const autoAlignCurrent = () => {
     if (coverFocused) {
-      if (activeArrays.texts.length + activeArrays.stickers.length === 0) return;
-      const next = autoAlignCover(activeArrays.texts, activeArrays.stickers);
-      writeSide(activeSide, { texts: next.texts, stickers: next.stickers });
+      const { texts, stickers } = cover.elements;
+      if (texts.length + stickers.length === 0) return;
+      const next = autoAlignCover(texts, stickers);
+      cover.writeSide(cover.side, { texts: next.texts, stickers: next.stickers });
     } else {
       if (!block) return;
       const next = autoAlignBlock(block);
       api.patchBlock(block.key, { texts: next.texts, stickers: next.stickers });
     }
-    setMessage({ kind: 'ok', text: 'Aligned the page.' });
+    setMessage({ kind: 'ok', text: coverFocused ? `Aligned the ${COVER_SIDE_LABEL[cover.side].toLowerCase()}.` : 'Aligned the page.' });
   };
 
   // ── auto-layout ────────────────────────────────────────────────────────────────
@@ -1817,10 +1794,10 @@ export default function Builder({
     if (!action) return;
     if (action.type === 'goto-front-cover') {
       setCoverFocused(true);
-      setActiveSide('front');
+      cover.setSide('front');
     } else if (action.type === 'goto-back-cover') {
       setCoverFocused(true);
-      setActiveSide('back');
+      cover.setSide('back');
     } else {
       // goto-page / goto-layout / goto-photo — focus that content spread.
       setCoverFocused(false);
@@ -1877,8 +1854,9 @@ export default function Builder({
    */
   const shortcuts = useMemo<Shortcut[]>(
     () => [
-      { combo: "mod+z", label: "Undo", group: "Editing", allowInInput: false, run: () => api.undo() },
-      { combo: "mod+shift+z", label: "Redo", group: "Editing", run: () => api.redo() },
+      // Undo follows the focused surface — the cover is history-backed now, not an exception.
+      { combo: "mod+z", label: "Undo", group: "Editing", allowInInput: false, run: () => (coverFocused ? cover.undo() : api.undo()) },
+      { combo: "mod+shift+z", label: "Redo", group: "Editing", run: () => (coverFocused ? cover.redo() : api.redo()) },
       {
         combo: "mod+s",
         label: "Save",
@@ -2018,7 +1996,7 @@ export default function Builder({
         },
       ]),
     ],
-    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection],
+    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused],
   );
   /**
    * Review mode owns the keyboard while it is open (it binds its own capture-phase listener), so
@@ -2051,10 +2029,13 @@ export default function Builder({
         status={status}
         review={review}
         dirty={api.dirty}
-        canUndo={api.canUndo}
-        canRedo={api.canRedo}
-        onUndo={api.undo}
-        onRedo={api.redo}
+        // Undo follows the FOCUSED SURFACE. The cover has real history now (`useCover` uses the
+        // same `useHistoryState` container `useBlocks` does), so ⌘Z means the same thing on it as
+        // it does on a spread — it used to mean nothing at all.
+        canUndo={coverFocused ? cover.canUndo : api.canUndo}
+        canRedo={coverFocused ? cover.canRedo : api.canRedo}
+        onUndo={coverFocused ? cover.undo : api.undo}
+        onRedo={coverFocused ? cover.redo : api.redo}
         showGuides={showGuides}
         onToggleGuides={() => setShowGuides((v) => !v)}
         onShortcuts={() => setShortcutsOpen(true)}
@@ -2320,46 +2301,85 @@ export default function Builder({
               />
             )}
 
-            {/* Cover Templates (Task 2) — cover-only. Applying copies the template's CoverConfig into
-                cover_config via the SAME updateCover→saveCoverDesign path; no template link is kept. */}
+            {/* Cover artwork — cover-only. Applying copies the template's CoverConfig into
+                cover_config through `cover.update`, which migrates it to the object model on the
+                way in, so an admin template authored before Cover Editor 2.0 lands as objects. */}
             {coverFocused && railTab === 'templates' && (
-              <div className="flex min-h-0 flex-1 flex-col p-4">
+              <div className="ms-scroll flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+                {/*
+                  COVER ARTWORK — the admin-managed PNG covers (0023). This gallery used to live
+                  inside the deprecated cover panel's "Artwork" source tab; it belongs in the rail
+                  with every other catalog of things you can add, which is where it is now.
+                  Choosing one sets `albums.cover_template_id`; the objects on top are untouched.
+                */}
+                <h2 className="mb-3 text-[13px] font-semibold tracking-tight text-foreground">Cover artwork</h2>
+                <div className="mb-5 grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCoverTemplate(null)}
+                    title="No artwork — use a photo or a background"
+                    className={`relative aspect-[3/4] overflow-hidden rounded-lg bg-muted ring-1 transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+                      coverId === null ? 'ring-2 ring-studio' : 'ring-border hover:ring-studio-bright/50'
+                    }`}
+                  >
+                    <span className="absolute inset-0 grid place-items-center px-1 text-center text-[10px] font-medium text-muted-foreground">
+                      None
+                    </span>
+                  </button>
+                  {covers.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setCoverTemplate(c.id)}
+                      title={c.name}
+                      className={`relative aspect-[3/4] overflow-hidden rounded-lg bg-muted ring-1 transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+                        coverId === c.id ? 'ring-2 ring-studio' : 'ring-border hover:ring-studio-bright/50'
+                      }`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={c.thumbUrl} alt={c.name} className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+
                 <h2 className="mb-3 text-[13px] font-semibold tracking-tight text-foreground">Cover templates</h2>
                 <CoverTemplatesPanel
                   templates={coverTemplates}
                   stickerUrlFor={stickerUrlFor}
                   hasExistingDesign={isCustomCover(coverConfig)}
                   onApply={(cfg) => {
-                    updateCover({ config: cfg });
-                    setCoverSel(COVER_NO_SELECTION);
+                    cover.update(cfg);
+                    cover.setSelection(NO_SELECTION);
                   }}
                 />
               </div>
             )}
 
+            {/* The add-object rails are surface-agnostic: the same panels, pointed at whichever
+                canvas has focus. The cover's target is its FOCUSED FACE (`cover.side`). */}
             {railTab === 'text' && (
-              <TextPanel hasTarget={coverFocused ? true : !!block} onAdd={coverFocused ? addCoverText : addText} />
+              <TextPanel hasTarget={coverFocused ? true : !!block} onAdd={coverFocused ? cover.addText : addText} />
             )}
 
             {railTab === 'stickers' && (
               <StickersPanel
                 catalog={stickerCatalog}
-                hasTarget={coverFocused ? true : !!block}
-                onAdd={coverFocused ? addCoverSticker : addPageSticker}
+                hasTarget={coverFocused ? cover.side !== 'spine' : !!block}
+                onAdd={coverFocused ? cover.addSticker : addPageSticker}
               />
             )}
 
             {railTab === 'backgrounds' && (
               <BackgroundsPanel
-                current={coverFocused ? (activeSide === 'front' ? coverConfig.background : coverConfig.back.background) : block?.background ?? null}
-                hasTarget={coverFocused ? true : !!block}
-                onApply={(bg) => (coverFocused ? applyCoverBackground(activeSide, bg) : block && api.setBackground(block.key, bg))}
-                onApplyAll={(bg) => (coverFocused ? applyCoverBackground(activeSide, bg) : api.setBackgroundAll(bg))}
+                current={coverFocused ? cover.background : block?.background ?? null}
+                hasTarget={coverFocused ? cover.side !== 'spine' : !!block}
+                onApply={(bg) => (coverFocused ? cover.setBackground(bg) : block && api.setBackground(block.key, bg))}
+                onApplyAll={(bg) => (coverFocused ? cover.setBackground(bg) : api.setBackgroundAll(bg))}
               />
             )}
 
             {railTab === 'qr' && (
-              <QrPanel hasTarget={coverFocused ? true : !!block} onAdd={coverFocused ? addCoverQr : addQr} />
+              <QrPanel hasTarget={coverFocused ? cover.side !== 'spine' : !!block} onAdd={coverFocused ? cover.addQr : addQr} />
             )}
           </aside>
         </div>
@@ -2393,30 +2413,18 @@ export default function Builder({
 
           {/* canvas body */}
           {coverFocused ? (
+            /* Eight props instead of twenty-four. Everything the canvas needs to MUTATE now
+               lives on `cover`; what is left is what it needs to DRAW. */
             <CoverCanvas
-              title={albumTitle}
-              config={coverConfig}
+              cover={cover}
               frontImageUrl={coverImageUrl}
               backImageUrl={backCoverImageUrl}
               size={size}
               zoomPct={zoomPct}
               stickerUrlFor={stickerUrlFor}
-              selection={coverSel}
-              onSelect={setCoverSel}
-              activeSide={activeSide}
-              onActiveSide={setActiveSide}
-              onChangeText={patchCoverText}
-              onReorderText={reorderCoverText}
-              onDeleteText={removeCoverText}
-              onDuplicateText={duplicateCoverText}
-              onChangeSticker={patchCoverSticker}
-              onReorderSticker={reorderCoverSticker}
-              onDeleteSticker={removeCoverSticker}
-              onDuplicateSticker={duplicateCoverSticker}
-              onChangeQr={patchCoverQr}
-              onReorderQr={reorderCoverQr}
-              onDeleteQr={removeCoverQr}
-              onDuplicateQr={duplicateCoverQr}
+              onFaceEl={(el) => {
+                pageElRef.current = el;
+              }}
             />
           ) : (
           /**
@@ -2518,11 +2526,14 @@ export default function Builder({
                     }}
                     onEditPhoto={openEditor}
                     onQuickCrop={openQuickCrop}
+                    onPlacePhoto={placeOnCanvas}
                     stickerUrlFor={stickerUrlFor}
                     pickActive={!!pickedId}
                     onTapPlaceBase={(slot: BaseSlot) => {
                       if (!pickedId) return;
-                      api.assignBaseSlot(block.key, slot, pickedId);
+                      // Tap-to-place is a placement like any other — same seam, so it replaces
+                      // an occupied slot and reports the swap exactly as a drop does.
+                      placeOnCanvas(pickedId, { blockKey: block.key, slot });
                       setPickedId(null);
                     }}
                     showGuides={showGuides}
@@ -2586,12 +2597,33 @@ export default function Builder({
           />
 
           {/*
-            THE FLOATING CONTEXT BAR — what the right-hand inspector became.
+            THE FLOATING CONTEXT BAR — on BOTH surfaces now.
 
-            It renders only in the focus view of a content spread (the grid overview has no
-            single selection to describe, and the cover has its own panel). Everything it
-            triggers is an existing command or `api` primitive; see `_context-bar`.
+            The cover used to be the exception ("the cover has its own panel"), and that exception
+            was the permanent sidebar. It is gone: a cover object gets the same floating toolbar a
+            page object gets, from the same components. `CoverContextBar` only decides which bar
+            a cover selection deserves — the Text / Sticker / QR / Photo bars themselves are the
+            shared ones, reached through `ObjectBar`.
           */}
+          {coverFocused && (
+            <CoverContextBar
+              anchor={barAnchor}
+              cover={cover}
+              selectedPhoto={coverSelectedPhoto}
+              photoMap={photoMap}
+              pageAspect={pageA}
+              onPickPhoto={() => setCoverPhotoPicker(cover.side)}
+              onOpenArtwork={() => setRailTab('templates')}
+              onOpenRail={setRailTab}
+              onCrop={() => setCoverImageEditor(cover.side)}
+              cropping={false}
+              onEndCrop={() => setCoverImageEditor(null)}
+              onOpenProperties={() => setPropsPanelOpen((v) => !v)}
+              propertiesOpen={propsPanelOpen && !!coverPropsPanelContent}
+              onEscape={() => cover.setSelection(NO_SELECTION)}
+            />
+          )}
+
           {!coverFocused && editLayout === 'focus' && block && (
             <ContextBar
               anchor={barAnchor}
@@ -2768,11 +2800,7 @@ export default function Builder({
         photoMap={photoMap}
         pageAspect={pageA}
         onCloseCoverEditor={() => setCoverImageEditor(null)}
-        onCoverImageEdit={(side, edit) =>
-          side === "front"
-            ? updateCover({ config: { imageEdit: edit } })
-            : updateCover({ config: { back: { ...coverConfig.back, imageEdit: edit } } })
-        }
+        onCoverImageEdit={(side, edit) => cover.patchImageEdit(edit, side)}
         quickCrop={quickCrop}
         onCloseQuickCrop={() => setQuickCrop(null)}
       />
@@ -2817,6 +2845,23 @@ export default function Builder({
 
       {/* Context menu — pure renderer over the command layer; holds no editing logic. */}
       <ContextMenu state={contextMenu.menu} onClose={contextMenu.close} />
+
+      {/* The COVER's photo picker — the same `PhotoPicker` a page frame uses, so choosing a cover
+          photo and choosing a page photo are one interaction. The cover prints at full size, so
+          only processed photos are offered (the worker's sanitized master is the print source). */}
+      {coverPhotoPicker && (
+        <PhotoPicker
+          title={coverPhotoPicker === 'front' ? 'Choose the front cover photo' : 'Choose the back cover photo'}
+          available={photos.filter((p) => p.status === 'ready')}
+          onClose={() => setCoverPhotoPicker(null)}
+          onPick={(id) => {
+            cover.setPhoto(id, coverPhotoPicker);
+            cover.setSide(coverPhotoPicker);
+            cover.setSelection({ kind: 'base', slot: 'image' });
+            setCoverPhotoPicker(null);
+          }}
+        />
+      )}
 
       {/* The canvas's own photo picker, hosted here so the floating toolbar can open it.
           Same component the canvas has always used — see `PhotoPicker` in `_block`. */}
@@ -2875,7 +2920,15 @@ export default function Builder({
             return { score: r.statistics.score, printReady: r.printReady };
           })()}
           onClose={() => setSettingsOpen(false)}
-          onTitleSaved={setAlbumTitle}
+          /**
+           * THE READ HALF OF THE TWO-WAY BINDING. Renaming the album in Settings retitles the
+           * cover immediately — `applyTitle` pushes the new words into the `role: 'title'` object,
+           * so the canvas, the preview and the PDF all say the new name without a reload.
+           */
+          onTitleSaved={(t) => {
+            setAlbumTitle(t);
+            cover.applyTitle(t);
+          }}
           onEditCover={focusCoverForEditing}
           onOpenPhotos={() => { setCoverFocused(false); setRailTab('images'); }}
           onOpenBuildMethods={() => setBuildMethodOpen(true)}

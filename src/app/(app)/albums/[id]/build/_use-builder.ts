@@ -37,7 +37,15 @@ export type Selection =
   | { kind: 'overlay'; id: string }
   | { kind: 'text'; id: string }
   | { kind: 'qr'; id: string }
-  | { kind: 'sticker'; id: string };
+  | { kind: 'sticker'; id: string }
+  /**
+   * The surface's backdrop itself (Cover Editor 2.0). A cover's background is a design decision
+   * you make as often as any other — colour, artwork, a photo — so it needs to be a thing you can
+   * click and get tools for, not a setting buried in a panel. Content pages do not select it
+   * today, which is why every consumer is written with a `default` branch; adding it here is
+   * additive and inert for them.
+   */
+  | { kind: 'background' };
 
 export const NO_SELECTION: Selection = { kind: 'none' };
 

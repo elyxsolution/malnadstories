@@ -316,6 +316,7 @@ export default function ReviewMode({
                   config={cover.config}
                   title={cover.title}
                   imageUrl={cover.frontImageUrl}
+                  pageAspect={pageRatio}
                   stickerUrlFor={stickerUrlFor}
                 />
               ) : current?.kind === 'back' ? (

@@ -16,6 +16,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig, type CoverConfig } from '@/lib/builder/cover';
+import { freeTexts } from '@/lib/builder/model';
 
 export type CoverResolution = {
   /** An ACTIVE legacy PNG template is selected (server-resolved: active row WITH an image_key). */
@@ -54,7 +55,10 @@ export function hasDesignedFrontCover(r: CoverResolution): boolean {
     r.activeTemplate ||
     c.photoId !== null ||
     c.background !== null ||
-    c.texts.length > 0 ||
+    // Metadata objects (title / subtitle / author) are a VIEW of album fields, not a design
+    // decision — counting them would make every album since Cover Editor 2.0 report as designed
+    // and silently reclassify pristine covers from `default` to `design`.
+    freeTexts(c.texts).length > 0 ||
     c.stickers.length > 0 ||
     c.qrs.length > 0 ||
     c.subtitle.trim() !== '' ||

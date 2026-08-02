@@ -85,7 +85,12 @@ export function TextInspector({
 }: {
   el: TextElement;
   onChange: (patch: Partial<TextElement>) => void;
-  onDelete: () => void;
+  /**
+   * Omitted when the object cannot be deleted. That is the cover's title and spine: they render
+   * album metadata that always prints, so offering Delete would be offering something the model
+   * refuses. Absent ⇒ the control is not drawn, rather than drawn and inert.
+   */
+  onDelete?: () => void;
   advanced?: boolean;
 }) {
   const set = onChange;
@@ -99,14 +104,16 @@ export function TextInspector({
             </span>
             <p className="text-sm font-semibold tracking-tight text-foreground">Text</p>
           </div>
-          <button
-            type="button"
-            onClick={onDelete}
-            aria-label="Delete text"
-            className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              aria-label="Delete text"
+              className="grid h-8 w-8 place-items-center rounded-lg text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
         <textarea
           value={el.text}
@@ -336,50 +343,12 @@ export function StickerInspector({
   );
 }
 
-/** Spine editor — the book's bound edge: the text printed vertically + its colour. Cover-only. */
-export function SpineInspector({
-  spineTitle,
-  spineColor,
-  fallbackTitle,
-  onChange,
-}: {
-  spineTitle: string;
-  spineColor: string;
-  fallbackTitle: string;
-  onChange: (patch: { spineTitle?: string; spineColor?: string }) => void;
-}) {
-  return (
-    <div className="ms-scroll flex-1 overflow-y-auto">
-      <Section>
-        <div className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-studio/10 text-studio">
-            <TypeIcon className="h-4 w-4" />
-          </span>
-          <div>
-            <p className="text-sm font-semibold tracking-tight text-foreground">Spine</p>
-            <p className="text-[11px] text-muted-foreground">The book&rsquo;s bound edge</p>
-          </div>
-        </div>
-        <input
-          type="text"
-          value={spineTitle}
-          onChange={(e) => onChange({ spineTitle: e.target.value })}
-          placeholder={fallbackTitle || 'Printed on the spine'}
-          maxLength={80}
-          className="h-9 w-full rounded-lg border border-input bg-card px-3 text-sm text-foreground shadow-xs outline-none transition-all placeholder:text-muted-foreground focus-visible:border-studio-bright focus-visible:ring-2 focus-visible:ring-studio-bright/40"
-        />
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Leave blank to print the album title. Thickness follows the page count.
-        </p>
-      </Section>
-
-      <Section title="Colour">
-        <ColorField value={spineColor} onChange={(hex) => hex !== 'transparent' && onChange({ spineColor: hex })} />
-      </Section>
-    </div>
-  );
-}
-
+/*
+ * The `SpineInspector` that stood here is gone (Cover Editor 2.0). The spine used to be two
+ * scalar fields with a bespoke form; it is a `TextElement` with `role: 'spine'` now, so it is
+ * edited by the SAME `TextInspector` and the same Text toolbar as any other text object — which
+ * is exactly the duplication this pass set out to remove.
+ */
 /** QR editor (link/text · code & background colour · padding · radius). Callback-driven, used on the cover. */
 export function QrInspector({
   el,

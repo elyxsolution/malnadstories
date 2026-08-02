@@ -80,7 +80,9 @@ export function makeText(variant: TextVariant, overrides: Partial<TextElement> =
  * REF_PAIR_W = 1000 → 1px = 0.1cqw.
  */
 export function textFontSize(el: TextElement): string {
-  return `${(el.size / REF_PAIR_W) * 100}cqw`;
+  // A spine object runs along the book's bound edge — a sliver a few percent of a page wide — so
+  // its size is measured against the surface's HEIGHT. Same number, the axis that makes it legible.
+  return `${(el.size / REF_PAIR_W) * 100}${el.role === 'spine' ? 'cqh' : 'cqw'}`;
 }
 
 /** Non-size text CSS (fontSize comes from textFontSize via container queries). */
@@ -284,3 +286,50 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
     ],
   },
 ];
+
+// ── layer ordering (pure index arithmetic, shared by pages and the cover) ─────────
+/**
+ * Where an element should END UP when a layer action is applied to it.
+ *
+ * Render order IS array order — later means on top — so every layer operation ("bring to front",
+ * "move above that sticker") is really "move index i to index j". That arithmetic used to live
+ * inside the command layer's `moveLayer`, which is bound to `Block[]`; the cover has element
+ * arrays but no blocks, and duplicating the index maths for it is exactly how two surfaces start
+ * disagreeing about what "forward" means. So the decision lives here, pure, and both callers
+ * apply the result with their own primitives.
+ *
+ * Returns `null` when the move is a no-op or the target is not in the list.
+ */
+export type LayerAction = 'front' | 'forward' | 'backward' | 'back' | { above: string } | { below: string };
+
+export function resolveLayerIndex(list: readonly { id?: string }[], id: string, action: LayerAction): number | null {
+  const i = list.findIndex((el) => el.id === id);
+  if (i < 0) return null;
+
+  let j: number;
+  if (action === 'front') j = list.length - 1;
+  else if (action === 'back') j = 0;
+  else if (action === 'forward') j = i + 1;
+  else if (action === 'backward') j = i - 1;
+  else {
+    // Remove-then-insert semantics: "above s" lands directly after s, "below s" directly before
+    // it — accounting for the shift the removal of `i` causes on one side.
+    const sibId = 'above' in action ? action.above : action.below;
+    const s = list.findIndex((el) => el.id === sibId);
+    if (s < 0 || sibId === id) return null;
+    j = 'above' in action ? (i < s ? s : s + 1) : i < s ? s - 1 : s;
+  }
+  j = Math.max(0, Math.min(list.length - 1, j));
+  return j === i ? null : j;
+}
+
+/** Apply `resolveLayerIndex`'s answer to an array: remove from `i`, insert at `j`. */
+export function reorderById<T extends { id?: string }>(list: readonly T[], id: string, action: LayerAction): T[] | null {
+  const j = resolveLayerIndex(list, id, action);
+  if (j === null) return null;
+  const i = list.findIndex((el) => el.id === id);
+  const next = [...list];
+  const [moved] = next.splice(i, 1);
+  next.splice(j, 0, moved);
+  return next;
+}
