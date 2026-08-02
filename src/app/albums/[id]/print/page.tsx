@@ -143,11 +143,19 @@ export default async function PrintPage({
 
   const { data: albumData } = await supabase
     .from('albums')
-    .select('id, title, cover_template_id, product_id')
+    .select('id, title, size, cover_template_id, product_id')
     .eq('id', params.id)
     .maybeSingle();
   if (!albumData) notFound();
-  const albumRow = albumData as { id: string; title: string; cover_template_id: string | null; product_id: string | null };
+  // `size` (the leaf count) is read for one reason: the spine's printed width derives from it,
+  // via the same `spineWidthFor` the builder and the preview use.
+  const albumRow = albumData as {
+    id: string;
+    title: string;
+    size: number;
+    cover_template_id: string | null;
+    product_id: string | null;
+  };
 
   // Physical page dimensions from the album's product (0047). Never hardcoded — a null/legacy
   // album (no product_id) falls back to the Standard-equivalent defaults so the PDF still renders.
@@ -173,7 +181,7 @@ export default async function PrintPage({
   const coverImageUrl = coverKeys.front.key ? await presignGet(coverKeys.front.key, 900) : null;
   const backCoverImageUrl = coverKeys.back.key ? await presignGet(coverKeys.back.key, 900) : null;
 
-  const cover: PrintCover = { imageUrl: coverImageUrl, backImageUrl: backCoverImageUrl, config: coverConfig, title: albumRow.title };
+  const cover: PrintCover = { imageUrl: coverImageUrl, backImageUrl: backCoverImageUrl, config: coverConfig, title: albumRow.title, size: albumRow.size };
 
   // Only 'ready' photos have a sanitized key; presign the full-res master (longer
   // TTL so the worker finishes within the window). Never the raw original.

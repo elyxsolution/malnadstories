@@ -239,25 +239,33 @@ export function isCustomCover(c: CoverConfig): boolean {
 }
 
 /**
- * Per-layout framing: a scrim (so light text stays legible over photos), an optional
- * translucent band behind the text, and the default text anchor. Pure CSS so the PDF
+ * Per-layout framing — the THEME's legibility scrim over a cover photo. Pure CSS, so the PDF
  * readiness gate never waits on a load.
+ *
+ * `band` is gone (Cover Editor 2.0). It used to draw a translucent plate sized to the structured
+ * title block, which only worked while the renderer owned that block's position — with the title
+ * as a free object there is no "behind the text" for a fixed layer to be. `banner` keeps its
+ * intent, expressed the way every other theme expresses it: a soft horizontal plate across the
+ * lower third, which is where that layout has always anchored its type. Legacy `banner` covers
+ * therefore keep a dark strip behind their title rather than losing their contrast entirely.
  */
-export function coverLayoutFraming(layout: CoverLayout, hasImage: boolean): {
-  scrim: CSSProperties | null;
-  band: boolean;
-} {
-  if (!hasImage) return { scrim: null, band: false };
+export function coverLayoutFraming(layout: CoverLayout, hasImage: boolean): { scrim: CSSProperties | null } {
+  if (!hasImage) return { scrim: null };
   switch (layout) {
     case 'spotlight':
-      return { scrim: { background: 'radial-gradient(120% 90% at 50% 50%, rgba(12,18,15,0.55), rgba(12,18,15,0.15))' }, band: false };
+      return { scrim: { background: 'radial-gradient(120% 90% at 50% 50%, rgba(12,18,15,0.55), rgba(12,18,15,0.15))' } };
     case 'banner':
-      return { scrim: null, band: true };
+      return {
+        scrim: {
+          background:
+            'linear-gradient(to bottom, transparent 46%, rgba(12,18,15,0.46) 56%, rgba(12,18,15,0.46) 88%, transparent 96%)',
+        },
+      };
     case 'minimal':
-      return { scrim: { background: 'linear-gradient(to bottom, rgba(12,18,15,0.32), transparent 40%)' }, band: false };
+      return { scrim: { background: 'linear-gradient(to bottom, rgba(12,18,15,0.32), transparent 40%)' } };
     case 'classic':
     default:
-      return { scrim: { background: 'linear-gradient(to top, rgba(12,18,15,0.6), transparent 55%)' }, band: false };
+      return { scrim: { background: 'linear-gradient(to top, rgba(12,18,15,0.6), transparent 55%)' } };
   }
 }
 

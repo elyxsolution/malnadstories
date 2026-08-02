@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import Preview from '@/app/(app)/albums/[id]/build/_preview';
+import Preview, { type PreviewCover } from '@/app/(app)/albums/[id]/build/_preview';
 import type { Photo } from '@/lib/builder/photo';
 import { type Block } from '@/lib/builder/model';
 
@@ -15,7 +15,7 @@ export default function AlbumPreview({
 }: {
   photos: Photo[];
   blocks: Block[];
-  cover: { url: string; name: string } | null;
+  cover: PreviewCover;
   stickerUrls?: Record<string, string>;
 }) {
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);

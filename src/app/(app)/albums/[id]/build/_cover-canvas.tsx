@@ -6,9 +6,9 @@ import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { TextContent, StickerContent, QrContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
 import { useBuilderDimensions } from './_dimensions';
-import { commitBounds, travelBounds, type EditableKind } from '@/lib/builder/edit-bounds';
+import { PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { squareQrHeight } from '@/lib/builder/elements';
-import { COVER_SIDES, coverSideElements, coverSideImage, isPermanentRole, roleLabel, type CoverSide } from '@/lib/builder/cover-objects';
+import { COVER_SIDES, coverSideElements, coverSideImage, roleLabel, type CoverSide } from '@/lib/builder/cover-objects';
 import type { CoverConfig } from '@/lib/builder/cover';
 import type { Selection } from './_use-builder';
 import type { CoverApi } from './_use-cover';
@@ -40,8 +40,6 @@ export type { CoverSide };
  * face without one to the BACKGROUND. Clicking the pasteboard around the book clears to nothing,
  * which is what surfaces the cover-level toolbar.
  */
-
-const escapeFor = (kind: EditableKind) => ({ edit: travelBounds(kind), commit: commitBounds(kind) });
 
 export type CoverCanvasProps = {
   cover: CoverApi;
@@ -184,7 +182,7 @@ function Face({
           object pushed off the edge shows only the part that will print. */}
       <div className="absolute inset-0 overflow-hidden">
         {side === 'spine' ? (
-          <SpineDesign spine={config.spine} renderElements={false} />
+          <SpineDesign config={config} renderElements={false} />
         ) : side === 'front' ? (
           <CoverDesign
             imageUrl={imageUrl}
@@ -211,7 +209,7 @@ function Face({
             containerRef={ref}
             chromeContainer={chromeEl}
             pageSpan={1}
-            escape={escapeFor('text')}
+            escape={PASTEBOARD_ESCAPE}
             ariaLabel={roleLabel(t.role) ?? 'Text'}
             peers={peersExcept(t.id)}
             onSelect={() => pick({ kind: 'text', id: t.id })}
@@ -248,7 +246,7 @@ function Face({
             containerRef={ref}
             chromeContainer={chromeEl}
             pageSpan={1}
-            escape={escapeFor('qr')}
+            escape={PASTEBOARD_ESCAPE}
             ariaLabel="QR code"
             peers={peersExcept(q.id)}
             onSelect={() => pick({ kind: 'qr', id: q.id })}
@@ -272,7 +270,7 @@ function Face({
             containerRef={ref}
             chromeContainer={chromeEl}
             pageSpan={1}
-            escape={escapeFor('sticker')}
+            escape={PASTEBOARD_ESCAPE}
             ariaLabel="Sticker"
             peers={peersExcept(s.id)}
             onSelect={() => pick({ kind: 'sticker', id: s.id })}
@@ -316,7 +314,3 @@ function Face({
     </div>
   );
 }
-
-/** Legacy export kept for the admin designer's selection plumbing. */
-export const COVER_NO_SELECTION: Selection = { kind: 'none' };
-export const coverTextIsPermanent = isPermanentRole;

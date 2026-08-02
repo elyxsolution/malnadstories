@@ -93,13 +93,29 @@ function snapAxis(
  * the second half of "the page reclaims the object". Peer alignment survives, because lining two
  * off-page elements up with each other is still meaningful.
  */
+/**
+ * The structural candidates are CONSTANT — four fixed lists (two axes × two page spans) — so they
+ * are built once at module load rather than allocated twice per `pointermove`. A drag fires this
+ * path ~60 times a second; rebuilding half a dozen literals each time is the cheapest kind of
+ * waste to remove, and it leaves the per-move allocation proportional to peers alone.
+ */
+const STRUCTURAL: Record<'x' | 'y', Record<1 | 2, Candidate[]>> = {
+  x: {
+    1: [...CENTER_X[1].map((pos) => ({ pos, kind: 'center' as const })), ...EDGE_X.map((pos) => ({ pos, kind: 'edge' as const }))],
+    2: [...CENTER_X[2].map((pos) => ({ pos, kind: 'center' as const })), ...EDGE_X.map((pos) => ({ pos, kind: 'edge' as const }))],
+  },
+  y: {
+    1: [...CENTER_Y.map((pos) => ({ pos, kind: 'center' as const })), ...EDGE_Y.map((pos) => ({ pos, kind: 'edge' as const }))],
+    2: [...CENTER_Y.map((pos) => ({ pos, kind: 'center' as const })), ...EDGE_Y.map((pos) => ({ pos, kind: 'edge' as const }))],
+  },
+};
+
+const NO_CANDIDATES: Candidate[] = [];
+
 function candidatesFor(axis: 'x' | 'y', peers: PeerRect[], structural: boolean, span: 1 | 2): Candidate[] {
-  const centres: Candidate[] = structural
-    ? (axis === 'x' ? CENTER_X[span] : CENTER_Y).map((pos) => ({ pos, kind: 'center' as const }))
-    : [];
-  const edges: Candidate[] = structural
-    ? (axis === 'x' ? EDGE_X : EDGE_Y).map((pos) => ({ pos, kind: 'edge' as const }))
-    : [];
+  const base = structural ? STRUCTURAL[axis][span] : NO_CANDIDATES;
+  if (peers.length === 0) return base;
+
   const peerCentres: Candidate[] = peers.map((p) =>
     axis === 'x' ? { pos: p.x + p.w / 2, kind: 'edge' as const } : { pos: p.y + p.h / 2, kind: 'edge' as const },
   );
@@ -109,7 +125,7 @@ function candidatesFor(axis: 'x' | 'y', peers: PeerRect[], structural: boolean, 
   for (let i = 0; i < sorted.length - 1; i += 1) {
     spacing.push({ pos: (sorted[i] + sorted[i + 1]) / 2, kind: 'spacing' });
   }
-  return [...centres, ...edges, ...peerCentres, ...spacing];
+  return [...base, ...peerCentres, ...spacing];
 }
 
 /**
@@ -149,10 +165,10 @@ const HANDLES: HandleDef[] = [
  * THE EDITING LAYER'S TRAVEL RULES.
  *
  * `edit` is how far a gesture may go — out onto the pasteboard, past the trim edge. `commit` is
- * where the element may LAND. Hosts now pass `travelBounds(kind)` / `commitBounds(kind)`, which
- * are the SAME box: a gesture can only reach places the element may stay, so releasing never
- * moves anything. `commit` is still applied on release as a defensive backstop (a host could
- * legitimately pass a wider `edit`), it simply has nothing left to correct.
+ * where the element may LAND. Hosts pass `PASTEBOARD_ESCAPE`, in which the two are the SAME box:
+ * a gesture can only reach places the element may stay, so releasing never moves anything.
+ * `commit` is still applied on release as a defensive backstop (a host could legitimately pass a
+ * wider `edit`), it simply has nothing left to correct.
  *
  * Omit `escape` entirely and the component keeps its original behaviour — the element stays
  * fully inside the page — which is what a host that has not opted in gets.

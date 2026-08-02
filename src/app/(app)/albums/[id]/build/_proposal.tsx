@@ -3,12 +3,11 @@
 import { Check, RefreshCw, X, Wand2 } from 'lucide-react';
 import { InlineLoader } from '@/components/loading';
 
-import Preview from './_preview';
+import Preview, { type PreviewCover } from './_preview';
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
 import type { Block } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
-import type { CoverOption } from '@/lib/covers';
 import { summarizePlan } from '@/lib/builder/auto-layout';
 
 type Summary = ReturnType<typeof summarizePlan>;
@@ -35,7 +34,7 @@ export default function Proposal({
   title: string;
   blocks: Block[];
   photoMap: Map<string, Photo>;
-  cover: CoverOption | null;
+  cover: PreviewCover;
   summary: Summary;
   canRegenerate: boolean;
   busy?: boolean;

@@ -15,7 +15,7 @@ import UploadBadge, { stateOpacityClass } from './_upload-badge';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
-import { PASTEBOARD_PCT, commitBounds, travelBounds, type EditableKind } from '@/lib/builder/edit-bounds';
+import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { useBuilderDimensions } from './_dimensions';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -156,14 +156,6 @@ export default function BlockCard({
   const isDouble = block.template === 'double-spread';
   const start = physicalStart(blocks, index);
   const cost = PAGE_COST[block.template];
-
-  /**
-   * Travel rules for the editing layer, per element kind — see `lib/builder/edit-bounds`. `edit`
-   * and `commit` are deliberately the same box now: a gesture can only reach positions the
-   * element is allowed to keep, so releasing near an edge never moves anything. Memo-free: two
-   * object literals per render, and hoisting them would cost more in indirection than it saves.
-   */
-  const escapeFor = (kind: EditableKind) => ({ edit: travelBounds(kind), commit: commitBounds(kind) });
 
   /**
    * REPLACE ON DROP — the ONE placement path on this spread.
@@ -436,7 +428,7 @@ export default function BlockCard({
                 selected={sel({ kind: 'overlay', id: oid }) || (isTargetSelected?.({ kind: 'overlay', blockKey: block.key, id: oid }) ?? false)}
                 containerRef={pageRef}
                 chromeContainer={chromeEl}
-                escape={escapeFor('overlay')}
+                escape={PASTEBOARD_ESCAPE}
                 ariaLabel="Photo overlay"
                 onSelect={(mods) => selectResolved({ kind: 'overlay', blockKey: block.key, id: oid }, mods ?? NO_MODS)}
                 onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
@@ -482,7 +474,7 @@ export default function BlockCard({
               selected={sel({ kind: 'text', id: t.id })}
               containerRef={pageRef}
               chromeContainer={chromeEl}
-              escape={escapeFor('text')}
+              escape={PASTEBOARD_ESCAPE}
               ariaLabel="Text"
               /**
                * BOTH STORES, ALWAYS. Text / sticker / QR used to update only the single-element
@@ -526,7 +518,7 @@ export default function BlockCard({
               selected={sel({ kind: 'qr', id: q.id })}
               containerRef={pageRef}
               chromeContainer={chromeEl}
-              escape={escapeFor('qr')}
+              escape={PASTEBOARD_ESCAPE}
               ariaLabel="QR code"
               onSelect={(mods) => selectResolved({ kind: 'qr', blockKey: block.key, id: q.id }, mods ?? NO_MODS)}
               onChange={(r) => api.patchQr(block.key, q.id, { ...r, h: squareQrHeight(r.w, pair) })}
@@ -550,7 +542,7 @@ export default function BlockCard({
               selected={sel({ kind: 'sticker', id: s.id })}
               containerRef={pageRef}
               chromeContainer={chromeEl}
-              escape={escapeFor('sticker')}
+              escape={PASTEBOARD_ESCAPE}
               ariaLabel="Sticker"
               onSelect={(mods) => selectResolved({ kind: 'sticker', blockKey: block.key, id: s.id }, mods ?? NO_MODS)}
               onChange={(r) => api.patchSticker(block.key, s.id, r)}

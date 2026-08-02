@@ -127,12 +127,29 @@ export const EditConfigSchema = z.object({
   shadow: z.number().min(0).max(1).optional(),
 });
 
+/**
+ * ── THE PASTEBOARD RANGE, FOR EVERY MOVABLE OBJECT ──────────────────────────────────────────
+ *
+ * `x`/`y` may reach −0.5: an object's origin can sit half a page off the left or top edge. With
+ * `w`/`h` ≤ 1 that also lets it hang off the right or bottom (x = 0.9, w = 0.3 ends at 1.2), so
+ * the range is symmetric in effect. Only the part over the paper prints — the editor clips to the
+ * trim and so does every renderer — but the stored position is free.
+ *
+ * It used to be −0.5 for text and stickers and 0 for overlays and QR codes, which made the SAME
+ * gesture behave differently depending on what you had grabbed: a caption could be pushed off the
+ * left edge for a deliberate bleed, a photo could not. There was no reason for the split beyond
+ * the order the features were built in. One range now, applied to all four, mirrored exactly by
+ * `lib/builder/edit-bounds` so the editor and the server agree by construction.
+ */
+const OFFPAGE_MIN = -0.5;
+const offPageCoord = () => z.number().min(OFFPAGE_MIN).max(1);
+
 const OverlaySchema = z.object({
   // Nullable: an overlay is a photo CONTAINER that may be an empty placeholder (photoId=null).
   // Blueprints materialize placeholder overlays; a photo is assigned later (auto-fill / manual).
   photoId: z.string().uuid().nullable().default(null),
-  x: z.number().min(0).max(1),
-  y: z.number().min(0).max(1),
+  x: offPageCoord(),
+  y: offPageCoord(),
   w: z.number().gt(0).max(1),
   h: z.number().gt(0).max(1),
 });
@@ -151,8 +168,8 @@ const TextElementSchema = z.object({
    * forged client cannot invent a role the renderer would have to interpret.
    */
   role: z.enum(COVER_TEXT_ROLES).optional(),
-  x: z.number().min(-0.5).max(1),
-  y: z.number().min(-0.5).max(1),
+  x: offPageCoord(),
+  y: offPageCoord(),
   w: z.number().gt(0).max(1),
   h: z.number().gt(0).max(1),
   variant: z.enum(['heading', 'subtitle', 'paragraph']),
@@ -173,8 +190,8 @@ const TextElementSchema = z.object({
 const QrElementSchema = z.object({
   id: z.string().min(1).max(64),
   data: z.string().min(1).max(1024),
-  x: z.number().min(0).max(1),
-  y: z.number().min(0).max(1),
+  x: offPageCoord(),
+  y: offPageCoord(),
   w: z.number().gt(0).max(1),
   h: z.number().gt(0).max(1),
   fg: HexColor,
@@ -186,8 +203,8 @@ const QrElementSchema = z.object({
 const StickerElementSchema = z.object({
   id: z.string().min(1).max(64),
   stickerId: z.string().uuid(),
-  x: z.number().min(-0.5).max(1),
-  y: z.number().min(-0.5).max(1),
+  x: offPageCoord(),
+  y: offPageCoord(),
   w: z.number().gt(0).max(1),
   h: z.number().gt(0).max(1),
   rotation: z.number().min(-180).max(180),

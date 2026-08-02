@@ -14,6 +14,21 @@ import {
   type StickerElement,
   type TextElement,
 } from '@/lib/builder/model';
+import { normalizeCoverConfig, type CoverConfig } from '@/lib/builder/cover';
+import { resolveCoverImageKeys } from '@/lib/albums/cover';
+
+/**
+ * The cover, in the shape the shared `Preview` renderer takes. Structurally identical to the
+ * customer surfaces' `PreviewCover` — declared here rather than imported so a server-only loader
+ * doesn't reach into a client component for a type.
+ */
+export type AdminPreviewCover = {
+  config: CoverConfig;
+  title: string;
+  size: number;
+  frontImageUrl: string | null;
+  backImageUrl: string | null;
+};
 
 type PhotoRow = {
   id: string;
@@ -49,30 +64,47 @@ export async function loadAlbumForAdmin(
 ): Promise<{
   photos: Photo[];
   blocks: Block[];
-  cover: { url: string; name: string } | null;
+  cover: AdminPreviewCover;
   stickerUrls: Record<string, string>;
 } | null> {
   const svc = createServiceClient();
 
   const { data: albumRow } = await svc
     .from('albums')
-    .select('id, cover_template_id')
+    .select('id, title, size, cover_template_id, cover_config')
     .eq('id', albumId)
     .maybeSingle();
   if (!albumRow) return null;
+  const album = albumRow as {
+    id: string;
+    title: string;
+    size: number;
+    cover_template_id: string | null;
+    cover_config: unknown;
+  };
 
-  // Selected cover (admin template), presigned for the preview.
-  let cover: { url: string; name: string } | null = null;
-  const coverTemplateId = (albumRow as { cover_template_id: string | null }).cover_template_id;
-  if (coverTemplateId) {
-    const { data: coverRow } = await svc
-      .from('cover_templates')
-      .select('name, image_key')
-      .eq('id', coverTemplateId)
-      .maybeSingle();
-    const c = coverRow as { name: string; image_key: string } | null;
-    if (c) cover = { url: await presignGet(c.image_key, 900), name: c.name };
-  }
+  /**
+   * THE CUSTOMER'S COVER, not the artwork underneath it.
+   *
+   * This used to presign `cover_templates.image_key` and hand the admin a bare PNG — so an admin
+   * checking an album before it went to print saw the house template where the customer's title,
+   * subtitle, photo and stickers would actually be. The image is now resolved through the
+   * CANONICAL `resolveCoverImageKeys` (the same chain the print route uses) and the composition
+   * comes from `cover_config`, so what the admin proofs is what the PDF renders.
+   */
+  const coverConfig = normalizeCoverConfig(album.cover_config as Parameters<typeof normalizeCoverConfig>[0]);
+  const coverKeys = await resolveCoverImageKeys(svc, {
+    id: album.id,
+    cover_template_id: album.cover_template_id,
+    cover_config: coverConfig,
+  });
+  const cover: AdminPreviewCover = {
+    config: coverConfig,
+    title: album.title,
+    size: album.size,
+    frontImageUrl: coverKeys.front.key ? await presignGet(coverKeys.front.key, 900) : null,
+    backImageUrl: coverKeys.back.key ? await presignGet(coverKeys.back.key, 900) : null,
+  };
 
   const { data: photoData } = await svc
     .from('photos')

@@ -2,14 +2,22 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
-import { CoverDesignFromConfig, BackCoverDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
+import { CoverDesignFromConfig, BackCoverDesign, SpineDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { Block, EditConfig } from '@/lib/builder/model';
-import type { CoverConfig } from '@/lib/builder/cover';
+import { spineWidthFor, type CoverConfig } from '@/lib/builder/cover';
 import { cmToIn, pageAspect, printPageCss, type ProductDimensions } from '@/lib/products/model';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
-/** The custom cover design: front rendered on page 1, back on the final physical page. */
-export type PrintCover = { imageUrl: string | null; backImageUrl: string | null; config: CoverConfig; title: string } | null;
+/**
+ * The custom cover design. Front is physical page 1, back is the final content-side page, and the
+ * SPINE is a page of its own at the end — see the note on `PrintAlbum`.
+ *
+ * `size` is the album's leaf count; the spine's printed width is derived from it by the same
+ * `spineWidthFor` the builder and the preview use, so all three agree on how thick the book is.
+ */
+export type PrintCover =
+  | { imageUrl: string | null; backImageUrl: string | null; config: CoverConfig; title: string; size: number }
+  | null;
 
 /**
  * Print-only album renderer — the PHYSICAL photobook, one PDF page per physical page:
@@ -78,10 +86,30 @@ export type PrintCover = { imageUrl: string | null; backImageUrl: string | null;
 /** CSS px for a physical length, rounded UP to match Chromium's print fragmentainer exactly. */
 const pageAxisPx = (cm: number): number => Math.ceil(cmToIn(cm) * 96);
 
-function buildPrintCss(dimensions: ProductDimensions): string {
+function buildPrintCss(dimensions: ProductDimensions, spineCm: number | null): string {
   const page = printPageCss(dimensions); // e.g. { w: '21cm', h: '29.7cm' } — the PHYSICAL size
   const w = pageAxisPx(dimensions.printWidthCm);
   const h = pageAxisPx(dimensions.printHeightCm);
+  /**
+   * THE SPINE'S OWN PAGE SIZE.
+   *
+   * The spine is a printed surface of the cover, a few percent of a page wide and the full page
+   * tall — so it cannot share the uniform portrait `@page`. A NAMED page is the standard CSS
+   * answer and the worker already prints with `preferCSSPageSize`, which is what makes a
+   * per-page size take effect. It is emitted only when there is a spine to print, so an album
+   * without one produces byte-identical CSS to before.
+   *
+   * Degradation is benign by design: if a renderer ignored the named size, the spine page would
+   * print at the default portrait size with the spine strip drawn inside it — narrower than
+   * intended, never broken, and never affecting any other page.
+   */
+  const spine =
+    spineCm === null
+      ? ''
+      : `
+  @page spine { size: ${spineCm.toFixed(3)}cm ${page.h}; margin: 0; }
+  .pdf-page-spine { page: spine; width: ${pageAxisPx(spineCm)}px; }
+`;
   return `
   @page { size: ${page.w} ${page.h}; margin: 0; }
   html, body {
@@ -100,7 +128,7 @@ function buildPrintCss(dimensions: ProductDimensions): string {
      worker's deviceScaleFactor: 2), so the two halves meet with no sub-pixel seam. */
   .pair-clip { position: absolute; top: 0; height: 100%; width: 200%; }
   .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-`;
+${spine}`;
 }
 
 declare global {
@@ -192,9 +220,16 @@ export default function PrintAlbum({
     if (loadedRef.current >= totalFrames) markReady();
   }, [totalFrames, markReady]);
 
+  /**
+   * The spine's printed width, in cm. `spineWidthFor` returns a fraction of ONE page width and is
+   * the same function the builder canvas and the cover preview use — a thicker book reads thicker
+   * everywhere, from one definition. Null when there is no cover to print a spine for.
+   */
+  const spineCm = cover ? spineWidthFor(cover.size) * dimensions.printWidthCm : null;
+
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: buildPrintCss(dimensions) }} />
+      <style dangerouslySetInnerHTML={{ __html: buildPrintCss(dimensions, spineCm) }} />
 
       {/* Page 1 — Cover (the customer's custom design: image/background + title/tagline) */}
       <div className="pdf-page">
@@ -233,13 +268,28 @@ export default function PrintAlbum({
         </Fragment>
       ))}
 
-      {/* Back matter — blank inside-back cover (left, right) then the Back cover (final page). */}
+      {/* Back matter — blank inside-back cover (left, right) then the Back cover. */}
       {cover && (
         <>
           <div className="pdf-page" />
           <div className="pdf-page" />
           <div className="pdf-page">
             <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} onReady={onFrameReady} />
+          </div>
+
+          {/*
+            THE SPINE — the third printed surface of the cover, and until now the only authorable
+            one that appeared nowhere in the PDF. A customer could put the album's name on the
+            bound edge, see it in the builder and in the preview, and never find it in the file.
+
+            It goes LAST, after the back cover, for one reason: appending cannot shift anything.
+            Every content page keeps the position it has always had, so nothing downstream — the
+            worker's readiness count, the page arithmetic, a print partner's expectations — has to
+            learn a new sequence. It carries no image loads (text only), so it adds nothing to the
+            readiness gate either.
+          */}
+          <div className="pdf-page pdf-page-spine">
+            <SpineDesign config={cover.config} title={cover.title} pageAspect={pageAspect(dimensions)} />
           </div>
         </>
       )}

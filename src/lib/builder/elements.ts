@@ -24,6 +24,7 @@ import {
   type TextVariant,
 } from './model';
 import { FONT_CATALOG, fontStack, FONT_KEYS } from './fonts-catalog';
+import { clampRect, EDIT_BOUNDS } from './edit-bounds';
 
 // ── Fonts ──────────────────────────────────────────────────────────────────────
 // The full selectable library lives in fonts-catalog.ts (legacy serif/sans/script + ~20 more).
@@ -332,4 +333,21 @@ export function reorderById<T extends { id?: string }>(list: readonly T[], id: s
   const [moved] = next.splice(i, 1);
   next.splice(j, 0, moved);
   return next;
+}
+
+// ── duplication ──────────────────────────────────────────────────────────────────
+/**
+ * Where a DUPLICATE lands: a small diagonal offset from its source, so the copy is visibly a copy
+ * rather than an invisible one sitting exactly on top of the original.
+ *
+ * This existed six times — once per element family across `useBlocks` and `useCover` — and the
+ * copies had already diverged: pages clamped the result to the page box (`0..1`) while the cover
+ * clamped only the far edge, which after the pasteboard change meant duplicating an off-page
+ * object on a page silently dragged it back on. One definition, clamped through the SAME
+ * `EDIT_BOUNDS` every other movement uses.
+ */
+const DUPLICATE_OFFSET = 0.03;
+
+export function offsetDuplicate<T extends Rect>(el: T): T {
+  return { ...el, ...clampRect({ ...el, x: el.x + DUPLICATE_OFFSET, y: el.y + DUPLICATE_OFFSET }, EDIT_BOUNDS) };
 }

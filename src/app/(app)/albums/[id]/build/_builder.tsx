@@ -106,7 +106,7 @@ import {
 } from '@/lib/builder/model';
 import { type LayoutPreset } from '@/lib/builder/elements';
 import { layoutCycleSteps, nextCycleIndex } from '@/lib/builder/layout-cycle';
-import { clampRect, commitBounds, type EditableKind } from '@/lib/builder/edit-bounds';
+import { clampRect, EDIT_BOUNDS } from '@/lib/builder/edit-bounds';
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
@@ -1268,24 +1268,25 @@ export default function Builder({
   const nudgeSelection = useCallback(
     (dx: number, dy: number) => {
       if (!block) return;
-      const shift = <T extends { x: number; y: number; w: number; h: number }>(el: T, kind: EditableKind): T => ({
+      // One box for every kind — the nudge is clamped exactly where a released drag is.
+      const shift = <T extends { x: number; y: number; w: number; h: number }>(el: T): T => ({
         ...el,
-        ...clampRect({ x: el.x + dx, y: el.y + dy, w: el.w, h: el.h }, commitBounds(kind)),
+        ...clampRect({ x: el.x + dx, y: el.y + dy, w: el.w, h: el.h }, EDIT_BOUNDS),
       });
       if (selection.kind === 'overlay') {
         api.patchOverlays(
           block.key,
-          block.overlays.map((o) => (o.id === selection.id ? shift(o, 'overlay') : o)),
+          block.overlays.map((o) => (o.id === selection.id ? shift(o) : o)),
         );
       } else if (selection.kind === 'text') {
         const el = block.texts.find((t) => t.id === selection.id);
-        if (el) api.patchText(block.key, el.id, shift(el, 'text'));
+        if (el) api.patchText(block.key, el.id, shift(el));
       } else if (selection.kind === 'qr') {
         const el = block.qrs.find((q) => q.id === selection.id);
-        if (el) api.patchQr(block.key, el.id, shift(el, 'qr'));
+        if (el) api.patchQr(block.key, el.id, shift(el));
       } else if (selection.kind === 'sticker') {
         const el = block.stickers.find((s) => s.id === selection.id);
-        if (el && !el.locked) api.patchSticker(block.key, el.id, shift(el, 'sticker'));
+        if (el && !el.locked) api.patchSticker(block.key, el.id, shift(el));
       }
     },
     [api, block, selection],
@@ -1436,6 +1437,22 @@ export default function Builder({
   const backCoverImageUrl = useMemo(
     () => (coverConfig.back.photoId ? resolvePhotoUrl(photoMap.get(coverConfig.back.photoId), 'full') : null),
     [coverConfig.back.photoId, photoMap],
+  );
+
+  /**
+   * The cover, in the shape every read-only preview surface takes. One object, so the layout
+   * proposal, the flipbook and the post-purchase view cannot disagree about which cover they are
+   * showing — and none of them can fall back to the bare template artwork the way `_preview` did.
+   */
+  const previewCover = useMemo(
+    () => ({
+      config: coverConfig,
+      title: albumTitle,
+      size,
+      frontImageUrl: coverImageUrl,
+      backImageUrl: backCoverImageUrl,
+    }),
+    [coverConfig, albumTitle, size, coverImageUrl, backCoverImageUrl],
   );
 
   // ── page sticker add (from the Stickers rail) ──────────────────────────────────
@@ -2832,6 +2849,7 @@ export default function Builder({
             title: albumTitle,
             frontImageUrl: coverImageUrl,
             backImageUrl: backCoverImageUrl,
+            size,
           }}
           report={quality}
           albumId={albumId}
@@ -3002,7 +3020,7 @@ export default function Builder({
           title={proposal.title}
           blocks={proposal.blocks}
           photoMap={photoMap}
-          cover={selectedCover}
+          cover={previewCover}
           summary={proposal.summary}
           canRegenerate={proposal.kind === 'build' || proposal.kind === 'suggest'}
           onAccept={acceptProposal}

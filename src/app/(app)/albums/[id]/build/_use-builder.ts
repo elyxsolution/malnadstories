@@ -20,8 +20,9 @@ import {
   type TextElement,
   type TextVariant,
 } from '@/lib/builder/model';
-import { makeQr, makeSticker, makeText, PAIR_ASPECT, type LayoutPreset } from '@/lib/builder/elements';
+import { makeQr, makeSticker, makeText, offsetDuplicate, PAIR_ASPECT, type LayoutPreset } from '@/lib/builder/elements';
 
+/** Only for a NEW overlay's default placement, which should always start on the page. */
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /** A base slot within a block: left/right pages (single-pair) or the spread image. */
@@ -250,12 +251,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
         if (b.key !== key) return b;
         const src = b.overlays.find((o) => o.id === overlayId);
         if (!src) return b;
-        const clone: Overlay = {
-          ...src,
-          id: makeOverlayId(),
-          x: clamp01(Math.min(src.x + 0.03, 1 - src.w)),
-          y: clamp01(Math.min(src.y + 0.03, 1 - src.h)),
-        };
+        const clone: Overlay = offsetDuplicate({ ...src, id: makeOverlayId() });
         newId = clone.id;
         return { ...b, overlays: [...b.overlays, clone] };
       }),
@@ -287,7 +283,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
         if (b.key !== key) return b;
         const src = b.texts.find((t) => t.id === id);
         if (!src) return b;
-        const clone = { ...src, id: cryptoId(), x: clamp01(src.x + 0.03), y: clamp01(src.y + 0.03) };
+        const clone = offsetDuplicate({ ...src, id: cryptoId() });
         newId = clone.id;
         return { ...b, texts: [...b.texts, clone] };
       }),
@@ -360,7 +356,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
         if (b.key !== key) return b;
         const src = b.stickers.find((s) => s.id === id);
         if (!src) return b;
-        const clone = { ...src, id: cryptoId(), x: clamp01(src.x + 0.03), y: clamp01(src.y + 0.03) };
+        const clone = offsetDuplicate({ ...src, id: cryptoId() });
         newId = clone.id;
         return { ...b, stickers: [...b.stickers, clone] };
       }),

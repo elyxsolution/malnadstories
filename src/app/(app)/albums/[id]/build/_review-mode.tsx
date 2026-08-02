@@ -16,10 +16,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import PairContent, { PrintGutter, type PairPhoto } from './_pair-frame';
-import { CoverDesignFromConfig, BackCoverDesign } from './_cover-render';
+import { CoverDesignFromConfig, BackCoverDesign, SpineDesign } from './_cover-render';
 import { useBuilderDimensions } from './_dimensions';
 import type { Block } from '@/lib/builder/model';
-import type { CoverConfig } from '@/lib/builder/cover';
+import { spineWidthFor, type CoverConfig } from '@/lib/builder/cover';
 import type { QualityIssue, QualityReport } from './_quality-model';
 
 /**
@@ -48,8 +48,12 @@ import type { QualityIssue, QualityReport } from './_quality-model';
 
 type PhotoFor = (id: string | null | undefined) => PairPhoto | undefined;
 
-/** Cover, then each content spread — the same linear sequence the builder's page strip uses. */
-type Page = { kind: 'cover' } | { kind: 'spread'; block: Block; index: number } | { kind: 'back' };
+/**
+ * The printed surfaces, in the order the PDF emits them. `spine` is here because it is now a real
+ * printed page (see `_print-album`) — review exists to show the customer every surface that will
+ * be manufactured, and a surface they can author but never proof is the gap this closes.
+ */
+type Page = { kind: 'cover' } | { kind: 'spread'; block: Block; index: number } | { kind: 'back' } | { kind: 'spine' };
 
 export default function ReviewMode({
   blocks,
@@ -68,7 +72,8 @@ export default function ReviewMode({
   stickerUrlFor?: (stickerId: string) => string | undefined;
   /** Draw the printed fold (Album Settings → Show print gutter). */
   showGutter?: boolean;
-  cover: { config: CoverConfig; title: string; frontImageUrl: string | null; backImageUrl: string | null };
+  /** `size` is the album's leaf count — it sets how thick the spine proofs, via `spineWidthFor`. */
+  cover: { config: CoverConfig; title: string; frontImageUrl: string | null; backImageUrl: string | null; size: number };
   report: QualityReport;
   albumId: string;
   /** Which content spread to open on — normally whatever the builder was showing. */
@@ -86,6 +91,7 @@ export default function ReviewMode({
       { kind: 'cover' as const },
       ...blocks.map((block, index) => ({ kind: 'spread' as const, block, index })),
       { kind: 'back' as const },
+      { kind: 'spine' as const },
     ],
     [blocks],
   );
@@ -133,7 +139,8 @@ export default function ReviewMode({
     }
   }, [notesKey]);
 
-  const noteId = current?.kind === 'spread' ? `spread:${current.block.key}` : current?.kind === 'cover' ? 'cover' : 'back';
+  const noteId =
+    current?.kind === 'spread' ? `spread:${current.block.key}` : current?.kind === 'cover' ? 'cover' : (current?.kind ?? 'back');
   const writeNote = useCallback(
     (value: string) => {
       setNotes((prev) => {
@@ -238,11 +245,16 @@ export default function ReviewMode({
       ? 'Front cover'
       : current?.kind === 'back'
         ? 'Back cover'
-        : `Spread ${(current?.index ?? 0) + 1} of ${blocks.length}`;
+        : current?.kind === 'spine'
+          ? 'Spine'
+          : `Spread ${(current?.index ?? 0) + 1} of ${blocks.length}`;
 
   const isSpread = current?.kind === 'spread';
-  // A spread is twice as wide as a single cover page, so it gets a wider stage allowance.
-  const stageWidth = isSpread ? 'min(94vw, 1180px)' : 'min(52vw, 560px)';
+  const isSpine = current?.kind === 'spine';
+  // A spread is twice as wide as a single page; the spine is a sliver of one. Its proportions come
+  // from the SAME `spineWidthFor` the builder canvas, the cover preview and the PDF use.
+  const spineAspect = pageRatio * spineWidthFor(cover.size);
+  const stageWidth = isSpread ? 'min(94vw, 1180px)' : isSpine ? 'min(14vw, 130px)' : 'min(52vw, 560px)';
 
   return (
     <div
@@ -309,7 +321,10 @@ export default function ReviewMode({
           >
             <div
               className="relative overflow-hidden bg-white shadow-paper"
-              style={{ aspectRatio: isSpread ? pairRatio : pageRatio, containerType: 'inline-size' }}
+              style={{
+                aspectRatio: isSpread ? pairRatio : isSpine ? spineAspect : pageRatio,
+                containerType: 'inline-size',
+              }}
             >
               {current?.kind === 'cover' ? (
                 <CoverDesignFromConfig
@@ -321,6 +336,8 @@ export default function ReviewMode({
                 />
               ) : current?.kind === 'back' ? (
                 <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
+              ) : current?.kind === 'spine' ? (
+                <SpineDesign config={cover.config} title={cover.title} pageAspect={pageRatio} />
               ) : current ? (
                 <>
                   <PairContent block={current.block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} badge="compact" />

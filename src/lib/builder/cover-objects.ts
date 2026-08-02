@@ -42,12 +42,7 @@
  *
  * PURE — no I/O, no 'use client' / 'server-only'. Safe to import anywhere.
  */
-import {
-  COVER_SCHEMA_VERSION,
-  DEFAULT_SPINE,
-  type CoverConfig,
-  type CoverLayout,
-} from './cover';
+import { COVER_SCHEMA_VERSION, type CoverConfig, type CoverLayout } from './cover';
 import {
   cryptoId,
   freeTexts,
@@ -76,7 +71,7 @@ export const COVER_SIDE_LABEL: Record<CoverSide, string> = {
 };
 
 /** Objects on one face. The spine carries text only — there is no room for anything else. */
-export type CoverSideElements = {
+type CoverSideElements = {
   texts: TextElement[];
   stickers: StickerElement[];
   qrs: QrElement[];
@@ -140,9 +135,9 @@ export function roleLabel(role: CoverTextRole | undefined): string | null {
  * directly in `cqw` (8.5 / 3.6 / 2.9), which makes the conversion exact rather than eyeballed.
  */
 const CQW_TO_SIZE = 10;
-export const TITLE_CQW = 8.5;
-export const SUBTITLE_CQW = 3.6;
-export const AUTHOR_CQW = 2.9;
+const TITLE_CQW = 8.5;
+const SUBTITLE_CQW = 3.6;
+const AUTHOR_CQW = 2.9;
 const SPINE_CQH = 5;
 
 /** Side padding of the legacy title block (`px-[9%]`), preserved so migrated covers don't shift. */
@@ -158,38 +153,79 @@ const SAFE_W = 1 - SAFE_X * 2;
  */
 const lineFrac = (cqw: number, pageAspect: number, lineHeight: number) => (cqw / 100) * pageAspect * lineHeight;
 
-type RoleSpec = { role: CoverTextRole; cqw: number; lineHeight: number; lines: number; gapCqw: number };
+type RoleSpec = { role: CoverTextRole; cqw: number; lineHeight: number; gapCqw: number };
 
 /** The legacy title block, described as data — the single source both migration and presets use. */
 const FRONT_ROLES: RoleSpec[] = [
-  { role: 'title', cqw: TITLE_CQW, lineHeight: 1.04, lines: 2, gapCqw: 0 },
-  { role: 'subtitle', cqw: SUBTITLE_CQW, lineHeight: 1.2, lines: 1.6, gapCqw: 2.4 },
-  { role: 'author', cqw: AUTHOR_CQW, lineHeight: 1.3, lines: 1.6, gapCqw: 3 },
+  { role: 'title', cqw: TITLE_CQW, lineHeight: 1.04, gapCqw: 0 },
+  { role: 'subtitle', cqw: SUBTITLE_CQW, lineHeight: 1.2, gapCqw: 2.4 },
+  { role: 'author', cqw: AUTHOR_CQW, lineHeight: 1.3, gapCqw: 3 },
 ];
+
+/**
+ * HOW MANY LINES THIS TEXT WILL WRAP TO, without measuring anything.
+ *
+ * The legacy title block was laid out by flow: its height was whatever the text needed. An object
+ * has an explicit box, so migration has to predict that height — and the first version simply
+ * assumed the title was two lines. That is wrong in both directions and visibly so: a one-line
+ * title got a box twice as tall as its text, which pushed the whole column off the anchor it was
+ * supposed to be centred on, and a genuinely long title was under-allocated and clipped.
+ *
+ * Estimating is enough, because the box only has to bound the text: it is vertically centred
+ * inside it, so a small error moves nothing. `AVG_GLYPH` is the mean advance width across the
+ * bundled families as a fraction of the font size — the usual ~0.5 for mixed-case Latin. Explicit
+ * newlines are honoured, since a customer who typed one meant it.
+ *
+ * Deliberately NOT a measurement: migration runs during render on every surface including the PDF,
+ * and a canvas/DOM measure there would cost a layout pass per cover and be unavailable server-side.
+ */
+const AVG_GLYPH = 0.5;
+
+function estimateLines(text: string, cqw: number, boxWidthFrac: number): number {
+  const t = text.trim();
+  if (t === '') return 1;
+  const charsPerLine = Math.max(1, Math.floor((boxWidthFrac * 100) / (cqw * AVG_GLYPH)));
+  return t.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.trim().length / charsPerLine)), 0);
+}
+
+/** One role's contribution to the column: its words, and — for a preset — its current styling. */
+type TitleBlockEntry = { role: CoverTextRole; text: string; cqw?: number; lineHeight?: number };
 
 /**
  * Lay the front-cover metadata objects out as the legacy structured block did: a column centred
  * on `posY`, inset by the same safe padding, in the order title → subtitle → author.
  *
- * This is BOTH the migration geometry (so a converted cover looks like it did) and the
- * "Title layout" presets the Cover toolbar offers (so re-applying one puts things back). One
+ * This is BOTH the migration geometry (so a converted cover looks like it did) and the "Title
+ * layout" presets the Cover toolbar offers (so re-applying one puts things back). One
  * implementation means a preset can never disagree with what migration produced.
+ *
+ * `cqw`/`lineHeight` on an entry override the house spec, which is what makes a preset correct
+ * for an object the customer has already restyled: re-arranging a title someone set to twice the
+ * default size has to allocate twice the height, or the preset would clip what it just tidied.
  */
-export function titleBlockRects(
-  present: CoverTextRole[],
+function titleBlockRects(
+  entries: TitleBlockEntry[],
   opts: { posY: number; pageAspect: number },
 ): Record<string, { x: number; y: number; w: number; h: number }> {
-  const specs = FRONT_ROLES.filter((s) => present.includes(s.role));
-  const heights = specs.map((s) => lineFrac(s.cqw, opts.pageAspect, s.lineHeight) * s.lines);
-  const gaps = specs.map((s, i) => (i === 0 ? 0 : (s.gapCqw / 100) * opts.pageAspect));
-  const total = heights.reduce((a, b) => a + b, 0) + gaps.reduce((a, b) => a + b, 0);
+  const rows = FRONT_ROLES.map((spec) => {
+    const entry = entries.find((e) => e.role === spec.role);
+    if (!entry) return null;
+    const cqw = entry.cqw ?? spec.cqw;
+    const lineHeight = entry.lineHeight ?? spec.lineHeight;
+    // A quarter-line of slack so descenders and diacritics are never clipped by the box.
+    const lines = estimateLines(entry.text, cqw, SAFE_W) + 0.25;
+    return { role: spec.role, gapCqw: spec.gapCqw, height: lineFrac(cqw, opts.pageAspect, lineHeight) * lines };
+  }).filter((r): r is NonNullable<typeof r> => r !== null);
+
+  const gaps = rows.map((r, i) => (i === 0 ? 0 : (r.gapCqw / 100) * opts.pageAspect));
+  const total = rows.reduce((a, r) => a + r.height, 0) + gaps.reduce((a, b) => a + b, 0);
 
   let y = opts.posY - total / 2;
   const out: Record<string, { x: number; y: number; w: number; h: number }> = {};
-  specs.forEach((s, i) => {
+  rows.forEach((r, i) => {
     y += gaps[i];
-    out[s.role] = { x: SAFE_X, y: clamp(y, -0.5, 1), w: SAFE_W, h: Math.min(1, heights[i]) };
-    y += heights[i];
+    out[r.role] = { x: SAFE_X, y: clamp(y, -0.5, 1), w: SAFE_W, h: Math.min(1, r.height) };
+    y += r.height;
   });
   return out;
 }
@@ -197,7 +233,7 @@ export function titleBlockRects(
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Where each layout preset anchors the title column — the legacy `posY` defaults, named. */
-export const LAYOUT_POS_Y: Record<CoverLayout, number> = {
+const LAYOUT_POS_Y: Record<CoverLayout, number> = {
   classic: 0.8,
   spotlight: 0.5,
   banner: 0.72,
@@ -249,7 +285,7 @@ function makeSpineText(text: string, color: string): TextElement {
 
 // ── migration ───────────────────────────────────────────────────────────────────────────────
 
-export type CoverMetadata = {
+type CoverMetadata = {
   /** `albums.title` — the album's canonical name. */
   title: string;
 };
@@ -297,7 +333,11 @@ export function migrateCoverConfig(c: CoverConfig, meta: CoverMetadata, pageAspe
     const present: CoverTextRole[] = legacy
       ? (['title', 'subtitle', 'author'] as const).filter((r) => r === 'title' || wanted[r] !== '')
       : missing;
-    const rects = titleBlockRects(present, { posY, pageAspect });
+    // The WORDS matter to the geometry: the column's height is the sum of what each line wraps to.
+    const rects = titleBlockRects(
+      present.map((r) => ({ role: r, text: wanted[r] })),
+      { posY, pageAspect },
+    );
     const created = missing.map((r) =>
       makeRoleText(r, wanted[r], rects[r] ?? { x: SAFE_X, y: 0.8, w: SAFE_W, h: 0.1 }, {
         font: c.font,
@@ -374,16 +414,6 @@ export function metadataFromCoverObjects(c: CoverConfig): { title: string | null
   };
 }
 
-/**
- * THE READ DIRECTION — push metadata edited elsewhere (Album Settings) into the objects.
- *
- * The same guarantee from the other side: renaming the album in Settings retitles the cover
- * immediately, without a reload and without the cover having its own copy of the truth.
- */
-export function applyMetadataToCoverObjects(c: CoverConfig, meta: CoverMetadata, pageAspect: number): CoverConfig {
-  return migrateCoverConfig(c, meta, pageAspect);
-}
-
 // ── title-layout presets ────────────────────────────────────────────────────────────────────
 
 /**
@@ -396,8 +426,13 @@ export function applyMetadataToCoverObjects(c: CoverConfig, meta: CoverMetadata,
  * touches can be dragged somewhere else immediately afterwards.
  */
 export function applyTitleLayout(c: CoverConfig, layout: CoverLayout, pageAspect: number): CoverConfig {
-  const present = (['title', 'subtitle', 'author'] as const).filter((r) => findRole(c.texts, r));
-  const rects = titleBlockRects(present, { posY: LAYOUT_POS_Y[layout], pageAspect });
+  // Each object contributes its OWN words and its OWN styling, so re-applying a preset to a title
+  // the customer has resized allocates the height that title actually needs.
+  const entries = (['title', 'subtitle', 'author'] as const).flatMap<TitleBlockEntry>((role) => {
+    const el = findRole(c.texts, role);
+    return el ? [{ role, text: el.text, cqw: el.size / CQW_TO_SIZE, lineHeight: el.lineHeight }] : [];
+  });
+  const rects = titleBlockRects(entries, { posY: LAYOUT_POS_Y[layout], pageAspect });
   return {
     ...c,
     layout,
@@ -405,6 +440,3 @@ export function applyTitleLayout(c: CoverConfig, layout: CoverLayout, pageAspect
     texts: c.texts.map((t) => (t.role && rects[t.role] ? { ...t, ...rects[t.role], rotation: 0 } : t)),
   };
 }
-
-/** A cover with no elements at all — used when a template/reset clears the design. */
-export const EMPTY_SPINE = { ...DEFAULT_SPINE };

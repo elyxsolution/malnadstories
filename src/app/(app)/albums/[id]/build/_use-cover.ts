@@ -6,6 +6,7 @@ import {
   makeQr,
   makeSticker,
   makeText,
+  offsetDuplicate,
   reorderById,
   type LayerAction,
 } from '@/lib/builder/elements';
@@ -15,7 +16,6 @@ import {
   coverSideBackground,
   coverSideElements,
   coverSideImage,
-  findRole,
   isPermanentRole,
   metadataFromCoverObjects,
   migrateCoverConfig,
@@ -150,8 +150,10 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
 
   // ── surfaces ────────────────────────────────────────────────────────────────────
   const elements = useMemo(() => coverSideElements(config, side), [config, side]);
-  const background = coverSideBackground(config, side);
-  const image = coverSideImage(config, side);
+  const background = coverSideBackground(config, side); // a stored reference — no churn
+  // Memoized because it BUILDS an object: an unmemoized one would hand every consumer a new
+  // identity on each render and defeat their own memos.
+  const image = useMemo(() => coverSideImage(config, side), [config, side]);
 
   /** Decode the side a toolbar callback refers to. Keys are minted as `cover:<side>`. */
   const sideOfKey = useCallback((key: string): CoverSide => {
@@ -165,17 +167,15 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
     [write],
   );
 
-  const els = useCallback((prev: CoverConfig, target: CoverSide) => coverSideElements(prev, target), []);
-
   // ── text ────────────────────────────────────────────────────────────────────────
   const addText = useCallback(
     (variant: TextVariant) => {
       const el = makeText(variant);
-      write((prev) => withCoverSideElements(prev, side, { texts: [...els(prev, side).texts, el] }));
+      write((prev) => withCoverSideElements(prev, side, { texts: [...coverSideElements(prev, side).texts, el] }));
       setSelection({ kind: 'text', id: el.id });
       return el.id;
     },
-    [write, side, els],
+    [write, side],
   );
 
   const patchText = useCallback(
@@ -185,52 +185,52 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
         withCoverSideElements(prev, target, {
           // `role` is structural, not editable — a client patch must never be able to steal or
           // forge a metadata binding (two title objects would make synchronisation ambiguous).
-          texts: els(prev, target).texts.map((t) => (t.id === id ? { ...t, ...patch, role: t.role } : t)),
+          texts: coverSideElements(prev, target).texts.map((t) => (t.id === id ? { ...t, ...patch, role: t.role } : t)),
         }),
       );
     },
-    [write, sideOfKey, els],
+    [write, sideOfKey],
   );
 
   const removeText = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
       write((prev) => {
-        const el = els(prev, target).texts.find((t) => t.id === id);
+        const el = coverSideElements(prev, target).texts.find((t) => t.id === id);
         // The title and the spine are structural: the printed cover always carries them, so the
         // toolbars never offer Delete for them and this refuses it a second time.
         if (el && isPermanentRole(el.role)) return prev;
-        return withCoverSideElements(prev, target, { texts: els(prev, target).texts.filter((t) => t.id !== id) });
+        return withCoverSideElements(prev, target, { texts: coverSideElements(prev, target).texts.filter((t) => t.id !== id) });
       });
     },
-    [write, sideOfKey, els],
+    [write, sideOfKey],
   );
 
   const duplicateText = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
-      const src = els(config, target).texts.find((t) => t.id === id);
+      const src = coverSideElements(config, target).texts.find((t) => t.id === id);
       if (!src) return undefined;
       // A duplicate is a FREE object: copying the title would create a second view of the same
       // metadata, and editing either one would fight the other. The words are copied, the binding
       // is not — which is also the escape hatch for "I want a second line styled like the title".
-      const clone: TextElement = { ...src, id: cryptoId(), role: undefined, x: Math.min(1, src.x + 0.03), y: Math.min(1, src.y + 0.03) };
-      write((prev) => withCoverSideElements(prev, target, { texts: [...els(prev, target).texts, clone] }));
+      const clone: TextElement = offsetDuplicate({ ...src, id: cryptoId(), role: undefined });
+      write((prev) => withCoverSideElements(prev, target, { texts: [...coverSideElements(prev, target).texts, clone] }));
       setSelection({ kind: 'text', id: clone.id });
       return clone.id;
     },
-    [write, sideOfKey, els, config],
+    [write, sideOfKey, config],
   );
 
   // ── stickers ────────────────────────────────────────────────────────────────────
   const addSticker = useCallback(
     (stickerId: string) => {
       const el = makeSticker(stickerId, pageAspect);
-      write((prev) => withCoverSideElements(prev, side, { stickers: [...els(prev, side).stickers, el] }));
+      write((prev) => withCoverSideElements(prev, side, { stickers: [...coverSideElements(prev, side).stickers, el] }));
       setSelection({ kind: 'sticker', id: el.id });
       return el.id;
     },
-    [write, side, els, pageAspect],
+    [write, side, pageAspect],
   );
 
   const patchSticker = useCallback(
@@ -238,75 +238,65 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
       const target = sideOfKey(key);
       write((prev) =>
         withCoverSideElements(prev, target, {
-          stickers: els(prev, target).stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+          stickers: coverSideElements(prev, target).stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)),
         }),
       );
     },
-    [write, sideOfKey, els],
+    [write, sideOfKey],
   );
 
   const removeSticker = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
-      write((prev) => withCoverSideElements(prev, target, { stickers: els(prev, target).stickers.filter((s) => s.id !== id) }));
+      write((prev) => withCoverSideElements(prev, target, { stickers: coverSideElements(prev, target).stickers.filter((s) => s.id !== id) }));
     },
-    [write, sideOfKey, els],
+    [write, sideOfKey],
   );
 
   const duplicateSticker = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
-      const src = els(config, target).stickers.find((s) => s.id === id);
+      const src = coverSideElements(config, target).stickers.find((s) => s.id === id);
       if (!src) return undefined;
-      const clone: StickerElement = { ...src, id: cryptoId(), x: Math.min(1, src.x + 0.03), y: Math.min(1, src.y + 0.03) };
-      write((prev) => withCoverSideElements(prev, target, { stickers: [...els(prev, target).stickers, clone] }));
+      const clone: StickerElement = offsetDuplicate({ ...src, id: cryptoId() });
+      write((prev) => withCoverSideElements(prev, target, { stickers: [...coverSideElements(prev, target).stickers, clone] }));
       setSelection({ kind: 'sticker', id: clone.id });
       return clone.id;
     },
-    [write, sideOfKey, els, config],
+    [write, sideOfKey, config],
   );
 
   // ── QR ──────────────────────────────────────────────────────────────────────────
   const addQr = useCallback(
     (data: string) => {
       const el = makeQr(data, { h: Math.min(1, 0.14 * pageAspect) }, pageAspect);
-      write((prev) => withCoverSideElements(prev, side, { qrs: [...els(prev, side).qrs, el] }));
+      write((prev) => withCoverSideElements(prev, side, { qrs: [...coverSideElements(prev, side).qrs, el] }));
       setSelection({ kind: 'qr', id: el.id });
       return el.id;
     },
-    [write, side, els, pageAspect],
+    [write, side, pageAspect],
   );
 
   const patchQr = useCallback(
     (key: string, id: string, patch: Partial<QrElement>) => {
       const target = sideOfKey(key);
       write((prev) =>
-        withCoverSideElements(prev, target, { qrs: els(prev, target).qrs.map((q) => (q.id === id ? { ...q, ...patch } : q)) }),
+        withCoverSideElements(prev, target, { qrs: coverSideElements(prev, target).qrs.map((q) => (q.id === id ? { ...q, ...patch } : q)) }),
       );
     },
-    [write, sideOfKey, els],
+    [write, sideOfKey],
   );
 
   const removeQr = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
-      write((prev) => withCoverSideElements(prev, target, { qrs: els(prev, target).qrs.filter((q) => q.id !== id) }));
+      write((prev) => withCoverSideElements(prev, target, { qrs: coverSideElements(prev, target).qrs.filter((q) => q.id !== id) }));
     },
-    [write, sideOfKey, els],
+    [write, sideOfKey],
   );
 
-  const duplicateQr = useCallback(
-    (key: string, id: string) => {
-      const target = sideOfKey(key);
-      const src = els(config, target).qrs.find((q) => q.id === id);
-      if (!src) return undefined;
-      const clone: QrElement = { ...src, id: cryptoId(), x: Math.min(1, src.x + 0.03), y: Math.min(1, src.y + 0.03) };
-      write((prev) => withCoverSideElements(prev, target, { qrs: [...els(prev, target).qrs, clone] }));
-      setSelection({ kind: 'qr', id: clone.id });
-      return clone.id;
-    },
-    [write, sideOfKey, els, config],
-  );
+  /* There is deliberately no `duplicateQr`: neither the page nor the cover QR toolbar offers
+     Duplicate, and a capability only one surface could reach is the asymmetry this pass removes. */
 
   // ── backdrop + base image ───────────────────────────────────────────────────────
   /** Set the face's CSS backdrop. Choosing a colour clears the photo — one backdrop at a time. */
@@ -530,7 +520,6 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
     addQr,
     patchQr,
     removeQr,
-    duplicateQr,
     setBackground,
     setPhoto,
     patchImageEdit,
@@ -540,8 +529,6 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
     applyTitle,
     moveLayer,
     deleteSelection,
-    /** Convenience for the toolbars: is this text a metadata view, and which one? */
-    roleOf: (id: string) => findRole(elements.texts, 'title')?.id === id ? 'title' : elements.texts.find((t) => t.id === id)?.role,
     writeSide,
   };
 }

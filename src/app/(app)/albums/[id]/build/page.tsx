@@ -29,6 +29,7 @@ import { listActiveStickers, resolveStickerUrls } from '@/lib/stickers';
 import { listActiveTemplates, listActiveBlueprints } from '@/lib/templates/catalog';
 import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
+import { resolveCoverImageKeys } from '@/lib/albums/cover';
 import { builderFontVars } from '@/lib/fonts';
 
 type AlbumRow = {
@@ -285,6 +286,20 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     }
   }
 
+  /**
+   * The cover's printable image(s), through the CANONICAL resolver — the same one the print route
+   * and checkout use, so the post-purchase view cannot show a different cover from the one in the
+   * PDF. Front follows the priority chain (customer photo → chosen artwork → none, which the
+   * renderer draws from CSS); back uses its own photo only.
+   */
+  const coverKeys = await resolveCoverImageKeys(supabase, {
+    id: album.id,
+    cover_template_id: album.cover_template_id,
+    cover_config: initialCoverConfig,
+  });
+  const coverFrontImageUrl = coverKeys.front.key ? await presignGet(coverKeys.front.key, 3600) : null;
+  const coverBackImageUrl = coverKeys.back.key ? await presignGet(coverKeys.back.key, 3600) : null;
+
   // Initial preview-PDF status (album_pdfs is service-only; ownership already proven
   // by the RLS-scoped album load above). The builder polls for updates.
   const admin = createServiceClient();
@@ -367,7 +382,15 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
           order={{ id: paidOrder.id, status: paidOrder.status }}
           photos={photos}
           blocks={initialBlocks}
-          cover={selectedCover ? { url: selectedCover.url, name: selectedCover.name } : null}
+          /* The customer's DESIGN, resolved exactly as the builder resolves it: their cover photo
+             wins, then the chosen artwork, then the CSS/brand backdrop the renderer draws. */
+          cover={{
+            config: initialCoverConfig,
+            title: album.title,
+            size: album.size,
+            frontImageUrl: coverFrontImageUrl,
+            backImageUrl: coverBackImageUrl,
+          }}
           stickerUrls={stickerUrls}
           initialPdfStatus={initialPdfStatus}
         />

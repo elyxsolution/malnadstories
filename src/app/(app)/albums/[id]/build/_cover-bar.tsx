@@ -18,7 +18,7 @@ import { ColorField } from './_color-picker';
 import { ObjectBar, type BarProps } from './_context-bar';
 import { BACKGROUNDS } from '@/lib/builder/elements';
 import { COVER_LAYOUTS, COVER_LAYOUT_LABEL, type CoverLayout } from '@/lib/builder/cover';
-import { COVER_SIDES, COVER_SIDE_LABEL, type CoverSide } from '@/lib/builder/cover-objects';
+import { COVER_SIDES, COVER_SIDE_LABEL } from '@/lib/builder/cover-objects';
 import type { Background } from '@/lib/builder/model';
 import type { Anchor } from './_use-anchor-rect';
 import type { Photo } from '@/lib/builder/photo';
@@ -288,6 +288,3 @@ function CoverBar(p: CoverBarProps) {
     </CanvasBar>
   );
 }
-
-export { CoverBar, BackgroundBar };
-export type { CoverSide };

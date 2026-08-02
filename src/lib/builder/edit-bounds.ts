@@ -7,35 +7,32 @@
  * every real layout tool, so a photo can be pushed off the edge deliberately (full-bleed crops,
  * a sticker half-hanging off a corner) instead of being pinned inside.
  *
- * ── WHY THERE IS NO LONGER A SEPARATE "TRAVEL" ENVELOPE ───────────────────────────────────
+ * ── ONE BOX, FOR EVERY OBJECT ──────────────────────────────────────────────────────────────
  *
- * There used to be two boxes: a generous uniform `EDIT_BOUNDS` a gesture could roam, and a
- * tighter `commitBounds` the element had to LAND inside. The gap between them is exactly where
- * the "objects snap back when released near the page edge" bug lived: an overlay dragged past the
- * left edge followed the pointer to x = −0.3, then teleported to x = 0 the instant the pointer
- * came up. Nothing about that reads as a rule — it reads as the page reclaiming the object.
+ * This file has been through two collapses, and both removed a distinction that was never real.
  *
- * So the gesture now travels inside the SAME box it may land in (`travelBounds === commitBounds`).
- * An element goes exactly where you put it and stays there. Release is a no-op; there is no
- * settle, no jump, and `clampRect` on release survives only as a defensive backstop.
+ * First there were two boxes per element: a generous envelope a gesture could roam, and a tighter
+ * one the element had to LAND inside. The gap between them was exactly where the "objects snap
+ * back when released near the page edge" bug lived — an overlay followed the pointer to x = −0.3
+ * and teleported to x = 0 on release. A gesture that can only reach places the element may stay
+ * cannot end in a jump, so the two became one.
  *
- * KEEP IN SYNC WITH `src/lib/validations.ts` — these bounds ARE the persisted contract:
- *   OverlaySchema      x,y ∈ [0, 1]      w,h ∈ (0, 1]
- *   TextElementSchema  x,y ∈ [-0.5, 1]   w,h ∈ (0, 1]
- *   QrElementSchema    x,y ∈ [0, 1]      w,h ∈ (0, 1]
- *   StickerElementSch. x,y ∈ [-0.5, 1]   w,h ∈ (0, 1]
+ * Then there were four boxes, one per kind: text and stickers could sit off the left/top edge,
+ * overlays and QR codes could not. That made the same gesture behave differently depending on
+ * what you had grabbed, for no reason beyond the order the features were built in. The schemas
+ * were widened (see `validations.ts`) and the four became one.
  *
- * Note that x ≤ 1 with w ≤ 1 already lets ANY element hang off the right/bottom edge (x = 0.9,
- * w = 0.3 lands its far edge at 1.2). Text and stickers may additionally sit off the left/top.
- * Overlays and QR codes may not — their stored contract starts at 0 — so their left/top travel
- * stops flush with the trim rather than pretending to go further and snapping back. Widening
- * that is a two-line change to `OverlaySchema`/`QrElementSchema`, deliberately NOT made here.
+ * What is left is a single constant. `EDIT_BOUNDS` IS the persisted contract, mirrored exactly by
+ * `OverlaySchema` / `TextElementSchema` / `QrElementSchema` / `StickerElementSchema`:
+ *
+ *   x, y ∈ [−0.5, 1]      w, h ∈ (0, 1]
+ *
+ * Note that x ≤ 1 with w ≤ 1 already lets any object hang off the right/bottom edge (x = 0.9,
+ * w = 0.3 ends at 1.2), so the reachable area is symmetric in effect. Only the part over the
+ * paper prints — every surface clips at the trim — but the stored position is free.
  */
 
 import type { Rect } from './model';
-
-/** The element kinds that live on a page or cover and can be moved. */
-export type EditableKind = 'overlay' | 'text' | 'qr' | 'sticker';
 
 export type Bounds = {
   /** Smallest allowed `x` / `y` (the element's top-left, normalized to the page box). */
@@ -47,10 +44,10 @@ export type Bounds = {
 };
 
 /**
- * The furthest outside the page any element's origin may sit, as a fraction of the page box.
- * Half a page is enough to park an element almost entirely off-canvas.
+ * The furthest outside the page any object's origin may sit, as a fraction of the page box.
+ * Half a page is enough to park one almost entirely off-canvas.
  */
-export const EDIT_MARGIN = 0.5;
+const EDIT_MARGIN = 0.5;
 
 /**
  * How much of the page box the pasteboard occupies VISUALLY — the working margin drawn around
@@ -59,29 +56,18 @@ export const EDIT_MARGIN = 0.5;
  */
 export const PASTEBOARD_PCT = 6;
 
-const COMMIT_BOUNDS: Record<EditableKind, Bounds> = {
-  overlay: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
-  qr: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
-  text: { minX: -EDIT_MARGIN, minY: -EDIT_MARGIN, maxX: 1, maxY: 1 },
-  sticker: { minX: -EDIT_MARGIN, minY: -EDIT_MARGIN, maxX: 1, maxY: 1 },
-};
-
-/** Where an element of this kind is allowed to come to rest (mirrors the persisted schema). */
-export function commitBounds(kind: EditableKind): Bounds {
-  return COMMIT_BOUNDS[kind];
-}
+/** Where every movable object may travel AND come to rest. One box; see the note above. */
+export const EDIT_BOUNDS: Bounds = { minX: -EDIT_MARGIN, minY: -EDIT_MARGIN, maxX: 1, maxY: 1 };
 
 /**
- * How far a GESTURE on this kind may travel.
+ * What `Movable` is handed to opt a host into off-page editing.
  *
- * Identical to `commitBounds` by construction, and that identity is the fix rather than an
- * oversight: a gesture that can only reach places the element may stay can never end in a jump.
- * The function exists (instead of callers using `commitBounds` twice) so the two ideas stay
- * nameable — if a kind ever earns real overshoot, this is the one place it is expressed.
+ * `edit` (how far a gesture goes) and `commit` (where it may land) are the same box, and the
+ * component still takes both because that identity is a DECISION rather than an accident — the
+ * pair is what documents "release never moves anything", and it is where a future overshoot
+ * behaviour would be expressed if one were ever wanted.
  */
-export function travelBounds(kind: EditableKind): Bounds {
-  return COMMIT_BOUNDS[kind];
-}
+export const PASTEBOARD_ESCAPE: { edit: Bounds; commit: Bounds } = { edit: EDIT_BOUNDS, commit: EDIT_BOUNDS };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -90,11 +76,6 @@ export function clampRect(rect: Rect, bounds: Bounds): Rect {
   const x = clamp(rect.x, bounds.minX, bounds.maxX);
   const y = clamp(rect.y, bounds.minY, bounds.maxY);
   return x === rect.x && y === rect.y ? rect : { ...rect, x, y };
-}
-
-/** Does any part of this rect fall outside the printable page? Drives the "will be trimmed" hint. */
-export function isOffPage(rect: Rect): boolean {
-  return rect.x < 0 || rect.y < 0 || rect.x + rect.w > 1 || rect.y + rect.h > 1;
 }
 
 /**

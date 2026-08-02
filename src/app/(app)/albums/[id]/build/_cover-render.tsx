@@ -12,9 +12,8 @@ import {
   type BackCoverConfig,
   type CoverConfig,
   type CoverLayout,
-  type SpineConfig,
 } from '@/lib/builder/cover';
-import { migrateCoverConfig } from '@/lib/builder/cover-objects';
+import { findRole, migrateCoverConfig } from '@/lib/builder/cover-objects';
 import type { Background, EditConfig, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
 /**
@@ -180,19 +179,39 @@ export function BackCoverDesign({
 }
 
 /**
- * THE SPINE — the bound edge, now a surface with objects rather than a hardcoded label.
+ * THE SPINE — the bound edge, a surface with objects rather than a hardcoded label.
  *
  * `container-type: size` (not `inline-size`) because a spine object is sized in `cqh`: the edge is
  * a few percent of a page wide and many times that tall, so height is the only axis that can
  * carry a legible measurement. See `textFontSize`.
+ *
+ * It takes the WHOLE config and migrates, for the same reason `CoverDesignFromConfig` does: a
+ * legacy album's spine text still lives in the `spineTitle` scalar, and every surface that draws
+ * a spine — builder, preview, review, PDF — has to see it. One rule for every cover renderer
+ * ("migrate your input"), rather than each caller remembering.
  */
 export function SpineDesign({
-  spine,
+  config,
+  title,
+  pageAspect = 0.75,
   renderElements = true,
 }: {
-  spine: SpineConfig;
+  config: CoverConfig;
+  /**
+   * The album title — the spine's fallback text when no spine text was set. Optional: an
+   * already-migrated config carries it in its own title object, so a host holding a live cover
+   * (the builder canvas) need not thread it. A host reading straight from the database (the PDF,
+   * review) must pass it, because a v1 row has no title object to read it from yet.
+   */
+  title?: string;
+  pageAspect?: number;
   renderElements?: boolean;
 }) {
+  const resolvedTitle = title ?? findRole(config.texts, 'title')?.text ?? '';
+  const c = useMemo(
+    () => migrateCoverConfig(config, { title: resolvedTitle }, pageAspect),
+    [config, resolvedTitle, pageAspect],
+  );
   return (
     <div
       className="relative h-full w-full overflow-hidden"
@@ -201,7 +220,7 @@ export function SpineDesign({
         containerType: 'size',
       }}
     >
-      {renderElements && spine.texts.map((t) => <TextBox key={t.id} el={t} />)}
+      {renderElements && c.spine.texts.map((t) => <TextBox key={t.id} el={t} />)}
     </div>
   );
 }
@@ -241,7 +260,7 @@ export function CoverSpread({
           <BackCoverDesign back={c.back} imageUrl={backImageUrl} stickerUrlFor={stickerUrlFor} onReady={onReady} />
         </div>
         <div className="relative h-full" style={{ width: `${spinePct}%` }}>
-          <SpineDesign spine={c.spine} />
+          <SpineDesign config={c} title={title} pageAspect={aspectRatio} />
         </div>
         <div className="relative h-full" style={{ width: `${pagePct}%` }}>
           <CoverDesign

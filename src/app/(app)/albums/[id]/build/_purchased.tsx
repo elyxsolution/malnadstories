@@ -6,7 +6,8 @@ import { CheckCircle2, Package, Printer, Box, Truck, PackageCheck, Eye, FileDown
 import { InlineLoader } from '@/components/loading';
 
 import { Button } from '@/components/ui/button';
-import Preview from './_preview';
+import Preview, { type PreviewCover } from './_preview';
+import { CoverDesignFromConfig } from './_cover-render';
 import type { Photo } from '@/lib/builder/photo';
 import { type Block } from '@/lib/builder/model';
 import { orderStatusView, type PurchasedStatus } from '@/lib/orders/status';
@@ -48,7 +49,7 @@ export default function PurchasedAlbum({
   order: { id: string; status: string };
   photos: Photo[];
   blocks: Block[];
-  cover: { url: string; name: string } | null;
+  cover: PreviewCover;
   stickerUrls?: Record<string, string>;
   initialPdfStatus: PdfStatus;
 }) {
@@ -127,9 +128,15 @@ export default function PurchasedAlbum({
       {/* Hero — what you ordered */}
       <header className="flex flex-col gap-5 sm:flex-row sm:items-center">
         <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden bg-muted shadow-paper ring-1 ring-black/10">
+          {/* The customer's OWN cover, not the house artwork underneath it — the same renderer
+              the builder, the preview and the PDF use. */}
           {cover ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={cover.url} alt={cover.name} className="absolute inset-0 h-full w-full object-cover" />
+            <CoverDesignFromConfig
+              config={cover.config}
+              title={cover.title}
+              imageUrl={cover.frontImageUrl}
+              stickerUrlFor={(id) => stickerUrls[id]}
+            />
           ) : (
             <span className="flex h-full w-full items-center justify-center text-muted-foreground/50">
               <BookOpen className="h-6 w-6" />
