@@ -9,10 +9,14 @@ import type { ProductOption } from '@/lib/products/catalog';
 const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
 /**
- * Customer Album Product selection (Phase B Part 2). Premium "buy a printed product" feel:
- * a card per physical product (cover preview, dimensions, description, starting price, preview
- * button, badge) → then the supported page counts for the chosen product. Everything is
- * data-driven from the Phase A catalog; the wizard owns the selected ids.
+ * Customer Album Product selection. Premium "buy a printed product" feel: a card per physical
+ * product (cover preview, dimensions, description, starting price, preview button, badge) →
+ * then the supported page counts for the chosen product. Everything is data-driven from the
+ * catalog; the wizard owns the selected ids.
+ *
+ * There is no `disabled` mode. It existed for the four-step flow, where navigating Back into
+ * an already-created album had to show a frozen copy of this screen. The two-step flow never
+ * returns here after creation, so the state was unreachable.
  */
 export default function ProductSelect({
   products,
@@ -20,14 +24,12 @@ export default function ProductSelect({
   pageCount,
   onSelectProduct,
   onSelectPageCount,
-  disabled = false,
 }: {
   products: ProductOption[];
   selectedProductId: string;
   pageCount: number | null;
   onSelectProduct: (id: string) => void;
   onSelectPageCount: (n: number) => void;
-  disabled?: boolean;
 }) {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const selected = products.find((p) => p.id === selectedProductId) ?? null;
@@ -42,11 +44,10 @@ export default function ProductSelect({
             <button
               key={p.id}
               type="button"
-              disabled={disabled}
-              onClick={() => !disabled && onSelectProduct(p.id)}
+              onClick={() => onSelectProduct(p.id)}
               className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-card text-left transition-all duration-200 ${
                 isSel ? 'ring-2 ring-primary shadow-lg' : 'hover:-translate-y-0.5 hover:shadow-md'
-              } ${disabled ? 'opacity-60' : ''}`}
+              }`}
             >
               {/* Cover preview */}
               <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
@@ -130,11 +131,10 @@ export default function ProductSelect({
                 <button
                   key={pr.pageCount}
                   type="button"
-                  disabled={disabled}
-                  onClick={() => !disabled && onSelectPageCount(pr.pageCount)}
+                  onClick={() => onSelectPageCount(pr.pageCount)}
                   className={`flex flex-col gap-1 rounded-xl border p-4 text-left transition-all duration-200 ${
                     isSel ? 'border-primary bg-primary/[0.04] ring-1 ring-primary' : 'hover:border-ring hover:bg-accent/40'
-                  } ${disabled ? 'opacity-60' : ''}`}
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-display text-2xl font-semibold tabular-nums text-foreground">{pr.pageCount}</span>
@@ -156,7 +156,7 @@ export default function ProductSelect({
         <ProductPreview
           productId={previewId}
           onStartDesigning={() => {
-            if (!disabled) onSelectProduct(previewId);
+            onSelectProduct(previewId);
             setPreviewId(null);
           }}
           onClose={() => setPreviewId(null)}

@@ -2,40 +2,38 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { Check, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { InlineLoader } from '@/components/loading';
 
 import { signOut } from '@/lib/actions/auth';
+import WizardProgress from '@/components/wizard-progress';
+import { LAST_WIZARD_STEP } from '@/lib/wizard/steps';
 
 /**
- * The ONE builder navbar (Part 1) — merges the old global app header and the builder's
- * identity/action row into a single sticky bar. The global AppHeader is suppressed on the
- * builder route (see app-header-gate), so this is the only chrome above the editor.
+ * The ONE builder navbar — merges the global app header and the builder's identity/action
+ * row into a single sticky bar. The global AppHeader is suppressed on the builder route
+ * (see app-header-gate), so this is the only chrome above the editor.
  *
- *   Logo · Format — Begin — Memories — Review (progress) · Save & Exit · email · Logout
+ *   Logo · Album Details — Upload & Build (progress) · Save & Exit · email · Logout
  *
- * The four steps mirror the album-creation wizard (`albums/new/_wizard.tsx`). In the
- * builder you are at Memories (draft) → Review (submitted); earlier steps are complete.
+ * The progress indicator is the SHARED `WizardProgress`, driven by `WIZARD_STEPS`. It used
+ * to be a second, hand-maintained four-entry array declared right here — which had already
+ * drifted from the wizard's own copy (its fourth step said "Review" where the wizard said
+ * "Create"). There is now one declaration; this file states only WHERE the builder sits in
+ * it, which is the final step: reaching the builder means the album already exists.
  */
-
-const STEPS = ['Format', 'Begin', 'Memories', 'Review'] as const;
 
 export default function BuilderHeader({
   email,
-  status,
   saving,
   exiting,
   onSaveExit,
 }: {
   email: string;
-  status: string;
   saving: boolean;
   exiting: boolean;
   onSaveExit: () => void;
 }) {
-  // draft → working in Memories; submitted → Review. Earlier steps are always complete.
-  const current = status === 'submitted' ? 3 : 2;
-
   return (
     <header className="sticky top-0 z-40 flex h-[72px] flex-none items-center gap-4 border-b border-border/70 bg-background/90 px-4 shadow-[0_1px_0_rgb(16_24_20/0.04),0_8px_24px_-20px_rgb(16_24_20/0.25)] backdrop-blur-md sm:px-6">
       {/* Brand */}
@@ -58,8 +56,17 @@ export default function BuilderHeader({
         </span>
       </Link>
 
-      {/* Progress — absolutely centred so the brand/account widths never shift it */}
-      <ProgressSteps current={current} />
+      {/*
+        Progress — absolutely centred so the brand/account widths never shift it.
+        The builder IS the second step ("Upload & Build"): you cannot reach it without an
+        album, so step one is always behind you. The album's draft/submitted status is
+        surfaced by the builder's own submit/review UI, not by this bar.
+      */}
+      <WizardProgress
+        current={LAST_WIZARD_STEP}
+        tone="studio"
+        className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2 md:flex"
+      />
 
       {/* Account + exit */}
       <div className="ml-auto flex flex-none items-center gap-2 sm:gap-3">
@@ -90,40 +97,3 @@ export default function BuilderHeader({
   );
 }
 
-function ProgressSteps({ current }: { current: number }) {
-  return (
-    <ol className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 md:flex">
-      {STEPS.map((label, i) => {
-        const done = i < current;
-        const active = i === current;
-        return (
-          <li key={label} className="flex items-center">
-            <span className="flex items-center gap-2 px-1.5">
-              <span
-                className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold tabular-nums transition-colors duration-200 ${
-                  done
-                    ? 'bg-studio text-studio-foreground'
-                    : active
-                      ? 'bg-studio/[0.12] text-studio ring-1 ring-studio/30'
-                      : 'bg-secondary text-muted-foreground/70 ring-1 ring-border'
-                }`}
-              >
-                {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
-              </span>
-              <span
-                className={`text-[13px] tracking-tight transition-colors duration-200 ${
-                  active ? 'font-semibold text-foreground' : done ? 'text-foreground/70' : 'text-muted-foreground'
-                }`}
-              >
-                {label}
-              </span>
-            </span>
-            {i < STEPS.length - 1 && (
-              <span className={`h-px w-6 ${i < current ? 'bg-studio/40' : 'bg-border'}`} aria-hidden />
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}

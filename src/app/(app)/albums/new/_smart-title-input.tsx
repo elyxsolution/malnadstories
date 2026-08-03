@@ -57,7 +57,6 @@ export default function SmartTitleInput({
   onSelectLocation,
   placeholder,
   maxLength = 120,
-  disabled = false,
   id,
   inputClassName,
 }: {
@@ -67,7 +66,6 @@ export default function SmartTitleInput({
   onSelectLocation: (loc: string) => void;
   placeholder?: string;
   maxLength?: number;
-  disabled?: boolean;
   id?: string;
   inputClassName?: string;
 }) {
@@ -144,7 +142,7 @@ export default function SmartTitleInput({
     }
   };
 
-  const showList = open && matches.length > 0 && !disabled;
+  const showList = open && matches.length > 0;
 
   return (
     <div ref={ref} className="relative">
@@ -154,21 +152,20 @@ export default function SmartTitleInput({
         value={value}
         maxLength={maxLength}
         placeholder={placeholder}
-        disabled={disabled}
         autoComplete="off"
         onChange={(e) => {
           onChange(e.target.value);
-          if (!disabled) setOpen(true);
+          setOpen(true);
           setActive(-1);
         }}
-        onFocus={() => !disabled && setOpen(true)}
+        onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
         role="combobox"
         aria-expanded={showList}
         aria-controls={listId}
         aria-autocomplete="list"
         className={cn(
-          'h-auto w-full border-0 border-b border-input bg-transparent px-0 py-2.5 font-display text-4xl font-medium leading-tight tracking-tight text-foreground shadow-none outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-60 sm:text-5xl',
+          'h-auto w-full border-0 border-b border-input bg-transparent px-0 py-2.5 font-display text-4xl font-medium leading-tight tracking-tight text-foreground shadow-none outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-0 sm:text-5xl',
           inputClassName,
         )}
       />

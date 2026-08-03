@@ -2050,7 +2050,7 @@ export default function Builder({
           dirty={api.dirty}
         />
       ) : (
-        <BuilderHeader email={email} status={status} saving={saving} exiting={exiting} onSaveExit={saveAndExit} />
+        <BuilderHeader email={email} saving={saving} exiting={exiting} onSaveExit={saveAndExit} />
       )}
       <CanvasToolbar
         title={albumTitle}
