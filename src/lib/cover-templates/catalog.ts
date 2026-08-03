@@ -111,3 +111,46 @@ export async function getActiveCoverTemplateConfig(id: string): Promise<CoverCon
   const rows = await getActiveCoverTemplatesCached();
   return rows.find((r) => r.id === id)?.config ?? null;
 }
+
+/**
+ * THE default cover template's id (0052), or null when no admin default is set.
+ *
+ * Deliberately a SEPARATE, narrow query rather than a column on the list above. PostgREST fails
+ * the whole request on an unknown column, so folding `is_default` into the main select would blank
+ * the entire active-cover catalog on any environment where 0052 has not been run yet — taking the
+ * builder's cover panel down with it. Isolated here, a missing column simply yields null, and
+ * every caller already treats null as "no default".
+ *
+ * Cached under the same tag as the catalog, so the existing admin bust (`revalidateTag`) refreshes
+ * it too — including when an admin changes which template is the default.
+ */
+const fetchDefaultCoverTemplateId = async (): Promise<string | null> => {
+  const svc = createServiceClient();
+  const { data, error } = await svc
+    .from('cover_design_templates')
+    .select('id')
+    .eq('status', 'active')
+    .eq('is_default', true)
+    .limit(1)
+    .maybeSingle();
+  if (error) return null; // pre-migration, or no row — both mean "no default"
+  return (data as { id: string } | null)?.id ?? null;
+};
+
+const getDefaultCoverTemplateIdCached = unstable_cache(fetchDefaultCoverTemplateId, ['cover-template-default'], {
+  tags: [CACHE_TAGS.coverTemplatesActive],
+  revalidate: CACHE_TTL.coverTemplatesActive,
+});
+
+/**
+ * The default template's CoverConfig, ready to apply to a new album — or null when no default is
+ * set, the row is inactive, or its config no longer validates. Resolved THROUGH the active catalog,
+ * so a default can never bypass the active + config-validity gates the customer path enforces.
+ */
+export async function getDefaultCoverTemplateConfig(): Promise<{ id: string; config: CoverConfig } | null> {
+  const id = await getDefaultCoverTemplateIdCached();
+  if (!id) return null;
+  const rows = await getActiveCoverTemplatesCached();
+  const row = rows.find((r) => r.id === id);
+  return row ? { id: row.id, config: row.config } : null;
+}

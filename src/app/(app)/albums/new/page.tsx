@@ -1,17 +1,19 @@
 import { listActiveProducts } from '@/lib/products/catalog';
-import { listActiveCoverOptions } from '@/lib/covers';
 import { listActiveTemplates, listActiveBlueprints } from '@/lib/templates/catalog';
-import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
 import { brandFontVars } from '@/lib/fonts';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import CreateWizard from './_wizard';
 
+/**
+ * Album creation entry. Cover catalogs are deliberately NOT loaded here: customers no longer
+ * choose a cover during onboarding — every new album receives the admin's default cover template
+ * (0052), resolved server-side inside `createAlbumDraft`. The full cover catalog still loads in
+ * the builder, where covers can be browsed, switched and edited.
+ */
 export default async function NewAlbumPage() {
-  const [albumProducts, covers, activeTemplates, coverTemplates, activeBlueprints] = await Promise.all([
-    listActiveProducts(), // physical Album Products (0047) — dimensions + per-page-count pricing + previews
-    listActiveCoverOptions(),
+  const [albumProducts, activeTemplates, activeBlueprints] = await Promise.all([
+    listActiveProducts(), // physical Album Products (0047) — dimensions + previews
     listActiveTemplates(),
-    listActiveCoverTemplates(),
     listActiveBlueprints(),
   ]);
 
@@ -38,14 +40,11 @@ export default async function NewAlbumPage() {
   // me" can draw varied, geometry-driven overlay slots (deterministic; no AI).
   const templates = activeTemplates.map((t) => ({ base: t.geometry.base, overlays: t.geometry.overlays }));
 
-  // Minimal cover-design-template options for the Format step (id + name + preview thumbnail).
-  const coverTemplateOptions = coverTemplates.map((t) => ({ id: t.id, name: t.name, previewUrl: t.previewUrl }));
-
   return (
     <div className={`${brandFontVars} font-ui`}>
       {/* Pre-warm the worker: this user is about to upload photos in the wizard. */}
       <WorkerPrewarm />
-      <CreateWizard albumProducts={albumProducts} covers={covers} coverTemplates={coverTemplateOptions} templates={templates} blueprints={blueprints} />
+      <CreateWizard albumProducts={albumProducts} templates={templates} blueprints={blueprints} />
     </div>
   );
 }

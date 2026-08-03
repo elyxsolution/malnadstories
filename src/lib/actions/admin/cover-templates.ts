@@ -11,6 +11,7 @@ import {
   CoverTemplateSaveSchema,
   CoverTemplateStatusSchema,
   CoverTemplateFeatureSchema,
+  CoverTemplateDefaultSchema,
   CoverTemplateReorderSchema,
   CoverTemplateDuplicateSchema,
   CoverTemplateImportRequestSchema,
@@ -150,10 +151,13 @@ export async function setCoverTemplateStatus(input: unknown): Promise<CoverTempl
     if (!check.ok) return { ok: false, error: `Cannot activate — the design is invalid: ${check.error}` };
   }
 
-  const { error } = await svc
-    .from('cover_design_templates')
-    .update({ status, updated_at: new Date().toISOString(), updated_by: actor.userId })
-    .eq('id', id);
+  // A template that leaves ACTIVE cannot remain THE default (0052): customers can't select an
+  // inactive cover, so silently applying one to every new album would bypass that gate. Cleared
+  // in the same write, which also frees the slot for another template.
+  const fields: Record<string, unknown> = { status, updated_at: new Date().toISOString(), updated_by: actor.userId };
+  if (status !== 'active') fields.is_default = false;
+
+  const { error } = await svc.from('cover_design_templates').update(fields).eq('id', id);
   if (error) {
     console.error('[admin] setCoverTemplateStatus error', error);
     return { ok: false, error: 'Could not update the status.' };
@@ -191,6 +195,63 @@ export async function setCoverTemplateFeatured(input: unknown): Promise<CoverTem
     return { ok: false, error: 'Could not update the cover template.' };
   }
   await audit(svc, actor.userId, 'cover_template.featured', id, { featured });
+  revalidatePath('/admin/cover-templates');
+  bust();
+  return { ok: true };
+}
+
+/**
+ * Set (or clear) THE default cover template (0052) — the one every new album receives
+ * automatically, since the creation flow no longer asks the customer to pick a cover.
+ *
+ * Setting a default first clears the existing one (the partial unique index also guards this),
+ * so there is never more than one. Clearing just unsets this row, after which album creation
+ * falls back to a blank custom cover — exactly the behaviour before this feature existed.
+ *
+ * The template must be ACTIVE to become the default: an inactive row is not selectable by
+ * customers, and silently applying one to every new album would bypass that gate.
+ */
+export async function setDefaultCoverTemplate(input: unknown): Promise<CoverTemplateSimpleResult> {
+  let actor: { userId: string };
+  try {
+    actor = await requireCoverTemplateCapability();
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = CoverTemplateDefaultSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { id, isDefault } = parsed.data;
+
+  const svc = createServiceClient();
+  const { data: row } = await svc.from('cover_design_templates').select('status').eq('id', id).maybeSingle();
+  const r = row as { status: string } | null;
+  if (!r) return { ok: false, error: 'Cover template not found.' };
+  if (isDefault && r.status !== 'active') {
+    return { ok: false, error: 'Activate this template before making it the default.' };
+  }
+
+  if (isDefault) {
+    // Clear the current default FIRST so the unique index never trips.
+    const { error: clearErr } = await svc
+      .from('cover_design_templates')
+      .update({ is_default: false })
+      .eq('is_default', true);
+    if (clearErr) {
+      console.error('[admin] setDefaultCoverTemplate clear error', clearErr);
+      return { ok: false, error: 'Could not update the default cover.' };
+    }
+  }
+
+  const { error } = await svc
+    .from('cover_design_templates')
+    .update({ is_default: isDefault, updated_at: new Date().toISOString(), updated_by: actor.userId })
+    .eq('id', id);
+  if (error) {
+    console.error('[admin] setDefaultCoverTemplate error', error);
+    return { ok: false, error: 'Could not update the default cover.' };
+  }
+
+  await audit(svc, actor.userId, isDefault ? 'cover_template.set_default' : 'cover_template.unset_default', id, {});
   revalidatePath('/admin/cover-templates');
   bust();
   return { ok: true };

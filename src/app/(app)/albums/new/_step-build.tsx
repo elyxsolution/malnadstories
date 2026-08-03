@@ -1,15 +1,6 @@
 'use client';
 
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  Dices,
-  ImageIcon,
-  LayoutTemplate,
-  RotateCw,
-  Sparkles,
-} from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, LayoutTemplate, Palette, RotateCw, Wand2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { InlineLoader } from '@/components/loading';
@@ -30,14 +21,14 @@ import type { WizardBlueprint } from './_wizard';
  * before they were offered anything to do. They are the same moment: photos arrive, and
  * the album can be built. So they share a screen.
  *
- * UPLOAD owns the main column, BUILD owns a rail that stays in view while the grid
- * scrolls — the reason it is a rail and not a band underneath is that a 100-photo grid
- * would otherwise push every action off-screen exactly when the user wants one. On
- * mobile the rail becomes the section below, in the same reading order.
+ * THE BUILD CHOICE IS THE POINT OF THIS PAGE, and the layout now says so. Uploading is a
+ * compact utility strip at the top — dropzone, batch progress, one status line, the grid —
+ * while the three build methods are full-size action cards below it, the largest and only
+ * accented things on the page. That is the inverse of the first pass, where a tall upload
+ * hero pushed three small buttons into a side rail.
  *
- * Nothing here waits on the backend. The three actions are live from the moment the
- * album exists, uploads keep running underneath them, and the copy says plainly which
- * photos a machine-built layout can reach.
+ * Nothing here waits on the backend. Uploads keep running underneath the cards, and the
+ * copy says plainly which photos a machine-built layout can actually reach.
  */
 
 export default function StepBuild({
@@ -51,6 +42,7 @@ export default function StepBuild({
   featuredCount,
   busy,
   error,
+  uploadAnchorRef,
   onAutoCreate,
   onChooseLayouts,
   onDesignMyself,
@@ -67,6 +59,8 @@ export default function StepBuild({
   featuredCount: number;
   busy: boolean;
   error: string | null;
+  /** Scroll target for "Upload photos" in the Auto Create warning. */
+  uploadAnchorRef: React.RefObject<HTMLDivElement>;
   onAutoCreate: () => void;
   onChooseLayouts: () => void;
   onDesignMyself: () => void;
@@ -78,41 +72,27 @@ export default function StepBuild({
   const batch = uploads.activeSessions;
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-10">
-      {/* ── UPLOAD ─────────────────────────────────────────────────────── */}
-      <section className="min-w-0 space-y-5" aria-labelledby="upload-heading">
-        <header className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1
-              id="upload-heading"
-              className="font-display text-[1.75rem] font-semibold leading-tight tracking-tight sm:text-[2rem]"
-            >
-              Add your photographs.
-            </h1>
-            <p className="mt-1.5 text-[14px] text-muted-foreground">
-              Drop them in — you can start building while they upload.
-            </p>
-          </div>
-          <div className="text-right">
-            <div className="font-display text-3xl font-semibold leading-none tabular-nums">
-              {photos.length}
-              <span className="text-lg text-muted-foreground/60"> / {cap}</span>
-            </div>
-            <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-              {remaining} {remaining === 1 ? 'slot' : 'slots'} left
-            </div>
-          </div>
-        </header>
+    <div className="space-y-8">
+      {/* ── UPLOAD — compact utility strip ─────────────────────────────── */}
+      <section ref={uploadAnchorRef} className="scroll-mt-28 space-y-3" aria-labelledby="upload-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 id="upload-heading" className="font-display text-lg font-semibold tracking-tight">
+            Your photographs
+          </h2>
+          <p className="text-[12px] tabular-nums text-muted-foreground">
+            <span className="font-medium text-foreground">{photos.length}</span> of {cap} · {remaining}{' '}
+            {remaining === 1 ? 'slot' : 'slots'} left
+          </p>
+        </div>
 
         <Uploader albumId={albumId} remaining={remaining} uploads={uploads} />
 
-        {/* Batch progress — one bar per pick, so a 60-file drop reads as one thing.
-            Bytes are half the bar and worker time the other half, so it keeps moving
-            after the upload lands instead of parking at 100%. */}
+        {/* Batch progress — one bar per pick, so a 60-file drop reads as one thing. Bytes are
+            half the bar and worker time the other half, so it keeps moving after upload lands. */}
         {batch.length > 0 && (
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {batch.map((s) => (
-              <li key={s.id} className="rounded-xl border bg-card px-3.5 py-2.5">
+              <li key={s.id} className="rounded-lg border bg-card px-3 py-2">
                 <div className="flex items-center justify-between gap-3 text-[12px]">
                   <span className="flex min-w-0 items-center gap-2 font-medium">
                     <InlineLoader />
@@ -120,11 +100,9 @@ export default function StepBuild({
                       {s.completed} of {s.total} added
                     </span>
                   </span>
-                  <span className="flex-none tabular-nums text-muted-foreground">
-                    {Math.round(s.progress * 100)}%
-                  </span>
+                  <span className="flex-none tabular-nums text-muted-foreground">{Math.round(s.progress * 100)}%</span>
                 </div>
-                <span className="mt-2 block h-1 overflow-hidden rounded-full bg-secondary">
+                <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-secondary">
                   <span
                     className="block h-full origin-left rounded-full bg-primary transition-transform duration-300 ease-glide"
                     style={{ transform: `scaleX(${s.progress})` }}
@@ -137,7 +115,7 @@ export default function StepBuild({
 
         {/* One status line, not three counters. */}
         {photos.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
               {ready} ready
@@ -163,18 +141,14 @@ export default function StepBuild({
         )}
 
         {photos.length === 0 ? (
-          <div className="rounded-2xl border border-dashed px-6 py-12 text-center">
-            <span className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-secondary text-muted-foreground">
-              <ImageIcon className="h-5 w-5" />
-            </span>
-            <p className="mt-3 font-display text-lg font-semibold tracking-tight">No photographs yet</p>
-            <p className="mx-auto mt-1 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
-              Add up to {cap}. Or skip this for now and design the pages first — you can upload
-              from inside the builder at any time.
-            </p>
-          </div>
+          <p className="rounded-xl border border-dashed px-4 py-5 text-center text-[13px] leading-relaxed text-muted-foreground">
+            No photographs yet — add up to {cap}. You can also design the pages first and upload from
+            inside the builder.
+          </p>
         ) : (
-          <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-6">
+          /* The grid stays comfortable: tiles are unchanged in size, there are simply more
+             columns available now that the section around them is tighter. */
+          <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 xl:grid-cols-10">
             {photos.map((p) => {
               const src = resolvePhotoUrl(p, 'thumb');
               const task = uploads.taskByTempPhotoId.get(p.id);
@@ -182,10 +156,7 @@ export default function StepBuild({
               const canRetry = state === 'failed' && task && task.photoId === null;
 
               return (
-                <li
-                  key={p.id}
-                  className="group relative aspect-square overflow-hidden rounded-lg border bg-muted"
-                >
+                <li key={p.id} className="group relative aspect-square overflow-hidden rounded-lg border bg-muted">
                   {src ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -232,96 +203,94 @@ export default function StepBuild({
         )}
       </section>
 
-      {/* ── BUILD ──────────────────────────────────────────────────────── */}
-      <aside className="lg:sticky lg:top-24 lg:self-start" aria-labelledby="build-heading">
-        {/* The divider does the separating on desktop; the heading does it on mobile. */}
-        <div className="space-y-3 border-t pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-          <div>
-            <h2 id="build-heading" className="font-display text-lg font-semibold tracking-tight">
-              Build your album
-            </h2>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              Three ways to turn {ready > 0 ? `your ${ready} ` : ''}
-              {ready === 1 ? 'photograph' : 'photographs'} into a finished book. You can change
-              everything afterwards.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-1">
-            <MethodCard
-              Icon={Dices}
-              title="Auto Create Album"
-              badge="Fastest"
-              primary
-              desc={
-                autoTarget
-                  ? `We arrange your photos into the “${autoTarget.name}” layout automatically.`
-                  : 'We arrange your photos into a full album automatically.'
-              }
-              meta={
-                autoTarget
-                  ? [
-                      { k: 'Layout', v: autoTarget.name },
-                      { k: 'Holds', v: `${autoTarget.slotCount}` },
-                      { k: 'Ready photos', v: `${ready}` },
-                    ]
-                  : [{ k: 'Ready photos', v: `${ready}` }]
-              }
-              note={
-                processing > 0
-                  ? `${processing} still processing — those stay in your tray to place yourself.`
-                  : null
-              }
-              cta="Auto Create"
-              onClick={onAutoCreate}
-              disabled={busy}
-            />
-
-            <MethodCard
-              Icon={LayoutTemplate}
-              title="Choose Layouts"
-              desc="Browse designed album layouts and pick the style you like."
-              meta={
-                blueprints.length > 0
-                  ? [
-                      { k: 'Layouts', v: `${blueprints.length}` },
-                      { k: 'Categories', v: `${categoryCount}` },
-                      { k: 'Featured', v: `${featuredCount}` },
-                    ]
-                  : []
-              }
-              note={blueprints.length === 0 ? 'No layouts for this album size yet.' : null}
-              cta="Browse layouts"
-              onClick={onChooseLayouts}
-              disabled={busy || blueprints.length === 0}
-            />
-
-            <MethodCard
-              Icon={Sparkles}
-              title="Design Album Yourself"
-              desc="Open a blank album and place every photograph exactly where you want it."
-              meta={[]}
-              note={null}
-              cta="Open builder"
-              onClick={onDesignMyself}
-              disabled={busy}
-            />
-          </div>
-
-          {error && (
-            <p role="alert" className="pt-1 text-[13px] text-destructive">
-              {error}
-            </p>
-          )}
+      {/* ── BUILD — the point of the page ──────────────────────────────── */}
+      <section className="space-y-4 border-t pt-8" aria-labelledby="build-heading">
+        <div>
+          <h2
+            id="build-heading"
+            className="font-display text-[1.6rem] font-semibold leading-tight tracking-tight sm:text-[1.9rem]"
+          >
+            How should we build it?
+          </h2>
+          <p className="mt-1.5 max-w-prose text-[14px] leading-relaxed text-muted-foreground">
+            Pick a starting point — you can change every page afterwards in the builder.
+          </p>
         </div>
-      </aside>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <MethodCard
+            Icon={Wand2}
+            title="Auto Create"
+            badge="Fastest"
+            primary
+            desc={
+              autoTarget
+                ? `Generate a complete album from the “${autoTarget.name}” layout, with your photos placed for you.`
+                : 'Generate a complete album automatically, with your photos placed for you.'
+            }
+            meta={
+              autoTarget
+                ? [
+                    { k: 'Layout', v: autoTarget.name },
+                    { k: 'Holds', v: `${autoTarget.slotCount}` },
+                    { k: 'Ready photos', v: `${ready}` },
+                  ]
+                : [{ k: 'Ready photos', v: `${ready}` }]
+            }
+            note={
+              processing > 0
+                ? `${processing} still processing — those stay in your tray to place yourself.`
+                : null
+            }
+            cta="Auto Create"
+            onClick={onAutoCreate}
+            disabled={busy}
+          />
+
+          <MethodCard
+            Icon={LayoutTemplate}
+            title="Choose Layout"
+            desc="Browse curated album layouts and pick the style you like, then fill it while you build."
+            meta={
+              blueprints.length > 0
+                ? [
+                    { k: 'Layouts', v: `${blueprints.length}` },
+                    { k: 'Categories', v: `${categoryCount}` },
+                    { k: 'Featured', v: `${featuredCount}` },
+                  ]
+                : []
+            }
+            note={blueprints.length === 0 ? 'No layouts for this album size yet.' : null}
+            cta="Browse layouts"
+            onClick={onChooseLayouts}
+            disabled={busy || blueprints.length === 0}
+          />
+
+          <MethodCard
+            Icon={Palette}
+            title="Design Yourself"
+            desc="Start with an empty album and place every photograph exactly where you want it."
+            meta={[]}
+            note="Full control, from a blank page."
+            cta="Open builder"
+            onClick={onDesignMyself}
+            disabled={busy}
+          />
+        </div>
+
+        {error && (
+          <p role="alert" className="text-[13px] text-destructive">
+            {error}
+          </p>
+        )}
+      </section>
     </div>
   );
 }
 
 /**
- * One build option. Compact enough for a rail, with a single clear action; the primary
- * one is the only card that carries the accent, so the hierarchy survives being stacked.
+ * One build option, as a large action card rather than a button with a label. The primary
+ * card is the only one carrying the accent, so stacking them on mobile keeps the hierarchy.
  */
 function MethodCard({
   Icon,
@@ -348,42 +317,53 @@ function MethodCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border p-4 transition-all duration-200 ease-glide ${
-        disabled ? 'opacity-60' : 'hover:shadow-md'
+      className={`flex flex-col rounded-2xl border p-5 transition-all duration-200 ease-glide sm:p-6 ${
+        disabled ? 'opacity-60' : 'hover:-translate-y-1 hover:shadow-elevated'
       } ${primary ? 'border-primary/30 bg-primary/[0.03] ring-1 ring-primary/10' : 'bg-card'}`}
     >
-      <div className="flex items-center gap-2.5">
-        <span className="grid h-9 w-9 flex-none place-items-center rounded-xl bg-primary/[0.07] text-primary ring-1 ring-primary/15">
-          <Icon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0">
-          <h3 className="truncate font-display text-[15px] font-semibold tracking-tight">{title}</h3>
+      {/* flex-1 on the content block keeps the three CTAs aligned across cards whose
+          descriptions and stat lists differ in height. */}
+      <div className="flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <span
+            className={`grid h-12 w-12 flex-none place-items-center rounded-xl ring-1 ${
+              primary
+                ? 'bg-primary text-primary-foreground ring-primary/20'
+                : 'bg-primary/[0.07] text-primary ring-primary/15'
+            }`}
+          >
+            <Icon className="h-5 w-5" />
+          </span>
           {badge && (
-            <span className="text-[11px] font-medium uppercase tracking-wide text-primary/80">{badge}</span>
+            <span className="rounded-full bg-primary/[0.08] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              {badge}
+            </span>
           )}
         </div>
+
+        <h3 className="mt-4 font-display text-xl font-semibold tracking-tight">{title}</h3>
+        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
+
+        {meta.length > 0 && (
+          <dl className="mt-4 space-y-1 border-t pt-3">
+            {meta.map((m) => (
+              <div key={m.k} className="flex items-center justify-between gap-2 text-[12px]">
+                <dt className="text-muted-foreground">{m.k}</dt>
+                <dd className="truncate font-medium tabular-nums text-foreground">{m.v}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
+        {note && <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
       </div>
-
-      <p className="mt-2.5 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
-
-      {meta.length > 0 && (
-        <dl className="mt-3 space-y-1 border-t pt-2.5">
-          {meta.map((m) => (
-            <div key={m.k} className="flex items-center justify-between gap-2 text-[12px]">
-              <dt className="text-muted-foreground">{m.k}</dt>
-              <dd className="truncate font-medium tabular-nums text-foreground">{m.v}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-
-      {note && <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
 
       <Button
         onClick={onClick}
         disabled={disabled}
+        size="lg"
         variant={primary ? 'default' : 'outline'}
-        className={`mt-3.5 w-full ${primary ? LUX_PRIMARY : ''}`}
+        className={`mt-5 h-11 w-full text-[14px] ${primary ? LUX_PRIMARY : ''}`}
       >
         <Icon /> {cta}
       </Button>

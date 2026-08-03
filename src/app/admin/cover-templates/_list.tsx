@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { InlineLoader } from '@/components/loading';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Star, Copy, Eye, EyeOff, Archive, Pencil, Download, Upload, X } from 'lucide-react';
+import { Star, Copy, Eye, EyeOff, Archive, Pencil, Download, Upload, X, Crown } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { CoverDesignFromConfig } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { CoverConfig } from '@/lib/builder/cover';
@@ -12,6 +12,7 @@ import { coverCategoryLabel, coverStatusChip, coverStatusLabel } from '@/lib/cov
 import {
   setCoverTemplateStatus,
   setCoverTemplateFeatured,
+  setDefaultCoverTemplate,
   duplicateCoverTemplate,
   exportCoverTemplate,
   importCoverTemplate,
@@ -23,6 +24,8 @@ export type AdminCoverTemplate = {
   category: string;
   status: string;
   featured: boolean;
+  /** THE default applied to every new album (0052). At most one template is true. */
+  isDefault: boolean;
   config: CoverConfig;
   updatedAt: string;
 };
@@ -131,6 +134,11 @@ export default function CoverTemplatesList({
                         <Star className="h-3 w-3" /> Featured
                       </span>
                     )}
+                    {t.isDefault && (
+                      <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-sm">
+                        <Crown className="h-3 w-3" /> Default
+                      </span>
+                    )}
                   </div>
                 </Link>
 
@@ -169,6 +177,25 @@ export default function CoverTemplatesList({
                       className={t.featured ? 'text-gold' : ''}
                     >
                       <Star className="h-4 w-4" />
+                    </Button>
+                    {/* THE default for new albums (0052). Only an ACTIVE template may hold it —
+                        the action rejects otherwise, so the control is disabled to match. */}
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t.isDefault ? 'Clear default cover' : 'Make default cover for new albums'}
+                      title={
+                        t.isDefault
+                          ? 'Default for new albums — click to clear'
+                          : active
+                            ? 'Make this the default for new albums'
+                            : 'Activate this template first'
+                      }
+                      disabled={busy === t.id || (!active && !t.isDefault)}
+                      onClick={() => run(t.id, () => setDefaultCoverTemplate({ id: t.id, isDefault: !t.isDefault }))}
+                      className={t.isDefault ? 'text-primary' : ''}
+                    >
+                      <Crown className="h-4 w-4" />
                     </Button>
                     <Button
                       variant="ghost"

@@ -10,7 +10,6 @@ import type { Photo } from '@/lib/builder/photo';
 import ProductGallery from './_product-gallery';
 import { getProductPreview, type ProductPreviewResult } from '@/lib/actions/product-preview';
 
-const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
 /**
  * Full-screen product preview (Phase B redesign). Renders the product's DEMO ALBUM through the
@@ -191,11 +190,9 @@ function PanelBody({ product }: { product: ProductMeta }) {
       </p>
       {product.description && <p className="text-sm leading-relaxed text-white/70">{product.description}</p>}
 
+      {/* No price. This lightbox is part of onboarding, which creates an album rather than
+          selling one — pricing belongs to checkout. */}
       <dl className="grid grid-cols-2 gap-3 border-y border-white/10 py-4 text-sm">
-        <div>
-          <dt className="text-white/50">Starting price</dt>
-          <dd className="font-semibold tabular-nums">{product.startingPrice != null ? inr(product.startingPrice) : '—'}</dd>
-        </div>
         <div>
           <dt className="text-white/50">Page counts</dt>
           <dd className="font-semibold tabular-nums">{product.pageCounts.join(' · ') || '—'}</dd>

@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import Link from 'next/link';
 import NextImage from 'next/image';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Check, CheckCircle2, ImageIcon, Dices } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, CheckCircle2, ImageIcon, Wand2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { InlineLoader } from '@/components/loading';
@@ -18,21 +18,26 @@ import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } fr
 import { usePhotoPipeline } from '../[id]/build/_use-photo-pipeline';
 import type { Photo } from '@/lib/builder/photo';
 import type { ProductOption } from '@/lib/products/catalog';
-import type { CoverOption } from '@/lib/covers';
 import BlueprintPicker from './_blueprint-picker';
-import StepDetails, { type CoverTemplateOption } from './_step-details';
+import StepDetails from './_step-details';
 import StepBuild from './_step-build';
 
 /**
  * ALBUM CREATION — a TWO-step flow.
  *
- *   1 · Album Details   product · page count · cover · title · destination · dates · words
+ *   1 · Album Details   product · page count · title · destination · dates · words
  *   2 · Upload & Build  photos, and the three ways to turn them into a book
  *
  * It used to be four (Format → Begin → Memories → Create). That split was never a
  * property of the domain: Format and Begin cannot be submitted separately (the create
  * payload requires product, page count AND title together), and Memories and Create are
  * one moment — photos arrive, the album gets built.
+ *
+ * ONBOARDING COLLECTS ALBUM INFORMATION ONLY. It no longer asks for a cover and no longer
+ * shows a price. Every new album receives the admin's DEFAULT cover template (0052),
+ * resolved server-side; the full cover catalog, custom design and template switching all
+ * remain in the builder, where the customer actually has the album in front of them.
+ * Pricing belongs to checkout, which is untouched.
  *
  * THE BACKEND LIFECYCLE IS UNCHANGED. The album is still created at exactly one point,
  * by exactly one call: `createAlbumDraft`, on leaving step 1. Uploads still go
@@ -96,15 +101,10 @@ export type WizardBlueprint = {
 
 export default function CreateWizard({
   albumProducts,
-  covers,
-  coverTemplates = [],
   templates = [],
   blueprints = [],
 }: {
   albumProducts: ProductOption[];
-  covers: CoverOption[];
-  /** Active builder-JSON cover DESIGN templates (0040) — a fully-editable starting point. */
-  coverTemplates?: CoverTemplateOption[];
   /** Active layout presets — feed the deterministic auto-layout fallback. */
   templates?: TemplateChoice[];
   /** Active whole-album blueprints (0043) — the auto-select / choose-layout strategies. */
@@ -123,27 +123,6 @@ export default function CreateWizard({
     albumProducts.find((p) => p.isDefault)?.id ?? albumProducts[0]?.id ?? '',
   );
   const [pageCount, setPageCount] = useState<number | null>(null);
-  // Cover choice is one of three, mutually exclusive:
-  //   coverId → legacy PNG artwork · designId → builder-JSON design template · customCover → blank
-  const [coverId, setCoverId] = useState<string | null>(null);
-  const [designId, setDesignId] = useState<string | null>(null);
-  const [customCover, setCustomCover] = useState(false);
-
-  const pickArtwork = useCallback((id: string) => {
-    setCoverId(id);
-    setDesignId(null);
-    setCustomCover(false);
-  }, []);
-  const pickDesign = useCallback((id: string) => {
-    setDesignId(id);
-    setCoverId(null);
-    setCustomCover(false);
-  }, []);
-  const pickCustom = useCallback(() => {
-    setCustomCover(true);
-    setCoverId(null);
-    setDesignId(null);
-  }, []);
 
   /**
    * Destination is now its OWN field. The title keeps its location autocomplete because it
@@ -195,6 +174,10 @@ export default function CreateWizard({
   const [autoCreating, setAutoCreating] = useState(false);
   const [autoStage, setAutoStage] = useState(0);
   const [autoConfirm, setAutoConfirm] = useState<WizardBlueprint | null>(null);
+  /** Auto Create pressed with no usable photos — hard-blocked, warning shown. */
+  const [autoBlocked, setAutoBlocked] = useState(false);
+  /** Scroll target so the warning's "Upload photos" lands on the dropzone. */
+  const uploadAnchorRef = useRef<HTMLDivElement>(null);
 
   const cap = pageCount ? photoCap(pageCount) : 100;
   const ready = photos.filter((p) => p.status === 'ready');
@@ -205,22 +188,19 @@ export default function CreateWizard({
   const trimmedTitle = title.trim();
   const dateError = !!fromDate && !!toDate && fromDate > toDate;
   const titleTooLong = trimmedTitle.length > TITLE_MAX;
-  const hasCoverChoice = !!coverId || !!designId || customCover;
   const travelPeriod = composePeriod(fromDate, toDate);
 
   const missing = !albumProductId
     ? 'Choose an album to continue'
     : !pageCount
       ? 'Choose a page count to continue'
-      : !hasCoverChoice
-        ? 'Choose a cover to continue'
-        : !trimmedTitle
-          ? 'Name your album to continue'
-          : titleTooLong
-            ? `Titles are limited to ${TITLE_MAX} characters`
-            : dateError
-              ? 'Check your travel dates'
-              : null;
+      : !trimmedTitle
+        ? 'Name your album to continue'
+        : titleTooLong
+          ? `Titles are limited to ${TITLE_MAX} characters`
+          : dateError
+            ? 'Check your travel dates'
+            : null;
   const canContinue = missing === null;
 
   /**
@@ -233,13 +213,13 @@ export default function CreateWizard({
 
     setCreating(true);
     setError(null);
+    // No cover ids are sent: onboarding no longer asks. The server applies the admin's
+    // DEFAULT cover template (0052) — or leaves the cover blank when none is set — and the
+    // customer changes it freely in the builder. Same call, same lifecycle, same timing.
     const res = await createAlbumDraft({
       title: trimmedTitle,
       albumProductId,
       pageCount: pageCount ?? undefined,
-      // Exactly one cover source (or neither, for a blank custom cover).
-      coverTemplateId: coverId ?? undefined,
-      coverDesignTemplateId: designId ?? undefined,
       destination,
       travelDates: travelPeriod,
       description,
@@ -298,14 +278,33 @@ export default function CreateWizard({
     }
   };
 
-  /** Auto Create entry — soft-gate on "not enough photos", then proceed. Never blocks. */
+  /**
+   * Auto Create entry — two gates, in order:
+   *
+   *  1. HARD: zero usable photos. Auto Create places only photos the worker has finished
+   *     (`readyPhotoIds` server-side), so with none ready it would produce an album of empty
+   *     frames and drop the customer into the builder wondering what happened. We stop before
+   *     any navigation and before any layout is written, and say why.
+   *  2. SOFT: fewer ready photos than the layout holds — the existing confirm, which offers
+   *     "add more" or "continue anyway". Unchanged.
+   */
   const runAutoCreate = () => {
     if (!albumId || !pageCount) return;
+    if (ready.length === 0) {
+      setAutoBlocked(true);
+      return;
+    }
     if (autoTarget && ready.length < autoTarget.slotCount) {
       setAutoConfirm(autoTarget);
       return;
     }
     void proceedAutoCreate();
+  };
+
+  /** Dismiss the warning and take the customer to the dropzone. */
+  const goToUploader = () => {
+    setAutoBlocked(false);
+    uploadAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   /**
@@ -406,13 +405,8 @@ export default function CreateWizard({
           {step === STEP_DETAILS && (
             <StepDetails
               albumProducts={albumProducts}
-              covers={covers}
-              coverTemplates={coverTemplates}
               albumProductId={albumProductId}
               pageCount={pageCount}
-              coverId={coverId}
-              designId={designId}
-              customCover={customCover}
               title={title}
               destination={destination}
               fromDate={fromDate}
@@ -423,9 +417,6 @@ export default function CreateWizard({
               titleMaxLength={TITLE_MAX}
               onSelectProduct={selectProduct}
               onSelectPageCount={setPageCount}
-              onPickArtwork={pickArtwork}
-              onPickDesign={pickDesign}
-              onPickCustom={pickCustom}
               onTitleChange={setTitle}
               onTitleLocation={applyTitleLocation}
               onDestinationChange={setDestination}
@@ -447,6 +438,7 @@ export default function CreateWizard({
               featuredCount={featuredCount}
               busy={autoCreating || bpBusy}
               error={bpError}
+              uploadAnchorRef={uploadAnchorRef}
               onAutoCreate={runAutoCreate}
               onChooseLayouts={() => setBpPickerOpen(true)}
               onDesignMyself={launchBuilder}
@@ -518,6 +510,46 @@ export default function CreateWizard({
         </div>
       )}
 
+      {/*
+        Auto Create — HARD block: no usable photos. Same overlay language as every other
+        dialog in this flow (backdrop click to dismiss, scale-in panel), not a browser alert.
+        Nothing was navigated and no layout was written when this appears.
+      */}
+      {autoBlocked && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="auto-blocked-title"
+          className="animate-fade-in fixed inset-0 z-[118] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setAutoBlocked(false)}
+        >
+          <div
+            className="animate-scale-in w-full max-w-sm rounded-2xl border bg-background p-6 text-center shadow-elevated"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-warning/[0.12] text-warning ring-1 ring-warning/25">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <h2 id="auto-blocked-title" className="mt-3 font-display text-xl font-semibold tracking-tight">
+              {photos.length === 0 ? 'Upload some photos first' : 'Your photos are still processing'}
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              {photos.length === 0
+                ? 'Auto Create arranges your photographs into the album, so it needs at least one to work with.'
+                : 'Auto Create can only place photographs that have finished processing. Give it a moment, or design the album yourself in the meantime.'}
+            </p>
+            <div className="mt-5 flex flex-col gap-2">
+              <Button onClick={goToUploader} className={LUX_PRIMARY}>
+                <ImageIcon /> Upload photos
+              </Button>
+              <Button variant="ghost" onClick={() => setAutoBlocked(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Auto Create — "not enough photos" soft confirm (never fails) */}
       {autoConfirm && (
         <div
@@ -564,7 +596,7 @@ export default function CreateWizard({
       {autoCreating && (
         <div className="animate-fade-in fixed inset-0 z-[125] flex flex-col items-center justify-center bg-[linear-gradient(180deg,hsl(156_36%_12%),hsl(156_36%_8%))] px-6 text-center">
           <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10 text-gold ring-1 ring-white/10">
-            <Dices className="h-7 w-7 animate-pulse" />
+            <Wand2 className="h-7 w-7 animate-pulse" />
           </span>
           <h2 className="mt-6 font-display text-[clamp(1.9rem,5vw,2.6rem)] font-normal leading-tight text-primary-foreground">
             Creating your album

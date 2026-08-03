@@ -548,6 +548,10 @@ export const coverDesignTemplates = pgTable('cover_design_templates', {
   // Merchandising flags (0041) — surface "Popular" + sticky "Pinned" shelves in the picker.
   popular: boolean('popular').notNull().default(false),
   pinned: boolean('pinned').notNull().default(false),
+  // THE default cover applied to every new album (0052). At most one row may be true — enforced
+  // by a partial unique index. Customers no longer pick a cover during creation; they change it
+  // freely in the builder. No default set ⇒ creation falls back to a blank custom cover.
+  isDefault: boolean('is_default').notNull().default(false),
   sort: integer('sort').notNull().default(0),
   createdBy: uuid('created_by').references(() => profiles.id, { onDelete: 'set null' }),
   updatedBy: uuid('updated_by').references(() => profiles.id, { onDelete: 'set null' }),

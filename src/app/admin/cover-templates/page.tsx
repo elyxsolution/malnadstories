@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Plus, Crown } from 'lucide-react';
 import { db } from '@/db';
 import { coverDesignTemplates } from '@/db/schema';
 import { desc } from 'drizzle-orm';
@@ -23,6 +23,7 @@ export default async function CoverTemplatesPage() {
         category: coverDesignTemplates.category,
         status: coverDesignTemplates.status,
         featured: coverDesignTemplates.featured,
+        isDefault: coverDesignTemplates.isDefault,
         sort: coverDesignTemplates.sort,
         config: coverDesignTemplates.config,
         updatedAt: coverDesignTemplates.updatedAt,
@@ -41,22 +42,38 @@ export default async function CoverTemplatesPage() {
     category: r.category,
     status: r.status,
     featured: r.featured,
+    isDefault: r.isDefault,
     config: normalizeCoverConfig(r.config as Parameters<typeof normalizeCoverConfig>[0]) as CoverConfig,
     updatedAt: r.updatedAt.toISOString(),
   }));
+
+  const defaultTemplate = templates.find((t) => t.isDefault) ?? null;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Cover templates</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Full cover designs built in the same editor customers use. Customers pick one as a fully-editable starting
-            point. (For legacy uploaded-image covers, see{' '}
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Full cover designs built in the same editor customers use. Customers no longer choose a cover while creating
+            an album — every new album starts from the <strong className="font-medium text-foreground">default</strong>{' '}
+            template below, and they change it freely in the builder. (For legacy uploaded-image covers, see{' '}
             <Link href="/admin/covers" className="underline">
               Cover artwork
             </Link>
             .)
+          </p>
+          <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12px]">
+            <Crown className={`h-3.5 w-3.5 ${defaultTemplate ? 'text-gold' : 'text-muted-foreground'}`} />
+            {defaultTemplate ? (
+              <>
+                Default for new albums: <strong className="font-medium text-foreground">{defaultTemplate.name}</strong>
+              </>
+            ) : (
+              <span className="text-muted-foreground">
+                No default set — new albums start with a blank cover the customer designs themselves.
+              </span>
+            )}
           </p>
         </div>
         <Link

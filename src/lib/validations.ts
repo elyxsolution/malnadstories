@@ -370,6 +370,13 @@ export const CoverTemplateFeatureSchema = z.object({
   featured: z.boolean(),
 });
 
+// THE default cover template (0052) — applied automatically to every new album. At most one row
+// may be default; the action clears the previous one and a partial unique index backs it.
+export const CoverTemplateDefaultSchema = z.object({
+  id: z.string().uuid('Invalid template'),
+  isDefault: z.boolean().optional().default(true),
+});
+
 export const CoverTemplateReorderSchema = z.object({
   // Ordered list of template ids → their new sort index is the array position.
   ids: z.array(z.string().uuid()).min(1, 'Nothing to reorder').max(500, 'Too many items'),

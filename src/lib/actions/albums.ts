@@ -8,7 +8,7 @@ import { redirect } from 'next/navigation';
 import { CreateAlbumSchema, UpdateAlbumDetailsSchema } from '@/lib/validations';
 import { enqueueR2Cleanup } from '@/lib/queue';
 import { hasActiveOrder, isEditingLocked } from '@/lib/orders/album-lock';
-import { getActiveCoverTemplateConfig } from '@/lib/cover-templates/catalog';
+import { getActiveCoverTemplateConfig, getDefaultCoverTemplateConfig } from '@/lib/cover-templates/catalog';
 import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
 import { getActiveProduct, getDefaultProduct } from '@/lib/products/catalog';
 import type { CoverConfig } from '@/lib/builder/cover';
@@ -86,11 +86,14 @@ async function insertAlbumForUser(
     return { ok: false, error: 'Please choose an album and page count.' };
   }
 
-  // Cover source resolution (Phase 3). Three mutually-exclusive paths:
+  // Cover source resolution. Mutually-exclusive paths, in priority order:
   //   1. coverDesignTemplateId → copy the builder-JSON template's CoverConfig into the album
   //      (fully editable; photoIds nulled by applyCoverTemplateToAlbum). cover_template_id stays null.
   //   2. coverTemplateId → legacy uploaded-PNG cover artwork; must be an ACTIVE row.
-  //   3. neither → a blank custom cover (the customer designs it in the builder before submit).
+  //   3. neither → THE admin default cover template (0052), applied exactly as path 1 —
+  //      same catalog, same active + config-validity gates, same clone. The creation flow no
+  //      longer asks the customer to choose; they change it freely in the builder.
+  //   4. neither, and no default set → a blank custom cover (the pre-0052 behaviour, unchanged).
   let appliedCoverConfig: CoverConfig | null = null;
   if (data.coverDesignTemplateId) {
     // Read via the service-role catalog (validates + re-checks active) so a forged/inactive id
@@ -107,6 +110,12 @@ async function insertAlbumForUser(
       .eq('active', true)
       .maybeSingle();
     if (!cover) return { ok: false, error: 'That cover design is unavailable. Please choose another.' };
+  } else {
+    // No cover was requested — apply THE admin default, through the very same catalog and gates
+    // as path 1. Best-effort by design: a missing/inactive/invalid default resolves to null and
+    // the album starts blank, because creation must never fail over a cover nobody chose.
+    const fallback = await getDefaultCoverTemplateConfig();
+    if (fallback) appliedCoverConfig = applyCoverTemplateToAlbum(fallback.config);
   }
 
   // user_id from the verified JWT; status omitted → DB 'draft' default (0021). cover_template_id
