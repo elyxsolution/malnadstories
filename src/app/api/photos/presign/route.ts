@@ -15,7 +15,54 @@ import { checkLimit } from '@/lib/security/guard';
  * directly to R2. NOTHING here is trusted from the client: the user must own the
  * album, the type must be allowed, the size must be within the cap, and the album
  * must not already be full. The signature pins content-type + content-length.
+ *
+ * RETRY RE-SIGNING (Phase 6, decision C2). An optional `key` lets a client resume an upload it
+ * already started instead of forking a second identity. That matters because `photos.upload_key`
+ * is the idempotency key for `/api/photos/confirm` (0053): a retry that minted a fresh key would
+ * produce a duplicate photo row, a duplicate hardening job, a second consumed cap slot, and an
+ * orphaned R2 object. Re-signing the SAME key makes a PUT retry overwrite its own object.
+ *
+ * It is a request to re-sign a key the caller ALREADY OWNS — never a way to name one. The seven
+ * checks in `validateRetryKey` re-derive everything from the session rather than trusting any of
+ * it, so the widest thing a caller can do with this parameter is re-upload bytes to an object
+ * they created moments ago and have not yet confirmed.
  */
+
+/**
+ * The exact shape `randomUUID()` produces below, and nothing else. This is what excludes every
+ * other object in the bucket by construction: derivative masters (`…_full.jpg`), thumbnails
+ * (`…_thumb.jpg`), `preview.pdf`, and the `covers/` and `stickers/` namespaces all fail it,
+ * because a v4 UUID contains no underscore and the basename must be a bare UUID plus extension.
+ */
+const RAW_BASENAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z]{3,4}$/;
+
+/** Structural verdict. Every rejection is deterministic, so the client must not retry it. */
+type RetryKeyVerdict = { ok: true } | { ok: false; error: string };
+
+/**
+ * Validate a client-supplied retry key against the session. Every rule is structural, so there
+ * is nothing here that a caller can talk their way past with a crafted string.
+ */
+function validateRetryKey(key: string, userId: string, albumId: string, ext: string): RetryKeyVerdict {
+  // (3)+(4) Prefix: the key must live under THIS user and THIS album. `userId` comes from the
+  // verified JWT and `albumId` has already been proven owned, so this single check pins both.
+  const prefix = `${userId}/albums/${albumId}/`;
+  if (!key.startsWith(prefix)) return { ok: false, error: 'Invalid object key' };
+
+  const basename = key.slice(prefix.length);
+  // No further path segments: `…/albums/<id>/sub/dir/file.jpg` is not a raw upload key.
+  if (basename.includes('/')) return { ok: false, error: 'Invalid object key' };
+
+  // (5) Shape: a bare UUID basename. Rejects derivatives, the PDF, and anything hand-written.
+  if (!RAW_BASENAME.test(basename)) return { ok: false, error: 'Invalid object key' };
+
+  // (6) Extension must match the content type being re-signed. The worker derives the sanitized
+  // and thumbnail keys from this key, so letting a retry switch type would desynchronise them.
+  if (!basename.endsWith(`.${ext}`)) return { ok: false, error: 'Invalid object key' };
+
+  return { ok: true };
+}
+
 export async function POST(request: Request) {
   const supabase = createClient();
   const {
@@ -63,7 +110,7 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
-  const { albumId, contentType, size } = parsed.data;
+  const { albumId, contentType, size, key: retryKey } = parsed.data;
 
   // Ownership gate: RLS scopes this SELECT to the user's own albums. A foreign or
   // non-existent album returns null → reject. Never trust the client's claim.
@@ -105,7 +152,58 @@ export async function POST(request: Request) {
   }
 
   const ext = ALLOWED_CONTENT_TYPES[contentType as AllowedContentType];
-  const key = `${user.id}/albums/${albumId}/${randomUUID()}.${ext}`;
+
+  /**
+   * THE KEY. Minted server-side on a first attempt (unchanged), or re-signed on a retry.
+   *
+   * Checks (1) and (2) — album ownership via RLS, and the edit lock — already ran above and
+   * apply to both paths identically. (3)–(6) are structural and live in `validateRetryKey`.
+   * (7) is the one that needs the database: a key that a photo row has already claimed must
+   * never be handed back out as a fresh upload target, or a confirmed photo's bytes could be
+   * overwritten (and, once the worker has hardened and deleted the raw object, re-created).
+   */
+  let key: string;
+  if (retryKey === undefined) {
+    key = `${user.id}/albums/${albumId}/${randomUUID()}.${ext}`;
+  } else {
+    const verdict = validateRetryKey(retryKey, user.id, albumId, ext);
+    if (!verdict.ok) {
+      return NextResponse.json({ error: verdict.error }, { status: 400 });
+    }
+
+    /**
+     * (7) Already claimed? Two plain equality filters rather than a composed `.or(...)` string:
+     * this is a security check, and building a PostgREST filter by interpolation is exactly the
+     * kind of thing that quietly stops matching when a value contains a reserved character.
+     * Both are scoped by `user_id` AND run under RLS (`users_own_photos`), and the prefix check
+     * above already proved the key is this user's, so neither can probe another user's photo.
+     * `upload_key` is the immutable identity (0053); `r2_key` is checked too because a legacy
+     * row may carry the key there with `upload_key` still null.
+     */
+    const claims = await Promise.all([
+      supabase.from('photos').select('id').eq('user_id', user.id).eq('upload_key', retryKey).limit(1).maybeSingle(),
+      supabase.from('photos').select('id').eq('user_id', user.id).eq('r2_key', retryKey).limit(1).maybeSingle(),
+    ]);
+
+    if (claims.some((c) => c.error)) {
+      // Fail CLOSED but RETRYABLY: we cannot prove the key is unclaimed, and re-signing a
+      // claimed key is the one outcome that could destroy a confirmed photo's bytes.
+      console.error('presign retry-key lookup failed:', claims.find((c) => c.error)?.error);
+      return NextResponse.json({ error: 'Could not start upload. Please try again.' }, { status: 503 });
+    }
+
+    if (claims.some((c) => c.data)) {
+      // The upload already became a photo. This is a TERMINAL upload situation, not a reason to
+      // create a second logical upload — the client's correct move is to (re)confirm the same
+      // key, which is idempotent and returns the existing row. The code says exactly that.
+      return NextResponse.json(
+        { error: 'This upload has already been saved.', code: 'key_already_used' },
+        { status: 409 },
+      );
+    }
+
+    key = retryKey;
+  }
 
   const url = await presignPut({
     key,

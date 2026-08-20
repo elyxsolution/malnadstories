@@ -4,13 +4,15 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
-import { redirect } from 'next/navigation';
 import { CreateAlbumSchema, UpdateAlbumDetailsSchema } from '@/lib/validations';
 import { enqueueR2Cleanup } from '@/lib/queue';
 import { hasActiveOrder, isEditingLocked } from '@/lib/orders/album-lock';
+import { IN_PROGRESS_MS } from '@/lib/pdf/generate';
+import { previewPdfKey } from '@/lib/pdf/key';
 import { getActiveCoverTemplateConfig, getDefaultCoverTemplateConfig } from '@/lib/cover-templates/catalog';
 import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
 import { getActiveProduct, getDefaultProduct } from '@/lib/products/catalog';
+import { deriveAlbumTitle } from '@/lib/albums/title';
 import type { CoverConfig } from '@/lib/builder/cover';
 
 export type AlbumActionState = { error: string } | null;
@@ -34,10 +36,10 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Shared album-insert core — validates the chosen product + cover (both via RLS) and
- * inserts the album for the verified user. Used by BOTH the form action (createAlbum,
- * which redirects) and the wizard (createAlbumDraft, which returns the id). No new
- * behaviour: same validation, same column-scoped insert, status still server-default.
+ * Shared album-insert core — validates the chosen product + cover (both via RLS), derives the
+ * album's title, and inserts the album for the verified user. `createAlbumDraft` is its only
+ * caller, and this is the only INSERT into `albums`, which is what makes the guarantees below
+ * (a resolved product, a valid cover, a non-empty title) hold for every album that exists.
  */
 async function insertAlbumForUser(
   supabase: SupabaseServerClient,
@@ -118,13 +120,32 @@ async function insertAlbumForUser(
     if (fallback) appliedCoverConfig = applyCoverTemplateToAlbum(fallback.config);
   }
 
+  /**
+   * THE TITLE, DERIVED SERVER-SIDE (Phase 5). The creation flow no longer asks the customer to
+   * name an album — a decision they would be making before seeing a single page — so the name
+   * comes from what they already told us about the trip: destination, else travel dates, else
+   * "Untitled Album". The rule itself lives in `deriveAlbumTitle`, which is pure and has no idea
+   * this function exists; here it is simply applied.
+   *
+   * DELIBERATELY HERE, and only here. `insertAlbumForUser` is the one chokepoint every album
+   * INSERT passes through, so "no album exists without a non-empty title" holds even for a caller
+   * that assembles `ParsedAlbum` without going through `CreateAlbumSchema`. There is no second
+   * derivation in the wizard, and nothing the browser sends can influence the result: `title` is
+   * not part of the creation contract at all, so a request carrying one is stripped by Zod before
+   * it ever reaches this line.
+   *
+   * The product is resolved above and is deliberately NOT an input — see `deriveAlbumTitle` for
+   * why a SKU makes a poor cover line, and why no clock is involved.
+   */
+  const title = deriveAlbumTitle({ destination: data.destination, travelDates: data.travelDates });
+
   // user_id from the verified JWT; status omitted → DB 'draft' default (0021). cover_template_id
   // is null for the design-template / blank paths.
   const { data: album, error: insertError } = await supabase
     .from('albums')
     .insert({
       user_id: userId,
-      title: data.title,
+      title,
       size: pageCount, // page count remains albums.size (backward-compatible)
       product_id: albumProductId, // physical product (0047)
       // Product snapshot at creation (0049) — historical record; rendering uses live dimensions.
@@ -158,37 +179,13 @@ async function insertAlbumForUser(
   return { ok: true, id: albumId };
 }
 
-export async function createAlbum(
-  _prevState: AlbumActionState,
-  formData: FormData,
-): Promise<AlbumActionState> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
-
-  const parsed = CreateAlbumSchema.safeParse({
-    title: formData.get('title'),
-    productId: formData.get('productId'),
-    coverTemplateId: formData.get('coverTemplateId') || undefined,
-    coverDesignTemplateId: formData.get('coverDesignTemplateId') || undefined,
-    destination: formData.get('destination'),
-    travelDates: formData.get('travelDates'),
-    description: formData.get('description'),
-  });
-  if (!parsed.success) return { error: parsed.error.issues[0].message };
-
-  const res = await insertAlbumForUser(supabase, user.id, parsed.data);
-  if (!res.ok) return { error: res.error };
-  redirect(`/albums/${res.id}/build`);
-}
-
 /**
- * Wizard variant of createAlbum (Design Completion Phase 1). Same validated insert as
- * the form action, but RETURNS the new album id instead of redirecting — the creation
- * wizard needs the album to exist (so it can upload into it) while staying on the page.
- * Reuses the existing createAlbum flow via the shared core; additive only.
+ * Create the album and RETURN its id (rather than redirecting): the creation wizard needs the
+ * album to exist — so it can upload into it — while the customer stays on the page.
+ *
+ * The accepted payload is `{ albumProductId, pageCount, destination, travelDates, description }`
+ * (plus the optional cover ids the wizard no longer sends). Notably NOT a title: since Phase 5
+ * the name is derived server-side from the trip details, so the browser cannot supply one.
  */
 export async function createAlbumDraft(input: unknown): Promise<CreateAlbumDraftResult> {
   const supabase = createClient();
@@ -312,13 +309,49 @@ export async function deleteAlbum(albumId: unknown): Promise<DeleteResult> {
 
   // The preview-PDF key lives on the service-only album_pdfs row.
   const admin = createServiceClient();
-  const { data: pdfRow } = await admin.from('album_pdfs').select('r2_key').eq('album_id', id).maybeSingle();
+  const { data: pdfRow } = await admin
+    .from('album_pdfs')
+    .select('r2_key, status, requested_at')
+    .eq('album_id', id)
+    .maybeSingle();
+  const pdf = pdfRow as { r2_key: string | null; status: string | null; requested_at: string | null } | null;
 
+  // DON'T DELETE OUT FROM UNDER A RUNNING RENDER (Phase 6 Prompt 10). While a PDF is generating,
+  // `r2_key` is still null — so the key collection below would find nothing to clean up, the album
+  // (and its cascading album_pdfs row) would disappear, and the worker would then upload
+  // `preview.pdf` with no row left to name it. The worker compensates for that case by deleting
+  // the object when finalize finds no row, but that only helps if the worker survives to finalize;
+  // refusing here removes the window instead of merely repairing it.
+  //
+  // Bounded on purpose: only a row whose `requested_at` is inside the in-flight window blocks. A
+  // crashed/stuck generation ages out of that window (and the worker's sweep marks it failed), so
+  // this can never trap an album permanently.
+  if (
+    pdf?.status === 'generating' &&
+    pdf.requested_at &&
+    Date.now() - new Date(pdf.requested_at).getTime() < IN_PROGRESS_MS
+  ) {
+    return {
+      ok: false,
+      error: 'A preview PDF is being generated for this album. Please try again in a moment.',
+    };
+  }
+
+  // CRASH-WINDOW COVERAGE (Phase 6 Prompt 12). `pdf.r2_key` is null for the whole duration of a
+  // render, so the stored value alone misses an object that a since-crashed worker already uploaded
+  // (upload succeeds → process dies → finalize never writes r2_key). Recovery cannot help once the
+  // album is gone: it looks only at `album_pdfs` rows, which the CASCADE removes with the album.
+  //
+  // The key is DETERMINISTIC in (userId, albumId), so we reconstruct the one key a render could
+  // possibly have written and hand it to cleanup alongside any stored value. R2 DeleteObject is
+  // idempotent, so enqueuing a key that was never written is a harmless no-op. Gated on the row
+  // existing: no `album_pdfs` row means generation was never requested, so no preview.pdf can exist.
   const keys = Array.from(
     new Set(
       [
         ...photoRows.flatMap((r) => [r.r2_key, r.sanitized_key, r.thumb_key]),
-        (pdfRow as { r2_key: string | null } | null)?.r2_key ?? null,
+        pdf?.r2_key ?? null,
+        pdf ? previewPdfKey(user.id, id) : null,
       ].filter((k): k is string => !!k),
     ),
   );

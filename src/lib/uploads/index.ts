@@ -21,10 +21,28 @@ export {
   readExifOrientation,
   type ClientImageMetadata,
 } from './metadata';
+export {
+  MAX_AUTO_ATTEMPTS,
+  RETRY_BASE_MS,
+  RETRY_FACTOR,
+  RETRY_JITTER,
+  RETRY_MAX_DELAY_MS,
+  backoffDelay,
+  classifyResponse,
+  isTransientStatus,
+  networkFailure,
+  parseRetryAfter,
+  permanentFailure,
+  timeoutFailure,
+  type Classification,
+  type FailureKind,
+} from './retry';
 export { useUploadManager, type UploadManagerApi, type UseUploadManagerOptions } from './use-upload-manager';
+export { UploadProvider } from './upload-provider';
 export { TEMP_PHOTO_PREFIX, isTempPhotoId, taskIdOfTempPhoto, tempPhotoId } from './optimistic';
 export {
   UPLOAD_STATES,
+  UPLOAD_STAGES,
   TERMINAL_UPLOAD_STATES,
   aggregateMetrics,
   computeStats,
@@ -34,6 +52,7 @@ export {
   type UploadEventType,
   type UploadMetrics,
   type UploadSessionSummary,
+  type UploadStage,
   type UploadStats,
   type UploadState,
   type UploadTask,

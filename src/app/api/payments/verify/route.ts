@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { verifyPaymentSignature, fetchRazorpayPayment } from '@/lib/razorpay';
-import { sendOrderConfirmationEmail } from '@/lib/email/events';
-import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
+import { settleOrderFulfilment } from '@/lib/orders/settlement';
 import { captureException, captureMessage } from '@/lib/observability/capture';
 import { getRequestId } from '@/lib/observability/request-id';
 import { checkLimit } from '@/lib/security/guard';
@@ -66,14 +65,15 @@ export async function POST(request: Request) {
   }
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = parsed.data;
 
-  // The order must belong to this user (RLS scopes the read).
+  // The order must belong to this user (RLS scopes the read). Only its id is needed now: the
+  // albums to fulfil come from `order_items` inside the settlement cascade, not from the
+  // legacy `orders.album_id` pointer.
   const { data: order } = await supabase
     .from('orders')
-    .select('id, album_id')
+    .select('id')
     .eq('razorpay_order_id', razorpay_order_id)
     .maybeSingle();
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-  const orderAlbumId = (order as { id: string; album_id: string }).album_id;
 
   if (!verifyPaymentSignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
     void captureMessage('Payment callback signature verification failed', {
@@ -124,29 +124,16 @@ export async function POST(request: Request) {
         metadata: { orderId: order.id, stage: 'reconcile' },
       });
     } else if (result === 'processed') {
-      // First transition to paid via this path → fire the idempotent confirmation email
-      // (email_log claim dedupes against the webhook path). Never throws / never blocks.
+      // THE SAME PAID-TRANSITION CASCADE the webhook runs (Phase 8): confirmation email, then
+      // per-`order_items` review enqueue + preview PDF, then clearing exactly the purchased
+      // albums from this customer's cart. Shared so the two settle paths can never drift, and
+      // iterating the items is what makes a combined order fulfil every album instead of only
+      // `orders.album_id`. Every step is idempotent, so whichever path wins the race, the other
+      // observes the already-paid state and adds no duplicate effect.
       try {
-        await sendOrderConfirmationEmail(order.id as string);
+        await settleOrderFulfilment(order.id as string, 'verify');
       } catch (e) {
-        console.error('[payments/verify] confirmation email error', { orderId: order.id, error: String(e) });
-      }
-
-      // Auto-generate the album PDF (backend workflow). Best-effort + idempotent; the
-      // webhook path does the same, and startAlbumPdfGeneration no-ops if already done.
-      try {
-        await startAlbumPdfGeneration(orderAlbumId, { validate: true, nudge: true });
-      } catch (e) {
-        console.error('[payments/verify] album-pdf auto-start error', { orderId: order.id, error: String(e) });
-      }
-
-      // Enter the admin review queue on the first paid transition (CHANGE 4). Idempotent with
-      // the webhook path — `submit_album_for_review` resets to 'pending_review' and audits it.
-      // Best-effort: the customer owns this order (RLS above), so user.id is the album owner.
-      try {
-        await admin.rpc('submit_album_for_review', { p_album_id: orderAlbumId, p_customer_id: user.id });
-      } catch (e) {
-        console.error('[payments/verify] review-queue enqueue error', { orderId: order.id, error: String(e) });
+        console.error('[payments/verify] settlement error', { orderId: order.id, error: String(e) });
       }
     }
     // result 'duplicate' | 'amount_mismatch' | 'order_not_found' → leave to webhook; ok below.

@@ -207,7 +207,14 @@ export function SpineDesign({
   pageAspect?: number;
   renderElements?: boolean;
 }) {
-  const resolvedTitle = title ?? findRole(config.texts, 'title')?.text ?? '';
+  // A SUPPLIED, NON-EMPTY album title still wins: renaming an album in Album Settings writes only
+  // `albums.title`, and this load-direction sync is what carries that rename onto the cover.
+  //
+  // An EMPTY one falls through to the cover's own title object instead of winning with "". `??`
+  // alone could not do this — `'' ?? x` is `''`, so an empty album title used to beat a perfectly
+  // good stored title. That is the last place a migrated cover still depended on `albums.title`.
+  const resolvedTitle =
+    title !== undefined && title.trim() !== '' ? title : (findRole(config.texts, 'title')?.text ?? '');
   const c = useMemo(
     () => migrateCoverConfig(config, { title: resolvedTitle }, pageAspect),
     [config, resolvedTitle, pageAspect],

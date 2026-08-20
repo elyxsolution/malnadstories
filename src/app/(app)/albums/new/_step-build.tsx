@@ -8,6 +8,7 @@ import { LUX_PRIMARY } from '@/components/brand';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import type { Photo } from '@/lib/builder/photo';
 import type { UploadManagerApi } from '@/lib/uploads';
+import { layoutInputs } from '../[id]/build/_use-optimistic-layout';
 import Uploader from '../[id]/build/_uploader';
 import UploadBadge, { stateOpacityClass } from '../[id]/build/_upload-badge';
 import { photoUiState } from '../[id]/build/_photo-state';
@@ -68,6 +69,13 @@ export default function StepBuild({
   const ready = photos.filter((p) => p.status === 'ready').length;
   const processing = photos.filter((p) => p.status === 'pending').length;
   const rejected = photos.filter((p) => p.status === 'rejected').length;
+  /**
+   * What Auto Create can actually place (Phase 4) — photos with a reliable shape, whether or not
+   * the worker has finished with them. Counted with the SAME projection Auto Create runs on, so
+   * the number on the card is the number that gets placed.
+   */
+  const usableCount = layoutInputs(photos).length;
+  const unusable = Math.max(0, photos.length - usableCount);
   const remaining = Math.max(0, cap - photos.length);
   const batch = uploads.activeSessions;
 
@@ -233,13 +241,13 @@ export default function StepBuild({
                 ? [
                     { k: 'Layout', v: autoTarget.name },
                     { k: 'Holds', v: `${autoTarget.slotCount}` },
-                    { k: 'Ready photos', v: `${ready}` },
+                    { k: 'Will place', v: `${usableCount}` },
                   ]
-                : [{ k: 'Ready photos', v: `${ready}` }]
+                : [{ k: 'Will place', v: `${usableCount}` }]
             }
             note={
-              processing > 0
-                ? `${processing} still processing — those stay in your tray to place yourself.`
+              unusable > 0
+                ? `${unusable} can’t be placed automatically — those stay in your tray to place yourself.`
                 : null
             }
             cta="Auto Create"

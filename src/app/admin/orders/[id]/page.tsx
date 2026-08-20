@@ -3,7 +3,9 @@ import { and, count, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   orders,
+  orderItems,
   albums,
+  albumPdfs,
   coupons,
   addresses,
   payments,
@@ -69,6 +71,31 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     .limit(1);
 
   if (!row) notFound();
+
+  // EVERY album in this order (0056). Drizzle/superuser like the rest of the admin console.
+  // `orders.album_id` above is the legacy first-item pointer and still feeds the album-status
+  // and PDF rows; these lines are what the order actually sold.
+  // Per-line snapshot + LIVE per-album state (album status and its own PDF status), because for a
+  // combined order each album prints and regenerates independently — a single order-level PDF chip
+  // would describe only the first one.
+  const itemRows = await db
+    .select({
+      id: orderItems.id,
+      albumId: orderItems.albumId,
+      albumTitle: orderItems.albumTitle,
+      productName: orderItems.productName,
+      productDimensions: orderItems.productDimensions,
+      copies: orderItems.copies,
+      unitPrice: orderItems.unitPrice,
+      lineSubtotal: orderItems.lineSubtotal,
+      albumStatus: albums.status,
+      itemPdfStatus: albumPdfs.status,
+    })
+    .from(orderItems)
+    .leftJoin(albums, eq(orderItems.albumId, albums.id))
+    .leftJoin(albumPdfs, eq(orderItems.albumId, albumPdfs.albumId))
+    .where(eq(orderItems.orderId, row.id))
+    .orderBy(orderItems.createdAt);
 
   const [email, [{ c: orderCount }], [payment], notes, audits, emails] = await Promise.all([
     adminUserEmail(row.userId),
@@ -178,6 +205,18 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
         tracking: row.trackingNumber,
         carrier: row.carrier,
       }}
+      items={itemRows.map((i) => ({
+        id: i.id,
+        albumId: i.albumId,
+        albumTitle: i.albumTitle,
+        productName: i.productName,
+        productDimensions: i.productDimensions,
+        copies: i.copies,
+        unitPrice: i.unitPrice,
+        lineSubtotal: i.lineSubtotal,
+        albumStatus: i.albumStatus,
+        pdfStatus: i.itemPdfStatus ?? 'idle',
+      }))}
       customer={{ name: row.customerName, email, phone: row.customerPhone, address: fullAddress, orderCount }}
       payment={{
         subtotal: row.subtotal,

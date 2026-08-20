@@ -7,8 +7,14 @@ export type OrderEmailData = {
   orderId: string;
   email: string;
   customerName: string;
+  /**
+   * LEGACY, first item only — kept so the fulfilment status emails (`order-status.tsx`) keep
+   * reading one title exactly as before. For what was actually purchased, use `items`.
+   */
   albumTitle: string;
   copies: number;
+  /** Every purchased album (Phase 8). One entry for a single-album order. */
+  items: { albumTitle: string; copies: number; lineSubtotal: number }[];
   subtotal: number;
   shipping: number;
   discount: number;
@@ -44,7 +50,7 @@ export async function loadOrderEmailData(orderId: string): Promise<OrderEmailDat
   } | null;
   if (!order) return null;
 
-  const [albumRes, addrRes, profileRes, userRes, couponRes] = await Promise.all([
+  const [albumRes, addrRes, profileRes, userRes, couponRes, itemsRes] = await Promise.all([
     svc.from('albums').select('title').eq('id', order.album_id).maybeSingle(),
     svc
       .from('addresses')
@@ -56,6 +62,12 @@ export async function loadOrderEmailData(orderId: string): Promise<OrderEmailDat
     order.coupon_id
       ? svc.from('coupons').select('code').eq('id', order.coupon_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    // The purchased lines (0056) — the authoritative album list for this order.
+    svc
+      .from('order_items')
+      .select('album_title, copies, line_subtotal, created_at')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true }),
   ]);
 
   const album = albumRes.data as { title: string } | null;
@@ -64,6 +76,7 @@ export async function loadOrderEmailData(orderId: string): Promise<OrderEmailDat
     | null;
   const profile = profileRes.data as { name: string | null } | null;
   const coupon = (couponRes.data ?? null) as { code: string } | null;
+  const items = (itemsRes.data ?? []) as { album_title: string; copies: number; line_subtotal: string }[];
   const email = userRes.data?.user?.email ?? '';
 
   return {
@@ -72,6 +85,22 @@ export async function loadOrderEmailData(orderId: string): Promise<OrderEmailDat
     customerName: profile?.name?.trim() || 'there',
     albumTitle: album?.title ?? 'your album',
     copies: order.copies,
+    // Falls back to the legacy single-album shape only if the lines cannot be read, so an email
+    // is never sent listing nothing.
+    items:
+      items.length > 0
+        ? items.map((i) => ({
+            albumTitle: i.album_title,
+            copies: i.copies,
+            lineSubtotal: Number(i.line_subtotal),
+          }))
+        : [
+            {
+              albumTitle: album?.title ?? 'your album',
+              copies: order.copies,
+              lineSubtotal: Number(order.subtotal_amount),
+            },
+          ],
     subtotal: Number(order.subtotal_amount),
     shipping: Number(order.shipping_amount),
     discount: Number(order.discount_amount),

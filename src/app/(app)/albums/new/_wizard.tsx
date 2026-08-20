@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import NextImage from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -12,10 +12,16 @@ import { LUX_PRIMARY } from '@/components/brand';
 import WizardProgress from '@/components/wizard-progress';
 import { wizardStepIndex } from '@/lib/wizard/steps';
 import { createAlbumDraft } from '@/lib/actions/albums';
-import { saveLayout, applyBlueprintToAlbum, autoSelectAndApplyBlueprint } from '@/lib/actions/builder';
+import { saveLayout, applyBlueprintToAlbum } from '@/lib/actions/builder';
 import { photoCap } from '@/lib/builder/model';
-import { autoLayout, serializeBlocks, type EnginePhoto, type TemplateChoice } from '@/lib/builder/auto-layout';
+import { autoLayout, type TemplateChoice } from '@/lib/builder/auto-layout';
+import { applyBlueprint, type Blueprint } from '@/lib/builder/blueprint';
+import { blueprintsForPageCount, selectAutoBlueprint } from '@/lib/builder/blueprint-select';
+import { pendingPlacementsFor, resolveLayoutForSave } from '@/lib/builder/persist-layout';
+import { usePendingPlacements } from '@/lib/builder/pending-placements';
+import { isTempPhotoId } from '@/lib/uploads';
 import { usePhotoPipeline } from '../[id]/build/_use-photo-pipeline';
+import { layoutInputs } from '../[id]/build/_use-optimistic-layout';
 import type { Photo } from '@/lib/builder/photo';
 import type { ProductOption } from '@/lib/products/catalog';
 import BlueprintPicker from './_blueprint-picker';
@@ -25,19 +31,20 @@ import StepBuild from './_step-build';
 /**
  * ALBUM CREATION — a TWO-step flow.
  *
- *   1 · Album Details   product · page count · title · destination · dates · words
+ *   1 · Album Details   product · page count · destination · dates · words
  *   2 · Upload & Build  photos, and the three ways to turn them into a book
  *
  * It used to be four (Format → Begin → Memories → Create). That split was never a
  * property of the domain: Format and Begin cannot be submitted separately (the create
- * payload requires product, page count AND title together), and Memories and Create are
+ * payload needs the product and page count together), and Memories and Create are
  * one moment — photos arrive, the album gets built.
  *
- * ONBOARDING COLLECTS ALBUM INFORMATION ONLY. It no longer asks for a cover and no longer
- * shows a price. Every new album receives the admin's DEFAULT cover template (0052),
- * resolved server-side; the full cover catalog, custom design and template switching all
- * remain in the builder, where the customer actually has the album in front of them.
- * Pricing belongs to checkout, which is untouched.
+ * ONBOARDING COLLECTS TRIP INFORMATION ONLY. It asks for no cover, no price and — since
+ * Phase 5 — no name. Every new album receives the admin's DEFAULT cover template (0052) and
+ * a title DERIVED server-side from the trip details, both resolved in `createAlbumDraft`; the
+ * cover catalog, custom design, template switching and the title itself all live in the
+ * builder, where the customer actually has the album in front of them. Pricing belongs to
+ * checkout, which is untouched.
  *
  * THE BACKEND LIFECYCLE IS UNCHANGED. The album is still created at exactly one point,
  * by exactly one call: `createAlbumDraft`, on leaving step 1. Uploads still go
@@ -51,9 +58,6 @@ import StepBuild from './_step-build';
 
 const STEP_DETAILS = wizardStepIndex('details');
 const STEP_BUILD = wizardStepIndex('build');
-
-/** Matches CreateAlbumSchema's `title` bound, so the client can no longer disagree with it. */
-const TITLE_MAX = 100;
 
 /** Staged copy for Auto Create's loading screen. */
 const AUTO_STAGES = [
@@ -97,6 +101,8 @@ export type WizardBlueprint = {
   isNew: boolean;
   breakdown: { label: string; count: number }[];
   thumbUrl: string | null;
+  /** The geometry itself — Auto Create applies it client-side (Phase 4). */
+  blueprint: Blueprint;
 };
 
 export default function CreateWizard({
@@ -111,10 +117,11 @@ export default function CreateWizard({
   blueprints?: WizardBlueprint[];
 }) {
   const router = useRouter();
+  /** Carries Auto Create's unresolved placements across the hand-off to the builder. */
+  const pendingPlacements = usePendingPlacements();
   const [step, setStep] = useState(STEP_DETAILS);
 
   // ── Step 1 · Album Details ────────────────────────────────────────────────
-  const [title, setTitle] = useState('');
   const [destination, setDestination] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -123,16 +130,6 @@ export default function CreateWizard({
     albumProducts.find((p) => p.isDefault)?.id ?? albumProducts[0]?.id ?? '',
   );
   const [pageCount, setPageCount] = useState<number | null>(null);
-
-  /**
-   * Destination is now its OWN field. The title keeps its location autocomplete because it
-   * is a genuinely nice way to name a trip, but selecting a location there only FILLS an
-   * empty destination — it never overwrites what the customer typed, and (unlike before)
-   * editing the title never silently erases the destination.
-   */
-  const applyTitleLocation = useCallback((loc: string) => {
-    setDestination((d) => (d.trim() ? d : loc));
-  }, []);
 
   const selectProduct = useCallback(
     (id: string) => {
@@ -182,25 +179,54 @@ export default function CreateWizard({
   const cap = pageCount ? photoCap(pageCount) : 100;
   const ready = photos.filter((p) => p.status === 'ready');
 
+  /**
+   * PHOTOS AUTO CREATE CAN ACTUALLY PLACE (Phase 4).
+   *
+   * Auto Create used to wait for `status === 'ready'` — i.e. for the WORKER to finish — even
+   * though the layout engine never needed anything the worker produces. All it reads is a photo's
+   * shape, and the browser measures that the moment the file is picked. Waiting meant a customer
+   * who had just dropped 40 photos was told to come back later.
+   *
+   * `layoutInputs` is the existing authority on "does this photo have a reliable shape?" — the
+   * same projection the builder's Build-it-for-me uses. It prefers the worker's dimensions when
+   * they exist, accepts browser-measured ones when they don't, and skips anything it cannot
+   * establish confidently (HEIC, which no browser decodes, and failed uploads, which never get
+   * measured). Reusing it is what keeps one definition of "usable" across both surfaces.
+   */
+  const usable = useMemo(() => layoutInputs(photos), [photos]);
+
+  /**
+   * Temp → real id resolution for the Auto Create save, derived from the upload manager's own
+   * task table (Phase 3). A task records the real `photoId` the instant confirm returns, so this
+   * is the authoritative mapping — not a second remapping system, and not a copy of the builder's
+   * `idMap` ref, which belongs to a surface the wizard does not have.
+   */
+  const autoCreateIdResolver = useMemo(
+    () => ({
+      resolve: (id: string) => uploads.taskByTempPhotoId.get(id)?.photoId ?? id,
+      isUnresolvedTemp: (id: string) => isTempPhotoId(id),
+    }),
+    [uploads.taskByTempPhotoId],
+  );
+
   // ── Validation (step 1) ───────────────────────────────────────────────────
   // Every rule the server will apply, applied here first, so Continue is never a
   // guess. `missing` drives the footer hint — a disabled button that says why.
-  const trimmedTitle = title.trim();
   const dateError = !!fromDate && !!toDate && fromDate > toDate;
-  const titleTooLong = trimmedTitle.length > TITLE_MAX;
   const travelPeriod = composePeriod(fromDate, toDate);
 
+  // THE BOOK IS THE ONLY REQUIREMENT (Phase 5). Product and page count decide what is being made
+  // and cannot be changed later, so they still gate Continue. Everything else on this step is
+  // optional trip detail — including the name, which the customer is no longer asked for at all:
+  // the server derives it, and the cover editor owns it from then on. The date rule stays because
+  // an inverted range is a genuine mistake worth catching before it is stored.
   const missing = !albumProductId
     ? 'Choose an album to continue'
     : !pageCount
       ? 'Choose a page count to continue'
-      : !trimmedTitle
-        ? 'Name your album to continue'
-        : titleTooLong
-          ? `Titles are limited to ${TITLE_MAX} characters`
-          : dateError
-            ? 'Check your travel dates'
-            : null;
+      : dateError
+        ? 'Check your travel dates'
+        : null;
   const canContinue = missing === null;
 
   /**
@@ -216,8 +242,9 @@ export default function CreateWizard({
     // No cover ids are sent: onboarding no longer asks. The server applies the admin's
     // DEFAULT cover template (0052) — or leaves the cover blank when none is set — and the
     // customer changes it freely in the builder. Same call, same lifecycle, same timing.
+    // No title is sent: since Phase 5 the server derives `albums.title` from these trip details
+    // (destination → travel dates → "Untitled Album"), and the customer edits it in the builder.
     const res = await createAlbumDraft({
-      title: trimmedTitle,
       albumProductId,
       pageCount: pageCount ?? undefined,
       destination,
@@ -242,23 +269,33 @@ export default function CreateWizard({
     setTimeout(() => router.push(`/albums/${albumId}/build`), 700);
   }, [albumId, router]);
 
-  const matchingBlueprints = blueprints
-    .filter((b) => !!pageCount && b.pageCount === pageCount)
-    .sort(
-      (a, b) =>
-        Number(b.pinned) - Number(a.pinned) ||
-        Number(b.featured) - Number(a.featured) ||
-        Number(b.popular) - Number(a.popular),
-    );
+  /**
+   * CATALOG ORDER is preserved here on purpose: the deterministic tie-break resolves to the first
+   * closest-capacity match, so selection must run over the order the catalog returned.
+   */
+  const selectableBlueprints = useMemo(
+    () => (pageCount ? blueprintsForPageCount(blueprints, pageCount) : []),
+    [blueprints, pageCount],
+  );
 
-  /** The blueprint Auto Create WILL use — mirrors the server's deterministic choice. */
-  const autoTarget: WizardBlueprint | null = matchingBlueprints.length
-    ? (matchingBlueprints.find((b) => b.isDefault) ??
-      matchingBlueprints.reduce(
-        (best, b) => (Math.abs(b.slotCount - ready.length) < Math.abs(best.slotCount - ready.length) ? b : best),
-        matchingBlueprints[0],
-      ))
-    : null;
+  /** The same list, re-sorted for the picker. Display only — never used for selection. */
+  const matchingBlueprints = useMemo(
+    () =>
+      [...selectableBlueprints].sort(
+        (a, b) =>
+          Number(b.pinned) - Number(a.pinned) ||
+          Number(b.featured) - Number(a.featured) ||
+          Number(b.popular) - Number(a.popular),
+      ),
+    [selectableBlueprints],
+  );
+
+  /**
+   * The blueprint Auto Create WILL use. This is no longer a mirror of the server's choice — it is
+   * the SAME function the server action calls (`selectAutoBlueprint`), so the preview shown in the
+   * confirm dialog and the layout actually produced cannot disagree.
+   */
+  const autoTarget: WizardBlueprint | null = selectAutoBlueprint(selectableBlueprints, usable.length);
 
   /** Option 2 — apply a chosen blueprint (optionally auto-placing photos). */
   const runApplyBlueprint = async (bpId: string, autoPlace: boolean) => {
@@ -279,22 +316,22 @@ export default function CreateWizard({
   };
 
   /**
-   * Auto Create entry — two gates, in order:
+   * Auto Create entry — two gates, in order. Both now count USABLE photos (a reliable shape)
+   * rather than worker-ready ones; everything else about them is unchanged.
    *
-   *  1. HARD: zero usable photos. Auto Create places only photos the worker has finished
-   *     (`readyPhotoIds` server-side), so with none ready it would produce an album of empty
-   *     frames and drop the customer into the builder wondering what happened. We stop before
-   *     any navigation and before any layout is written, and say why.
-   *  2. SOFT: fewer ready photos than the layout holds — the existing confirm, which offers
-   *     "add more" or "continue anyway". Unchanged.
+   *  1. HARD: zero usable photos. With nothing placeable, Auto Create would produce an album of
+   *     empty frames and drop the customer into the builder wondering what happened. We stop
+   *     before any navigation and before any layout is written, and say why.
+   *  2. SOFT: fewer usable photos than the layout holds — the existing confirm, which offers
+   *     "add more" or "continue anyway".
    */
   const runAutoCreate = () => {
     if (!albumId || !pageCount) return;
-    if (ready.length === 0) {
+    if (usable.length === 0) {
       setAutoBlocked(true);
       return;
     }
-    if (autoTarget && ready.length < autoTarget.slotCount) {
+    if (autoTarget && usable.length < autoTarget.slotCount) {
       setAutoConfirm(autoTarget);
       return;
     }
@@ -327,22 +364,61 @@ export default function CreateWizard({
     let ok = false;
     let errMsg: string | null = null;
     try {
-      if (matchingBlueprints.length > 0) {
-        const res = await autoSelectAndApplyBlueprint({ albumId });
-        ok = res.ok;
-        if (!res.ok) errMsg = res.error;
-      } else {
-        const enginePhotos: EnginePhoto[] = ready.map((p) => ({
-          id: p.id,
-          width: p.width ?? null,
-          height: p.height ?? null,
-          takenAt: p.takenAt,
-        }));
-        const blocks = autoLayout(enginePhotos, pageCount, 0, templates);
-        const res = await saveLayout({ albumId, blocks: serializeBlocks(blocks) });
-        ok = res.ok;
-        if (!res.ok) errMsg = res.error;
-      }
+      /**
+       * BOTH paths now run IN THE BROWSER, over `usable` — which is what lets a photo that is
+       * still uploading be placed under its optimistic id. The engines are the existing pure
+       * ones, called with exactly the arguments the previous code used; only the photo set and
+       * the location of the call changed.
+       *
+       * The blueprint path used to be the server action, whose `readyPhotoIds()` query is the
+       * very dependency Phase 4 removes. That action is untouched and still serves Choose Layout.
+       */
+      const chosen = selectAutoBlueprint(selectableBlueprints, usable.length);
+      const ids = usable.map((p) => p.id);
+      const blocks = chosen
+        ? applyBlueprint(chosen.blueprint, ids)
+        : autoLayout(usable, pageCount, 0, templates);
+
+      /**
+       * Optimistic ids cannot be persisted — `saveLayout` validates every referenced photo
+       * against the album and would reject the WHOLE payload. The shared boundary resolves the
+       * ones that have confirmed since the layout was built and strips the rest, keeping their
+       * containers. The photos are not lost: they stay placed in the builder under their temp
+       * ids, and the builder's next save persists them once they land.
+       */
+      const { blocks: payload, stripped } = resolveLayoutForSave(blocks, autoCreateIdResolver);
+
+      /**
+       * Remember where the stripped photos were meant to go, BEFORE navigating away takes this
+       * component's state with it. The builder replays each one as its upload confirms, so the
+       * arrangement the customer just saw is the arrangement they end up with — without anyone
+       * re-running Auto Create over a photo set that has since changed.
+       *
+       * Written unconditionally (even when empty) so a second Auto Create run supersedes the
+       * first rather than leaving stale coordinates behind.
+       */
+      pendingPlacements.set(albumId, pendingPlacementsFor(blocks, payload, autoCreateIdResolver));
+
+      const res = await saveLayout({
+        albumId,
+        blocks: payload.map((b) => ({
+          template: b.template,
+          photoIds: b.photoIds.filter(Boolean),
+          caption: b.caption,
+          overlays: b.overlays,
+          // Blueprints carry decorative elements; the auto-layout fallback simply has none.
+          texts: b.texts,
+          qrs: b.qrs,
+          stickers: b.stickers,
+          background: b.background,
+        })),
+      });
+      ok = res.ok;
+      if (!res.ok) errMsg = res.error;
+      // `stripped` is intentionally not surfaced here: the customer is about to land in the
+      // builder, where those photos are still placed and the existing save message already
+      // explains the held-back placements at the moment it matters.
+      void stripped;
     } catch {
       errMsg = 'Something went wrong. Please try again.';
     }
@@ -407,18 +483,13 @@ export default function CreateWizard({
               albumProducts={albumProducts}
               albumProductId={albumProductId}
               pageCount={pageCount}
-              title={title}
               destination={destination}
               fromDate={fromDate}
               toDate={toDate}
               description={description}
               dateError={dateError}
-              titleTooLong={titleTooLong}
-              titleMaxLength={TITLE_MAX}
               onSelectProduct={selectProduct}
               onSelectPageCount={setPageCount}
-              onTitleChange={setTitle}
-              onTitleLocation={applyTitleLocation}
               onDestinationChange={setDestination}
               onFromDateChange={setFromDate}
               onToDateChange={setToDate}
@@ -531,12 +602,16 @@ export default function CreateWizard({
               <AlertTriangle className="h-6 w-6" />
             </div>
             <h2 id="auto-blocked-title" className="mt-3 font-display text-xl font-semibold tracking-tight">
-              {photos.length === 0 ? 'Upload some photos first' : 'Your photos are still processing'}
+              {photos.length === 0 ? 'Upload some photos first' : 'These photos need a moment'}
             </h2>
             <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
               {photos.length === 0
                 ? 'Auto Create arranges your photographs into the album, so it needs at least one to work with.'
-                : 'Auto Create can only place photographs that have finished processing. Give it a moment, or design the album yourself in the meantime.'}
+                : // Auto Create no longer waits for the worker — it needs a photo's SHAPE, which the
+                  // browser measures on selection. So the only photos it cannot place are ones whose
+                  // shape it could not read: formats the browser can't open (HEIC) and uploads that
+                  // failed. Saying "still processing" here would now be wrong.
+                  'Auto Create arranges photographs by their shape, and it couldn’t read one for any of these — HEIC files need processing first, and failed uploads can’t be used. Try again shortly, or design the album yourself.'}
             </p>
             <div className="mt-5 flex flex-col gap-2">
               <Button onClick={goToUploader} className={LUX_PRIMARY}>
@@ -563,15 +638,16 @@ export default function CreateWizard({
             <h2 className="font-display text-xl font-semibold tracking-tight">A few more photos will fill it out</h2>
             <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
               The <span className="font-medium text-foreground">{autoConfirm.name}</span> layout holds{' '}
-              {autoConfirm.slotCount} photos and {ready.length} of yours {ready.length === 1 ? 'is' : 'are'} ready. You
-              can add more, or continue now — the extra frames stay empty for you to fill later.
+              {autoConfirm.slotCount} photos and {usable.length} of yours {usable.length === 1 ? 'is' : 'are'} ready to
+              place — uploading ones included. You can add more, or continue now — the extra frames stay empty for you
+              to fill later.
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
               {[
                 { k: 'Capacity', v: autoConfirm.slotCount },
-                { k: 'Ready', v: ready.length },
-                { k: 'Empty frames', v: Math.max(0, autoConfirm.slotCount - ready.length) },
-                { k: 'Unused', v: Math.max(0, ready.length - autoConfirm.slotCount) },
+                { k: 'Placing', v: usable.length },
+                { k: 'Empty frames', v: Math.max(0, autoConfirm.slotCount - usable.length) },
+                { k: 'Unused', v: Math.max(0, usable.length - autoConfirm.slotCount) },
               ].map((s) => (
                 <div key={s.k} className="rounded-lg border bg-card px-1.5 py-2">
                   <div className="text-base font-semibold tabular-nums">{s.v}</div>
@@ -630,8 +706,16 @@ export default function CreateWizard({
           className="animate-fade-in fixed inset-0 z-[120] flex cursor-pointer flex-col items-center justify-center bg-[linear-gradient(180deg,hsl(156_36%_12%),hsl(156_36%_8%))] text-center"
         >
           <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gold/80">Opening your album</p>
+          {/*
+            The veil used to print the name the customer had just typed. There is no client-side
+            title any more, and inventing one here would be a second, disagreeing source of truth
+            — the album's real name is derived server-side. It shows the DESTINATION instead when
+            there is one: it is the customer's own word for this trip, it is the same thing the
+            server leads with, and when there isn't one the line falls back to the house phrase.
+            Purely a transition flourish; it makes no claim about what the album is called.
+          */}
           <h2 className="animate-rise mt-6 max-w-[18ch] font-display text-[clamp(2.5rem,7vw,4rem)] font-normal leading-tight text-primary-foreground">
-            {trimmedTitle || 'Your story'}
+            {destination.trim() || 'Your story'}
           </h2>
           <span className="mt-7 h-px w-60 bg-[linear-gradient(90deg,transparent,hsl(var(--gold)/0.6),transparent)]" />
           <div className="mt-8 flex items-center gap-3 text-sm text-primary-foreground/70">

@@ -9,8 +9,34 @@ import { updateOrderStatus } from '@/lib/actions/admin/orders';
 import { adminStatusLabel } from '@/lib/orders/status';
 import { fmtDate, shortId } from '@/lib/admin/format';
 
-export type BoardCard = { id: string; albumTitle: string; customerName: string; spec: string; placedAt: string };
+/**
+ * ONE PURCHASE UNIT — one `order_items` row: one album, printed `copies` times.
+ * `albumTitle` is the SNAPSHOT title (as purchased); `spec` and `pdfStatus` are operational.
+ */
+export type BoardItem = {
+  id: string;
+  albumId: string;
+  albumTitle: string;
+  spec: string;
+  copies: number;
+  pdfStatus: string;
+};
+/** One order = one parcel = one fulfilment lifecycle, containing N albums to print. */
+export type BoardCard = {
+  id: string;
+  customerName: string;
+  placedAt: string;
+  items: BoardItem[];
+  totalCopies: number;
+};
 type Column = { status: string; label: string; cards: BoardCard[] };
+
+const PDF_CHIP: Record<string, string> = {
+  ready: 'bg-success/10 text-success',
+  generating: 'bg-warning/12 text-warning',
+  failed: 'bg-destructive/10 text-destructive',
+  idle: 'bg-muted text-muted-foreground',
+};
 
 // Forward-only next state (mirrors admin_update_order_status adjacency). 'shipped' →
 // 'delivered' leaves the board. We never write directly — we call the audited RPC.
@@ -62,9 +88,39 @@ export default function ProductionBoard({ columns }: { columns: Column[] }) {
                         </Link>
                         <span className="text-[10px] text-muted-foreground">{fmtDate(c.placedAt)}</span>
                       </div>
-                      <p className="mt-1 truncate text-sm font-medium">{c.albumTitle}</p>
-                      <p className="text-xs text-muted-foreground">{c.spec}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">{c.customerName}</p>
+
+                      {/*
+                        EVERY album in the order, each with its OWN copy count — a combined order is
+                        several books to print, not one. Each row links to that album's admin page,
+                        which is where the album-level PDF/regenerate action lives, so an operator
+                        acting on a specific book can never be sent to the order's first album.
+                      */}
+                      <ul className="mt-1.5 flex flex-col gap-1.5">
+                        {c.items.map((it) => (
+                          <li key={it.id} className="rounded-md bg-muted/40 px-2 py-1.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <Link
+                                href={`/admin/albums/${it.albumId}`}
+                                className="min-w-0 truncate text-sm font-medium text-primary hover:underline"
+                              >
+                                {it.albumTitle}
+                              </Link>
+                              <span className="flex-none text-xs font-semibold tabular-nums">× {it.copies}</span>
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1.5">
+                              <span className="text-[11px] text-muted-foreground">{it.spec}</span>
+                              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${PDF_CHIP[it.pdfStatus] ?? PDF_CHIP.idle}`}>
+                                PDF {it.pdfStatus}
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">
+                        {c.customerName}
+                        {c.items.length > 1 ? ` · ${c.items.length} albums · ${c.totalCopies} copies total` : ''}
+                      </p>
                       {next && (
                         <button
                           type="button"

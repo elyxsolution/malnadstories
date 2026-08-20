@@ -22,8 +22,25 @@ export function OrderConfirmationEmail({
       </P>
 
       <SummaryRow label="Order" value={`#${short}`} />
-      <SummaryRow label="Album" value={data.albumTitle} />
-      <SummaryRow label="Copies" value={String(data.copies)} />
+      {/*
+        One row per purchased album (Phase 8). A single-album order still reads
+        "Album / Copies" exactly as before; a combined order lists every album with its own
+        copies and line total instead of naming just one.
+      */}
+      {data.items.length === 1 ? (
+        <>
+          <SummaryRow label="Album" value={data.items[0].albumTitle} />
+          <SummaryRow label="Copies" value={String(data.items[0].copies)} />
+        </>
+      ) : (
+        data.items.map((item, i) => (
+          <SummaryRow
+            key={`${item.albumTitle}-${i}`}
+            label={item.copies > 1 ? `${item.albumTitle} × ${item.copies}` : item.albumTitle}
+            value={inr(item.lineSubtotal)}
+          />
+        ))
+      )}
       <Divider />
       <SummaryRow label="Subtotal" value={inr(data.subtotal)} />
       <SummaryRow label="Shipping" value={inr(data.shipping)} />

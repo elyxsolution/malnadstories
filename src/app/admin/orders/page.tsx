@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { orders, albums, profiles, coupons } from '@/db/schema';
+import { orders, orderItems, albums, profiles, coupons } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmails } from '@/lib/admin/users';
 import OrdersFilters from './_filters';
@@ -70,6 +70,35 @@ export default async function AdminOrdersPage({
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const emails = await adminUserEmails(rows.map((r) => r.userId));
 
+  // WHAT EACH ORDER ACTUALLY CONTAINS (0056), in ONE batched read for the page. The `albums` join
+  // above stays — the search filter matches on live titles, which is the right behaviour for a
+  // lookup — but the DISPLAYED label and copy count now come from the purchase snapshot, so a
+  // combined order stops presenting itself as its first album at that album's copy count, and a
+  // later rename cannot rewrite what a historical order says it sold.
+  const itemsByOrder = new Map<string, { title: string; copies: number }[]>();
+  if (rows.length > 0) {
+    const itemRows = await db
+      .select({ orderId: orderItems.orderId, title: orderItems.albumTitle, copies: orderItems.copies })
+      .from(orderItems)
+      .where(inArray(orderItems.orderId, rows.map((r) => r.id)))
+      .orderBy(orderItems.createdAt);
+    for (const it of itemRows) {
+      const list = itemsByOrder.get(it.orderId) ?? [];
+      list.push({ title: it.title, copies: it.copies });
+      itemsByOrder.set(it.orderId, list);
+    }
+  }
+  const labelFor = (orderId: string, fallback: string | null) => {
+    const items = itemsByOrder.get(orderId);
+    if (!items || items.length === 0) return fallback; // pre-0056 order, or unreadable lines
+    return items.length === 1 ? items[0].title : `${items[0].title} + ${items.length - 1} more`;
+  };
+  const copiesFor = (orderId: string, fallback: number) => {
+    const items = itemsByOrder.get(orderId);
+    if (!items || items.length === 0) return fallback;
+    return items.reduce((n, i) => n + i.copies, 0);
+  };
+
   // Global per-status counts for the filter tabs (independent of the current filter).
   const statusRows = await db.select({ status: orders.status, c: count() }).from(orders).groupBy(orders.status);
   const counts: Record<string, number> = {};
@@ -80,11 +109,11 @@ export default async function AdminOrdersPage({
     id: r.id,
     status: r.status,
     total: String(r.total),
-    copies: r.copies,
+    copies: copiesFor(r.id, r.copies),
     placedAt: new Date(r.placedAt as unknown as string).toISOString(),
     customerName: r.customerName,
     email: emails.get(r.userId) ?? '',
-    albumTitle: r.albumTitle,
+    albumTitle: labelFor(r.id, r.albumTitle),
     couponCode: r.couponCode,
   }));
 

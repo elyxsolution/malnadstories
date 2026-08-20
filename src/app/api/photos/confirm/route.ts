@@ -13,6 +13,16 @@ import { checkLimit, sanitizeFilename } from '@/lib/security/guard';
  * RLS check (user_id = auth.uid()) is the real DB-level gate, then enqueues the
  * image-hardening job. The raw upload is NEVER served — the worker produces
  * sanitized derivatives and the client polls until status='ready'.
+ *
+ * IDEMPOTENT PER UPLOAD KEY (0053). Confirming the same key twice returns the SAME
+ * photo id and creates no second row. The guarantee is the DB's, not the app's: the
+ * partial unique index `photos_upload_key_key` on `upload_key` decides the winner, and
+ * the insert is written as ON CONFLICT DO NOTHING so the loser of a race resolves the
+ * existing row instead of erroring. A SELECT-then-INSERT check would be racy and is
+ * deliberately NOT the mechanism.
+ *
+ * `upload_key` (not `r2_key`) carries the identity because `r2_key` is transient — the
+ * worker nulls it once the raw object is deleted, so it stops identifying anything.
  */
 export async function POST(request: Request) {
   const supabase = createClient();
@@ -77,26 +87,71 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid object key' }, { status: 400 });
   }
 
+  /**
+   * Resolve the row that already owns this upload key.
+   *
+   * SECURITY: this must never become a way to probe for someone else's photo. Three
+   * independent layers make that impossible — (1) the prefix check above proves `key`
+   * begins with THIS user's id and THIS album's id, so a foreign key can't even be
+   * submitted; (2) the explicit `user_id` filter; (3) RLS `users_own_photos`
+   * (user_id = auth.uid()) on the authenticated client, which is the real DB gate.
+   *
+   * Scoped by user rather than album on purpose: `photos.album_id` is ON DELETE SET NULL,
+   * so an orphaned row must still resolve to its own id rather than look absent.
+   */
+  const findExisting = async () =>
+    supabase
+      .from('photos')
+      .select('id, status')
+      .eq('upload_key', key)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
   // Insert via the authenticated client: RLS "user_id = auth.uid()" enforces the row.
   // originalFilename is sanitized (G2 — strip control chars, collapse whitespace, cap
   // length) before storage for log/display hygiene.
-  const { data: photo, error } = await supabase
+  //
+  // `ignoreDuplicates` makes this ON CONFLICT DO NOTHING, which needs only the INSERT
+  // grant (0020/0053) — never UPDATE — so a duplicate can never rewrite the winning row's
+  // filename, album, owner or upload_key. It also can't disturb `r2_key`, so a retry
+  // arriving after hardening leaves the cleared key cleared.
+  const { data: inserted, error } = await supabase
     .from('photos')
-    .insert({
-      user_id: user.id,
-      album_id: albumId,
-      r2_key: key,
-      original_filename: sanitizeFilename(originalFilename),
-    })
-    .select('id')
-    .single();
+    .upsert(
+      {
+        user_id: user.id,
+        album_id: albumId,
+        r2_key: key,
+        upload_key: key,
+        original_filename: sanitizeFilename(originalFilename),
+      },
+      { ignoreDuplicates: true },
+    )
+    .select('id, status')
+    .maybeSingle();
 
-  if (error || !photo) {
+  // 23505 = unique_violation. ON CONFLICT DO NOTHING normally swallows it (returning no
+  // row), but resolve it the same way if it ever surfaces as an error instead.
+  if (error && error.code !== '23505') {
     console.error('Photo insert error:', error);
     return NextResponse.json({ error: 'Could not save photo' }, { status: 500 });
   }
 
-  const id = (photo as { id: string }).id;
+  // No row came back → this key was already confirmed. Return the ORIGINAL photo, so a
+  // retry is a no-op that yields the same id (and its real current status, which may
+  // already be 'ready' or 'rejected'). Nothing is enqueued: the first confirm already
+  // did, and a row whose enqueue failed is recovered by the worker's stale-pending sweep.
+  if (!inserted) {
+    const { data: existing, error: findErr } = await findExisting();
+    if (findErr || !existing) {
+      console.error('Photo confirm: upload_key conflict but no visible row', findErr);
+      return NextResponse.json({ error: 'Could not save photo' }, { status: 500 });
+    }
+    const row = existing as { id: string; status: string };
+    return NextResponse.json({ id: row.id, status: row.status });
+  }
+
+  const { id, status } = inserted as { id: string; status: string };
 
   // Best-effort enqueue. If it fails the row stays 'pending' and the worker's
   // periodic sweep will pick it up, so an upload is never silently lost.
@@ -106,5 +161,5 @@ export async function POST(request: Request) {
     console.error('enqueue image-hardening failed (worker sweep will retry):', e);
   }
 
-  return NextResponse.json({ id, status: 'pending' });
+  return NextResponse.json({ id, status });
 }

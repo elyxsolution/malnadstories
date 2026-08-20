@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { saveLayout, saveCoverDesign } from '@/lib/actions/builder';
+import { resolveLayoutForSave, strippedPhotoNote } from '@/lib/builder/persist-layout';
 import type { CoverConfig } from '@/lib/builder/cover';
 import type { BuilderApi } from './_use-builder';
 import type { IdMapApi } from './_use-id-map';
@@ -40,53 +41,18 @@ export function useSaveController({
   const [lastSaved, setLastSaved] = useState<number | null>(null);
 
   /**
-   * THE serialization boundary — the one place blocks become a server payload, and therefore
-   * the one place that must guarantee no temporary id ever leaves the browser.
-   *
-   * Two passes, in order:
-   *   1. RESOLVE — every id goes through the mapping layer, so a photo that confirmed after it
-   *      was placed is saved under its real id. This is the normal case.
-   *   2. STRIP — an id that is still temporary refers to a photo the server does not have.
-   *      `saveLayout` validates that every referenced photo belongs to the album, so sending
-   *      one would fail the ENTIRE save. It is dropped from the payload instead (the slot saves
-   *      empty — a legal state drafts already allow), and the caller tells the user.
-   *
-   * Nothing is invented: no new endpoint, no placeholder row, no altered server action. The
-   * photo stays placed locally, so saving again once it lands persists it.
+   * THE serialization boundary. The rule itself now lives in `resolveLayoutForSave` so the
+   * creation wizard's Auto Create — which produces layouts full of optimistic ids for exactly
+   * the same reason — strips them identically. Behaviour here is unchanged; only the location of
+   * the rule moved, so there is one source of truth for resolution, stripping and the count.
    */
-  const serializeForSave = useCallback(() => {
-    let stripped = 0;
-    const blocksOut = api.serialize().map((b) => {
-      const photoIds: string[] = [];
-      for (const id of b.photoIds) {
-        const resolved = idMap.resolve(id);
-        if (idMap.isUnresolvedTemp(resolved)) stripped += 1;
-        else photoIds.push(resolved);
-      }
-      const overlays = b.overlays.map((o) => {
-        if (!o.photoId) return o;
-        const resolved = idMap.resolve(o.photoId);
-        if (idMap.isUnresolvedTemp(resolved)) {
-          stripped += 1;
-          // Keep the CONTAINER (its geometry is the user's layout work) — only the photo
-          // reference is dropped, exactly like an intentionally empty overlay slot.
-          return { ...o, photoId: null };
-        }
-        return { ...o, photoId: resolved };
-      });
-      return { ...b, photoIds, overlays };
-    });
-    return { blocks: blocksOut, stripped };
-  }, [api, idMap]);
+  const serializeForSave = useCallback(
+    () => resolveLayoutForSave(api.serialize(), idMap),
+    [api, idMap],
+  );
 
   /** Appended to a successful save when placements couldn't be persisted yet. */
-  const strippedNote = useCallback(
-    (n: number) =>
-      n === 0
-        ? ''
-        : ` ${n} photo${n === 1 ? '' : 's'} still uploading — save again once ${n === 1 ? 'it lands' : 'they land'} to keep ${n === 1 ? 'it' : 'them'} on the page.`,
-    [],
-  );
+  const strippedNote = useCallback((n: number) => strippedPhotoNote(n), []);
 
   /**
    * The ONE reliable customer save: flush the debounced cover design FIRST (so the latest
@@ -100,18 +66,20 @@ export function useSaveController({
     onMessage(null);
     flushCoverDebounce();
     const cover = getCover();
-    if (cover.title.trim()) {
-      const cov = await saveCoverDesign({
-        albumId,
-        title: cover.title,
-        coverTemplateId: cover.coverId,
-        config: cover.config,
-      });
-      if (!cov.ok) {
-        setSaving(false);
-        onMessage({ kind: 'err', text: cov.error });
-        return false;
-      }
+    // The cover save is UNCONDITIONAL. It used to be skipped whenever the title was blank, which
+    // silently discarded every other cover edit (background, elements, base template) along with
+    // it. The title is only one field of the cover: a blank one leaves `albums.title` untouched
+    // server-side, it does not cancel the write.
+    const cov = await saveCoverDesign({
+      albumId,
+      title: cover.title,
+      coverTemplateId: cover.coverId,
+      config: cover.config,
+    });
+    if (!cov.ok) {
+      setSaving(false);
+      onMessage({ kind: 'err', text: cov.error });
+      return false;
     }
     const { blocks: payload, stripped } = serializeForSave();
     const res = await saveLayout({ albumId, blocks: payload });

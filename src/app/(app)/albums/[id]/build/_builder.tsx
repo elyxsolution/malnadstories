@@ -128,6 +128,7 @@ import { usePhotoFor } from './_use-photo-for';
 import { useIdlePreload } from './_use-idle-preload';
 import { isPlaceable, photoUiState } from './_photo-state';
 import { layoutInputs, useOptimisticLayout } from './_use-optimistic-layout';
+import { usePendingPlacements } from '@/lib/builder/pending-placements';
 import SessionStatus from './_session-status';
 import { STUDIO_PRIMARY } from './_ui';
 
@@ -335,6 +336,13 @@ export default function Builder({
    */
   const selectionRemapRef = useRef<((from: string, to: string) => void) | null>(null);
   const favouritesRemapRef = useRef<((from: string, to: string) => void) | null>(null);
+  /** Auto Create placements waiting on an upload — recorded by the wizard, replayed here. */
+  const pendingPlacements = usePendingPlacements();
+  const restorePendingRef = useRef<((tempId: string, realId: string, view?: Block[]) => void) | null>(
+    null,
+  );
+  const restorePendingPlacement = (tempId: string, realId: string) =>
+    restorePendingRef.current?.(tempId, realId);
   /** Labels follow the same late-bound remap contract as selection + favourites (Phase 7). */
   const labelsRemapRef = useRef<((from: string, to: string) => void) | null>(null);
   const pipeline = usePhotoPipeline({
@@ -349,12 +357,16 @@ export default function Builder({
       selectionRemapRef.current?.(fromId, toId);
       favouritesRemapRef.current?.(fromId, toId);
       labelsRemapRef.current?.(fromId, toId);
+      // Now that this photo is real, put it back where Auto Create meant it to go (if anywhere).
+      restorePendingPlacement(fromId, toId);
     },
     onPhotoDropped: (photoId) => {
       idMap.forget(photoId);
       api.removePhotoEverywhere(photoId);
       setPickedId((cur) => (cur === photoId ? null : cur));
       setEditingPhoto((cur) => (cur && cur.id === photoId ? null : cur));
+      // A cancelled upload will never become a photo — drop its reserved spot too.
+      pendingPlacements.remove(albumId, photoId);
     },
   });
   const { photos, setPhotos, uploads, taskFor, photoStateFor, reportFailure } = pipeline;
@@ -373,6 +385,157 @@ export default function Builder({
   blocksRef.current = api.blocks;
 
   /**
+   * RESTORE ONE AUTO CREATE PLACEMENT, now that its upload has a real photo id.
+   *
+   * Auto Create may have arranged photos that were still uploading. Their positions could not be
+   * persisted (a temp id is not a photo the server has), so the wizard recorded the coordinates
+   * and this replays them one photo at a time, as each id becomes real. Deliberately NOT a
+   * re-run of Auto Create: the original arrangement is restored exactly, rather than recomputed
+   * against a photo set and dimension picture that have since moved on.
+   *
+   * NEVER OVERWRITES THE CUSTOMER. The recorded slot is taken only if it is still EMPTY; if the
+   * user has since put something there (or reworked the page), the photo is left in the tray for
+   * them to place. Losing an automatic placement is a small miss; overwriting deliberate work is
+   * not. A free slot elsewhere in the same block is accepted as a fallback, which keeps the photo
+   * on its intended page when a neighbour happened to resolve first.
+   *
+   * Keyed by temp id, so photos confirming out of order each still find their own spot.
+   *
+   * `view` is the block list to decide against, and the caller may pass its own so that SEVERAL
+   * restorations resolved in one pass see each other's work. React state is one render behind
+   * inside a loop, and two photos reading the same stale page both conclude the same slot is free
+   * — the second silently replacing the first. The caller that restores in bulk therefore keeps a
+   * projection and this function updates it in step with the mutation it issues.
+   */
+  const restorePending = useCallback(
+    (tempId: string, realId: string, view?: Block[]) => {
+      const waiting = pendingPlacements.get(albumId);
+      const pending = waiting.find((p) => p.tempPhotoId === tempId);
+      if (!pending) return;
+      pendingPlacements.remove(albumId, tempId);
+
+      const blocks = view ?? blocksRef.current;
+      /**
+       * ALREADY PLACED = ALREADY DECIDED. The tray accepts optimistic photos, so the customer can
+       * drag a still-uploading one onto a page themselves. Restoring it afterwards would MOVE it
+       * (every assignment strips the photo from its previous frame first) — taking a deliberate
+       * placement away and calling it a restoration. If the photo is anywhere in the layout, under
+       * either id, the intent is spent.
+       */
+      const placed = blocks.some(
+        (b) =>
+          b.photoIds.some((id) => id === realId || id === tempId) ||
+          b.overlays.some((o) => o.photoId === realId || o.photoId === tempId),
+      );
+      if (placed) return;
+
+      const at = pending.blockIndex;
+      const block = blocks[at];
+      if (!block) return; // the page is gone — the user restructured; leave the photo in the tray
+      const blockKey = block.key;
+      const baseCapacity = block.template === 'double-spread' ? 1 : 2;
+
+      /** Write base slots wholesale — the only shape that can express an INSERT, not just a set. */
+      const putBase = (photoIds: string[]) => {
+        api.patchBlock(blockKey, { photoIds });
+        if (view) view[at] = { ...block, photoIds };
+      };
+      const putOverlay = (overlayId: string) => {
+        api.replaceOverlay(blockKey, overlayId, realId);
+        if (view) {
+          view[at] = {
+            ...block,
+            overlays: block.overlays.map((o) => (o.id === overlayId ? { ...o, photoId: realId } : o)),
+          };
+        }
+      };
+
+      if (pending.slot.kind === 'base') {
+        /**
+         * ORDER SURVIVES OUT-OF-ORDER CONFIRMATION. Base slots compact — the model cannot express
+         * "right filled, left empty" — so a photo landing while an earlier one is still uploading
+         * has to sit further left than it was arranged. Inserting (rather than assigning) at a
+         * position that DISCOUNTS the neighbours still in flight makes that self-correcting: each
+         * late arrival slots in ahead of the ones that beat it, and the page ends up in the order
+         * Auto Create chose, whatever order the network delivered. If a neighbour never arrives
+         * (cancelled, failed) the photos simply stay compacted — no gap, nothing lost.
+         */
+        const earlierInFlight = waiting.filter(
+          (p) =>
+            p.tempPhotoId !== tempId &&
+            p.blockIndex === pending.blockIndex &&
+            p.slot.kind === 'base' &&
+            p.slot.index < pending.slot.index,
+        ).length;
+        const insertAt = Math.max(0, pending.slot.index - earlierInFlight);
+        if (block.photoIds.length < baseCapacity && insertAt <= block.photoIds.length) {
+          const next = [...block.photoIds];
+          next.splice(insertAt, 0, realId);
+          putBase(next.slice(0, baseCapacity));
+          return;
+        }
+      } else {
+        const overlay = block.overlays[pending.slot.index];
+        // `id` is assigned on load (withOverlayIds); an overlay without one cannot be addressed.
+        if (overlay?.id && !overlay.photoId) {
+          putOverlay(overlay.id);
+          return;
+        }
+      }
+
+      // Preferred slot taken — the user has been working here. Any other free slot on the SAME
+      // page still keeps the photo where it was meant to be, page-wise. Try the kind it was
+      // arranged as first, so an overlay stays an overlay when a spare one exists.
+      const takeFreeOverlay = () => {
+        const free = block.overlays.find((o) => o.id && !o.photoId);
+        if (!free?.id) return false;
+        putOverlay(free.id);
+        return true;
+      };
+      const takeFreeBase = () => {
+        if (block.photoIds.length >= baseCapacity) return false;
+        putBase([...block.photoIds, realId]);
+        return true;
+      };
+      if (pending.slot.kind === 'overlay') {
+        if (takeFreeOverlay() || takeFreeBase()) return;
+      } else if (takeFreeBase() || takeFreeOverlay()) return;
+      // Nothing free — the page is full of the user's own choices. The photo stays in the tray.
+    },
+    [albumId, api, pendingPlacements],
+  );
+  restorePendingRef.current = restorePending;
+
+  /**
+   * THE OTHER HALF OF RESTORATION: uploads that confirmed BEFORE this builder existed.
+   *
+   * `onRemapId` only fires for a photo that is still optimistic *here* — but an upload can land
+   * during the wizard's save or mid-navigation, in which case the wizard's pipeline did the remap
+   * and the builder mounts with a plain real photo and no event to hang restoration off. Those
+   * placements would be silently dropped.
+   *
+   * So the pending list is also swept against what is actually known: the manager's task table
+   * (session-scoped, so it still holds the temp → real mapping) intersected with photos the album
+   * really has. Runs whenever either changes, which also covers a photo that confirms while the
+   * builder is open but outside the remap path. `restorePending` removes each entry as it goes,
+   * so this and `onRemapId` can never place the same photo twice.
+   */
+  useEffect(() => {
+    const waiting = pendingPlacements.get(albumId);
+    if (waiting.length === 0) return;
+    const known = new Set(photos.map((p) => p.id));
+    // A projection of the pages, updated as each placement lands, so a whole batch of restorations
+    // can resolve in one pass without any of them deciding against pre-batch state.
+    const view = [...blocksRef.current];
+    for (const p of waiting) {
+      const realId = uploads.taskByTempPhotoId.get(p.tempPhotoId)?.photoId;
+      // Not confirmed yet, or the row hasn't reached this page — leave it pending.
+      if (!realId || !known.has(realId)) continue;
+      restorePendingRef.current?.(p.tempPhotoId, realId, view);
+    }
+  }, [albumId, photos, uploads.taskByTempPhotoId, pendingPlacements]);
+
+  /**
    * MEMORY AUDIT (Phase 5). The debounced cover save was the one timer in the builder with no
    * cleanup: leaving the page mid-debounce left a pending `saveCoverDesign` that would fire
    * after unmount — a stray write and a retained closure over the whole cover config. Cancelling
@@ -386,9 +549,15 @@ export default function Builder({
   );
 
   // Release any local preview still held when the builder unmounts (route change / exit).
+  // Skips previews the upload manager still owns (temp ids) — those outlive this page now, and
+  // revoking them here would blank the tile on whichever surface the upload lands in. Same
+  // ownership rule as the pipeline's cleanup; see `_use-photo-pipeline`.
   useEffect(
     () => () => {
-      for (const p of photosRef.current) revokeLocalPreview(p.localUrl);
+      for (const p of photosRef.current) {
+        if (isTempPhotoId(p.id)) continue;
+        revokeLocalPreview(p.localUrl);
+      }
     },
     [],
   );
@@ -611,7 +780,9 @@ export default function Builder({
     (next: { title: string; coverId: string | null; config: CoverConfig }) => {
       if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
       coverSaveTimer.current = setTimeout(async () => {
-        if (!next.title.trim()) return; // title is required server-side; skip until typed
+        // Runs whatever the title is. A blank title is not an error and no longer suppresses the
+        // write — the server simply leaves `albums.title` untouched and still persists the config,
+        // so a background/element edit is never lost just because the cover line is empty.
         const res = await saveCoverDesign({ albumId, title: next.title, coverTemplateId: next.coverId, config: next.config });
         if (!res.ok) setMessage({ kind: 'err', text: res.error });
       }, 500);
@@ -1791,9 +1962,9 @@ export default function Builder({
     setMessage(null);
     // Flush the debounced cover design + layout so validation reads the CURRENT state, not a stale row.
     if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
-    if (albumTitle.trim()) {
-      await saveCoverDesign({ albumId, title: albumTitle, coverTemplateId: coverId, config: coverConfig });
-    }
+    // Unconditional: the flush exists so validation reads the CURRENT cover, and a blank title
+    // must not leave it reading a stale row. The server ignores a blank title and saves the rest.
+    await saveCoverDesign({ albumId, title: albumTitle, coverTemplateId: coverId, config: coverConfig });
     const { blocks: payload, stripped } = serializeForSave();
     const saved = await saveLayout({ albumId, blocks: payload });
     setChecking(false);

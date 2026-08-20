@@ -18,7 +18,7 @@ export const WIZARD_STEPS = [
     key: 'details',
     label: 'Album Details',
     /** Shown under the label on wide screens — what this step is actually for. */
-    hint: 'Choose your book and name it',
+    hint: 'Choose your book and size',
   },
   {
     key: 'build',

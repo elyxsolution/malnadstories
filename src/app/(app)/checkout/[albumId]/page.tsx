@@ -112,7 +112,26 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
       initialCouponCode = (c as { code: string } | null)?.code ?? null;
     }
   } else {
-    const a = computeOrderAmount(basePrice);
+    // FRESH CHECKOUT — carry the copy count the customer already chose in their cart (Phase 7).
+    //
+    // Read SERVER-SIDE from their own `cart_items` row through the RLS-scoped client, never from
+    // the URL or the client: there is no `?copies=` to tamper with, and the figure is only a
+    // starting value for the stepper anyway — `createOrder` recomputes the amount from the
+    // product price and its own Zod-bounded `copies` at pay time.
+    //
+    // This branch is the ELSE of the pending-order case above, deliberately. A pending order's
+    // stored copies stay authoritative because its Razorpay amount is already fixed; seeding from
+    // the cart there would display a number that is not what will be charged.
+    const { data: cartRow } = await supabase
+      .from('cart_items')
+      .select('quantity')
+      .eq('album_id', album.id)
+      .maybeSingle();
+    const cartQuantity = (cartRow as { quantity: number } | null)?.quantity;
+    if (typeof cartQuantity === 'number' && Number.isFinite(cartQuantity)) {
+      initialCopies = Math.min(10, Math.max(1, Math.round(cartQuantity)));
+    }
+    const a = computeOrderAmount(basePrice, initialCopies);
     amount = {
       subtotalInr: a.subtotalInr,
       shippingInr: a.shippingInr,
@@ -121,9 +140,18 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     };
   }
 
+  // OWN ADDRESSES ONLY — filtered explicitly, not just by RLS: `addresses` carries an
+  // `admins_read_all_addresses` policy, so for an admin the RLS-scoped read returns every
+  // customer's address and the picker could pre-select a foreign one. `createOrder` refuses such
+  // an id, so this only aligns the list with what the action will accept. No change for a
+  // normal customer, whose RLS view is already just their own rows.
+  const {
+    data: { user: currentUser },
+  } = await supabase.auth.getUser();
   const { data: addressRows } = await supabase
     .from('addresses')
     .select('id, full_name, line1, city, state, pincode, is_default')
+    .eq('user_id', currentUser?.id ?? '')
     .order('is_default', { ascending: false })
     .order('created_at', { ascending: false });
   const addresses = (addressRows ?? []) as Address[];
@@ -254,6 +282,14 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
 
   const albumSub = [album.destination, album.travel_dates].filter(Boolean).join(' · ') || null;
 
+  // The album's OWN cover, for the book shown beside the order summary. `cover_config` was already
+  // selected for the readiness check above, so this costs no extra query. NULL stays NULL: an album
+  // with no design keeps the existing template-thumbnail / bound-book fallback rather than being
+  // handed an invented default config.
+  const ownCover = album.cover_config
+    ? normalizeCoverConfig(album.cover_config as Parameters<typeof normalizeCoverConfig>[0])
+    : null;
+
   return (
     <div className="brand-surface">
       <Checkout
@@ -266,6 +302,7 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
         formatDimensions={formatDimensions}
         coverUrl={coverUrl}
         coverName={coverName}
+        coverConfig={ownCover}
         amount={amount}
         addresses={addresses}
         pendingOrderId={pending?.id ?? null}

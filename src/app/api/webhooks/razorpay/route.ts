@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import { verifyWebhookSignature } from '@/lib/razorpay';
 import { rateLimit, sweepRateLimits } from '@/lib/rate-limit';
-import { sendOrderConfirmationEmail } from '@/lib/email/events';
-import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
+import { settleOrderFulfilment } from '@/lib/orders/settlement';
 import { captureException, captureMessage } from '@/lib/observability/capture';
 import { getRequestId } from '@/lib/observability/request-id';
 
@@ -144,51 +143,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, result }, { status: 200 });
   }
 
-  // Order-confirmation email — attached to the existing 'paid' transition, not a new
-  // path. Only a genuine capture that processed reaches here; the email layer is
-  // idempotent (email_log claim) so a duplicate/retry webhook never re-sends, and it
-  // never throws, so email problems can't fail the webhook. We need the orders.id, not
-  // the razorpay order id, so resolve it via the service client.
+  // THE PAID-TRANSITION CASCADE (Phase 8). Attached to the existing 'paid' transition, not a
+  // new path: only a genuine capture that processed reaches here. Everything downstream — the
+  // confirmation email, the review queue, the preview PDF and cart clearing — now runs for
+  // EVERY `order_items` row, because an order can contain several albums and `orders.album_id`
+  // names only the first. Every step inside is individually idempotent, so a duplicate or
+  // racing delivery has no additional effect, and it never throws, so a sleeping worker or a
+  // bounced email can never turn a settled payment into a 503 retry.
   if (event === 'payment.captured' && result === 'processed') {
-    let albumId: string | null = null;
-    let customerId: string | null = null;
     try {
       const { data: orderRow } = await admin
         .from('orders')
-        .select('id, album_id, user_id')
+        .select('id')
         .eq('razorpay_order_id', razorpayOrderId)
         .maybeSingle();
-      const row = orderRow as { id: string; album_id: string; user_id: string } | null;
-      albumId = row?.album_id ?? null;
-      customerId = row?.user_id ?? null;
-      if (row?.id) await sendOrderConfirmationEmail(row.id);
+      const orderId = (orderRow as { id: string } | null)?.id ?? null;
+      if (orderId) await settleOrderFulfilment(orderId, 'webhook');
     } catch (e) {
-      console.error('[razorpay-webhook] confirmation email error', { eventId, error: String(e) });
-    }
-
-    // Enter the admin review queue on the FIRST paid transition (CHANGE 4): every paid album
-    // must be reviewed before print. `submit_album_for_review` creates/refreshes the
-    // album_reviews row to 'pending_review' and audits it (single source of the review state;
-    // the central validation service is untouched). Best-effort — must never fail the webhook.
-    if (albumId && customerId) {
-      try {
-        await admin.rpc('submit_album_for_review', { p_album_id: albumId, p_customer_id: customerId });
-      } catch (e) {
-        console.error('[razorpay-webhook] review-queue enqueue error', { eventId, albumId, error: String(e) });
-      }
-    }
-
-    // Auto-generate the album PDF on the FIRST transition to paid (backend workflow —
-    // the customer never triggers this). Best-effort + idempotent: validate:true — submission is
-    // now non-blocking, so the PDF generator runs the central integrity gate itself and simply
-    // won't produce a broken book for an incomplete album (admin follows up). Nudge wakes the worker.
-    if (albumId) {
-      try {
-        const r = await startAlbumPdfGeneration(albumId, { validate: true, nudge: true });
-        console.log('[razorpay-webhook] album-pdf auto-start', { eventId, albumId, result: r });
-      } catch (e) {
-        console.error('[razorpay-webhook] album-pdf auto-start error', { eventId, albumId, error: String(e) });
-      }
+      console.error('[razorpay-webhook] settlement error', { eventId, error: String(e) });
     }
   }
 

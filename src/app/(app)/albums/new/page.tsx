@@ -34,6 +34,10 @@ export default async function NewAlbumPage() {
     isNew: b.isNew,
     breakdown: b.breakdown,
     thumbUrl: b.thumbUrl,
+    // The geometry itself (Phase 4). Auto Create now applies the blueprint IN THE BROWSER, so a
+    // photo still uploading can be placed under its optimistic id instead of being ignored until
+    // the worker finishes. `applyBlueprint` is the same pure function the server action calls.
+    blueprint: b.blueprint,
   }));
 
   // Map the active layout catalog to the engine's TemplateChoice shape so "Build it for

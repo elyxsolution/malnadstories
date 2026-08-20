@@ -24,7 +24,9 @@ class FakePdfStore implements AlbumPdfStore {
     return this.state;
   }
   async setStage(_a: string, _s: PdfStage): Promise<void> {}
-  async markReady(): Promise<void> {}
+  async markReady(): Promise<boolean> {
+    return true;
+  }
   async markFailed(albumId: string, _m: string, code: PdfFailureCode): Promise<void> {
     this.failed = { albumId, code };
   }

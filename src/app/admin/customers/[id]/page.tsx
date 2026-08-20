@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { profiles, orders, albums, couponRedemptions, coupons, auditLog } from '@/db/schema';
+import { profiles, orders, orderItems, albums, couponRedemptions, coupons, auditLog } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { adminUserEmail } from '@/lib/admin/users';
 import { inr, shortId, fmtDate, fmtDateTime, statusChip } from '@/lib/admin/format';
@@ -24,18 +24,24 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
 
   const [email, orderRows, albumRows, redemptions, activity] = await Promise.all([
     adminUserEmail(profile.id),
+    // HISTORICAL purchase display comes from the order snapshot (0056), not the live album:
+    // `orders.album_id` names only the first album of a combined order, and a later rename must
+    // never rewrite what a past order says it sold. Aggregated per order in SQL so the table stays
+    // one row per order and this stays a single query.
     db
       .select({
         id: orders.id,
         status: orders.status,
         total: orders.totalAmount,
-        copies: orders.copies,
         placedAt: orders.placedAt,
-        albumTitle: albums.title,
+        itemCount: sql<number>`count(${orderItems.id})::int`,
+        copies: sql<number>`coalesce(sum(${orderItems.copies}), ${orders.copies})::int`,
+        firstTitle: sql<string | null>`min(${orderItems.albumTitle})`,
       })
       .from(orders)
-      .leftJoin(albums, eq(orders.albumId, albums.id))
+      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
       .where(eq(orders.userId, params.id))
+      .groupBy(orders.id, orders.status, orders.totalAmount, orders.placedAt, orders.copies)
       .orderBy(desc(orders.placedAt)),
     db
       .select({ id: albums.id, title: albums.title, status: albums.status, updatedAt: albums.updatedAt })
@@ -106,7 +112,9 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
                       #{shortId(o.id)}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">{o.albumTitle ?? '—'}</td>
+                  <td className="px-3 py-2">
+                    {o.itemCount > 1 ? `${o.firstTitle ?? 'Album'} + ${o.itemCount - 1} more` : (o.firstTitle ?? '—')}
+                  </td>
                   <td className="px-3 py-2 text-right">{inr(o.total)}</td>
                   <td className="px-3 py-2 text-center">{o.copies}</td>
                   <td className="px-3 py-2">

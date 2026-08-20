@@ -322,8 +322,14 @@ export function migrateCoverConfig(c: CoverConfig, meta: CoverMetadata, pageAspe
   let changed = false;
 
   // 1 — create the front metadata objects that should exist but don't.
+  // A role object is created only when there is something for it to say. `title` used to be
+  // exempted (always created, even blank) to guarantee a title object existed; with no album title
+  // to fall back on that exemption fabricates an empty object the customer then has to find and
+  // delete. Nothing depends on the object existing when it would be blank —
+  // `metadataFromCoverObjects` already returns `title: null` for "no title object", and a
+  // non-empty title arriving later creates it through this same path.
   const missing = (['title', 'subtitle', 'author'] as const).filter(
-    (r) => !findRole(texts, r) && (r === 'title' || wanted[r] !== ''),
+    (r) => !findRole(texts, r) && wanted[r] !== '',
   );
   if (missing.length > 0) {
     // A v1 row lays them out where the structured block was; a v2 row that is simply missing one
@@ -331,7 +337,7 @@ export function migrateCoverConfig(c: CoverConfig, meta: CoverMetadata, pageAspe
     // rest of the metadata already sits.
     const posY = legacy ? c.posY : (findRole(texts, 'title')?.y ?? LAYOUT_POS_Y[c.layout]) + 0.06;
     const present: CoverTextRole[] = legacy
-      ? (['title', 'subtitle', 'author'] as const).filter((r) => r === 'title' || wanted[r] !== '')
+      ? (['title', 'subtitle', 'author'] as const).filter((r) => wanted[r] !== '')
       : missing;
     // The WORDS matter to the geometry: the column's height is the sum of what each line wraps to.
     const rects = titleBlockRects(
@@ -351,8 +357,9 @@ export function migrateCoverConfig(c: CoverConfig, meta: CoverMetadata, pageAspe
     changed = true;
   }
 
-  // 2 — the spine object.
-  if (!findRole(spineTexts, 'spine')) {
+  // 2 — the spine object. Same rule: an empty spine (no `spineTitle` AND no album title) has
+  // nothing to print, so no object is fabricated for it.
+  if (!findRole(spineTexts, 'spine') && wanted.spine !== '') {
     spineTexts = [makeSpineText(wanted.spine, c.spineColor), ...spineTexts];
     changed = true;
   }
@@ -373,6 +380,16 @@ export function migrateCoverConfig(c: CoverConfig, meta: CoverMetadata, pageAspe
   return { ...c, v: COVER_SCHEMA_VERSION, texts, spine: { texts: spineTexts } };
 }
 
+/**
+ * The two roles whose text is DERIVED FROM `albums.title` rather than from the cover's own fields.
+ *
+ * `title` is `meta.title` verbatim; `spine` is `c.spineTitle || meta.title`. `subtitle` and
+ * `author` are not here on purpose — they come from `c.subtitle` / `c.author`, where empty
+ * genuinely means "this field is empty" and clearing it is the documented way to delete the object
+ * (see `metadataFromCoverObjects`). Their semantics are unchanged.
+ */
+const TITLE_DERIVED_ROLES: ReadonlySet<CoverTextRole> = new Set<CoverTextRole>(['title', 'spine']);
+
 /** Point every role object's `text` at the metadata it renders. Returns the input when in sync. */
 function syncRoleTexts(texts: TextElement[], wanted: Record<CoverTextRole, string>): TextElement[] {
   let touched = false;
@@ -380,6 +397,21 @@ function syncRoleTexts(texts: TextElement[], wanted: Record<CoverTextRole, strin
     if (!t.role) return t;
     const want = wanted[t.role];
     if (want === undefined || t.text === want) return t;
+    // EMPTY METADATA IS "NO OPINION", NOT "ERASE" — for the album-title-derived roles only.
+    //
+    // This is the load direction, and it used to overwrite unconditionally. That made the cover's
+    // title a projection of `albums.title` FOREVER, not just until the cover had its own object:
+    // an empty title metadata blanked an explicit, already-migrated title object on the next read.
+    // Retiring `albums.title` would therefore have silently emptied migrated covers, which is the
+    // dependency this whole phase exists to remove.
+    //
+    // The WRITE direction already works this way — `saveCoverDesign` does `...(title ? { title } : {})`
+    // precisely so a blank title is never read as an instruction to erase `albums.title`. This makes
+    // the read direction agree with the write direction instead of contradicting it.
+    //
+    // A NON-EMPTY metadata title still wins, so renaming an album in Album Settings still renames
+    // the cover — the two-way binding is intact.
+    if (want === '' && TITLE_DERIVED_ROLES.has(t.role) && t.text !== '') return t;
     touched = true;
     return { ...t, text: want };
   });

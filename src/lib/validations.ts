@@ -24,12 +24,17 @@ const optionalText = (max: number, msg: string) =>
     z.string().max(max, msg).optional(),
   );
 
+// NO `title` (Phase 5). Creation does not ask for one and therefore does not accept one: the
+// server derives `albums.title` from the trip details inside `insertAlbumForUser`, via the pure
+// `deriveAlbumTitle` (lib/albums/title). The field is REMOVED rather than accepted-and-ignored —
+// a schema that takes a value it silently discards is a contract that lies, and it would leave a
+// client-supplied title looking authoritative to the next reader. Zod strips unknown keys by
+// default, so a hand-crafted request carrying `title` parses fine and the value goes nowhere.
+//
+// Renaming an EXISTING album is unaffected and still requires a real title — see
+// UpdateAlbumDetailsSchema below, and the cover editor's CoverDesignSchema.
 export const CreateAlbumSchema = z
   .object({
-    title: z
-      .string()
-      .min(1, 'Album title is required')
-      .max(100, 'Title must be 100 characters or less'),
     // Cover source (Phase 3). Exactly one path (or neither = blank custom cover):
     //   coverTemplateId       → legacy uploaded-PNG cover artwork (0023), kept for back-compat.
     //   coverDesignTemplateId → a full builder-JSON cover DESIGN template (0040); its CoverConfig
@@ -85,6 +90,17 @@ export const PresignUploadSchema = z.object({
     .int()
     .positive('File is empty')
     .max(MAX_UPLOAD_BYTES, 'Each file must be 20 MB or smaller'),
+  /**
+   * RETRY ONLY (Phase 6, decision C2) — an upload key this client was already issued, to be
+   * RE-SIGNED rather than replaced. Present only when an upload is resuming after a transient
+   * PUT failure; a first attempt omits it and the server mints the key as it always has.
+   *
+   * This is a request to re-sign a key the caller already owns, NEVER a way to name one: the
+   * route re-derives ownership from the session and validates the key's prefix, shape and
+   * extension from scratch, and refuses any key a photo row has already claimed. Zod only
+   * bounds the string here — see `presign/route.ts` for the real gate.
+   */
+  key: z.string().min(1).max(512).optional(),
 });
 
 export const ConfirmUploadSchema = z.object({
@@ -327,7 +343,11 @@ export const CoverConfigSchema = z.object({
 
 export const CoverDesignSchema = z.object({
   albumId: z.string().uuid('Invalid album'),
-  title: z.string().trim().min(1, 'Album title is required').max(100, 'Title must be 100 characters or less'),
+  // OPTIONAL BY DESIGN. The title is one field of the cover, not a gate on it: a blank cover line
+  // must not stop the background / elements / base template from being persisted. Blank or absent
+  // means "don't touch the album's name" — saveCoverDesign leaves `albums.title` (NOT NULL, and
+  // the name shown on the dashboard, the order and the invoice) exactly as it is.
+  title: z.string().trim().max(100, 'Title must be 100 characters or less').optional(),
   // Base cover artwork (admin template). Null = no template image (use a photo/background).
   coverTemplateId: z.string().uuid('Invalid cover').nullable().optional().default(null),
   config: CoverConfigSchema,
@@ -558,6 +578,61 @@ export const CreateOrderSchema = z.object({
 
 export const CancelOrderSchema = z.object({
   orderId: z.string().uuid('Invalid order'),
+});
+
+/**
+ * Add an album to the cart (0055). The client supplies ONLY these two fields.
+ *
+ * There is deliberately no `userId` — identity comes from `getUser()` server-side, so a
+ * forged one has nowhere to enter — and no price or product data, because `createOrder`
+ * remains the only thing that decides what an album costs.
+ *
+ * The 1–10 bound is not a new rule: it mirrors `CreateOrderSchema.copies` and the
+ * `orders_copies_check` CHECK, so a cart can never hold a quantity an order would refuse.
+ */
+export const AddToCartSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  quantity: z.number().int().min(1, 'At least 1 copy').max(10, 'Maximum 10 copies').default(1),
+});
+
+/**
+ * COMBINED CHECKOUT (Phase 8) — one order for every album currently in the cart.
+ *
+ * There is deliberately NO album list, no quantity, no price and no total: the server
+ * re-resolves the cart itself at pay time, so a stale or tampered browser payload cannot
+ * change what is bought or what it costs. The client supplies only the delivery choice and
+ * an optional code — exactly the three things `CreateOrderSchema` accepts beyond ids.
+ */
+export const CreateCombinedOrderSchema = z.object({
+  addressId: z.string().uuid('Please select a delivery address'),
+  shippingMethod: ShippingMethodSchema,
+  couponCode: CouponCodeSchema,
+});
+
+/** Advisory combined preview (delivery-tier switch / coupon apply). No address needed. */
+export const PreviewCombinedOrderSchema = z.object({
+  shippingMethod: ShippingMethodSchema,
+  couponCode: CouponCodeSchema,
+});
+
+/**
+ * Remove an album from the cart (Phase 7). Album-keyed like every other cart operation — the
+ * `unique (user_id, album_id)` index makes the album the row's natural identity, and there is
+ * no `cart_items.id` for a client to guess at. Ownership is RLS's job, not this schema's.
+ */
+export const RemoveFromCartSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+});
+
+/**
+ * Set the number of copies for an album already in the cart (Phase 7). `quantity` is the
+ * ABSOLUTE desired value, never a delta — see `setCartQuantity`. Same 1–10 bound as
+ * `AddToCartSchema` and `CreateOrderSchema.copies`, so a cart quantity can never be a copy
+ * count an order would refuse.
+ */
+export const UpdateCartQuantitySchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  quantity: z.number().int().min(1, 'At least 1 copy').max(10, 'Maximum 10 copies'),
 });
 
 // Live discount preview on the checkout page (advisory; createOrder recomputes).
@@ -1003,7 +1078,11 @@ export type ShipmentStatusInput = z.infer<typeof ShipmentStatusSchema>;
 
 export type AddressInput = z.infer<typeof AddressSchema>;
 export type CreateOrderInput = z.infer<typeof CreateOrderSchema>;
+export type CreateCombinedOrderInput = z.infer<typeof CreateCombinedOrderSchema>;
 export type CancelOrderInput = z.infer<typeof CancelOrderSchema>;
+export type AddToCartInput = z.infer<typeof AddToCartSchema>;
+export type RemoveFromCartInput = z.infer<typeof RemoveFromCartSchema>;
+export type UpdateCartQuantityInput = z.infer<typeof UpdateCartQuantitySchema>;
 
 export type EditConfigInput = z.infer<typeof EditConfigSchema>;
 export type SaveLayoutInput = z.infer<typeof SaveLayoutSchema>;

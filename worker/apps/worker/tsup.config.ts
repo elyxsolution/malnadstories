@@ -8,7 +8,27 @@ import { defineConfig } from 'tsup';
  * emits build artifacts; the libraries stay `--noEmit`.
  */
 export default defineConfig({
-  entry: ['src/main.ts'],
+  /**
+   * ONE image, several entrypoints.
+   *
+   * `main.ts` is the long-running worker. The diagnostics CLIs are built alongside it because
+   * the production image ships ONLY `dist/` — `src/` is never copied, and `tsx` is a
+   * devDependency that `pnpm deploy --prod` strips. Without these entries the diagnostics
+   * package scripts work on a developer machine and are simply absent in production, which
+   * would make any documented production procedure fiction.
+   *
+   * They add no runtime behaviour to the worker: nothing in `main.ts` imports them, so the
+   * long-running process never loads a byte of this code. They are separate executables that
+   * happen to travel in the same image, invoked as `node dist/orphan-cleanup.js …`.
+   */
+  entry: [
+    'src/main.ts',
+    'src/diagnostics/orphan-scan/cli.ts',
+    'src/diagnostics/orphan-cleanup/cli.ts',
+    'src/diagnostics/preview-pdf-cleanup/cli.ts',
+    'src/diagnostics/derivative-forensics/cli.ts',
+    'src/diagnostics/account-assets/cli.ts',
+  ],
   format: ['esm'],
   platform: 'node',
   target: 'node20',

@@ -66,9 +66,10 @@ class FakePdfStore implements AlbumPdfStore {
   async setStage(_albumId: string, stage: PdfStage): Promise<void> {
     this.stages.push(stage);
   }
-  async markReady(albumId: string, r2Key: string): Promise<void> {
+  async markReady(albumId: string, r2Key: string): Promise<boolean> {
     if (this.failMarkReady) throw new Error('db down');
     this.ready = { albumId, r2Key };
+    return true; // a row was updated (the album still exists)
   }
   async markFailed(albumId: string, message: string, code: PdfFailureCode): Promise<void> {
     this.failed = { albumId, message, code };

@@ -23,9 +23,15 @@ import { loadRenderReadiness, summarizeRenderIssues } from '@/lib/albums/render-
 export type StartResult = { ok: true; skipped?: 'already-ready' | 'in-progress' } | { ok: false; error: string };
 
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
-// A 'generating' row younger than this is considered actively in progress, so a
-// non-forced request is a no-op (don't pile on duplicate jobs).
-const IN_PROGRESS_MS = 90 * 1000;
+/**
+ * A 'generating' row younger than this is considered actively in progress, so a non-forced
+ * request is a no-op (don't pile on duplicate jobs).
+ *
+ * Exported because `deleteAlbum` needs the SAME definition of "a render is in flight" to refuse
+ * deleting an album out from under a running job (Phase 6 Prompt 10). One constant, one meaning —
+ * and because it is bounded, a stuck row can never block deletion permanently.
+ */
+export const IN_PROGRESS_MS = 90 * 1000;
 
 
 /**
@@ -49,8 +55,29 @@ export async function startAlbumPdfGeneration(
 
   const svc = createServiceClient();
 
-  const { data: albumRow } = await svc.from('albums').select('id').eq('id', albumId).maybeSingle();
+  const { data: albumRow } = await svc
+    .from('albums')
+    .select('id, blueprint_draft_of')
+    .eq('id', albumId)
+    .maybeSingle();
   if (!albumRow) return { ok: false, error: 'Album not found' };
+
+  // BLUEPRINT DRAFTS NEVER GENERATE PDFs. A draft (0046) is an admin AUTHORING SCAFFOLD, not an
+  // orderable book: it carries no photos, is hidden from the customer dashboard, and is destroyed
+  // by CASCADE whenever its blueprint is deleted or re-opened for editing. If one ever acquired a
+  // PDF, that CASCADE would drop the `album_pdfs` row — the ONLY record of the R2 key — leaving
+  // `{user}/albums/{album}/preview.pdf` orphaned AND unreclaimable, since the orphan-cleanup key
+  // parser positively excludes `preview.pdf` as a non-raw object class. Prevention is the only
+  // available fix, so the invariant is absolute.
+  //
+  // This sits ABOVE the force / validate / override branches deliberately. `override` is an
+  // AUDITED bypass of the content-validation and render-readiness gates — quality judgements about
+  // a real album — and must not double as a licence to create an unreclaimable orphan. Blueprints
+  // get their preview image from a separate pipeline (startBlueprintThumbnail → layout_templates.
+  // thumb_key), so nothing legitimate is lost here.
+  if ((albumRow as { blueprint_draft_of: string | null }).blueprint_draft_of !== null) {
+    return { ok: false, error: 'Blueprint draft albums cannot generate PDFs.' };
+  }
 
   // Idempotency: don't duplicate work for a non-forced caller.
   const { data: existing } = await svc

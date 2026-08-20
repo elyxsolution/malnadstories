@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { and, count, desc, eq, gte, inArray, isNull, lt, lte, or, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lt, lte, or, sql, sum } from 'drizzle-orm';
 import { AlertTriangle, ImageOff, FileWarning, Clock } from 'lucide-react';
 import { db } from '@/db';
-import { orders, coupons, couponRedemptions, albums, profiles, photos, albumPdfs } from '@/db/schema';
+import { orders, coupons, couponRedemptions, orderItems, profiles, photos, albumPdfs } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { roleHasCapability } from '@/lib/auth/capabilities';
 import { collectHealth } from '@/lib/monitoring/collectors';
@@ -59,6 +59,10 @@ export default async function AdminDashboard() {
         ),
       ),
     db.select({ couponsUsed: count() }).from(couponRedemptions),
+    // Recent orders — the album column comes from the purchase snapshot (0056), like every other
+    // historical order display: `orders.album_id` names only the first album of a combined order,
+    // and a later rename must never rewrite what a past order says it sold. Aggregated in SQL so
+    // this stays one query and one row per order.
     db
       .select({
         id: orders.id,
@@ -67,11 +71,13 @@ export default async function AdminDashboard() {
         placedAt: orders.placedAt,
         userId: orders.userId,
         customerName: profiles.name,
-        albumTitle: albums.title,
+        itemCount: sql<number>`count(${orderItems.id})::int`,
+        firstTitle: sql<string | null>`min(${orderItems.albumTitle})`,
       })
       .from(orders)
-      .leftJoin(albums, eq(orders.albumId, albums.id))
+      .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
       .leftJoin(profiles, eq(orders.userId, profiles.id))
+      .groupBy(orders.id, orders.status, orders.totalAmount, orders.placedAt, orders.userId, profiles.name)
       .orderBy(desc(orders.placedAt))
       .limit(10),
   ]);
@@ -238,7 +244,9 @@ export default async function AdminDashboard() {
                   </Link>
                 </td>
                 <td className="px-3 py-2">{r.customerName ?? emails.get(r.userId) ?? '—'}</td>
-                <td className="px-3 py-2">{r.albumTitle ?? '—'}</td>
+                <td className="px-3 py-2">
+                  {r.itemCount > 1 ? `${r.firstTitle ?? 'Album'} + ${r.itemCount - 1} more` : (r.firstTitle ?? '—')}
+                </td>
                 <td className="px-3 py-2 text-right">{inr(r.total)}</td>
                 <td className="px-3 py-2">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>

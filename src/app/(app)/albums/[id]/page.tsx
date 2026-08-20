@@ -4,12 +4,15 @@ import { PenLine, Eye, ShoppingCart, ReceiptText, MapPin, Calendar } from 'lucid
 import BackLink from '@/components/ui/back-link';
 import { createClient } from '@/lib/supabase/server';
 import { listActiveCoverOptions } from '@/lib/covers';
+import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { albumCoverFace, albumCoverSpine } from '@/components/album-cover';
 import { getPaidOrder } from '@/lib/orders/album-lock';
 import { orderStatusView } from '@/lib/orders/status';
 import { Button } from '@/components/ui/button';
 import { LUX_PRIMARY } from '@/components/brand';
 import Book, { paletteFor } from '@/components/book';
 import CustomerShell from '@/components/customer-shell';
+import AddToCartButton from './_add-to-cart';
 
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -30,7 +33,7 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
 
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, title, size, status, cover_template_id, destination, travel_dates, description')
+    .select('id, title, size, status, cover_template_id, cover_config, destination, travel_dates, description')
     .eq('id', params.id)
     .maybeSingle();
   const album = albumRow as {
@@ -39,6 +42,7 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
     size: number;
     status: string;
     cover_template_id: string | null;
+    cover_config: unknown;
     destination: string | null;
     travel_dates: string | null;
     description: string | null;
@@ -58,6 +62,12 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
 
   const orders = (orderRows ?? []) as { id: string; status: string; total_amount: string; placed_at: string }[];
   const cover = covers.find((c) => c.id === album.cover_template_id) ?? null;
+  // The album's OWN cover, not the template catalogue's thumbnail. `cover.thumbUrl` below is kept as
+  // the fallback for an album that has no `cover_config` yet. NULL stays NULL so an undesigned album
+  // keeps the bound-book artwork rather than being handed an invented default config.
+  const ownCover = album.cover_config
+    ? normalizeCoverConfig(album.cover_config as Parameters<typeof normalizeCoverConfig>[0])
+    : null;
   const isEditable = !paidOrder; // paid → read-only album
 
   return (
@@ -70,7 +80,15 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
             {/* Book + actions */}
             <div>
               <div className="flex justify-center">
-                <Book title={album.title} coverImage={cover?.thumbUrl ?? null} cover={paletteFor(album.id)} size="lg" thickness={album.size >= 100 ? 16 : 12} />
+                <Book
+                  title={album.title}
+                  coverImage={cover?.thumbUrl ?? null}
+                  coverContent={albumCoverFace(ownCover, album.title)}
+                  spineContent={albumCoverSpine(ownCover, album.title)}
+                  cover={paletteFor(album.id)}
+                  size="lg"
+                  thickness={album.size >= 100 ? 16 : 12}
+                />
               </div>
 
               <div className="mt-7 flex flex-col gap-2">
@@ -80,9 +98,15 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
                       <PenLine /> Continue building
                     </Button>
                     {album.status === 'submitted' && (
-                      <Button variant="outline" render={<Link href={`/checkout/${album.id}`} />}>
-                        <ShoppingCart /> Proceed to checkout
-                      </Button>
+                      <>
+                        {/* Cart first, checkout second: adding is the reversible choice. Both are
+                            server-gated (`addAlbumToCart` / `createOrder`); showing them only for
+                            a submitted album is presentation. */}
+                        <AddToCartButton albumId={album.id} />
+                        <Button variant="outline" render={<Link href={`/checkout/${album.id}`} />}>
+                          <ShoppingCart /> Proceed to checkout
+                        </Button>
+                      </>
                     )}
                   </>
                 ) : (

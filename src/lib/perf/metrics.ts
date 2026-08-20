@@ -22,7 +22,17 @@ export type PerfMetric =
   | 'url.refresh' // signed-URL refresh round trip
   | 'virtual.ratio' // rendered items ÷ total items (×100)
   | 'upload.throughput' // KB/s for one completed upload
-  | 'upload.queueWait'; // ms a task spent queued before starting
+  | 'upload.queueWait' // ms a task spent queued before starting
+  // Phase 6 reliability counters. Each records a plain 1 — the ring buffer has no label
+  // dimension, so the retry CATEGORY is expressed as separate series rather than a tag.
+  | 'upload.retry.attempted' // an automatic retry was scheduled (any cause)
+  | 'upload.retry.network' // …because the connection failed
+  | 'upload.retry.5xx' // …because the server answered 5xx/408/425
+  | 'upload.retry.429' // …because we were rate-limited
+  | 'upload.retry.exhausted' // a transient failure ran out of automatic attempts
+  | 'upload.offline.pause' // the queue suspended (offline event, or a run of network failures)
+  | 'upload.offline.resume' // the queue restarted
+  | 'upload.unload.warned'; // beforeunload fired while uploads were in flight
 
 const CAPACITY = 120; // per metric — enough for a stable p95, bounded memory
 

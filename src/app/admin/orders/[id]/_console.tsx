@@ -25,6 +25,27 @@ export type ConsoleOrder = {
   tracking: string | null;
   carrier: string | null;
 };
+/**
+ * One purchased line (0056) — the snapshot as sold, not today's catalog.
+ *
+ * `albumStatus` and `pdfStatus` are LIVE per-album state (not snapshots), because that is what an
+ * operator acts on: for a combined order a single order-level PDF chip would describe only the
+ * first album and quietly hide the others. Regeneration itself stays where it already is —
+ * `adminGenerateAlbumPdf(albumId)` on `/admin/albums/[id]`, which each row links to — so no new
+ * mutation surface, no order-level PDF, and `previewPdfKey`/PDF idempotency are untouched.
+ */
+export type ConsoleItem = {
+  id: string;
+  albumId: string;
+  albumTitle: string;
+  productName: string | null;
+  productDimensions: unknown;
+  copies: number;
+  unitPrice: string | number;
+  lineSubtotal: string | number;
+  albumStatus: string | null;
+  pdfStatus: string;
+};
 export type ConsoleCustomer = { name: string | null; email: string; phone: string | null; address: string; orderCount: number };
 export type ConsolePayment = {
   subtotal: string | number;
@@ -48,6 +69,13 @@ const PDF_CHIP: Record<string, string> = {
   idle: 'bg-muted text-muted-foreground',
 };
 
+/** The purchased dimensions snapshot ("21 × 29.7 cm"), or null when a line predates it. */
+function dimsOf(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const d = value as { widthCm?: unknown; heightCm?: unknown };
+  return typeof d.widthCm === 'number' && typeof d.heightCm === 'number' ? `${d.widthCm} × ${d.heightCm} cm` : null;
+}
+
 /**
  * Unified premium order console (Phase 10E.1). ONE operational surface: a sticky header,
  * three tabs (Overview / Fulfilment & Shipping / Activity), and a single Operations panel.
@@ -56,6 +84,7 @@ const PDF_CHIP: Record<string, string> = {
  */
 export default function OrderConsole({
   order,
+  items,
   customer,
   payment,
   pdfStatus,
@@ -66,6 +95,7 @@ export default function OrderConsole({
   related,
 }: {
   order: ConsoleOrder;
+  items: ConsoleItem[];
   customer: ConsoleCustomer;
   payment: ConsolePayment;
   pdfStatus: string;
@@ -140,10 +170,57 @@ export default function OrderConsole({
               <Row label="Order history" value={<Link href={`/admin/customers/${order.userId}`} className="text-primary hover:underline">{customer.orderCount} order{customer.orderCount === 1 ? '' : 's'}</Link>} />
             </Section>
 
-            <Section title="Album">
-              <Row label="Title" value={order.albumTitle ?? '—'} />
-              <Row label="Album status" value={order.albumStatus ?? '—'} />
-              <Row label="PDF" value={<span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PDF_CHIP[pdfStatus] ?? PDF_CHIP.idle}`}>{pdfStatus}</span>} />
+            {/*
+              ALBUMS IN THIS ORDER, from `order_items` (Phase 8) — an order can contain several,
+              and `orders.album_id` names only the first. Each row links to its album and shows
+              the purchased copies and line total (the snapshot, not today's catalog). A
+              single-album order therefore reads as it always did, with one line.
+              `Album status` / `PDF` still describe the FIRST album, which is what the existing
+              per-album columns on `orders` point at.
+            */}
+            <Section title={items.length > 1 ? `Albums (${items.length})` : 'Album'}>
+              {items.length > 0 ? (
+                <div className="flex flex-col divide-y">
+                  {items.map((it) => (
+                    <div key={it.id} className="flex items-start justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                      <div className="min-w-0">
+                        <Link href={`/admin/albums/${it.albumId}`} className="block truncate text-sm font-medium text-primary hover:underline">
+                          {it.albumTitle}
+                        </Link>
+                        {/* Product name AND dimensions come from the purchase snapshot, so a later
+                            catalog edit cannot restate what this order sold. */}
+                        <p className="text-xs text-muted-foreground">
+                          {it.productName ?? 'Album'}
+                          {dimsOf(it.productDimensions) ? ` · ${dimsOf(it.productDimensions)}` : ''} · {inr(it.unitPrice)} ×{' '}
+                          {it.copies}
+                        </p>
+                        {/* Per-album live state: for a combined order each book prints, reviews and
+                            regenerates on its own, so each one shows its own status here. */}
+                        <p className="mt-1 flex items-center gap-1.5 text-xs">
+                          <span className="text-muted-foreground">{it.albumStatus ?? '—'}</span>
+                          <span className="text-muted-foreground/50">·</span>
+                          <span className={`rounded-full px-2 py-0.5 font-medium ${PDF_CHIP[it.pdfStatus] ?? PDF_CHIP.idle}`}>
+                            PDF {it.pdfStatus}
+                          </span>
+                        </p>
+                      </div>
+                      <span className="flex-none text-sm tabular-nums">{inr(it.lineSubtotal)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <Row label="Title" value={order.albumTitle ?? '—'} />
+                  <Row label="Album status" value={order.albumStatus ?? '—'} />
+                  <Row label="PDF" value={<span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PDF_CHIP[pdfStatus] ?? PDF_CHIP.idle}`}>{pdfStatus}</span>} />
+                </>
+              )}
+              {items.length > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Regenerate a PDF (reprint) from that album&apos;s page — it is per album, never
+                  order-wide.
+                </p>
+              )}
             </Section>
 
             <Section title="Payment">

@@ -101,10 +101,36 @@ export class FinalizeStage implements RenderStage {
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
     await deps.pdf.setStage(ctx.albumId, 'finalizing');
     const r2Key = required(ctx.r2Key, 'r2Key');
+    let owned: boolean;
     try {
-      await deps.pdf.markReady(ctx.albumId, r2Key);
+      owned = await deps.pdf.markReady(ctx.albumId, r2Key);
     } catch (error) {
       throw new TransientPdfError(message(error), 'db_update_failed');
+    }
+
+    // OWNERSHIP LOST MID-FLIGHT (Phase 6 Prompt 10). The bytes are already in R2 (UploadStage),
+    // but the `album_pdfs` row is gone — the album was deleted while this render was running and
+    // the CASCADE removed the row that held the key. Nothing in the database names this object
+    // any more, and `deleteAlbum` cannot have enqueued it for cleanup because `r2_key` was still
+    // null when it collected keys. The orphan-scan tooling deliberately ignores `preview.pdf`, so
+    // an object left here would never be reclaimed by anything, ever.
+    //
+    // COMPENSATE, then fail. R2 DeleteObject is idempotent (a missing key is a no-op), so this is
+    // safe on redelivery and safe if `deleteAlbum`'s own cleanup job already removed the key. The
+    // delete is best-effort: if it fails we still refuse to report success, because a job that
+    // claimed `ready` here would leave a permanently ownerless object AND a customer-visible PDF
+    // that no row points at.
+    if (!owned) {
+      try {
+        await deps.objectStore.delete(r2Key);
+      } catch {
+        // Swallowed deliberately: the throw below is the real signal. Reporting success is the
+        // one outcome that must never happen.
+      }
+      throw new PermanentPdfError(
+        'album deleted while its PDF was rendering; uploaded object was cleaned up',
+        'album_missing',
+      );
     }
     return ctx;
   }

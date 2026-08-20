@@ -34,12 +34,25 @@ import { orientedSize } from './_photo-state';
 /** A photo projected for the engine, tagged with where its dimensions came from. */
 export type LayoutInput = EnginePhoto & { dimensionSource: 'server' | 'client' };
 
-/** Project the photos an auto-layout run may use — server dims preferred, client accepted. */
+/**
+ * Project the photos an auto-layout run may use — server dims preferred, client accepted.
+ *
+ * DISTINCT BY ID. The photo list can transiently hold the same photo twice: the poll adopts a
+ * confirmed row under its real id while the optimistic entry is still present, and the moment
+ * `onConfirmed` remaps that entry the two collapse onto one id. Feeding both to the engine places
+ * one photo in two slots, which `saveLayout` rejects outright ("A photo cannot be placed more
+ * than once") — losing the whole layout over a state that resolves itself a tick later. De-duping
+ * here fixes it for every caller at once, and is the right place: this function's contract is
+ * "the photos an engine run may use", and the engine's own rule is that each is used at most once.
+ */
 export function layoutInputs(photos: Photo[]): LayoutInput[] {
   const out: LayoutInput[] = [];
+  const seen = new Set<string>();
   for (const p of photos) {
+    if (seen.has(p.id)) continue;
     const size = orientedSize(p);
     if (!size) continue; // no reliable shape from either source — sit this round out
+    seen.add(p.id);
     out.push({
       id: p.id,
       width: size.width,

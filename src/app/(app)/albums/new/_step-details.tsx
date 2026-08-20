@@ -34,18 +34,13 @@ export default function StepDetails({
   albumProducts,
   albumProductId,
   pageCount,
-  title,
   destination,
   fromDate,
   toDate,
   description,
   dateError,
-  titleTooLong,
-  titleMaxLength,
   onSelectProduct,
   onSelectPageCount,
-  onTitleChange,
-  onTitleLocation,
   onDestinationChange,
   onFromDateChange,
   onToDateChange,
@@ -54,18 +49,13 @@ export default function StepDetails({
   albumProducts: ProductOption[];
   albumProductId: string;
   pageCount: number | null;
-  title: string;
   destination: string;
   fromDate: string;
   toDate: string;
   description: string;
   dateError: boolean;
-  titleTooLong: boolean;
-  titleMaxLength: number;
   onSelectProduct: (id: string) => void;
   onSelectPageCount: (n: number) => void;
-  onTitleChange: (v: string) => void;
-  onTitleLocation: (loc: string) => void;
   onDestinationChange: (v: string) => void;
   onFromDateChange: (v: string) => void;
   onToDateChange: (v: string) => void;
@@ -82,7 +72,7 @@ export default function StepDetails({
             Design your album.
           </h1>
           <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-muted-foreground">
-            Pick the book you want printed and give it a name. You&rsquo;ll choose the cover, the layouts and
+            Pick the book you want printed. You&rsquo;ll choose the cover, the title, the layouts and
             everything else in the builder.
           </p>
         </header>
@@ -98,33 +88,14 @@ export default function StepDetails({
           />
         </Section>
 
-        {/* 2 · The story. The title input is deliberately the one loud element on this page —
-            it is what gets printed on the cover. Everything around it stays quiet. */}
+        {/* 2 · The story. Where and when, in the customer's own words — no name is asked for
+            (Phase 5): the album is titled from these details and renamed in the builder, on the
+            cover itself, where the words are actually in front of them. */}
         <Section
           title="Your story"
-          description="The title is printed on the cover. Everything else is optional context you can add now or later."
+          description="Where you went and when. All of it is optional, and everything — including the title on the cover — can be changed later in the builder."
         >
           <div className="space-y-5">
-            <div className="space-y-2">
-              <Label
-                htmlFor="title"
-                className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-              >
-                Album title
-              </Label>
-              <SmartTitleInput
-                id="title"
-                value={title}
-                onChange={onTitleChange}
-                onSelectLocation={onTitleLocation}
-                placeholder="Name your story…"
-                maxLength={titleMaxLength}
-              />
-              {titleTooLong && (
-                <p className="text-xs text-destructive">Titles are limited to {titleMaxLength} characters.</p>
-              )}
-            </div>
-
             <div className="space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
@@ -201,11 +172,18 @@ export default function StepDetails({
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 Your specification
               </p>
+              {/*
+                The rail used to headline whatever the customer had typed into the title field.
+                With no name collected here it states the thing this panel is actually about —
+                the chosen book — and never guesses at a title: the album's name is derived
+                server-side after Continue, so any placeholder shown here would be a second,
+                disagreeing answer to a question the screen no longer asks.
+              */}
               <h2 className="mt-1.5 truncate font-display text-lg font-semibold tracking-tight">
-                {title.trim() || selectedProduct?.name || 'Untitled album'}
+                {selectedProduct?.name ?? 'Choose your book'}
               </h2>
-              {title.trim() && selectedProduct && (
-                <p className="truncate text-[12px] text-muted-foreground">{selectedProduct.name}</p>
+              {destination.trim() && (
+                <p className="truncate text-[12px] text-muted-foreground">{destination.trim()}</p>
               )}
             </div>
 

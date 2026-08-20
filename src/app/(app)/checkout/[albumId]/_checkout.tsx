@@ -13,6 +13,8 @@ import { LUX_PRIMARY } from '@/components/brand';
 import { SHIPPING_TIERS, type ShippingMethod } from '@/lib/shipping';
 import { isPaidStatus } from '@/lib/orders/status';
 import Book from '@/components/book';
+import { albumCoverFace, albumCoverSpine } from '@/components/album-cover';
+import type { CoverConfig } from '@/lib/builder/cover';
 import AddressPicker, { type Address } from './_address-picker';
 import CheckoutProgress, { STEP_ORDER, type CheckoutStep } from './_progress';
 import SuccessScreen from './_success';
@@ -61,6 +63,7 @@ export default function Checkout({
   formatDimensions,
   coverUrl,
   coverName,
+  coverConfig,
   amount,
   addresses,
   pendingOrderId,
@@ -85,6 +88,8 @@ export default function Checkout({
   renderReport?: RenderReadinessReport | null;
   coverUrl: string | null;
   coverName: string | null;
+  /** The album's persisted cover, normalized server-side. `null` = never designed one. */
+  coverConfig: CoverConfig | null;
   amount: AmountBreakdown;
   addresses: Address[];
   pendingOrderId: string | null;
@@ -430,6 +435,7 @@ export default function Checkout({
               <OrderRail
                 coverUrl={coverUrl}
                 coverName={coverName}
+                coverConfig={coverConfig}
                 albumTitle={albumTitle}
                 formatName={formatName}
                 albumSize={albumSize}
@@ -742,6 +748,7 @@ function FinalizingLoader() {
 function OrderRail({
   coverUrl,
   coverName,
+  coverConfig,
   albumTitle,
   formatName,
   albumSize,
@@ -760,6 +767,7 @@ function OrderRail({
 }: {
   coverUrl: string | null;
   coverName: string | null;
+  coverConfig: CoverConfig | null;
   albumTitle: string;
   formatName: string;
   albumSize: number;
@@ -780,7 +788,14 @@ function OrderRail({
     <aside className="overflow-hidden rounded-2xl border bg-card shadow-panel lg:sticky lg:top-[6.5rem]">
       <div className="flex items-center gap-4 border-b p-5">
         <div className="shrink-0">
-          <Book title={coverName ?? albumTitle} coverImage={coverUrl} size="sm" thickness={albumSize >= 100 ? 12 : 9} />
+          <Book
+            title={coverName ?? albumTitle}
+            coverImage={coverUrl}
+            coverContent={albumCoverFace(coverConfig, albumTitle)}
+            spineContent={albumCoverSpine(coverConfig, albumTitle)}
+            size="sm"
+            thickness={albumSize >= 100 ? 12 : 9}
+          />
         </div>
         <div className="min-w-0">
           <h3 className="font-display text-lg font-semibold leading-tight tracking-tight">{albumTitle}</h3>

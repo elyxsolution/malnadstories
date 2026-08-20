@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { listOrderItems } from '@/lib/orders/items';
 import { shippingLabel } from '@/lib/shipping';
 import { brandFontVars } from '@/lib/fonts';
 import BackLink from '@/components/ui/back-link';
@@ -34,7 +35,11 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
   } | null;
   if (!order) notFound();
 
-  const [{ data: albumRow }, { data: addrRow }] = await Promise.all([
+  // WHAT WAS BOUGHT comes from `order_items` (Phase 8) — an order may contain several albums,
+  // and `orders.album_id` names only the first. The titles are the ones snapshotted at purchase,
+  // so a later rename never rewrites history. RLS scopes the read through the parent order.
+  const [items, { data: albumRow }, { data: addrRow }] = await Promise.all([
+    listOrderItems(supabase, order.id),
     supabase.from('albums').select('title').eq('id', order.album_id).maybeSingle(),
     supabase
       .from('addresses')
@@ -79,7 +84,16 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
         <BackLink href="/orders" label="Orders" />
 
         <div className="mt-5">
-          <OrderStatus orderId={order.id} albumId={order.album_id} initialStatus={order.status} />
+          {/* Every purchased album (0056) — never just `orders.album_id`, which names only the first. */}
+          <OrderStatus
+            orderId={order.id}
+            albums={
+              items.length > 0
+                ? items.map((it) => ({ id: it.album_id, title: it.album_title }))
+                : [{ id: order.album_id, title: album?.title ?? 'Your album' }]
+            }
+            initialStatus={order.status}
+          />
           {shipment && <ShipmentCard shipment={shipment} />}
         </div>
 
@@ -87,10 +101,34 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
           <section className="rounded-2xl border bg-card p-5 text-sm shadow-panel">
             <h2 className="font-display text-[15px] font-semibold tracking-tight">Order summary</h2>
             <div className="mt-3 space-y-2">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Album</span>
-                <span className="tabular-nums text-foreground">{inr(subtotal)}</span>
-              </div>
+              {/*
+                One line per purchased album (Phase 8). A single-album order therefore reads
+                exactly as before — its one line, then shipping — while a combined order lists
+                every album it paid for instead of one misleading "Album" row. Falls back to the
+                aggregate subtotal only if the lines cannot be read.
+              */}
+              {items.length > 0 ? (
+                items.map((it) => (
+                  <div key={it.id} className="flex justify-between gap-3 text-muted-foreground">
+                    <span className="min-w-0 truncate">
+                      {it.album_title}
+                      {it.copies > 1 ? ` × ${it.copies}` : ''}
+                    </span>
+                    <span className="flex-none tabular-nums text-foreground">{inr(Number(it.line_subtotal))}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Album</span>
+                  <span className="tabular-nums text-foreground">{inr(subtotal)}</span>
+                </div>
+              )}
+              {items.length > 1 && (
+                <div className="flex justify-between border-t pt-2 text-muted-foreground">
+                  <span>Subtotal · {items.length} albums</span>
+                  <span className="tabular-nums text-foreground">{inr(subtotal)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-muted-foreground">
                 <span>Shipping · {tierLabel}</span>
                 <span className="tabular-nums text-foreground">{inr(shipping)}</span>
@@ -126,7 +164,13 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card/60 px-4 py-3 text-xs text-muted-foreground">
           <span>
             Order&nbsp;#{order.id.slice(0, 8)}
-            {album ? ` · ${album.title}` : ''}
+            {items.length > 1
+              ? ` · ${items.length} albums`
+              : items.length === 1
+                ? ` · ${items[0].album_title}`
+                : album
+                  ? ` · ${album.title}`
+                  : ''}
           </span>
           <span>Placed {placedDate}</span>
         </div>

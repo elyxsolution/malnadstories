@@ -37,6 +37,8 @@ export default function Book({
   title,
   year,
   coverImage = null,
+  coverContent = null,
+  spineContent = null,
   cover = 'forest',
   size = 'md',
   tilt = true,
@@ -46,6 +48,27 @@ export default function Book({
   title: string;
   year?: string;
   coverImage?: string | null;
+  /**
+   * The album's REAL cover, rendered as a node that fills the cover face — used by the shelf to
+   * show the customer's own design inside this frame instead of the cloth artwork.
+   *
+   * A node rather than another URL because the cover is drawn from `cover_config` by the canonical
+   * renderer (`CoverDesignFromConfig`), not fetched as an image; `coverImage` cannot carry it. The
+   * face is a fixed-size box and the renderer sizes its type in container-query units, so it scales
+   * to a thumbnail on its own. Precedence: coverContent → coverImage → cloth artwork, so every
+   * existing caller is unaffected.
+   */
+  coverContent?: React.ReactNode;
+  /**
+   * The album's REAL spine, for the bound edge — passed alongside `coverContent` so the binding
+   * belongs to the same cover as the face.
+   *
+   * Without it the spine kept drawing the hashed cloth palette, so a blue cover could sit next to a
+   * brown spine: a colour picked from the album's UUID, related to nothing the customer designed.
+   * Callers pass the canonical `SpineDesign` — the same component the PDF, the in-app preview and
+   * review mode render — so the shelf shows the binding that will actually print.
+   */
+  spineContent?: React.ReactNode;
   cover?: CoverPalette;
   size?: keyof typeof SIZES;
   /** Shelf books tilt in perspective; the format selector stands them upright. */
@@ -68,20 +91,24 @@ export default function Book({
       >
         {/* spine */}
         <div
-          className={`flex ${s.spine} items-center justify-center rounded-l-[1px]`}
-          style={{ background: p.spine }}
+          className={`relative flex ${s.spine} items-center justify-center overflow-hidden rounded-l-[1px]`}
+          style={spineContent ? undefined : { background: p.spine }}
         >
-          <span
-            className="max-h-[88%] overflow-hidden whitespace-nowrap text-[7px] uppercase tracking-[0.14em] [writing-mode:vertical-rl] [transform:rotate(180deg)]"
-            style={{ color: p.accent }}
-          >
-            {title}
-          </span>
+          {spineContent ?? (
+            <span
+              className="max-h-[88%] overflow-hidden whitespace-nowrap text-[7px] uppercase tracking-[0.14em] [writing-mode:vertical-rl] [transform:rotate(180deg)]"
+              style={{ color: p.accent }}
+            >
+              {title}
+            </span>
+          )}
         </div>
 
         {/* cover */}
         <div className={`relative flex ${s.cover} flex-col items-center justify-center overflow-hidden`}>
-          {coverImage ? (
+          {coverContent ? (
+            <div className="absolute inset-0">{coverContent}</div>
+          ) : coverImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={coverImage} alt={title} className="absolute inset-0 h-full w-full object-cover" />
           ) : (

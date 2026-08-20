@@ -7,6 +7,8 @@ import { Search, Plus, ArrowRight, Trash2, X, AlertTriangle, SearchX } from 'luc
 import { InlineLoader } from '@/components/loading';
 
 import Book, { paletteFor } from '@/components/book';
+import { albumCoverFace, albumCoverSpine } from '@/components/album-cover';
+import type { CoverConfig } from '@/lib/builder/cover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { deleteAlbum } from '@/lib/actions/albums';
@@ -18,6 +20,8 @@ export type LibraryAlbum = {
   status: string;
   updatedAt: string;
   purchase: { orderId: string; status: string; placedAt: string } | null;
+  /** The album's persisted cover, already normalized server-side. `null` = never designed one. */
+  cover: CoverConfig | null;
 };
 
 type Kind = 'draft' | 'ready' | 'ordered' | 'delivered';
@@ -90,7 +94,7 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
         {/* Continue where you left off */}
         {draft && (
           <div className="mt-8 flex flex-wrap items-center gap-7 bg-primary px-8 py-6 text-primary-foreground">
-            <Book title={draft.title} size="sm" thickness={9} cover={paletteFor(draft.id)} />
+            <Book title={draft.title} size="sm" thickness={9} cover={paletteFor(draft.id)} coverContent={albumCoverFace(draft.cover, draft.title)} spineContent={albumCoverSpine(draft.cover, draft.title)} />
             <div className="min-w-[200px] flex-1">
               <p className="text-[11px] uppercase tracking-[0.16em] text-primary-foreground/75">Pick up where you left off</p>
               <p className="mt-1 font-display text-[26px] leading-tight text-primary-foreground">{draft.title}</p>
@@ -226,7 +230,15 @@ function ShelfBook({ album }: { album: LibraryAlbum }) {
     <div className="group relative w-[150px]">
       <Link href={`/albums/${album.id}`} className="block">
         <div className="flex h-[248px] items-end justify-center">
-          <Book title={album.title} year={year} size="sm" thickness={album.size >= 100 ? 12 : 9} cover={paletteFor(album.id)} />
+          <Book
+            title={album.title}
+            year={year}
+            size="sm"
+            thickness={album.size >= 100 ? 12 : 9}
+            cover={paletteFor(album.id)}
+            coverContent={albumCoverFace(album.cover, album.title)}
+            spineContent={albumCoverSpine(album.cover, album.title)}
+          />
         </div>
         <div className="mt-3.5">
           <p className="truncate font-display text-lg leading-tight text-primary">{album.title}</p>

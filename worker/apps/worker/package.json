@@ -9,7 +9,12 @@
     "build": "tsup",
     "start": "node dist/main.js",
     "dev": "tsx watch src/main.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "orphan-scan": "tsx src/diagnostics/orphan-scan/cli.ts",
+    "orphan-cleanup": "tsx src/diagnostics/orphan-cleanup/cli.ts",
+    "derivative-forensics": "tsx src/diagnostics/derivative-forensics/cli.ts",
+    "account-assets": "tsx src/diagnostics/account-assets/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview-pdf-cleanup": "tsx src/diagnostics/preview-pdf-cleanup/cli.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1057.0",

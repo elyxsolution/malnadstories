@@ -65,9 +65,13 @@ src/
       auth.ts                 signOut server action
       albums.ts               createAlbum + deleteAlbum server actions
       builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
+      cart.ts                 addAlbumToCart server action (ownership + eligibility gate)
       pdf.ts (REMOVED)        customer PDF action gone — generation is backend-only now
     pdf/
       generate.ts             startAlbumPdfGeneration (service-role: validate→mint→enqueue→nudge)
+    cart/
+      queries.ts              cart_items data access (server-only; takes a client, never service role)
+      provider.tsx            CartProvider — count-only client context for the header badge
     builder/
       model.ts                Shared builder types + accounting + render helpers (no I/O)
     queue.ts                  App-side pg-boss (ENQUEUE only) — image-hardening + album-pdf
@@ -114,6 +118,8 @@ drizzle/
   0036_error_events.sql               error_events (append-only captured failures/exceptions/slow ops; deduped by fingerprint via partial unique (fingerprint) where not resolved → occurrences++). Admin-only RLS + service-role writes (no delete). record_error_event() SECURITY DEFINER RPC = single capture entrypoint (app + worker): dedupe-upsert + audit error.created + open a critical system_alert (reuses 0035). Phase 10B
   0037_perf_indexes.sql               PURELY ADDITIVE performance indexes (Phase 10D) — no schema/RLS/grant change: albums(user_id,updated_at), orders(user_id,placed_at), orders(album_id,status), addresses(user_id), payments(order_id). Targets the hottest RLS/lookup predicates the base tables (0001) never indexed
   0052_cover_template_default.sql     cover_design_templates.is_default + partial unique index (at most ONE default across the table). The creation flow no longer asks the customer for a cover — every new album gets the admin's default, applied server-side in insertAlbumForUser through the SAME active + config-validity gates as a customer pick. No default set → blank custom cover (pre-0052 behaviour). Covers stay fully browsable/switchable/editable in the builder
+  0055_cart_items.sql                 cart_items (Phase 6 cart foundation) — one row per (user, album) with a 1..10 quantity; NO parent `carts` table and NO price/product snapshot (createOrder stays the only price authority). Customer-owned RLS (`user_id = auth.uid()`, the albums/addresses shape) + admin SELECT. Both FKs CASCADE (a cart row names no R2 object, so 0054's RESTRICT reasoning does not apply). Two non-SECURITY-DEFINER SQL helpers do the writes because PostgREST cannot express `least(existing + new, 10)`: cart_add_or_increment (manual add) + cart_ensure_item (submit auto-add, DO NOTHING). ✅ EXECUTED against the live database
+  0056_order_items.sql                order_items (Phase 8 multi-album order FOUNDATION) — the AUTHORITATIVE list of albums in an order, so ONE order can name several albums while staying ONE Razorpay order + ONE payment. `orders.album_id`/`copies`/product snapshot stay NOT NULL LEGACY POINTERS to the FIRST item. Money stays order-level (shipping charged ONCE per order); the per-line columns are an immutable snapshot (unit_price, line_subtotal, product, album_title). Child-of-order RLS (customer SELECT via EXISTS-through-orders, admin SELECT, restrictive client write-deny); authenticated = SELECT only, anon nothing. Adds create_order_with_items() SECURITY DEFINER (service-role EXECUTE only) = the atomic order+lines primitive used by BOTH createOrder and createCombinedOrder. Backfilled all 4 existing orders. ✅ EXECUTED against the live database
   0039_stickers.sql                   sticker_categories + stickers (admin-managed decorative artwork for the cover + pages). Mirrors cover_templates (0023): artwork in private R2 under stickers/…; PUBLIC-READ active rows (anon/authenticated SELECT active); service-role writes only. RBAC `sticker:manage` (content role). Placed stickers store only `stickerId` in album jsonb — the print route/admin/builder resolve URLs by id so a deactivated-but-placed sticker still renders
 worker/                       Worker V2 — its OWN pnpm workspace (Worker V1 was removed; tag `worker-v1-final`)
   .env.example                Env template — copy to worker/.env, or use the repo-root .env.local
@@ -147,6 +153,91 @@ worker/                       Worker V2 — its OWN pnpm workspace (Worker V1 wa
 7. **`getUser()` not `getSession()`** — JWT can be stale; `getUser()` validates against Supabase.
 8. **No secrets in committed code** — `.env.local` is gitignored.
 9. **CSP headers** in `next.config.mjs`. Tighten before prod.
+
+
+---
+
+## Destructive operations & test data — MANDATORY PROCEDURE
+
+> **This is a project convention, not an automatic protection.** The worker's
+> `diagnostics/orphan-cleanup` subsystem enforces its own safety in the type system (see below).
+> **Ad-hoc scripts connecting over `DIRECT_URL` are enforced by NOTHING.** They run as `postgres`,
+> bypass RLS, and can delete any row in the database. A real incident already happened this way:
+> an over-broad `id ~ '^evt_[0-9a-f]{16}'` regex intended for test fixtures deleted **4 genuine
+> `webhook_events` dedupe markers**, which turned out to be unrecoverable. Everything below exists
+> because of that.
+
+### The rule
+
+**A row may be deleted only by its exact primary key, recorded BEFORE the row was created, after
+re-verifying ownership at deletion time.** Nothing else is sufficient — not a name, not an email
+domain, not a timestamp window, not an id shape.
+
+### The 12-point checklist every destructive test script MUST satisfy
+
+1. **Explicit fixture IDs.** Every id is generated or captured by the script itself.
+2. **A written manifest.** Ids are persisted to a manifest file *before/as* the rows are created,
+   outside the database, so a crashed run still leaves a record of what to clean up.
+3. **Pre-mutation fingerprint.** Row counts for every affected table (and the R2 object
+   count/bytes/digest if object storage is involved) captured and stored before anything changes.
+4. **Exact-PK deletion only.** `delete … where id = any($1::uuid[])` with the manifest's ids.
+5. **Ownership re-check immediately before deleting.** Re-read the rows and abort the entire run
+   if any row's `user_id` (or equivalent owner column) is not the fixture user. Fail closed.
+6. **A transaction wherever the driver allows it**, so a partial failure rolls back.
+7. **Post-delete verification.** Re-run the fingerprint and assert it equals the baseline exactly.
+   "The script exited 0" is not verification.
+8. **NO pattern matching.** No `LIKE`, no `~`/regex, no prefix, suffix, or `ILIKE` as the thing
+   that decides a row is disposable. A pattern may *find* candidates for a human to read; it may
+   never *authorise* a delete.
+9. **No deletion from resemblance.** Not by email address, email domain, display name, title,
+   amount, or "looks like test data".
+10. **Dry-run is the default** for anything touching production. The destructive mode must be an
+    explicit, separate flag (`--execute`), never the default path.
+11. **Explicit acknowledgement before destructive execution.** The script prints exactly what it
+    will delete — table, count, and the ids — and proceeds only on a deliberate confirmation.
+12. **Exact affected-row count** reported, and compared against the expected count. A mismatch is
+    a failure, not a warning.
+
+### What the codebase already enforces (and what it does not)
+
+- **Enforced in types — `worker/apps/worker/src/diagnostics/orphan-cleanup/`.** The only deletion
+  entrypoint is `deleteVerified(orphan: VerifiedOrphan)`. `VerifiedOrphan` carries a `unique
+  symbol` brand that is never exported, and the sole function that can mint one is
+  `verifyCandidate`, which re-asks every gate at deletion time (scope → key parse → `photos`
+  recheck → R2 size/ETag/LastModified recheck → age recheck against `MIN_DESTRUCTIVE_AGE_MS`, the
+  24h floor). Every gate fails closed. There is no `delete(key: string)` in the subsystem — "delete
+  an arbitrary key" is a sentence that cannot be written in that type system.
+- **NOT enforced anywhere — one-off scripts.** A script with `DIRECT_URL` has none of the above.
+  The checklist is the only thing standing between it and a production incident, and the checklist
+  is followed by discipline, not by the compiler. Do not describe such scripts as "safe" because
+  the worker is safe.
+- **`r2-cleanup` (the pg-boss job) has no gate of its own.** It deletes the exact key list it is
+  handed, idempotently. Its safety comes entirely from the caller: `deleteAlbum` gathers keys from
+  DB rows whose ownership RLS already proved. It must never be handed keys that were not derived
+  from rows the caller owns — doing so is an ungated deletion with an extra hop.
+
+### `webhook_events` — a specific, permanent trap
+
+**`webhook_events` has no `created_by`, `source`, `is_test` or provenance column of any kind.** A
+test fixture written into it is therefore *indistinguishable* from a real Razorpay delivery: same
+shape, same id format, same columns. There is no query that can separate them after the fact, and
+Razorpay exposes no events API to reconstruct from (`GET /v1/events` → 404). The four markers
+deleted in the incident were gone permanently.
+
+Consequences, which are not negotiable:
+
+- **A test harness that writes to `webhook_events` MUST record the event ids externally, before
+  insertion**, and delete only those exact ids.
+- **NEVER clean `webhook_events` by** `LIKE`, regex, id shape, event name, amount, customer email,
+  or `created_at` window — alone or in combination. These select real deliveries too.
+- **Deleting a `webhook_events` row destroys an idempotency marker**, not a log line. It is the
+  record that says "this Razorpay event was already processed".
+- Redelivery of an already-settled event happens to remain safe, because
+  `process_razorpay_event`'s paid-family guard skips the transition, the coupon consumption and any
+  status downgrade (runtime-proven by the duplicate-webhook tests). **That is a second line of
+  defence, not permission to delete markers.**
+- Adding a provenance column would make fixtures separable, but that is a schema change to the
+  money path and has deliberately **not** been done.
 
 ---
 
@@ -221,7 +312,7 @@ Razorpay POST /api/webhooks/razorpay:
 - Region: ap-northeast-1 (AWS Tokyo)
 
 **Tables**: `profiles`, `addresses`, `products`, `albums`, `album_pages`,
-`photos`, `orders`, `payments`
+`photos`, `orders`, `order_items`, `payments`, `cart_items`
 
 **GRANT summary** (see `0003_grants.sql`):
 
@@ -234,13 +325,40 @@ Razorpay POST /api/webhooks/razorpay:
 | album_pages | — | ALL | ALL |
 | photos | — | ALL | ALL |
 | orders | — | SELECT | ALL |
+| order_items | — | SELECT | ALL |
 | payments | — | SELECT | ALL |
+| cart_items | — | SELECT, INSERT, UPDATE, DELETE | ALL |
 
 **RLS model**:
 - User tables: `user_id = auth.uid()`
 - Child tables (album_pages, payments): access via parent ownership subquery
 - `products`: public SELECT for active rows; admin writes
 - Admin: `public.is_admin()` SQL function checks `profiles.role = 'admin'`
+
+**`cart_items` (0055 — Phase 6 cart foundation)**:
+
+| column | notes |
+|---|---|
+| `id` | uuid pk, `gen_random_uuid()` |
+| `user_id` | uuid → `profiles(id)` **ON DELETE CASCADE** |
+| `album_id` | uuid → `albums(id)` **ON DELETE CASCADE** |
+| `quantity` | integer, default 1, `check (quantity >= 1 and quantity <= 10)` |
+| `created_at` | timestamptz, `now()` |
+| `updated_at` | timestamptz, `now()` |
+
+- `unique (user_id, album_id)` — one row per album per customer; also the `ON CONFLICT`
+  target the atomic increment depends on. Plus `(user_id, created_at desc)` for the read.
+- There is **no `cart_id`** and **no parent `carts` table** (one cart per user is implicit in
+  `user_id`), so RLS is the same direct `user_id = auth.uid()` predicate as albums/addresses
+  rather than a subquery — and there is no client-supplied cart id to forge.
+- There is **no price, product, title or cover snapshot, deliberately**. `createOrder`
+  resolves the price server-side and snapshots product/pricing onto the *order*; a price on
+  the cart would be a second, staler authority for money.
+- Both FKs **CASCADE**, which intentionally differs from `0054`'s `RESTRICT` on
+  `photos.user_id`/`albums.user_id`: those rows name R2 objects, a cart row names none. So
+  deleting an album just removes it from the cart and `deleteAlbum` needed no change.
+- `quantity 1..10` is not a new rule — it mirrors `orders_copies_check` (0014) and
+  `CreateOrderSchema.copies`, so a cart can never hold a quantity an order would reject.
 
 **Profile guarantee (three layers)**:
 1. `on_auth_user_created` trigger — idempotent (`ON CONFLICT DO NOTHING`) since `0002`
@@ -252,6 +370,66 @@ album/photo/order insert can succeed.
 
 **Migrations**: Write SQL to `drizzle/NNNN_description.sql`, paste into
 Supabase Dashboard → SQL Editor → New query to run.
+
+### Migration conventions (project-specific; learned the hard way in 0055)
+
+**1 — EVERY NEW PUBLIC TABLE MUST EXPLICITLY REVIEW AND REVOKE DEFAULT ANON/PUBLIC
+PRIVILEGES BEFORE GRANTING THE INTENDED ROLES.** In *this* Supabase project, a freshly
+created `public` table came out of `create table` with `REFERENCES, TRIGGER, TRUNCATE`
+granted to **`anon`** — which no other table here carries (`albums`, `orders`, `photos`,
+`addresses`, `support_tickets` all give anon nothing), because they were created before those
+default privileges applied. So a new migration must state the final privilege state itself:
+
+```sql
+revoke all on table public.<new_table> from anon;
+grant select, insert, update, delete on table public.<new_table> to authenticated;
+grant all on table public.<new_table> to service_role;
+```
+
+- **RLS does NOT protect `TRUNCATE`.** That is what made the anon grant a real vulnerability
+  rather than a cosmetic one: `TRUNCATE` is reachable with the public anon key and no policy
+  filters it, so anon could have emptied every customer's cart while every policy read
+  correctly. **RLS is a row filter, not a table-level permission** — the GRANT is the only
+  thing standing between anon and `TRUNCATE`.
+  - **Proven, not theorised** (Phase 9 P3, on a throwaway table inside a rolled-back
+    transaction): with RLS enabled and no policy granting access, `anon` saw **0 rows** via
+    `SELECT` and removed **0 rows** via `DELETE` — and then `TRUNCATE` **succeeded and emptied
+    the table**.
+  - **ROOT CAUSE, now fixed.** `pg_default_acl` carried an `ALTER DEFAULT PRIVILEGES` entry
+    owned by `postgres` for schema `public` granting `Dxtm` (TRUNCATE, REFERENCES, TRIGGER,
+    MAINTAIN) to **both** `anon` and `authenticated`. Migrations run as `postgres`, so *every*
+    table ever created by a migration silently inherited TRUNCATE at birth — 0055 did not
+    introduce the problem, it merely noticed it. **`0057_revoke_truncate_privilege.sql`**
+    revoked TRUNCATE from both roles on all 38 existing tables **and changed that default**, so
+    new tables no longer inherit it (verified: a freshly created table now comes out
+    `anon=xtm` / `authenticated=xtm`). Nothing in the app or worker issues SQL `TRUNCATE`, so
+    no code path lost a capability.
+  - A new migration should still state its intended final privilege state explicitly rather
+    than relying on the corrected default.
+- **Function `EXECUTE` defaults must be reviewed too.** Postgres grants `EXECUTE` on a new
+  function to `PUBLIC`, so a new SQL function needs
+  `revoke all on function public.f(args) from public;` followed by explicit grants to
+  `authenticated` / `service_role` (matching `log_audit` / `submit_album_for_review`, which
+  anon cannot execute).
+- **Verify against `pg_catalog` after execution — do not trust the file.** A migration that
+  returns without an error has not been verified. 0055's anon grants were correct *in the SQL
+  file* and wrong *in the database*; only querying
+  `information_schema.role_table_grants` / `has_function_privilege` / `pg_policies` /
+  `pg_constraint` after the run found it.
+
+**2 — New migrations should be safely re-runnable where practical.** `create table if not
+exists`, `create index if not exists` and `create or replace function` already are, but
+**`create policy` has no `IF NOT EXISTS`**, so a re-run fails partway through unless you
+write:
+
+```sql
+drop policy if exists "<name>" on public.<table>;
+create policy "<name>" on public.<table> …
+```
+
+Grants/revokes should likewise *establish the intended final privilege state* rather than
+assume a starting point. This applies to **future** migrations only — `0001`–`0054` are not
+being retrofitted.
 
 ---
 
@@ -317,6 +495,43 @@ exposed — direct browser uploads/displays fail without it.
 
 ---
 
+## Tests
+
+Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
+
+```bash
+pnpm test              # app suite — 9 files / 84 tests
+cd worker && pnpm test # worker suite — 141 files / 1220 tests
+```
+
+- **`tests/`** (repo root, added Phase 9 P4) — app-side commerce domain. Full index and rationale
+  in **`tests/README.md`**. It protects the invariants Phase 8/9 established: one order → many
+  `order_items` with per-line album/copies/title/product snapshots, **no first-album-only
+  collapse**, snapshot immutability under a later album rename, the settlement cascade fanning out
+  over every album (and refusing anything not already paid, and never throwing), shipping charged
+  once per order, email content for single vs combined orders, one customer status CTA per album,
+  cart eligibility + the two deliberately-separate add helpers, the absolute blueprint-draft PDF
+  block, derived album titles, and migration-inventory/documentation consistency.
+- **`worker/`** — owns everything worker-side and is NOT duplicated by the app suite: the PDF
+  pipeline and deletion race, `previewPdfKey` determinism, orphan scan/cleanup safety
+  (`VerifiedOrphan`, the 24h floor, dry-run default, ownership + ETag rechecks, "admin assets can
+  never be verified"), image hardening, recovery.
+
+**What no automated test covers, and why** — recorded so nobody assumes otherwise:
+
+| gap | why |
+|---|---|
+| RLS row filtering · atomic cart increment · the `quantity <= 10` cap · `create_order_with_items` money re-checks · the TRUNCATE revoke | enforced by Postgres. **The only database this repository can reach is production**, so they are verified against the live catalog during phase work (Phases 6–9) rather than re-run per commit. Closing this needs a disposable Postgres. |
+| `/admin/production`, `/admin/orders`, `/admin/customers/[id]`, `/admin/shipping`, admin dashboard | async Server Components with their Drizzle queries written inline — nothing importable to assert against without a database, and extracting a helper purely for tests is a production refactor. Proven in the browser against seeded fixtures in Phase 9 P2. |
+| the PDF SIGKILL crash-window | the forensic proof was a manual kill harness; the worker suite covers the same window deterministically via `pdf-deletion-race.test.ts` (A–E), so the crash harness stays forensic-only. |
+
+**Three combined-order lookup bugs are KNOWN, DEFERRED, and deliberately untested** (no test
+implies they are fixed): `admin/albums/[id]`, `admin/reviews/_detail.tsx` and
+`admin/_resolutions/detail.tsx` find orders with `where(orders.album_id = X)`, so an album that is
+the *second* line of a combined order does not appear in those lists. Display/lookup only —
+`album-lock.ts` resolves membership through `order_items`, so no money, lock or eligibility
+decision is affected.
+
 ## Running locally
 
 ```bash
@@ -336,43 +551,94 @@ The worker connects to the same Supabase Postgres (pg-boss creates its own `pgbo
 schema automatically) and reads the repo-root `.env.local`. Without it running,
 uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`.
 
-**First-run SQL migrations (run in order in Supabase SQL Editor):**
-1. `drizzle/0001_init.sql` — tables, RLS, trigger, seed
-2. `drizzle/0002_backfill_profiles.sql` — backfill + idempotent trigger
-3. `drizzle/0003_grants.sql` — table-level GRANTs
-4. `drizzle/0004_album_sizes.sql` — album sizes 50/100/200 → 24/36/48
-5. `drizzle/0005_album_pages_layout.sql` — album_pages.layout_config + layout guards
-6. `drizzle/0006_generic_overlays.sql` — generic overlays; retire pip; relax CHECKs
-7. `drizzle/0007_photo_processing.sql` — photos status + sanitized/thumb keys + EXIF date
-8. `drizzle/0008_album_pdfs.sql` — album_pdfs (service-only PDF state + print token)
-9. `drizzle/0009_service_role_grants.sql` — service_role table/sequence grants
-10. `drizzle/0010_orders_payments.sql` — orders 'failed' status, dedupe indexes, webhook_events + process_razorpay_event()
-11. `drizzle/0011_one_pending_order_per_album.sql` — partial unique index: ≤1 pending order per album
-12. `drizzle/0012_orders_payments_write_rls.sql` — independent write-side RLS on orders/payments
-13. `drizzle/0013_webhook_amount_currency.sql` — webhook amount/currency validation (run WITH the matching app deploy)
-14. `drizzle/0014_orders_fulfillment.sql` — orders copies/pricing-breakdown/fulfillment + lifecycle states + indexes
-15. `drizzle/0015_coupons.sql` — coupons + coupon_redemptions (+ orders.coupon_id FK)
-16. `drizzle/0016_audit_notes.sql` — audit_log + order_notes + log_audit()
-17. `drizzle/0017_admin_rpcs_and_consumption.sql` — admin RPCs + process_razorpay_event rewrite (run WITH the matching app deploy)
-18. `drizzle/0018_coupon_created_reason.sql` — coupons.created_reason + admin_create_coupon extension
-19. `drizzle/0019_lock_profile_role.sql` — column-scoped profiles grants (anti self-promotion to admin)
-19a. `drizzle/0020_photos_column_lockdown.sql` — column-scoped photos grants (deploy code first) — ✅ APPLIED to production
-19b. `drizzle/0021_album_status_hardening.sql` — column-scoped albums grants + status server-only (deploy code first) — ✅ APPLIED to production
-20. `drizzle/0022_email_log.sql` — email delivery audit + idempotency (0020/0021 now applied to production)
-21. `drizzle/0025_album_pdf_recovery.sql` — album_pdfs.requested_at + attempts (backend PDF recovery)
-22. `drizzle/0028_support_center.sql` — Support Center (tickets + messages); **run SQL FIRST** (new code reads these tables/RPCs)
-23. `drizzle/0029_refund_reprint.sql` — Refund & Reprint requests; **run SQL FIRST** (new code reads these tables/RPCs)
-24. `drizzle/0030_album_review.sql` — Album Review & Request-Changes (Phase 9C); **run SQL FIRST** (new code reads these tables/RPCs)
-25. `drizzle/0031_cms.sql` — CMS content_pages (Phase 9D); **run SQL FIRST** (admin UI + public pages read this table)
-26. `drizzle/0032_layout_templates.sql` — Template catalog (Phase 9E); **run SQL FIRST** (admin UI + builder read this table)
-27. `drizzle/0033_shipments.sql` — Courier shipments + events (Phase 9F); **run SQL FIRST** (admin order page + customer order page read these tables)
-28. `drizzle/0034_admin_roles.sql` — Multi-role RBAC (Phase 9G); **run SQL FIRST** (the access layer reads `admin_roles`). No backfill — existing admins default to super_admin.
-29. `drizzle/0035_monitoring.sql` — Monitoring & alerting (Phase 10A); **run SQL FIRST** (the monitoring page reads these tables)
-30. `drizzle/0036_error_events.sql` — Error tracking & observability (Phase 10B); **run SQL FIRST** (the capture layer + Error Center read/write this table + the `record_error_event` RPC)
-31. `drizzle/0037_perf_indexes.sql` — Performance indexes (Phase 10D); purely additive (no schema/RLS/grant change) — safe to run any time, code works with or without it (queries just get faster)
-32. `drizzle/0038_album_cover_config.sql` — Editable custom front cover; adds `albums.cover_config` jsonb + extends the authenticated UPDATE column grant. Safe either way — `saveCoverDesign` is the only write that needs it; until it runs the builder loads with cover defaults and the rest of the flow is unaffected.
-33. `drizzle/0039_stickers.sql` — Sticker catalog (cover + page decorative artwork); **run SQL FIRST** (the builder + admin `/admin/stickers` read these tables). Public-read active rows + service-role writes (mirrors covers). Until it runs the Stickers panel is empty and the rest of the flow is unaffected.
-34. `drizzle/0052_cover_template_default.sql` — Default cover template. **Safe to run before OR after the code deploy** — the default lookup is a separate, isolated query that returns null on a missing column, so until it runs album creation simply keeps using the blank-cover path. Run it, then pick a default in `/admin/cover-templates` (crown icon) to activate the behaviour. **Admin-page caveat:** `/admin/cover-templates` reads `is_default` via Drizzle, so run the SQL before relying on that page.
+**SQL migrations — the complete, verified run order.**
+
+Run in ascending numeric order in Supabase Dashboard → SQL Editor. **This table is built from
+`drizzle/*.sql` on disk, and the applied state was verified against `pg_catalog`** (tables,
+columns, indexes, functions, policies, constraints and grants — there is no migrations tracking
+table, so object existence *is* the evidence). It is not a hand-maintained narrative: if it and
+the disk disagree, the disk is right and this table is stale.
+
+**Status of this repository: 57 migration files, `0001`–`0057`, no gaps, no duplicates, and
+every one of them APPLIED to the live database. Nothing is unapplied.**
+
+| # | file | what it does | applied |
+|---|---|---|---|
+| 0001 | `0001_init.sql` | tables, RLS, trigger, product seed | ✅ |
+| 0002 | `0002_backfill_profiles.sql` | profile backfill + idempotent trigger | ✅ |
+| 0003 | `0003_grants.sql` | table-level GRANTs for anon/authenticated | ✅ |
+| 0004 | `0004_album_sizes.sql` | album sizes → 24/36/48 (CHECK + product rows) | ✅ |
+| 0005 | `0005_album_pages_layout.sql` | `album_pages.layout_config` + layout guards | ✅ |
+| 0006 | `0006_generic_overlays.sql` | generic unlimited overlays; retire pip; relax CHECKs | ✅ |
+| 0007 | `0007_photo_processing.sql` | photos status + sanitized/thumb keys + EXIF date | ✅ |
+| 0008 | `0008_album_pdfs.sql` | `album_pdfs` (service-only PDF state + print token) | ✅ |
+| 0009 | `0009_service_role_grants.sql` | service_role table/sequence grants | ✅ |
+| 0010 | `0010_orders_payments.sql` | orders 'failed', dedupe indexes, `webhook_events` + `process_razorpay_event()` | ✅ |
+| 0011 | `0011_one_pending_order_per_album.sql` | partial unique index: ≤1 pending order per album | ✅ |
+| 0012 | `0012_orders_payments_write_rls.sql` | write-side RLS on orders/payments (supersedes 0001's `users_own_orders`) | ✅ |
+| 0013 | `0013_webhook_amount_currency.sql` | webhook amount/currency gate — run WITH the matching app deploy | ✅ |
+| 0014 | `0014_orders_fulfillment.sql` | copies/pricing breakdown/fulfilment fields + lifecycle states | ✅ |
+| 0015 | `0015_coupons.sql` | `coupons` + `coupon_redemptions` (+ `orders.coupon_id`) | ✅ |
+| 0016 | `0016_audit_notes.sql` | append-only `audit_log` + `order_notes` + `log_audit()` | ✅ |
+| 0017 | `0017_admin_rpcs_and_consumption.sql` | admin RPCs + `process_razorpay_event` rewrite — run WITH the app deploy | ✅ |
+| 0018 | `0018_coupon_created_reason.sql` | `coupons.created_reason` + 10-arg `admin_create_coupon` | ✅ |
+| 0019 | `0019_lock_profile_role.sql` | column-scoped `profiles` grants (anti self-promotion) | ✅ |
+| 0020 | `0020_photos_column_lockdown.sql` | column-scoped `photos` grants — deploy code first | ✅ |
+| 0021 | `0021_album_status_hardening.sql` | column-scoped `albums` grants + status server-only — deploy code first | ✅ |
+| 0022 | `0022_email_log.sql` | email delivery audit + idempotency claim | ✅ |
+| 0023 | `0023_photobook_model.sql` | physical-photobook page model + `cover_templates` | ✅ |
+| 0024 | `0024_cover_meta.sql` | cover-template description + dimensions | ✅ |
+| 0025 | `0025_album_pdf_recovery.sql` | `album_pdfs.requested_at` + `attempts` (stuck-job recovery) | ✅ |
+| 0026 | `0026_album_metadata.sql` | album destination / travel_dates / description — run SQL FIRST | ✅ |
+| 0027 | `0027_orders_shipping_method.sql` | persist the delivery tier on the order — run SQL FIRST | ✅ |
+| 0028 | `0028_support_center.sql` | Support Center (tickets + messages) — run SQL FIRST | ✅ |
+| 0029 | `0029_refund_reprint.sql` | Refund & Reprint requests — run SQL FIRST | ✅ |
+| 0030 | `0030_album_review.sql` | Album Review & Request-Changes — run SQL FIRST | ✅ |
+| 0031 | `0031_cms.sql` | CMS `content_pages` — run SQL FIRST | ✅ |
+| 0032 | `0032_layout_templates.sql` | layout-template catalog — run SQL FIRST | ✅ |
+| 0033 | `0033_shipments.sql` | courier shipments + events — run SQL FIRST | ✅ |
+| 0034 | `0034_admin_roles.sql` | multi-role RBAC — run SQL FIRST; no backfill (absent row → super_admin) | ✅ |
+| 0035 | `0035_monitoring.sql` | monitoring & alerting — run SQL FIRST | ✅ |
+| 0036 | `0036_error_events.sql` | error tracking + `record_error_event()` — run SQL FIRST | ✅ |
+| 0037 | `0037_perf_indexes.sql` | performance indexes — purely additive, safe any time | ✅ |
+| 0038 | `0038_album_cover_config.sql` | `albums.cover_config` jsonb + column grant | ✅ |
+| 0039 | `0039_stickers.sql` | sticker catalog (`sticker_categories` + `stickers`) — run SQL FIRST | ✅ |
+| 0040 | `0040_cover_design_templates.sql` | cover DESIGN templates (builder-JSON cover presets) | ✅ |
+| 0041 | `0041_cover_template_metadata.sql` | cover-template merchandising metadata (popular · pinned) | ✅ |
+| 0042 | `0042_sticker_tags.sql` | sticker tags (searchable keywords) | ✅ |
+| 0043 | `0043_album_blueprints.sql` | Album Blueprints (whole-album layout templates) | ✅ |
+| 0044 | `0044_blueprint_preview_token.sql` | blueprint preview render token (thumbnail worker) | ✅ |
+| 0045 | `0045_blueprint_default.sql` | default blueprint per album size | ✅ |
+| 0046 | `0046_blueprint_draft_album.sql` | blueprint-editing draft albums (`albums.blueprint_draft_of`) | ✅ |
+| 0047 | `0047_album_products.sql` | Album Product catalog (products + dimensions + prices) | ✅ |
+| 0048 | `0048_album_product_demo.sql` | product demo album + "best for" tags | ✅ |
+| 0049 | `0049_album_product_snapshot.sql` | album-level product snapshot (historical consistency) | ✅ |
+| 0050 | `0050_catalog_perf_indexes.sql` | catalog/admin read-path indexes — purely additive | ✅ |
+| 0051 | `0051_album_pdf_stages.sql` | PDF stage observability — purely additive | ✅ |
+| 0052 | `0052_cover_template_default.sql` | `cover_design_templates.is_default` + single-default index | ✅ *(executed in Phase 9 P2 — had shipped as code but was never run; see below)* |
+| 0053 | `0053_photo_upload_idempotency.sql` | immutable upload identity (`photos.upload_key`) | ✅ |
+| 0054 | `0054_prevent_orphaned_user_assets.sql` | `photos.user_id` / `albums.user_id` → `ON DELETE RESTRICT` | ✅ |
+| 0055 | `0055_cart_items.sql` | cart foundation (Phase 6) | ✅ |
+| 0056 | `0056_order_items.sql` | multi-album order foundation + `create_order_with_items()` (Phase 8) | ✅ |
+| 0057 | `0057_revoke_truncate_privilege.sql` | **revokes TRUNCATE from `anon` + `authenticated`** on all 38 public tables and from the schema default privileges (Phase 9 P3) | ✅ |
+
+Notes that do not fit the table:
+
+- **0013 and 0017 must be run WITH their matching app deploy** — they change the money path's
+  function signature/behaviour.
+- **0020, 0021 and 0026–0039 are "run SQL FIRST"** — the shipped code reads the new
+  tables/columns/RPCs immediately.
+- **0037, 0050, 0051 are purely additive** (indexes/observability) — safe to run at any time; the
+  code works with or without them.
+- **0052** had shipped as code but was never executed, so `/admin/cover-templates` errored on the
+  missing `is_default` column until Phase 9 Prompt 2 ran it verbatim. The single existing template
+  row was preserved with `is_default = false`, i.e. the pre-0052 blank-cover behaviour is unchanged
+  until an admin picks a default with the crown control.
+- **0055, 0056, 0057** were each verified against `pg_catalog` after execution (columns,
+  constraints, indexes, RLS, policies, grants, function EXECUTE), not merely "ran without error".
+  All three are idempotent and safe to re-run.
+- **On a fresh environment** run 0001→0057 in order; every file is written to be re-runnable
+  except the pre-0055 ones, which predate that convention.
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
 > rotation, migration order, monitoring/alerting, rate-limit-at-scale, CSP).
@@ -388,7 +654,7 @@ uploads stay stuck on "Processing…" — start it to sanitize photos to `ready`
 - Privileged writes (orders, payments, admin) → `@/lib/supabase/service` (`createServiceClient`)
 - Admin role checks → `@/db` (Drizzle)
 - Client Components → `@/lib/supabase/client`
-- New tables: add to `src/db/schema.ts` AND write a new numbered SQL migration AND add GRANTs to `0003_grants.sql` or a new migration
+- New tables: add to `src/db/schema.ts` AND write a new numbered SQL migration AND add GRANTs to `0003_grants.sql` or a new migration — and **`revoke all … from anon` first**, then verify the live grants against `pg_catalog` (see *Migration conventions* under **Database**)
 - API route / server action pattern: `Zod.parse(input)` → `supabase.auth.getUser()` → DB query
 - shadcn@4 uses `@base-ui/react` (same team as Radix, next-gen API); `asChild` → `render` prop
 
@@ -589,6 +855,37 @@ action (`src/lib/actions/albums.ts`).
   `status NOT IN ('failed','cancelled')` exists. A `pending` order blocks deletion
   too (a live Razorpay order could still be paid) — the checkout/confirmation
   "Cancel" control (`cancelOrder`) releases a pending one. See **Checkout** below.
+
+### R2 ownership state, and the one object that is deliberately kept (Phase 9 P3)
+
+A **generic** ownership scan is the check that matters: discover every text/json column in
+`public` from `information_schema`, harvest every value that looks like an object key, and compare
+that set against a full bucket listing. Do not hard-code table names — the whole point is to catch
+a namespace nobody remembered.
+
+Current state: **391 objects · 703,671,153 bytes · 0 customer orphans · 0 broken DB references ·
+exactly 1 unowned object.**
+
+- **`stickers/ac82bfa6-5690-46d0-ac9c-466ca02ef12d.jpg` (37,127 bytes) is UNOWNED and is being
+  KEPT.** Proven unowned: a substring search for its uuid across **all 250 text/json/uuid columns
+  in all 38 public tables** returned **0 rows**; neither `stickers` row points at it; it is not a
+  cover, template, product, album, order or admin-config asset.
+- **It is kept because the audited cleanup architecture structurally cannot reclaim it, and
+  inventing a path around that would be worse than 37 KB of waste.** `stickers/` is in
+  `NON_USER_NAMESPACES`, so the key parser returns `NOT_RAW_UPLOAD` and it can never become an
+  `ORPHAN_CANDIDATE`; and `verifyCandidate` — the only minter of `VerifiedOrphan` — proves
+  ownership by asking the **`photos`** table, a question that is meaningless for an admin asset.
+  Handing the key to the `r2-cleanup` job instead would bypass the proof gate entirely (that job
+  has none of its own), which is precisely the ungated deletion the design forbids.
+- **Minimal future extension, if it is ever worth doing:** teach the orphan subsystem an
+  admin-namespace candidate class whose ownership recheck queries the owning catalog table
+  (`stickers.image_key`/`thumb_key`, `cover_templates`, `cover_design_templates`,
+  `album_products`) instead of `photos`, reusing the same `VerifiedOrphan` brand, age floor,
+  dry-run default and ETag recheck. Until that exists, admin orphans are reported and preserved.
+- **`photos.upload_key` values with no R2 object are EXPECTED, not broken references.**
+  `upload_key` (0053) is an immutable idempotency record of the original upload; the worker
+  deletes the raw object after hardening and nulls `r2_key`. The one such row is `ready` with both
+  its `sanitized_key` and `thumb_key` present in R2.
 
 ## Checkout + payment (Razorpay) — built
 
@@ -1216,8 +1513,338 @@ security, or architecture change.
   shared store before multi-instance), single Render worker (scale horizontally for PDF/image
   throughput), and Supabase connection-pool limits under heavy concurrency.
 
+## Cart foundation (Phase 6) — built
+
+A pre-purchase staging area — *which of MY albums do I intend to order, and how many copies of
+each* — and nothing more. `cart_items` (0055, documented under **Database**) is additive:
+orders, payments, Razorpay, uploads, the worker, PDF generation and their RLS are all
+untouched, and `deleteAlbum` needed no change. **Phase 6 is the data + plumbing layer; there is
+no cart page yet** (see the boundary below).
+
+### FOUR INVARIANTS — do not break these
+
+**1 — MANUAL ADD IS DATABASE-ATOMIC, AND CAPPED AT 10.** `addOrIncrementCartItem`
+(`src/lib/cart/queries.ts`) calls the `cart_add_or_increment` SQL function, which does
+`on conflict (user_id, album_id) do update set quantity = least(existing + excluded, 10)` in
+**one statement**. Never rewrite it as *read quantity → increment in TypeScript → write
+quantity*: that reintroduces a lost-update race which was **proven** in Phase 6 Prompt 3 (10
+genuinely concurrent adds → exactly 1 row at quantity 10, 0 duplicates, 0 lost increments;
+10 more at the cap → still 10, 0 failures). The cap lives in the same statement, so it can
+never be bypassed by a client and never raises the `quantity <= 10` constraint error.
+
+**2 — SUBMIT AUTO-ADD IS IDEMPOTENT.** `submitAlbum` (`src/lib/actions/builder.ts`) calls
+`ensureCartItem`, **not** `addOrIncrementCartItem` — `cart_ensure_item` is
+`on conflict do nothing`. `submitAlbum` has no guard against an already-`submitted` album and
+is also the **"Resubmit for Review"** path, so it can run many times for one album. Repeated
+submit/resubmit must leave the album at **quantity = 1**; it must never increment merely
+because the album was resubmitted (verified: 3 submits → 1 row, quantity 1). These are two
+deliberately separate helpers because one ambiguous "add" is a bug waiting to happen.
+
+**3 — THE HEADER BADGE COUNTS DISTINCT ALBUMS, NOT TOTAL QUANTITY.** Album A at quantity 9 +
+album B at quantity 1 → badge **2**, not 10. An order is per-album with `copies` as an
+attribute and the library is album-oriented throughout, so "2 albums" is the number the
+product actually asks about. `unique (user_id, album_id)` means a row count *is* the
+distinct-album count, which is why `getCartCount` is a `head: true` count and not a sum.
+
+**4 — IDENTITY ALWAYS COMES FROM `auth.uid()`.** The client supplies only `albumId` and
+`quantity` (`AddToCartSchema`). Neither SQL helper takes a user id and neither is
+`SECURITY DEFINER`, so the caller's RLS applies and there is no `p_user_id` to forge; a
+hand-written insert with someone else's `user_id` is rejected by the policy with `42501`
+(verified). **Do not introduce a `cart_id`** unless a future architectural decision
+explicitly requires one — its absence is what removes the classic cart-hijack surface.
+
+### Query architecture
+
+- **`src/lib/cart/queries.ts`** (`import 'server-only'`) — `getCartCount`, `listCartItems`,
+  `addOrIncrementCartItem`, `ensureCartItem`. Each **accepts a client** rather than creating
+  one, so the caller owns the security boundary; all four are called with the
+  **authenticated** client. **No customer cart operation uses the service role** — RLS
+  (`user_id = auth.uid()`) is the real gate, exactly as for albums/addresses. No price or
+  product snapshot is read or written anywhere in this file. `getCartCount` returns 0 rather
+  than throwing (chrome must never break a page).
+- **`src/lib/actions/cart.ts`** — `addAlbumToCart`: Zod → `getUser()` → re-read the album
+  through the RLS-scoped client (a foreign album resolves to `null` → ordinary "Album not
+  found", no existence oracle) → reject `blueprint_draft_of !== null` → reject
+  `status !== 'submitted'` (matching `createOrder`'s eligibility) → atomic add →
+  `revalidatePath('/dashboard', 'layout')` so the layout re-renders a fresh count.
+- **`src/lib/cart/provider.tsx`** — `CartProvider` mounted once in `(app)/layout.tsx`
+  (innermost, inside `UploadProvider` → `PendingPlacementsProvider`), seeded by the layout's
+  single server-side `getCartCount`. It is **count-only**: no cart contents, **no
+  localStorage, no polling, no timers, no sockets, no store or singleton**. A `useEffect`
+  adopts a changed `initialCount` because the layout is deliberately never remounted by
+  navigation. `setCount`/`bumpCount` exist unused for Phase 7's optimistic add/remove.
+  Do not redesign it.
+- **`src/components/customer-shell.tsx`** — the badge; the Cart nav row is intentionally
+  **non-interactive** (`href: null`) until Phase 7 creates `/cart`.
+
+### Phase 6 boundary — DONE vs NOT IMPLEMENTED
+
+**DONE**: `cart_items` data model · RLS · grants (incl. the anon revoke) · atomic
+add/increment · quantity cap · auto-add on album submit · cart count query · `CartProvider` ·
+header badge · ownership + blueprint + submitted eligibility enforcement · cascade behaviour.
+
+**NOT IMPLEMENTED IN PHASE 6** (later phases — do not add until asked): `/cart` page ·
+remove from cart · quantity-editing UI · Buy Now · individual checkout · combined
+multi-album checkout · payment changes · order-schema changes · the `order_items`
+decision · clearing the cart after payment.
+
+**Next**: **Phase 7** = cart page + remove + quantity editing + individual Buy Now +
+dashboard integration. **Phase 8** = combined multi-album checkout and the order/payment
+architecture (which is precisely why the cart stores no pricing). **Phase 9** = upload/cart
+robustness and recovery hardening.
+
+### Verification caveat — STRUCTURAL ONLY
+
+Phase 6 Prompt 3 ran 32 PASS / 1 STRUCTURAL ONLY / 0 FAIL / 0 NOT RUN against the live
+database with real JWTs. The one **STRUCTURAL ONLY** item is **failure injection for the
+submit auto-add**: no safe failure-injection seam exists, and production source was not
+modified merely to manufacture one. Code inspection confirms the intended semantics — the
+`ensureCartItem` call sits in a best-effort `try/catch` (logging
+`[cart] submit auto-add — continuing`) so `submitAlbum` still returns success if the cart
+write fails, following the Phase 9C review-hook precedent. **This is not a failure**, and no
+test seam should be added solely for it; future hardening may revisit it if a legitimate seam
+appears. Separately **not yet exercised**: the `revalidatePath`-driven badge refresh, because
+no UI calls `addAlbumToCart` yet — Phase 7 should confirm it the moment an Add button exists.
+
+## Multi-album orders + combined checkout (Phase 8) — built
+
+`order_items` (0056, above) lets ONE order contain several albums, `/checkout/cart` sells them
+in one payment, and the paid transition fulfils every album and clears exactly what was bought.
+
+### The invariant, and why it is shaped this way
+
+**ONE PURCHASE = ONE `orders` ROW = ONE Razorpay ORDER = ONE PAYMENT.** A combined order is
+one `orders` row with N `order_items` lines, not N orders. That is what allows
+`process_razorpay_event`, `payments`, `webhook_events`, `coupon_redemptions`,
+`orders_razorpay_order_id_key` and the amount gate (`round(p_amount,2) = orders.total_amount`)
+to remain **byte-for-byte unchanged** — verified by md5 of the function definition. The
+alternative (N orders sharing one payment) would have required dropping a unique index and
+rewriting the atomic money function; that was rejected in the Phase 8 Prompt 1 preflight.
+
+- **`order_items` is the AUTHORITY** for "which albums does this order contain?".
+- **`orders.album_id` / `copies` / `product_id` / `product_name` / `product_dimensions` are
+  LEGACY POINTERS to the FIRST item.** They stay NOT NULL and remain exactly correct for a
+  single-album order. `orders.copies` is deliberately **not** a sum — `orders_copies_check`
+  caps it at 10, and 3 albums × 4 copies would violate it.
+- **Money stays order-level.** `subtotal_amount` (= Σ `line_subtotal`), `shipping_amount`,
+  `discount_amount`, `total_amount`. The line columns are an immutable **snapshot**
+  (`unit_price`, `line_subtotal`, product, `album_title`) so a receipt stays correct after
+  titles, products, catalog prices or dimensions change. There is deliberately **no** per-item
+  shipping/coupon allocation, tax, status or refund field — a second money authority is how a
+  receipt starts disagreeing with a payment.
+- **SHIPPING IS CHARGED ONCE PER ORDER** — ₹99 standard / ₹199 priority / ₹399 express,
+  regardless of album count or copies (product decision, locked in Phase 8 Prompt 2).
+
+### What exists
+
+- **`create_order_with_items(...)`** (0056) — SECURITY DEFINER, **`service_role` EXECUTE only**
+  (`authenticated` deliberately cannot call it: `orders` is never written by a client). ONE
+  function serves both paths (single-album = one line). It creates the order **and all its
+  lines in one transaction**, so an order can never exist without its items; re-checks that
+  every album/address belongs to the customer, that each album is `submitted`, not a blueprint
+  draft and not already in a paid order, and that the money agrees with itself
+  (`Σ line_subtotal = subtotal`, `line = unit × copies`, `total = subtotal + shipping −
+  discount` with the ₹1 floor). It creates **no payment row** and only ever writes status
+  `'pending'` — `process_razorpay_event` remains the only path to `paid`. It deliberately does
+  **not** swallow `23505`, so `orders_one_pending_per_album` still reaches the caller.
+- **`src/lib/orders/items.ts`** — `listOrderItems`, `albumIdsForOrder`, `buildOrderItemSnapshot`
+  (pure; computes `line_subtotal` itself). Reads take a client so RLS stays the gate.
+- **`computeCombinedOrderAmount(lines, discount, shipping)`** in `pricing.ts` —
+  `computeOrderAmount` is **unmodified**; the new function sums per-line subtotals (each
+  rounded before summing, so the order total can never drift from Σ lines), applies the same
+  subtotal-only clamped discount, adds shipping **once**, and uses the same ₹1 floor and paise
+  rounding. A one-line combined amount equals the single-album amount to the paise.
+- **`album-lock.ts` now reads `order_items`** — `hasPaidOrder`/`hasActiveOrder`/`getPaidOrder`
+  join `order_items → orders`, because `orders.album_id` names only the first album and would
+  answer "not locked" for the second album of a paid combined order. **Public signatures are
+  unchanged**, so all 11 existing call sites (builder ×7, photos presign/confirm/[id], album
+  actions) were untouched. The gates now **fail CLOSED**: a read error counts as locked (the
+  old code ignored errors and failed open). `getPaidOrder` is display-only and still yields
+  null on error.
+- **`createOrder` (single-album) is otherwise unchanged** — same pricing, coupon, shipping,
+  Razorpay call, pending resume and cancel-remint semantics; it now writes its one line through
+  the atomic RPC and additionally consults `hasPaidOrder` so an album bought inside a combined
+  order can't be re-bought.
+- **`createCombinedOrder`** (`src/lib/actions/orders-combined.ts`). The client sends only
+  `{addressId, shippingMethod, couponCode?}` (`CreateCombinedOrderSchema`); the server
+  re-resolves the cart, re-checks eligibility, re-prices every line, validates the coupon against
+  the combined subtotal, charges shipping once, resumes an identical pending order or cancels a
+  conflicting one, then creates the Razorpay order and calls the RPC. **No price, quantity, title
+  or total is ever accepted from the browser.** `previewCombinedOrder` is the advisory
+  tier/coupon preview (writes nothing, consumes nothing).
+- **Address ownership is filtered explicitly, not just by RLS.** `addresses` carries an
+  `admins_read_all_addresses` policy, so for an ADMIN customer the RLS-scoped read returns every
+  customer's address — the checkout picker listed a foreign one and pre-selected it (found by the
+  real browser payment run in Prompt 4; `create_order_with_items` refused the order, which is how
+  it surfaced). Both checkout pages and both order actions now add `.eq('user_id', …)`. No change
+  for a normal customer, whose RLS view is already only their own rows.
+- **`resolveCartForCheckout`** (`src/lib/cart/checkout.ts`) — ONE server-side resolver used by
+  BOTH the `/checkout/cart` page (to render) and `createCombinedOrder` (to charge). Its per-album
+  work runs in PARALLEL (`Promise.all` over the cart, and over the three independent facts per
+  album). Measured: 3-album cart 1551ms → 593ms; the same 88-assertion matrix passes before and
+  after, so the result is identical — only the serialisation is gone. Sharing it is
+  the point: a projection computed one way and an order computed another way is how a customer
+  ends up charged something they were never shown. It returns priced `lines` plus `blocked`
+  entries (not-submitted / blueprint / already-ordered / unavailable / no-price) so an ineligible
+  album is **named, never silently dropped**.
+- **`/checkout/cart`** (`page.tsx` + `_combined-checkout.tsx` + `loading.tsx`) — the combined
+  checkout. Reuses the single-album route's `AddressPicker`, `SHIPPING_TIERS` shape, coupon field
+  and Razorpay `next/script` + handler sequence, and posts the callback to the **existing**
+  `/api/payments/verify`. **`_checkout.tsx` is untouched**: it carries a per-album readiness panel
+  and copies stepper that have no meaning here, so the flows stay separate rather than one
+  component being bent around both. `/checkout/[albumId]` still handles single-album purchases.
+- **`/cart` has a "Checkout all" CTA**, enabled only when at least one row is eligible, and it
+  names the albums that block checkout using the row's own `eligible` flag — the same rule the
+  server enforces. Per-row Buy now, remove, quantity editing and the badge are unchanged.
+
+### The paid-transition cascade (`src/lib/orders/settlement.ts`)
+
+`settleOrderFulfilment(orderId, source)` is the ONE downstream path, called by **both** the
+Razorpay webhook and `/api/payments/verify` after `process_razorpay_event` reports a capture that
+processed. Per paid order it: sends the confirmation email (order-scoped), then **per
+`order_items` row** enters the review queue and starts the preview PDF, then **clears exactly
+those albums from that customer's cart**, then revalidates the cart surfaces.
+
+- **It iterates `order_items`, never `orders.album_id`** — that pointer names only the first
+  album, so a combined order would otherwise review and render just one book.
+- **Idempotent by construction, no new lock:** the email claims an `email_log` row (0022);
+  `submit_album_for_review` re-reaches the same `pending_review` state;
+  `startAlbumPdfGeneration` short-circuits on `already-ready`/`in-progress`; the cart delete is a
+  filtered DELETE. It also refuses to run unless the order is already in the paid family, and it
+  never writes `orders.status`. Duplicate webhook, duplicate verify and a genuine
+  verify+webhook race were all runtime-tested: one paid transition, one payment row, one email,
+  one `album_pdfs` row per album, one net cart deletion.
+- **NEVER THROWS** — a sleeping worker or a bounced email must not turn a settled payment into a
+  503 retry.
+
+### What was proven against real Razorpay, and what was not
+
+A real **test-mode** payment run (Prompt 4) drove the actual browser flow: add both albums →
+`/cart` → Checkout all → `/checkout/cart` → **Pay**. That created a real Razorpay order whose
+amount was independently confirmed at Razorpay itself (`GET /v1/orders/…` → 319600 paise =
+`orders.total_amount` ₹3,196), and opened the genuine Razorpay Checkout sheet in test mode.
+
+**The payment sheet itself was not completed** — it renders in a cross-origin iframe that the
+automation could not drive, and completing it by hand would mean entering card or bank
+credentials. Settlement was therefore proven by POSTing a **correctly HMAC-signed** payload to the
+real `/api/webhooks/razorpay` endpoint: real route, real signature verification, real
+`process_razorpay_event`, real cascade. Only the event's *origin* was simulated. A wrong signature
+returned 400 and changed nothing; a signed-but-underpaid capture returned `amount_mismatch` and
+fulfilled nothing.
+
+**Webhook delivery from Razorpay has never been exercised here**: the configured webhook is
+`active: false` and points at a dead ngrok tunnel, so activating it would need a dashboard login
+and a public tunnel. `/api/payments/verify` remains the co-equal settle path and both share one
+cascade.
+
+**Historical `webhook_events` dedupe markers are unrecoverable.** Four were deleted in error in
+Prompt 3; Razorpay exposes no events API (`GET /v1/events` → 404) and nothing else in this schema
+stores an event id, so they were NOT reinvented. Redelivery of those long-settled events remains
+safe because `process_razorpay_event`'s paid-family guard skips the transition, the coupon consume
+and any downgrade — runtime-proven by the duplicate-webhook tests.
+
+### Cart clearing rules
+
+Cart rows are removed **only** on the first transition into the paid family, **only** for the
+albums in that order, server-side via the service role. Not when checkout opens, not when the
+order is created, not when the Razorpay order is minted, and never from the browser. So a failed,
+cancelled or abandoned checkout leaves the cart exactly as it was (runtime-verified), and buying
+A+B out of a cart of A+B+C leaves C with its quantity intact. Paid rows therefore normally
+disappear; Phase 7's "Already ordered" row remains as the fallback renderer for a row that
+survives (clearing failed, webhook late, or the customer re-added the album).
+
+### Display surfaces reading `order_items`
+
+**THE RULE: a HISTORICAL order display reads the `order_items` snapshot; a LIVE album workspace
+reads `albums`.** Two distinct failures follow from breaking it — a combined order presenting
+itself as its first album only, and a later album rename silently rewriting what a past order
+says it sold. Completed in Phase 9 Prompt 2 (R2/R3/R4); a single-album order renders byte-for-byte
+as before, and every surface falls back to the legacy single-album shape if the lines cannot be
+read.
+
+| Surface | Reads |
+|---|---|
+| `orders/[id]` | one summary row per album; `_status.tsx` takes `albums: OrderAlbum[]` and renders **one "View album" button per album** (single-album keeps the original single primary CTA) |
+| `orders` list | label = the single title, or `First + N more` |
+| `admin` dashboard · `admin/orders` list · `admin/customers/[id]` · `admin/shipping` | SQL-aggregated `count`/`min(album_title)`/`sum(copies)` per order — one row per order, no join fan-out |
+| `admin/orders/[id]` | `Albums (N)` panel: per-line title, product + dimensions, copies, line total, **per-album** album-status and PDF chip |
+| `admin/production` | one card per ORDER containing one row **per album**, each linking to **its own** `/admin/albums/[id]` (where the album-level PDF/regenerate action lives) |
+| order-confirmation + `order-status` emails | `OrderEmailData.items`; combined → `Order #x · N albums` + the item list, single → the original one-title line |
+
+`orders.album_id` survives in these files only as (a) a **search filter** join on live titles
+(`admin/orders` — correct for a lookup), (b) a **fallback** when an order has no lines, and (c)
+the order-level `Album status`/PDF/review lookups on `admin/orders/[id]`, which by construction
+describe the first album. **Still first-album-only, reported not fixed (out of Phase 9 P2 scope):**
+`admin/albums/[id]`, `admin/reviews/_detail` and `admin/_resolutions/detail` find orders with
+`where(orders.album_id = X)`, so an album that is the *second* line of a combined order does not
+appear in those lists. `album-lock.ts` already resolves membership through `order_items`, so no
+money, lock or eligibility decision is affected — this is a display/lookup gap only.
+
+### Pending-order limitation (application-level, by design)
+
+`orders_one_pending_per_album` (0011) is unchanged and still guards the **first** line's album.
+A partial unique index cannot reference the parent's status, so the second..Nth album of a
+combined order has **no DB-level backstop**; `createCombinedOrder` instead cancels every
+pending order that shares an album with the cart before minting, and stops with a clear error
+if one of those albums turns out to be paid. A trigger-maintained index would close the gap and
+was deliberately not added in this phase.
+
+### Refund and reprint granularity — DECIDED (Phase 8 Prompt 4)
+
+**REFUND = WHOLE ORDER ONLY.** A combined order of A+B+C cannot refund just B. This is not a
+gap to fill later; it is the correct unit for this architecture, because every financial fact is
+order-level: one Razorpay payment, one `payments` row, one coupon and one `discount_amount`, one
+`shipping_amount`, and `refund_requests` itself is order-scoped with one active request per order
+(0029). A per-item refund would need an allocation policy for shipping and the coupon — i.e. new
+accounting semantics — so it must not be improvised. **Verified by inspection:** neither
+`refund_requests` nor `reprint_requests` has an album column, and no refund/cancel path reads
+`orders.album_id` for logic (`cancelOrder` is order-id keyed), so combined orders cannot
+accidentally enter a partial-refund path today.
+
+**REPRINT = PER ALBUM, and already is.** `adminGenerateAlbumPdf(albumId)` takes one album and
+`album_pdfs` is one row per album, so regeneration was never order-wide. Runtime-proven on a
+combined order: regenerating album A rotated only A's token and `requested_at`, while B's token,
+`requested_at` and `attempts` were untouched — no order-level PDF, `previewPdfKey` unchanged. The
+admin order page now shows each album's own status + PDF chip and links to that album's page,
+where the existing regenerate control lives.
+
+### NOT implemented yet (later phases — do not add until asked)
+
+- **Per-item (partial) refunds** — see the decision above. Whole-order is the deliberate policy.
+- **A dedicated combined-order success screen.** Combined checkout navigates to `/orders/[id]`,
+  which already lists every album, the subtotal, shipping and total, and owns the poller;
+  `_success.tsx` (single-album) is untouched and unused by this flow. Verified in the browser as
+  clear and correct, so no second success architecture was built.
+- **Refund execution, post-paid cancellation, order editing** — unchanged from earlier phases.
+- **The pending-order DB backstop for a combined order's non-primary albums** — still
+  application-level (a trigger-maintained index would close it; deliberately not added).
+- **Retiring `orders.album_id` / `orders.copies`** — audited, not retired (see below).
+
+### Legacy `orders.album_id` / `orders.copies` — audited (Phase 8 Prompt 4)
+
+Both columns stay NOT NULL as first-item pointers. Every remaining reader was classified:
+
+- **MIGRATED because they were actually wrong for combined orders:** the dashboard and `/cart`
+  purchase maps. Both keyed "is this album bought?" on `orders.album_id`, so albums 2..N of a
+  combined purchase rendered as unbought — offering checkout and delete on a book the customer
+  already owned. Both now read through `order_items`. (The server always refused such an order,
+  so this was a display defect, not a money one.)
+- **SAFE LEGACY DISPLAY** (shows the first album; the detail views list all): admin order/customer
+  lists, production and shipping queues, `orders/[id]/_status.tsx` links, the support/refund/
+  reprint order pickers, `OrderEmailData.albumTitle` (fulfilment status emails only).
+- **SAFE (conservative)**: `lib/storage/metrics.ts` retention eligibility — missing albums 2..N
+  means it keeps data longer, never deletes more.
+- **MUST MIGRATE EVENTUALLY (not a bug today)**: `admin/production/page.tsx` shows `orders.copies`
+  as the print quantity, which for a combined order is only the first item's copies. Harmless
+  while no combined order has been printed; fix before the first combined production run.
+
 ## What's NOT built yet (do not add until asked)
 
+- ✅ **Cart + checkout are now complete** through Phase 8: `/cart` (page, remove, quantity, Buy
+  now — Phase 7), `/checkout/cart` combined checkout, per-item fulfilment and cart clearing on the
+  paid transition (Phase 8). See **Cart foundation (Phase 6)** for the data model and
+  **Multi-album orders + combined checkout (Phase 8)** for the order/settlement architecture and
+  what remains unimplemented.
 - Refund/reprint **execution** (the request workflow is built — Phase 9B — but actually
   issuing a Razorpay refund or kicking off a reprint order stays MANUAL by design) /
   post-paid cancellation (admin order lifecycle is forward-only)

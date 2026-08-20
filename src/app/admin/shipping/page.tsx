@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { orders, albums, profiles, addresses, shipments } from '@/db/schema';
+import { orders, orderItems, profiles, addresses, shipments } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
 import { shortId, fmtDate, statusChip } from '@/lib/admin/format';
 import { adminStatusLabel } from '@/lib/orders/status';
@@ -28,18 +28,37 @@ export default async function AdminShippingPage() {
       shippedAt: orders.shippedAt,
       deliveredAt: orders.deliveredAt,
       placedAt: orders.placedAt,
-      albumTitle: albums.title,
+      // What is in the parcel, from the purchase snapshot (0056) — `orders.album_id` names only
+      // the first album, so a combined shipment would otherwise be labelled with one book.
+      // Aggregated in SQL to keep this one query and one row per order.
+      itemCount: sql<number>`count(${orderItems.id})::int`,
+      firstTitle: sql<string | null>`min(${orderItems.albumTitle})`,
+      totalCopies: sql<number>`coalesce(sum(${orderItems.copies}), ${orders.copies})::int`,
       customerName: profiles.name,
       city: addresses.city,
       state: addresses.state,
       shipmentStatus: shipments.shipmentStatus,
     })
     .from(orders)
-    .leftJoin(albums, eq(orders.albumId, albums.id))
+    .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
     .leftJoin(profiles, eq(orders.userId, profiles.id))
     .leftJoin(addresses, eq(orders.addressId, addresses.id))
     .leftJoin(shipments, eq(shipments.orderId, orders.id))
     .where(inArray(orders.status, DISPATCH_STATES))
+    .groupBy(
+      orders.id,
+      orders.status,
+      orders.carrier,
+      orders.trackingNumber,
+      orders.shippedAt,
+      orders.deliveredAt,
+      orders.placedAt,
+      orders.copies,
+      profiles.name,
+      addresses.city,
+      addresses.state,
+      shipments.shipmentStatus,
+    )
     .orderBy(desc(orders.placedAt))
     .limit(100);
 
@@ -78,7 +97,11 @@ export default async function AdminShippingPage() {
                     </Link>
                   </td>
                   <td className="px-3 py-2">
-                    <div>{r.albumTitle ?? '—'}</div>
+                    <div>
+                      {r.itemCount > 1
+                        ? `${r.firstTitle ?? 'Album'} + ${r.itemCount - 1} more · ${r.totalCopies} copies`
+                        : (r.firstTitle ?? '—')}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       {r.customerName ?? '—'}
                       {r.city ? ` · ${r.city}, ${r.state}` : ''}

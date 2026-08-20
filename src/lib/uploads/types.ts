@@ -27,6 +27,16 @@ export const UPLOAD_STATES = [
 
 export type UploadState = (typeof UPLOAD_STATES)[number];
 
+/**
+ * The three network stages inside `uploading`. Phase 6 records which one a task reached so a
+ * retry can RESUME rather than restart — the difference between reusing an upload identity and
+ * silently minting a second one. Deliberately NOT an `UploadState`: adding a state would ripple
+ * through `computeStats`, capacity accounting and every badge, for a distinction the customer
+ * never needs to see.
+ */
+export const UPLOAD_STAGES = ['presign', 'put', 'confirm'] as const;
+export type UploadStage = (typeof UPLOAD_STAGES)[number];
+
 /** States from which no further transition happens on its own. */
 export const TERMINAL_UPLOAD_STATES: readonly UploadState[] = ['ready', 'failed', 'cancelled'];
 
@@ -61,6 +71,37 @@ export type UploadTimings = {
 export type UploadTask = {
   /** Client-side task id. A RENDER KEY — never sent to the server, never a photo id. */
   readonly id: string;
+  /**
+   * THE UPLOAD IDENTITY (Phase 6, decision C2) — the R2 object key this logical file owns,
+   * for its entire life. `null` until the first presign succeeds, then FIXED: a PUT retry
+   * re-signs this same key, and a confirm retry sends this same key.
+   *
+   * Why it lives on the task rather than in a local variable inside `run()`: `photos.upload_key`
+   * is globally unique (0053) and is what makes `/api/photos/confirm` idempotent. Minting a
+   * fresh key per attempt — which is what happened before this field existed — turned every
+   * confirm retry into a SECOND photo row, a second hardening job, a second consumed cap slot,
+   * and left the previous R2 object orphaned. Pinning the key here is what makes
+   * "one picked File ⇒ one photo row" hold across retries.
+   */
+  readonly uploadKey: string | null;
+  /**
+   * The network stage this task is in (or the one a scheduled retry will RESUME at). `null`
+   * before any attempt. This is the other half of same-key retry: a confirm-stage failure
+   * resumes at `confirm` and must never re-enter presign.
+   */
+  readonly stage: UploadStage | null;
+  /**
+   * Absolute wall-clock time an automatic retry becomes eligible, or `null` when not waiting.
+   * A waiting task stays in state `queued` (so capacity accounting and every badge keep
+   * working unchanged) but is deliberately NOT in the FIFO, so it holds no concurrency lane.
+   */
+  readonly retryAt: number | null;
+  /**
+   * AUTOMATIC retries used so far, bounded by `MAX_AUTO_ATTEMPTS`. Reset to 0 on any
+   * successful stage transition, so an early blip cannot exhaust a later stage's budget.
+   * Deliberately separate from `attempt`, which stays the user-facing manual counter.
+   */
+  readonly autoAttempt: number;
   /** The batch this file was picked in (see `summarizeSessions`). */
   readonly sessionId: string;
   /**

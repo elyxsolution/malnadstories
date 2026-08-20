@@ -32,8 +32,15 @@ export interface AlbumPdfStore {
   findPdfState(albumId: string): Promise<PdfState | null>;
   /** Best-effort progress write (gated to a still-generating row). */
   setStage(albumId: string, stage: PdfStage): Promise<void>;
-  /** Finalize success: point the row at the uploaded PDF. Idempotent. */
-  markReady(albumId: string, r2Key: string): Promise<void>;
+  /**
+   * Finalize success: point the row at the uploaded PDF. Idempotent.
+   *
+   * Returns whether a row was actually updated. `false` means the `album_pdfs` row no longer
+   * exists — the album was deleted while this render was in flight and the CASCADE took the row
+   * with it. The caller MUST NOT treat that as success: the PDF bytes are already in R2 with
+   * nothing left to name them (Phase 6 Prompt 10).
+   */
+  markReady(albumId: string, r2Key: string): Promise<boolean>;
   /** Finalize failure with a typed code. Idempotent. */
   markFailed(albumId: string, message: string, code: PdfFailureCode): Promise<void>;
   // --- Recovery (bounded; Phase I-3) ---
@@ -86,14 +93,18 @@ export class AlbumPdfRepository implements AlbumPdfStore {
     );
   }
 
-  async markReady(albumId: string, r2Key: string): Promise<void> {
-    await this.db.query(
+  async markReady(albumId: string, r2Key: string): Promise<boolean> {
+    // RETURNING makes the affected-row count observable: a plain UPDATE that matches nothing
+    // raises no error, which is exactly how a deleted album used to be reported as a success.
+    const rows = await this.db.query<{ album_id: string }>(
       `update album_pdfs
          set status = 'ready', stage = 'completed', failure_code = null, error = null,
              r2_key = $2, generated_at = now()
-       where album_id = $1`,
+       where album_id = $1
+       returning album_id`,
       [albumId, r2Key],
     );
+    return rows.length > 0;
   }
 
   async markFailed(albumId: string, message: string, code: PdfFailureCode): Promise<void> {

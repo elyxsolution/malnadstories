@@ -78,6 +78,19 @@ export function usePhotoPipeline({
   });
 
   const uploads = useUploadManager({
+    /**
+     * ALBUM SCOPE (Phase 3). The manager is shared by the whole session, so this pipeline states
+     * which album it speaks for and the provider delivers it nothing else: every callback below
+     * fires ONLY for uploads enqueued against this album, and `uploads.tasks` (with its stats,
+     * sessions and temp-id lookup) contains only this album's tasks.
+     *
+     * The filter deliberately lives at that one boundary rather than being re-checked in each
+     * callback. The events carry a task id, not an album, so a local check would have to
+     * re-derive the album from the manager's task list — duplicating the exact derivation the
+     * provider already performs, and giving the invariant two places to be wrong instead of one.
+     */
+    albumId,
+
     // A file was picked: the photo exists NOW, before any network call.
     onQueued: ({ tempPhotoId, filename, localUrl }) =>
       setPhotos((prev) => [
@@ -89,13 +102,27 @@ export function usePhotoPipeline({
     onMetadata: ({ tempPhotoId, metadata }) =>
       setPhotos((prev) => prev.map((p) => (p.id === tempPhotoId ? { ...p, clientMeta: metadata } : p))),
 
-    // The server issued a real id. The host remaps its layout first, then the photo list takes
-    // the new id — the blob preview carries over untouched, so the pixels never change.
+    /**
+     * The server issued a real id. The host remaps its layout first, then the photo list takes
+     * the new id — the blob preview carries over untouched, so the pixels never change.
+     *
+     * ADOPTION. The return value tells the provider whether this surface actually took the blob.
+     * It is read from `photosRef` (the live mirror) BEFORE the state update, because `setPhotos`
+     * is asynchronous and its updater cannot report back — and because the honest answer is
+     * exactly "do I hold a photo under this temp id right now?". A surface that mounted after
+     * `onQueued` holds none, its `.map` below matches nothing, and it correctly claims nothing;
+     * the provider then revokes rather than leaving the URL live and unreachable.
+     *
+     * The remap runs either way: a surface that cannot adopt the preview may still be holding
+     * layout references to the temp id.
+     */
     onConfirmed: ({ tempPhotoId, photoId, localUrl }) => {
+      const adopted = photosRef.current.some((p) => p.id === tempPhotoId);
       hooksRef.current.onRemapId?.(tempPhotoId, photoId);
       setPhotos((prev) =>
         prev.map((p) => (p.id === tempPhotoId ? { ...p, id: photoId, localUrl, processingSince: Date.now() } : p)),
       );
+      return adopted;
     },
 
     // Cancelled before it ever became a photo — drop it everywhere.
@@ -106,13 +133,70 @@ export function usePhotoPipeline({
     },
   });
 
-  // Release any preview still held when the host unmounts.
+  /**
+   * Release previews THIS HOST OWNS when it unmounts — and only those.
+   *
+   * Blob ownership is the manager's until confirm, at which point it transfers to the photo
+   * (the manager nulls its own reference so nothing double-revokes). A temp id is therefore an
+   * exact marker for "the manager still owns this preview": ownership and the id change in the
+   * same step.
+   *
+   * The `isTempPhotoId` guard matters because uploads now OUTLIVE the page that started them
+   * (Phase 3). Without it, leaving the wizard mid-upload revoked previews for files that were
+   * still uploading, so when they confirmed the manager handed the builder an already-dead
+   * blob URL and the tiles arrived blank. Skipping them is safe: whatever the manager still
+   * owns, the manager still releases — on cancel, or when the provider tears it down.
+   */
   useEffect(
     () => () => {
-      for (const p of photosRef.current) revokeLocalPreview(p.localUrl);
+      for (const p of photosRef.current) {
+        if (isTempPhotoId(p.id)) continue;
+        revokeLocalPreview(p.localUrl);
+      }
     },
     [],
   );
+
+  /**
+   * ADOPT UPLOADS THIS SURFACE DID NOT START.
+   *
+   * `onQueued` only fires for files picked HERE, but uploads outlive the page that started them
+   * (Phase 3): hand off from the creation wizard mid-upload and the builder inherits live tasks it
+   * has no photo for. Left alone that costs the customer twice — the tray is missing photos that
+   * are visibly still uploading, and when one confirms this surface truthfully reports that it
+   * adopted nothing, so the provider revokes a preview that was the only image available until the
+   * worker finishes.
+   *
+   * Seeding the same optimistic entry `onQueued` would have created fixes both, and it stays
+   * inside this hook: no manager change, no protocol change, and the adoption handshake keeps
+   * working exactly as designed — the entry now genuinely exists, so claiming the blob is honest.
+   * Only live tasks are seeded; a cancelled or failed one is not a photo.
+   */
+  useEffect(() => {
+    const inherited = uploads.tasks.filter(
+      (t) =>
+        t.photoId === null &&
+        (t.state === 'queued' || t.state === 'local' || t.state === 'uploading') &&
+        !photosRef.current.some((p) => p.id === t.tempPhotoId),
+    );
+    if (inherited.length === 0) return;
+    setPhotos((prev) => {
+      const known = new Set(prev.map((p) => p.id));
+      const add = inherited
+        .filter((t) => !known.has(t.tempPhotoId))
+        .map((t) => ({
+          id: t.tempPhotoId,
+          url: '',
+          thumbUrl: '',
+          localUrl: t.localUrl,
+          filename: t.filename,
+          edit: null,
+          status: 'pending' as const,
+          takenAt: null,
+        }));
+      return add.length > 0 ? [...prev, ...add] : prev;
+    });
+  }, [uploads.tasks]);
 
   /** The upload behind an optimistic photo, or undefined once it is a real photo. */
   const taskFor = useCallback(
@@ -133,6 +217,26 @@ export function usePhotoPipeline({
   // `status: 'pending'`, but the server has never heard of it.
   const pendingPhotos = photos.filter((p) => p.status === 'pending' && !isTempPhotoId(p.id)).length;
   const rejectedPhotos = photos.filter((p) => p.status === 'rejected').length;
+
+  /**
+   * PHOTOS THE ALBUM HAS THAT THIS SURFACE HASN'T SEEN.
+   *
+   * Uploads outlive the page that started them (Phase 3), so a file picked in the creation wizard
+   * can confirm after the builder has taken over. The builder holds no optimistic entry for it —
+   * it mounted later — so `onConfirmed` correctly adopts nothing, and the row would stay invisible
+   * until the next full page load: the tray misses a photo, and any frame the layout points at it
+   * renders empty.
+   *
+   * The manager's task table closes that gap. A task that has a `photoId` we don't hold is exactly
+   * "the server has a photo this surface is missing", which is a precise reason to poll and one
+   * that clears itself the moment the row is adopted (the poll already takes unknown ids).
+   */
+  const unknownConfirmed = useMemo(() => {
+    const known = new Set(photos.map((p) => p.id));
+    let n = 0;
+    for (const t of uploads.tasks) if (t.photoId && !known.has(t.photoId)) n += 1;
+    return n;
+  }, [photos, uploads.tasks]);
 
   /** The longest-waiting photo, so status copy escalates on the worst case, not the best. */
   const oldestProcessingSince = useMemo(() => {
@@ -161,9 +265,9 @@ export function usePhotoPipeline({
 
   usePhotoPoll({
     albumId,
-    enabled: pendingPhotos > 0 || pollWhen,
+    enabled: pendingPhotos > 0 || unknownConfirmed > 0 || pollWhen,
     immediate: pollImmediately,
-    resetKey: pendingPhotos,
+    resetKey: pendingPhotos + unknownConfirmed,
     getPhotos,
     apply: useCallback(
       (rows: PhotoRow[]) => {

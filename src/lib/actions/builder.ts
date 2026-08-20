@@ -2,9 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
+import { ensureCartItem } from '@/lib/cart/queries';
 import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema, CoverDesignSchema, ApplyBlueprintSchema } from '@/lib/validations';
 import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
 import { applyBlueprint, shuffleIds } from '@/lib/builder/blueprint';
+import { selectAutoBlueprint } from '@/lib/builder/blueprint-select';
 import { getActiveBlueprint, listActiveBlueprints } from '@/lib/templates/catalog';
 import { isEditingLocked } from '@/lib/orders/album-lock';
 import { sendReviewStatusEmail, sendReviewAdminSubmittedEmail } from '@/lib/email/review-events';
@@ -225,6 +227,26 @@ export async function submitAlbum(albumId: unknown): Promise<ActionResult> {
     console.error('[review] submit hook — continuing', String(e));
   }
 
+  // Phase 6 — the album is now submitted, which is exactly the state checkout requires, so
+  // put it in the customer's cart. Same best-effort shape as the review hook above: the
+  // submission has ALREADY succeeded, so a cart failure is logged and swallowed rather than
+  // turned into a failed submit.
+  //
+  // ENSURE, NOT INCREMENT. This action has no guard against the album already being
+  // `submitted` and is also the "Resubmit for Review" path, so it can run many times for one
+  // album. `cart_ensure_item` is `on conflict do nothing`, so three resubmissions leave one
+  // row at quantity 1 — the customer asked to submit, not to buy three copies. Manual adds
+  // (addAlbumToCart) are the ones that increment.
+  //
+  // The authenticated client is used deliberately: `user_id` comes from `auth.uid()` inside
+  // the function, so this cannot write to anyone else's cart even though a service-role
+  // handle is in scope.
+  try {
+    await ensureCartItem(supabase, albumId);
+  } catch (e) {
+    console.error('[cart] submit auto-add — continuing', String(e));
+  }
+
   return { ok: true };
 }
 
@@ -315,9 +337,17 @@ export async function saveCoverDesign(input: unknown): Promise<ActionResult> {
     if (!p) return { ok: false, error: 'That photo is not available for the cover.' };
   }
 
+  // The title is written only when one was actually supplied. A blank/absent title is not an
+  // error and must not cancel the write: the rest of the cover design still persists, and
+  // `albums.title` — NOT NULL, and the album's name everywhere else — is left untouched.
   const { error } = await supabase
     .from('albums')
-    .update({ title, cover_template_id: coverTemplateId, cover_config: config, updated_at: new Date().toISOString() })
+    .update({
+      ...(title ? { title } : {}),
+      cover_template_id: coverTemplateId,
+      cover_config: config,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', albumId);
   if (error) {
     console.error('saveCoverDesign error:', error);
@@ -438,9 +468,10 @@ export async function autoSelectAndApplyBlueprint(input: unknown): Promise<AutoS
   // set do we fall back to the closest-capacity match (first by the catalog's pinned/featured/sort
   // order — NOT random) so Auto Create is always predictable and admin-controlled.
   const uploaded = (await readyPhotoIds(supabase, albumId)).length;
-  const chosen =
-    matching.find((b) => b.isDefault) ??
-    matching.reduce((best, b) => (Math.abs(b.slotCount - uploaded) < Math.abs(best.slotCount - uploaded) ? b : best), matching[0]);
+  // The rule lives in `selectAutoBlueprint` (pure) so the wizard's client-side Auto Create picks
+  // the SAME blueprint — it is the same deterministic choice, not a second implementation of it.
+  const chosen = selectAutoBlueprint(matching, uploaded);
+  if (!chosen) return { ok: false, error: 'No blueprints are available for this album size yet.' };
 
   const res = await applyBlueprintById(supabase, albumId, chosen.id, true, undefined);
   if (!res.ok) return { ok: false, error: res.error };

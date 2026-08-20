@@ -47,9 +47,20 @@ export function OrderStatusEmail({
       <P>
         Hi {data.customerName}, {c.body}
       </P>
+      {/*
+        A single-album order reads exactly as before ("Order #1234abcd · Coorg"). A combined order
+        names its count instead of only the first album — the header used `data.albumTitle`, which
+        is the legacy first-item field, so a three-album order announced one book.
+      */}
       <Text style={{ color: '#8898aa', fontSize: '13px', margin: '0 0 12px' }}>
-        Order #{short} · {data.albumTitle}
+        Order #{short} ·{' '}
+        {data.items.length > 1 ? `${data.items.length} albums` : (data.items[0]?.albumTitle ?? data.albumTitle)}
       </Text>
+      {data.items.length > 1 && (
+        <Text style={{ color: '#8898aa', fontSize: '13px', margin: '-6px 0 12px' }}>
+          {data.items.map((i) => (i.copies > 1 ? `${i.albumTitle} × ${i.copies}` : i.albumTitle)).join(' · ')}
+        </Text>
+      )}
 
       {status === 'shipped' && data.trackingNumber && (
         <>

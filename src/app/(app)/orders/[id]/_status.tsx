@@ -29,15 +29,25 @@ type Status = 'pending' | 'paid' | 'failed' | 'cancelled' | string;
  * to "paid" and any later admin fulfilment moves show without a reload. Every label
  * comes from lib/orders/status.ts — no status is hardcoded or invented here.
  */
+/**
+ * The albums this order actually bought, in purchase order, from `order_items` (Phase 9).
+ * Previously this component took a single `albumId` (`orders.album_id`), so every link on a
+ * combined order pointed at the first album only. `title` is the purchased SNAPSHOT title.
+ */
+export type OrderAlbum = { id: string; title: string };
+
 export default function OrderStatus({
   orderId,
-  albumId,
+  albums,
   initialStatus,
 }: {
   orderId: string;
-  albumId: string;
+  albums: OrderAlbum[];
   initialStatus: Status;
 }) {
+  // Single-album orders keep their exact previous experience; `multi` is the only switch.
+  const multi = albums.length > 1;
+  const firstAlbumId = albums[0]?.id ?? null;
   const router = useRouter();
   const [status, setStatus] = useState<Status>(initialStatus);
   const [cancelling, setCancelling] = useState(false);
@@ -96,14 +106,40 @@ export default function OrderStatus({
             {delivered ? 'Delivered — we hope you treasure it' : 'Your order is confirmed'}
           </h2>
           <p className="mt-2 max-w-sm text-pretty text-sm text-muted-foreground">{view.message}</p>
-          <div className="mt-6 flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button render={<Link href={`/albums/${albumId}/build`} />} className={`w-full sm:w-auto ${LUX_PRIMARY}`}>
-              <ImageIcon /> View your album
-            </Button>
+          {/*
+            One button per purchased album. A single-album order therefore renders exactly the
+            button it always did; a combined order names every book instead of quietly linking
+            to the first one.
+          */}
+          <div className="mt-6 flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-center">
+            {multi ? (
+              albums.map((a) => (
+                <Button
+                  key={a.id}
+                  variant="outline"
+                  render={<Link href={`/albums/${a.id}/build`} />}
+                  className="w-full sm:w-auto"
+                >
+                  <ImageIcon /> <span className="max-w-[12rem] truncate">{a.title}</span>
+                </Button>
+              ))
+            ) : (
+              <Button
+                render={<Link href={`/albums/${firstAlbumId}/build`} />}
+                className={`w-full sm:w-auto ${LUX_PRIMARY}`}
+              >
+                <ImageIcon /> View your album
+              </Button>
+            )}
             <Button variant="outline" render={<Link href="/dashboard" />} className="w-full sm:w-auto">
               <LayoutDashboard /> Go to dashboard
             </Button>
           </div>
+          {multi && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {albums.length} albums in this order · printed and shipped together
+            </p>
+          )}
         </div>
 
         {/* Live fulfilment timeline — projection of the real orders.status */}
@@ -186,12 +222,21 @@ export default function OrderStatus({
             </p>
             <p className="mt-0.5 text-sm text-muted-foreground">
               {status === 'failed'
-                ? 'No charge was made and your album is safe. You can try again whenever you’re ready.'
-                : 'No charge was made. Your album is saved — start again any time.'}
+                ? `No charge was made and your ${multi ? 'albums are' : 'album is'} safe. You can try again whenever you’re ready.`
+                : `No charge was made. Your ${multi ? 'albums are' : 'album is'} saved — start again any time.`}
             </p>
           </div>
         </div>
-        <Button render={<Link href={`/checkout/${albumId}`} />} className={`mt-4 ${LUX_PRIMARY}`}>
+        {/*
+          Retry destination. A single-album order goes straight back to its own checkout, exactly
+          as before. A combined order goes to the cart: nothing was charged, so its albums are
+          still there, and `/checkout/cart` re-resolves and re-prices the whole set — sending the
+          customer to one album's checkout would silently drop the rest of their order.
+        */}
+        <Button
+          render={<Link href={multi || !firstAlbumId ? '/cart' : `/checkout/${firstAlbumId}`} />}
+          className={`mt-4 ${LUX_PRIMARY}`}
+        >
           Try again
         </Button>
       </div>

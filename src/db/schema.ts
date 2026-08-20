@@ -95,9 +95,13 @@ export const albumProductPrices = pgTable('album_product_prices', {
 
 export const albums = pgTable('albums', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  // RESTRICT, not cascade (0054). Albums cascade to `album_pdfs`, whose `r2_key` names the
+  // rendered preview PDF, so cascading here would destroy that record while leaving the object
+  // in R2. Deleting an ALBUM is unaffected; only deleting a PROFILE that still owns one is
+  // blocked, and the fix is to remove the albums through the app (which cleans R2) first.
   userId: uuid('user_id')
     .notNull()
-    .references(() => profiles.id, { onDelete: 'cascade' }),
+    .references(() => profiles.id, { onDelete: 'restrict' }),
   title: text('title').notNull(),
   size: integer('size').notNull(),
   // Chosen physical product (0047). Nullable only for pre-migration rows; backfilled to Standard.
@@ -189,11 +193,23 @@ export const albumPages = pgTable('album_pages', {
 
 export const photos = pgTable('photos', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  // RESTRICT, not cascade (0054). A photo row holds the ONLY record of up to three R2 objects
+  // (r2_key, sanitized_key, thumb_key). Cascading destroyed those records while leaving the
+  // objects behind — the confirmed source of 1,302 orphaned derivative objects found in the
+  // Phase 6 Prompt 5 forensics. Deleting a PHOTO is unaffected; only deleting a PROFILE that
+  // still owns one is blocked.
   userId: uuid('user_id')
     .notNull()
-    .references(() => profiles.id, { onDelete: 'cascade' }),
+    .references(() => profiles.id, { onDelete: 'restrict' }),
   albumId: uuid('album_id').references(() => albums.id, { onDelete: 'set null' }),
+  // TRANSIENT raw-upload key: the worker deletes the raw object after hardening and nulls
+  // this (photo-repository.clearRawKey). Never use it as an identity.
   r2Key: text('r2_key'),
+  // IMMUTABLE upload identity (0053) — the original R2 key, never nulled by the worker.
+  // Nullable because legacy rows hardened before 0053 no longer have their raw key; a
+  // partial unique index (photos_upload_key_key) makes non-null values globally unique,
+  // which is what /api/photos/confirm relies on for idempotency.
+  uploadKey: text('upload_key'),
   originalFilename: text('original_filename').notNull(),
   editConfig: jsonb('edit_config'),
   status: text('status').notNull().default('pending'),
@@ -240,6 +256,44 @@ export const orders = pgTable('orders', {
   deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   razorpayOrderId: text('razorpay_order_id'),
   placedAt: timestamp('placed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * ORDER LINES (0056) — the AUTHORITATIVE list of albums belonging to an order.
+ *
+ * One purchase is still one `orders` row with one Razorpay order and one payment; this
+ * child table is what lets that single order name more than one album. `orders.album_id`
+ * (and `copies` / `product_id` / `product_name` / `product_dimensions`) remain NOT NULL
+ * legacy/display pointers equal to the FIRST item — exactly correct for a single-album
+ * order, a mirror of item one for a combined order. Anything asking "which albums does
+ * this order contain?" — the album lock above all — must read THIS table.
+ *
+ * The per-line columns are an immutable snapshot (titles, products, catalog prices and
+ * dimensions all change over time). Money stays order-level: there is deliberately no
+ * shipping allocation, coupon allocation, tax, per-item status or refund field here,
+ * because a second money authority is how a receipt starts disagreeing with a payment.
+ * Shipping is charged ONCE per order regardless of album count.
+ *
+ * `order_id` CASCADEs (a line is meaningless without its order); `album_id` is NO ACTION,
+ * mirroring `orders.album_id` — a purchased album must never be deletable.
+ */
+export const orderItems = pgTable('order_items', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  albumId: uuid('album_id')
+    .notNull()
+    .references(() => albums.id),
+  // CHECK (copies >= 1 and copies <= 10) lives in 0056 — mirroring orders_copies_check.
+  copies: integer('copies').notNull().default(1),
+  unitPrice: numeric('unit_price', { precision: 10, scale: 2 }).notNull(),
+  lineSubtotal: numeric('line_subtotal', { precision: 10, scale: 2 }).notNull(),
+  productId: uuid('product_id').references(() => albumProducts.id, { onDelete: 'set null' }),
+  productName: text('product_name'),
+  productDimensions: jsonb('product_dimensions'),
+  albumTitle: text('album_title').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const albumPdfs = pgTable('album_pdfs', {
@@ -665,4 +719,35 @@ export const errorEvents = pgTable('error_events', {
   firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
   occurrences: integer('occurrences').notNull().default(1),
+});
+
+/**
+ * Cart items (0055) — the pre-purchase staging area: which of MY albums do I intend to
+ * order, and how many copies of each.
+ *
+ * ONE TABLE, NO PARENT `carts`: a cart row would hold nothing but `user_id`, which is
+ * already here, and a client-supplied `cart_id` is the most dangerous field a cart schema
+ * can have. `unique (user_id, album_id)` is therefore expressible directly, and is what
+ * makes adding the same album twice increment one row instead of creating a second.
+ *
+ * NO PRICE AND NO PRODUCT SNAPSHOT: `createOrder` resolves the price server-side and
+ * snapshots product/pricing onto the order at order time. A price here would be a second,
+ * staler authority for money.
+ *
+ * Both FKs CASCADE — deliberately unlike 0054, which moved photos/albums `user_id` to
+ * RESTRICT because those rows name R2 objects. A cart row names no storage, so deleting an
+ * album simply removes it from the cart and `deleteAlbum` needs no change.
+ */
+export const cartItems = pgTable('cart_items', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  albumId: uuid('album_id')
+    .notNull()
+    .references(() => albums.id, { onDelete: 'cascade' }),
+  // CHECK (quantity >= 1 and quantity <= 10) lives in 0055 — mirroring orders.copies.
+  quantity: integer('quantity').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

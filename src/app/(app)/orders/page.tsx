@@ -36,12 +36,29 @@ export default async function OrdersPage() {
     .order('placed_at', { ascending: false });
   const orders = (orderRows ?? []) as OrderRow[];
 
-  // Album titles for display (RLS-scoped — same owner).
-  const albumIds = Array.from(new Set(orders.map((o) => o.album_id)));
-  const titles = new Map<string, string>();
-  if (albumIds.length > 0) {
-    const { data: albumRows } = await supabase.from('albums').select('id, title').in('id', albumIds);
-    for (const a of (albumRows ?? []) as { id: string; title: string }[]) titles.set(a.id, a.title);
+  // WHAT EACH ORDER CONTAINS, from `order_items` (Phase 8) — an order can hold several albums,
+  // so the label is built per ORDER rather than by looking up `orders.album_id`. One batched
+  // read, no N+1; the titles are the ones snapshotted at purchase, so a later rename never
+  // rewrites an old order. RLS scopes the read through the parent orders.
+  const labels = new Map<string, string>();
+  if (orders.length > 0) {
+    const { data: itemRows } = await supabase
+      .from('order_items')
+      .select('order_id, album_title, created_at')
+      .in(
+        'order_id',
+        orders.map((o) => o.id),
+      )
+      .order('created_at', { ascending: true });
+    const byOrder = new Map<string, string[]>();
+    for (const r of (itemRows ?? []) as { order_id: string; album_title: string }[]) {
+      const list = byOrder.get(r.order_id) ?? [];
+      list.push(r.album_title);
+      byOrder.set(r.order_id, list);
+    }
+    byOrder.forEach((list, orderId) => {
+      labels.set(orderId, list.length === 1 ? list[0] : `${list[0]} + ${list.length - 1} more`);
+    });
   }
 
   const active = orders.filter((o) => isPaidStatus(o.status) && o.status !== 'delivered');
@@ -86,7 +103,7 @@ export default async function OrdersPage() {
                   <div className="flex items-center gap-3 text-sm">
                     <Clock className="h-5 w-5 text-warning" />
                     <div>
-                      <p className="font-medium">{titles.get(o.album_id) ?? 'Your album'}</p>
+                      <p className="font-medium">{labels.get(o.id) ?? 'Your album'}</p>
                       <p className="text-xs text-muted-foreground">Awaiting payment · {inr(Number(o.total_amount))}</p>
                     </div>
                   </div>
@@ -110,7 +127,7 @@ export default async function OrdersPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-display text-lg font-semibold tracking-tight">
-                            {titles.get(o.album_id) ?? 'Your album'}
+                            {labels.get(o.id) ?? 'Your album'}
                           </span>
                           <span className="font-mono text-xs text-muted-foreground">#{o.id.slice(0, 8)}</span>
                         </div>
@@ -171,7 +188,7 @@ export default async function OrdersPage() {
                       </span>
                       <div>
                         <p className="font-display text-base font-semibold tracking-tight">
-                          {titles.get(o.album_id) ?? 'Your album'}
+                          {labels.get(o.id) ?? 'Your album'}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Delivered · {fmtDate(o.placed_at)} · #{o.id.slice(0, 8)}

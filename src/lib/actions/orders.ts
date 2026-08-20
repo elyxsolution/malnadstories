@@ -10,9 +10,11 @@ import {
   PreviewOrderSchema,
 } from '@/lib/validations';
 import { computeOrderAmount } from '@/lib/pricing';
+import { buildOrderItemSnapshot } from '@/lib/orders/items';
 import { priceFor, getAlbumProductSnapshot } from '@/lib/products/catalog';
 import { shippingFeeInr } from '@/lib/shipping';
 import { isPaidStatus } from '@/lib/orders/status';
+import { hasPaidOrder } from '@/lib/orders/album-lock';
 import { validateCoupon } from '@/lib/coupons';
 import { isCouponLocked, recordCouponFailure, clearCouponFailures } from '@/lib/coupon-abuse';
 import { createRazorpayOrder, publicKeyId } from '@/lib/razorpay';
@@ -77,23 +79,35 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
   // Shipping fee is resolved SERVER-SIDE from the tier key (never client-supplied).
   const shippingInr = shippingFeeInr(shippingMethod);
 
-  // Album must exist, belong to the user (RLS), and be submitted.
+  // Album must exist, belong to the user (RLS), and be submitted. `title` rides along for the
+  // order line's snapshot (0056) — titles are editable until payment, so the purchased one is
+  // frozen on the line rather than looked up later.
   const { data: albumRow } = await supabase
     .from('albums')
-    .select('id, size, status, product_id')
+    .select('id, title, size, status, product_id')
     .eq('id', albumId)
     .maybeSingle();
-  const album = albumRow as { id: string; size: number; status: string; product_id: string | null } | null;
+  const album = albumRow as {
+    id: string;
+    title: string;
+    size: number;
+    status: string;
+    product_id: string | null;
+  } | null;
   if (!album) return { ok: false, error: 'Album not found' };
   if (album.status !== 'submitted') {
     return { ok: false, error: 'Finish and submit the album before checking out.' };
   }
 
-  // Address must belong to the user (RLS). full_name → Checkout prefill.
+  // Address must belong to the user — RLS *and* an explicit owner filter. `addresses` carries
+  // an admin-read policy, so RLS alone would let an admin customer pass another customer's
+  // address id (found during the Phase 8 browser E2E). Behaviour is unchanged for every normal
+  // customer, whose RLS view already contains only their own rows. full_name → Checkout prefill.
   const { data: addrRow } = await supabase
     .from('addresses')
     .select('id, full_name')
     .eq('id', addressId)
+    .eq('user_id', user.id)
     .maybeSingle();
   const address = addrRow as { id: string; full_name: string } | null;
   if (!address) return { ok: false, error: 'Please select a valid delivery address.' };
@@ -151,7 +165,12 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
     razorpay_order_id: string | null;
   }[];
 
-  if (existing.some((o) => isPaidStatus(o.status))) {
+  // Already-bought check. `existing` only sees orders whose LEGACY pointer is this album, so
+  // since 0056 it is paired with `hasPaidOrder`, which reads `order_items` and therefore also
+  // catches an album that was bought as the second or third line of a combined order. The SQL
+  // function refuses such an album too; this is here so the customer gets the friendly message
+  // instead of a raised exception.
+  if (existing.some((o) => isPaidStatus(o.status)) || (await hasPaidOrder(supabase, albumId))) {
     return { ok: false, error: 'This album has already been ordered.' };
   }
 
@@ -217,27 +236,39 @@ export async function createOrder(input: unknown): Promise<CreateOrderResult> {
   // Product snapshot for historical accuracy (0047): frozen name + dimensions at purchase time.
   const snapshot = await getAlbumProductSnapshot(album.product_id);
 
-  const { data: orderRow, error: insErr } = await admin
-    .from('orders')
-    .insert({
-      user_id: user.id,
-      album_id: albumId,
-      address_id: addressId,
-      status: 'pending',
-      copies,
-      subtotal_amount: amount.subtotalInr,
-      shipping_amount: amount.shippingInr,
-      shipping_method: shippingMethod,
-      discount_amount: amount.discountInr,
-      total_amount: amount.totalInr,
-      coupon_id: couponId,
-      razorpay_order_id: rzpOrderId,
-      product_id: snapshot.productId,
-      product_name: snapshot.productName,
-      product_dimensions: snapshot.dimensions,
-    })
-    .select('id')
-    .single();
+  // ATOMIC ORDER + LINE (0056). The order row and its single `order_items` line are written
+  // by one SECURITY DEFINER function in ONE transaction, because two PostgREST inserts could
+  // leave an order permanently without its line — and the line is now the authority for which
+  // albums an order contains (the album lock reads it). Nothing about the money changes: the
+  // values below are the same ones this action already computed, and the function only
+  // re-checks that they agree with each other. It never creates a payment row and never sets
+  // a status other than 'pending'; `process_razorpay_event` remains the only path to paid.
+  //
+  // The unique violation from `orders_one_pending_per_album` (0011) still surfaces as 23505,
+  // which is what the reuse-the-winner branch below depends on.
+  const item = buildOrderItemSnapshot({
+    albumId,
+    copies,
+    unitPriceInr: basePrice,
+    albumTitle: album.title ?? 'Album',
+    productId: snapshot.productId,
+    productName: snapshot.productName,
+    productDimensions: snapshot.dimensions,
+  });
+
+  const { data: newOrderId, error: insErr } = await admin.rpc('create_order_with_items', {
+    p_user_id: user.id,
+    p_address_id: addressId,
+    p_items: [item],
+    p_subtotal: amount.subtotalInr,
+    p_shipping: amount.shippingInr,
+    p_discount: amount.discountInr,
+    p_total: amount.totalInr,
+    p_shipping_method: shippingMethod,
+    p_coupon_id: couponId,
+    p_razorpay_order_id: rzpOrderId,
+  });
+  const orderRow = newOrderId ? { id: newOrderId as string } : null;
 
   if (insErr || !orderRow) {
     // A concurrent createOrder (double-click / network retry) won the race and already
