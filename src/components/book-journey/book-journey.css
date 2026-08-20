@@ -14,28 +14,72 @@
  * media queries are the artifact's own and are preserved as-is.
  */
 
+/**
+ * The journey is an EMBEDDED section, not a takeover. `.bj-root` is a transparent band that only
+ * supplies breathing room — the page's cream background shows through it — and `.bj-frame` is the
+ * visible box the experience lives in.
+ */
 .bj-root {
   position: relative;
-  /* The artifact used 100vh. `svh` keeps the section inside the visible viewport on mobile,
-     where browser chrome makes `vh` overshoot and push the next section off-screen. */
-  height: 100vh;
-  height: 100svh;
+  padding-inline: clamp(0.75rem, 3vw, 2rem);
+}
+
+.bj-frame {
+  position: relative;
+  width: min(94vw, 1600px);
+  margin-inline: auto;
+  /* Roughly the original stage's landscape proportion at desktop, so the camera framing the
+     artifact was composed against is preserved — but bounded, so page space stays visible above
+     and below. `svh` avoids mobile browser chrome overshooting the box. */
+  height: min(82svh, 880px);
+  min-height: 460px;
+  overflow: hidden;
+  border-radius: clamp(0.75rem, 1.2vw, 1.25rem);
+  border: 1px solid hsl(var(--border));
   background: #06281f;
+  box-shadow:
+    0 1px 2px hsl(var(--foreground) / 0.04),
+    0 12px 32px -12px hsl(var(--foreground) / 0.14);
+  /* THE COORDINATE BOUNDARY. Every overlay was authored in `vw`/`vh` against a full-bleed stage;
+     those units are now `cqw`/`cqh`, so the same numbers resolve against this box instead of the
+     window. One declaration re-bases the whole overlay system — no panel had to be re-measured. */
+  container-type: size;
   /* The journey manages wheel input itself; this stops a consumed gesture from also chaining
      into the page behind it, without locking anything. */
   overscroll-behavior: contain;
 }
 
-.bj-root a {
+/* Shorter viewports: keep the box from eating the whole screen so the hero stays discoverable. */
+@media (max-height: 700px) {
+  .bj-frame {
+    height: min(78svh, 620px);
+  }
+}
+
+/**
+ * Phones. A narrow box needs MORE height, not less: the panel cards stack vertically, so the
+ * space the desktop box gets from its width has to come from height here. Measured against the
+ * tallest panel (scene 1, three titled paragraphs) at 375px — below roughly 88svh its card
+ * starts to overrun the box. Page space above and below is still clearly visible.
+ */
+@media (max-width: 640px) {
+  .bj-frame {
+    width: 100%;
+    height: min(88svh, 720px);
+    border-radius: clamp(0.75rem, 3vw, 1rem);
+  }
+}
+
+.bj-frame a {
   color: #dce8e2;
   text-decoration: none;
 }
 
-.bj-root a:hover {
+.bj-frame a:hover {
   color: #ffffff;
 }
 
-.bj-root ::selection {
+.bj-frame ::selection {
   background: #145a41;
   color: #ffffff;
 }
@@ -59,12 +103,25 @@
   }
 }
 
-.bj-root [data-panel] > div {
+.bj-frame [data-panel] > div {
   transition: filter 120ms linear;
 }
 
+/**
+ * Panels are `pointer-events: none` so the pointer reaches the 3D scene behind them (that is how
+ * the album stays draggable). The scene-0 "Create Your Album" anchor inherited that and was not
+ * clickable — scene 5's already opts back in, so this only brings the first one in line.
+ *
+ * Safe for the hidden panels: the engine sets `visibility: hidden` on every panel below 1% opacity
+ * (`updateDom`), and a hidden element receives no pointer events, so only the panel actually on
+ * screen is ever interactive.
+ */
+.bj-frame [data-panel] a {
+  pointer-events: auto;
+}
+
 @media (prefers-reduced-transparency: reduce) {
-  .bj-root [data-panel] > div {
+  .bj-frame [data-panel] > div {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background-color: #06281f !important;
@@ -72,18 +129,100 @@
 }
 
 @media (prefers-contrast: more) {
-  .bj-root [data-panel] > div {
+  .bj-frame [data-panel] > div {
     background-color: #06281f !important;
     border-color: #dce8e2 !important;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bj-root [data-panel] {
+  .bj-frame [data-panel] {
     transform: none !important;
   }
-  .bj-root [style*='malnadCue'] {
+  .bj-frame [style*='malnadCue'] {
     animation: none !important;
+  }
+}
+
+/**
+ * SMALL-CONTAINER ADAPTATION.
+ *
+ * The overlays were composed against a full-screen stage that, even on a phone, was ~930px tall.
+ * The embedded box is far shorter, and two artifact-era values stop fitting: the `5.5rem` top
+ * padding each panel used to clear the artifact's OWN navbar (which is not ported — PublicHeader
+ * is the page's navbar), and the pixel `min-height` floors the editor baked into the cards.
+ *
+ * These are container queries, so they key off the BOX, not the window — the same box the
+ * overlays are already measured against. Nothing is repositioned or restyled: the padding that
+ * reserved space for a bar that no longer exists is reclaimed, the floors are allowed to
+ * collapse to the content, and the display type steps down. Content, order and design are
+ * untouched.
+ */
+@container (max-width: 720px) or (max-height: 620px) {
+  .bj-frame [data-panel] {
+    padding: 1.15rem 1.15rem !important;
+  }
+
+  /* Let the editor's pixel floors collapse — on a short box the content is the right height. */
+  .bj-frame [data-panel] * {
+    min-height: 0 !important;
+  }
+
+  .bj-frame [data-panel] > div {
+    max-width: 100% !important;
+  }
+
+  /* The display sizes' clamp() FLOORS were set for a tall stage; step them down together so the
+     relative hierarchy between heading, body and label is preserved exactly. */
+  .bj-frame [data-panel] h1 {
+    font-size: clamp(1.5rem, 7cqw, 2.4rem) !important;
+  }
+
+  .bj-frame [data-panel] h2 {
+    font-size: clamp(1.25rem, 5.6cqw, 1.9rem) !important;
+  }
+
+  .bj-frame [data-panel] p,
+  .bj-frame [data-panel] > div > div {
+    font-size: clamp(0.78rem, 3.1cqw, 1rem) !important;
+  }
+
+  /* Keep the closing CTA a comfortable tap target without letting it dominate the small box. */
+  .bj-frame [data-panel] a {
+    padding: 0.85rem 1.6rem !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.16em !important;
+  }
+}
+
+/**
+ * Smallest boxes (≈375px phones). Scene 2's three numbered steps are the tallest card in the
+ * set and still ran ~9px past the box after the tier above. Trimming the leading and the step
+ * gap absorbs it — the smallest type change that clears the tallest panel, so every other scene
+ * keeps more slack than it needs.
+ */
+@container (max-width: 400px) {
+  .bj-frame [data-panel] {
+    padding: 0.85rem !important;
+  }
+
+  /* The cards carry a 2.6rem/2.4rem inset from the artifact — generous on a full stage, most of
+     a phone's card on a 351px box. Tightening the inset (not the content) is what buys the room.
+     Scoped to the four PANELS THAT HAVE A CARD: scene 0 and scene 5 lay their content directly on
+     the scene with no surface behind it, and adding an inset there only pushes them out. */
+  .bj-frame [data-panel='1'] > div,
+  .bj-frame [data-panel='2'] > div,
+  .bj-frame [data-panel='3'] > div,
+  .bj-frame [data-panel='4'] > div {
+    padding: 1.25rem 1.15rem !important;
+  }
+
+  .bj-frame [data-panel] > div > div {
+    line-height: 1.45 !important;
+  }
+
+  .bj-frame [data-panel] > div > div > div {
+    gap: 0.6rem !important;
   }
 }
 

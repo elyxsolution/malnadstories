@@ -105,26 +105,33 @@ export default function BookJourney(props: BookJourneyProps) {
   }, [transitionSpeed, showTrail, leafDensity, mistDensity]);
 
   return (
-    <section
-      ref={pinRef}
-      // tabIndex makes the section focusable so its scoped keydown handler can work without a
-      // window-level listener; -1 keeps it out of the tab order.
-      tabIndex={-1}
-      aria-label="Malnad Stories — the journey"
-      className={`bj-root ${bookJourneyFontVars}`}
-    >
+    <section aria-label="Malnad Stories — the journey" className={`bj-root ${bookJourneyFontVars}`}>
+      {/*
+        `pinRef` is THE BOX, not the full-width band. The engine binds wheel/touch/key to this
+        element, so "the pointer is inside the journey" means inside the visible box — the
+        breathing space beside and around it scrolls the page like any other part of the site.
+        It is also the container-query container the overlays size against.
+      */}
       <div
-        ref={stageRef}
-        className="bj-stage"
-        // See stage-markup.ts: static authored markup, injected rather than transcribed to JSX so
-        // the artifact's inline styling survives byte-for-byte.
-        dangerouslySetInnerHTML={{ __html: BOOK_JOURNEY_STAGE_HTML }}
-      />
-      {failed && (
-        <p className="bj-fallback" role="status">
-          The journey needs WebGL — scroll on to explore Malnad Stories.
-        </p>
-      )}
+        ref={pinRef}
+        // Focusable so the scoped keydown handler works without a window-level listener;
+        // -1 keeps it out of the tab order.
+        tabIndex={-1}
+        className="bj-frame"
+      >
+        <div
+          ref={stageRef}
+          className="bj-stage"
+          // See stage-markup.ts: static authored markup, injected rather than transcribed to JSX
+          // so the artifact's inline styling survives byte-for-byte.
+          dangerouslySetInnerHTML={{ __html: BOOK_JOURNEY_STAGE_HTML }}
+        />
+        {failed && (
+          <p className="bj-fallback" role="status">
+            The journey needs WebGL — scroll on to explore Malnad Stories.
+          </p>
+        )}
+      </div>
     </section>
   );
 }

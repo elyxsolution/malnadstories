@@ -64,10 +64,12 @@ export default async function HomePage() {
 
       <main className="flex-1">
         {/* ── Book Journey ──────────────────────────────────────────────────
-            The scroll-interactive 3D opening, ported from the Book Journey artifact. It is an
-            ordinary ~viewport-height section: it consumes wheel/touch only while its own scenes
-            have somewhere to go, and hands scrolling straight back to the page at either end.
+            The scroll-interactive 3D opening, ported from the Book Journey artifact. It sits in
+            its own bounded box with page space around it, and consumes wheel/touch only while
+            its own scenes have somewhere to go — at either end scrolling returns to the page.
             Client-only (WebGL) and code-split, so this page stays a Server Component. */}
+        <div aria-hidden className="h-10 sm:h-14" />
+
         <BookJourney />
 
         {/* Breathing space between the journey and the hero it hands off to. */}

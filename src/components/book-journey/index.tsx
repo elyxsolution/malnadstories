@@ -20,8 +20,10 @@ const BookJourney = dynamic(() => import('./book-journey'), {
   ssr: false,
   loading: () => (
     <div className="bj-root" aria-hidden>
-      <div className="bj-stage">
-        <div className="bj-mount" />
+      <div className="bj-frame">
+        <div className="bj-stage">
+          <div className="bj-mount" />
+        </div>
       </div>
     </div>
   ),
