@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import Book from '@/components/book';
 import { Sprig } from '@/components/brand';
 import PublicHeader from '@/components/public-header';
+import BookJourney from '@/components/book-journey';
 import PublicFooter from '@/components/public-footer';
 import { listPublished } from '@/lib/cms/public';
 
@@ -62,6 +63,16 @@ export default async function HomePage() {
       <PublicHeader />
 
       <main className="flex-1">
+        {/* ── Book Journey ──────────────────────────────────────────────────
+            The scroll-interactive 3D opening, ported from the Book Journey artifact. It is an
+            ordinary ~viewport-height section: it consumes wheel/touch only while its own scenes
+            have somewhere to go, and hands scrolling straight back to the page at either end.
+            Client-only (WebGL) and code-split, so this page stays a Server Component. */}
+        <BookJourney />
+
+        {/* Breathing space between the journey and the hero it hands off to. */}
+        <div aria-hidden className="h-16 sm:h-24" />
+
         {/* ── Hero ─────────────────────────────────────────────────────────── */}
         <section className="relative overflow-hidden border-b border-border/60">
           <div

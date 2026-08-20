@@ -1,0 +1,114 @@
+/**
+ * BOOK JOURNEY — scoped styles.
+ *
+ * Ported from the artifact's <style> block, with every rule confined to `.bj-root` so nothing
+ * escapes into the rest of the site. Two things were deliberately NOT brought across:
+ *
+ *   · `html,body{margin:0;padding:0;background:#06281F}` — this would have repainted the whole
+ *     of Malnad Stories dark green. The journey keeps its dark scene INSIDE its own section;
+ *     the site stays cream.
+ *   · the `@font-face` for Scriptorama — `next/font/local` handles it now (see fonts.ts), so the
+ *     file is self-hosted and CSP-clean instead of loaded from a relative `uploads/` path.
+ *
+ * The link colours, selection colour, the scroll-cue keyframes and all three accessibility
+ * media queries are the artifact's own and are preserved as-is.
+ */
+
+.bj-root {
+  position: relative;
+  /* The artifact used 100vh. `svh` keeps the section inside the visible viewport on mobile,
+     where browser chrome makes `vh` overshoot and push the next section off-screen. */
+  height: 100vh;
+  height: 100svh;
+  background: #06281f;
+  /* The journey manages wheel input itself; this stops a consumed gesture from also chaining
+     into the page behind it, without locking anything. */
+  overscroll-behavior: contain;
+}
+
+.bj-root a {
+  color: #dce8e2;
+  text-decoration: none;
+}
+
+.bj-root a:hover {
+  color: #ffffff;
+}
+
+.bj-root ::selection {
+  background: #145a41;
+  color: #ffffff;
+}
+
+.bj-stage {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: #0b3d2e;
+}
+
+@keyframes malnadCue {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translateY(7px);
+    opacity: 1;
+  }
+}
+
+.bj-root [data-panel] > div {
+  transition: filter 120ms linear;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .bj-root [data-panel] > div {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-color: #06281f !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .bj-root [data-panel] > div {
+    background-color: #06281f !important;
+    border-color: #dce8e2 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bj-root [data-panel] {
+    transform: none !important;
+  }
+  .bj-root [style*='malnadCue'] {
+    animation: none !important;
+  }
+}
+
+/**
+ * Pre-WebGL state. The artifact had no such state: it painted the mount with the sky gradient
+ * only AFTER three.js had loaded, so any failure before that left an unpainted dark box — the
+ * black area. Painting the gradient up front means the section reads as sky from first paint
+ * and the scene fades in over it.
+ */
+.bj-mount {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(#b9cec4 0%, #dce8e2 26%, #6e8f80 52%, #145a41 74%, #06281f 100%);
+}
+
+.bj-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+  color: #dce8e2;
+  font-size: 0.82rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
