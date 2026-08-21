@@ -12,13 +12,14 @@ import {
   BookOpen,
   Sparkles,
   AlignVerticalSpaceAround,
+  Link2,
 } from 'lucide-react';
 import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
 import { ColorField } from './_color-picker';
 import { ObjectBar, type BarProps } from './_context-bar';
 import { BACKGROUNDS } from '@/lib/builder/elements';
-import { COVER_LAYOUTS, COVER_LAYOUT_LABEL, type CoverLayout } from '@/lib/builder/cover';
-import { COVER_SIDES, COVER_SIDE_LABEL } from '@/lib/builder/cover-objects';
+import { COVER_LAYOUTS, COVER_LAYOUT_LABEL, SPINE_LEGACY_COLOR, type CoverLayout } from '@/lib/builder/cover';
+import { COVER_SIDES, COVER_SIDE_LABEL, type CoverSide } from '@/lib/builder/cover-objects';
 import type { Background } from '@/lib/builder/model';
 import type { Anchor } from './_use-anchor-rect';
 import type { Photo } from '@/lib/builder/photo';
@@ -124,17 +125,25 @@ function BackgroundBar(p: CoverBarProps) {
   const { cover } = p;
   const side = cover.side;
   const bg = cover.background;
+  const linked = cover.linkBackgrounds;
+
+  /**
+   * ONE write path for every control in this bar. `applyBackground` is the thing that knows
+   * whether "Apply to all" is on, so a swatch, the picker and a preset can never disagree about
+   * how far a colour reaches.
+   */
+  const apply = (next: Background | null) => cover.applyBackground(next);
 
   return (
     <>
       <BarLabel>{COVER_SIDE_LABEL[side]}</BarLabel>
       <BarSep />
 
-      <BarPopover label="Background colour" swatch={bgSwatch(bg)} width={252} overflowVisible>
+      <BarPopover label="Background colour" swatch={bgSwatch(bg, side)} width={252} overflowVisible>
         <div className="space-y-3 p-3">
           <ColorField
-            value={bg?.kind === 'color' ? bg.value : '#1e3a2f'}
-            onChange={(hex) => hex !== 'transparent' && cover.setBackground({ kind: 'color', value: hex })}
+            value={bg?.kind === 'color' ? bg.value : bgSwatch(bg, side)}
+            onChange={(hex) => hex !== 'transparent' && apply({ kind: 'color', value: hex })}
           />
           <div>
             <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Presets</p>
@@ -145,17 +154,41 @@ function BackgroundBar(p: CoverBarProps) {
                   type="button"
                   title={s.label}
                   aria-label={s.label}
-                  onClick={() => cover.setBackground(swatchToBackground(s.key, s.kind))}
+                  onClick={() => apply(swatchToBackground(s.key, s.kind))}
                   className="h-7 w-full rounded-md ring-1 ring-border transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
                   style={s.swatch}
                 />
               ))}
             </div>
           </div>
+          {/* THE LINK, where the colours are. Off by default and never persisted: the three faces
+              own their colours independently, and this only widens where the NEXT one lands. */}
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/70 bg-secondary/40 p-2.5">
+            <input
+              type="checkbox"
+              checked={linked}
+              onChange={(e) => cover.setLinkBackgrounds(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[hsl(var(--studio))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+            />
+            <span className="min-w-0">
+              <span className="block text-[12px] font-medium leading-tight text-foreground">Apply to all three</span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+                Front, spine and back take the next colour together. Turn it off to keep editing one face at a time.
+              </span>
+            </span>
+          </label>
         </div>
       </BarPopover>
 
-      <BarBtn label="Use one of your photos" icon={<Images />} text="Photo" onClick={p.onPickPhoto} />
+      <BarBtn
+        label={linked ? 'Colours are landing on all three faces' : 'Apply the next colour to front, spine and back'}
+        icon={<Link2 />}
+        text="Link all"
+        active={linked}
+        onClick={() => cover.setLinkBackgrounds(!linked)}
+      />
+
+      {side !== 'spine' && <BarBtn label="Use one of your photos" icon={<Images />} text="Photo" onClick={p.onPickPhoto} />}
       {side === 'front' && <BarBtn label="Choose cover artwork" icon={<ImageIcon />} text="Artwork" onClick={p.onOpenArtwork} />}
       <BarSep />
 
@@ -172,7 +205,12 @@ function BackgroundBar(p: CoverBarProps) {
       {bg && (
         <>
           <BarSep />
-          <BarBtn label="Clear the background" icon={<Trash2 />} destructive onClick={() => cover.setBackground(null)} />
+          <BarBtn
+            label={side === 'spine' ? 'Back to the default spine colour' : 'Clear the background'}
+            icon={<Trash2 />}
+            destructive
+            onClick={() => apply(null)}
+          />
         </>
       )}
     </>
@@ -194,8 +232,12 @@ function ThemeRow({ layout, active, onPick }: { layout: CoverLayout; active: boo
   );
 }
 
-const bgSwatch = (bg: Background | null): string =>
-  bg?.kind === 'color' ? bg.value : bg ? '#1e3a2f' : '#1e3a2f';
+/**
+ * The dot the toolbar shows for a face's backdrop. An unset SPINE is not "no colour" — it is the
+ * legacy paint the renderer falls back to — so the swatch shows what will actually print.
+ */
+const bgSwatch = (bg: Background | null, side: CoverSide): string =>
+  bg?.kind === 'color' ? bg.value : side === 'spine' ? SPINE_LEGACY_COLOR : '#1e3a2f';
 
 /** Resolve a catalog swatch key back to a `Background`. Mirrors the Backgrounds rail's apply. */
 function swatchToBackground(key: string, kind: Background['kind']): Background {
@@ -238,19 +280,22 @@ function CoverBar(p: CoverBarProps) {
       </div>
       <BarSep />
 
+      {/* COLOUR IS AVAILABLE ON ALL THREE FACES. The spine is a printed surface like the other
+          two; only the photo and artwork sources stay front/back-only, because a spine a few
+          millimetres wide has nowhere to put a picture. */}
+      <BarBtn
+        label="Choose this face's background"
+        icon={<Palette />}
+        text="Background"
+        onClick={() => cover.setSelection({ kind: 'background' })}
+      />
       {cover.side !== 'spine' && (
         <>
-          <BarBtn
-            label="Choose this face's background"
-            icon={<Palette />}
-            text="Background"
-            onClick={() => cover.setSelection({ kind: 'background' })}
-          />
           <BarBtn label="Use one of your photos" icon={<Images />} onClick={p.onPickPhoto} />
           {cover.side === 'front' && <BarBtn label="Choose cover artwork" icon={<ImageIcon />} onClick={p.onOpenArtwork} />}
-          <BarSep />
         </>
       )}
+      <BarSep />
 
       <BarBtn label="Add text" icon={<TypeIcon />} text="Text" onClick={() => p.onOpenRail('text')} />
       {cover.side !== 'spine' && (

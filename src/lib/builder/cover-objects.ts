@@ -87,14 +87,38 @@ export function coverSideElements(c: CoverConfig, side: CoverSide): CoverSideEle
 export function withCoverSideElements(c: CoverConfig, side: CoverSide, patch: Partial<CoverSideElements>): CoverConfig {
   if (side === 'front') return { ...c, ...patch };
   if (side === 'back') return { ...c, back: { ...c.back, ...patch } };
-  return { ...c, spine: { texts: patch.texts ?? c.spine.texts } };
+  // Spread the spine rather than rebuilding it: it carries a `background` now, and a literal
+  // `{ texts }` here would silently erase the customer's spine colour on every text edit.
+  return { ...c, spine: { ...c.spine, texts: patch.texts ?? c.spine.texts } };
 }
 
-/** The face's backdrop. The spine has none of its own — it is the bound edge. */
+/**
+ * The face's backdrop. All three faces have one — the spine's used to be hardcoded in the
+ * renderer, which is exactly why it could not be changed. `null` on the spine means "the legacy
+ * paint"; `spineBackgroundStyle` is what turns that into CSS.
+ */
 export function coverSideBackground(c: CoverConfig, side: CoverSide): Background | null {
   if (side === 'front') return c.background;
   if (side === 'back') return c.back.background;
-  return null;
+  return c.spine.background;
+}
+
+/**
+ * Paint the SAME backdrop onto all three faces in one write — the "Apply to all" action.
+ *
+ * It deliberately touches only the backdrops. A face showing a photo has its photo cleared (one
+ * backdrop at a time, the rule `setBackground` already enforces per face), but text, stickers and
+ * QR codes are untouched: applying a colour is not a request to clear the design.
+ */
+export function withAllCoverBackgrounds(c: CoverConfig, bg: Background | null): CoverConfig {
+  return {
+    ...c,
+    background: bg,
+    photoId: bg ? null : c.photoId,
+    imageEdit: bg ? null : c.imageEdit,
+    spine: { ...c.spine, background: bg },
+    back: { ...c.back, background: bg, photoId: bg ? null : c.back.photoId, imageEdit: bg ? null : c.back.imageEdit },
+  };
 }
 
 /** The face's base photo + its independent crop. */
@@ -377,7 +401,10 @@ export function migrateCoverConfig(c: CoverConfig, meta: CoverMetadata, pageAspe
   }
 
   if (!changed && !legacy) return c;
-  return { ...c, v: COVER_SCHEMA_VERSION, texts, spine: { texts: spineTexts } };
+  // Spread the existing spine — it carries a `background` as well as its texts, and rebuilding
+  // it from a literal would drop the customer's spine colour on every migration pass (which runs
+  // in every renderer, on every load).
+  return { ...c, v: COVER_SCHEMA_VERSION, texts, spine: { ...c.spine, texts: spineTexts } };
 }
 
 /**

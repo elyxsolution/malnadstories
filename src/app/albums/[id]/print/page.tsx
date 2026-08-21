@@ -13,6 +13,7 @@ import {
   type QrElement,
   type StickerElement,
   type TextElement,
+  trimBaseIds,
 } from '@/lib/builder/model';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
 import { resolveCoverImageKeys } from '@/lib/albums/cover';
@@ -217,7 +218,9 @@ export default async function PrintPage({
     .map((r) => ({
       key: `${r.page_number}`,
       template: r.layout_template as LayoutTemplate,
-      photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
+      // Vacate the slot of a photo that no longer exists — never compact the row, or the right
+      // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
+      photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
       caption: r.caption ?? '',
       // Print is the FINAL physical book: only overlays with a real, still-present photo render.
       // Empty placeholders (photoId=null) and deleted-photo overlays are intentionally excluded

@@ -23,6 +23,7 @@ export default function PhotoFrame({
   onReady,
   onLoadError,
   lazy = false,
+  bleed = false,
 }: {
   url: string;
   edit?: EditConfig | null;
@@ -44,6 +45,16 @@ export default function PhotoFrame({
    * headless viewport never scrolls to. Only surfaces that scroll opt in.
    */
   lazy?: boolean;
+  /**
+   * Draw the WHOLE image, unclipped, instead of only the part inside the frame.
+   *
+   * This is the one thing the frame renderer could not do, and the reason the adjustment ghost
+   * needs it: while you reposition a photo you have to see what you are choosing FROM, not just
+   * what is currently selected. Geometry is untouched — same `computeFrameLayout`, same footprint,
+   * same transform — only the clip is lifted, so the faint spill lines up exactly with the crisp
+   * frame it surrounds. Off everywhere else, so no printing surface is affected.
+   */
+  bleed?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [frame, setFrame] = useState({ w: 0, h: 0 });
@@ -126,7 +137,7 @@ export default function PhotoFrame({
   return (
     <div
       ref={ref}
-      className={`relative h-full w-full overflow-hidden ${className ?? ''}`}
+      className={`relative h-full w-full ${bleed ? '' : 'overflow-hidden'} ${className ?? ''}`}
       style={{ filter: cssFilter(edit, sharpenId), ...finish }}
     >
       {sharpness > 0 && (

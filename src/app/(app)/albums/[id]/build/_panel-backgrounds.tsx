@@ -14,17 +14,26 @@ export default function BackgroundsPanel({
   hasTarget,
   onApply,
   onApplyAll,
+  surface = 'page',
 }: {
   current: Background | null;
   hasTarget: boolean;
   onApply: (bg: Background | null) => void;
   onApplyAll: (bg: Background | null) => void;
+  /**
+   * Which surface the rail is pointed at. It changes nothing about how a background is applied —
+   * only what "all" honestly means: every content page, or the cover's front, spine and back.
+   */
+  surface?: 'page' | 'cover';
 }) {
   const isCurrent = (b: { key: string }) => current?.value === b.key;
+  const onCover = surface === 'cover';
 
   return (
     <div className="ms-scroll flex-1 space-y-4 overflow-y-auto p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Page background</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        {onCover ? 'Cover background' : 'Page background'}
+      </p>
 
       {!hasTarget && (
         <p className="rounded-xl border border-dashed bg-muted/40 px-4 py-6 text-center text-xs text-muted-foreground">
@@ -79,10 +88,12 @@ export default function BackgroundsPanel({
           onClick={() => onApplyAll(current)}
           className="w-full rounded-xl border border-border bg-card px-3 py-2 text-[13px] font-medium text-foreground shadow-xs transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-40"
         >
-          Apply this background to all pages
+          {onCover ? 'Apply to front, spine and back' : 'Apply this background to all pages'}
         </button>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          “Apply to all” uses the current spread’s background across the whole album.
+          {onCover
+            ? 'Each cover face keeps its own colour — this is the one action that sets all three at once.'
+            : '“Apply to all” uses the current spread’s background across the whole album.'}
         </p>
       </div>
     </div>

@@ -20,6 +20,7 @@
  * its `idMap` ref and the wizard use the upload manager's task table without either growing a
  * second id-remapping system.
  */
+import { trimBaseIds } from './model';
 
 /** The minimum a caller must provide to resolve optimistic ids. Satisfied by `useIdMap`. */
 export type LayoutIdResolver = {
@@ -41,16 +42,24 @@ export type LayoutIdResolver = {
  */
 export function resolveLayoutForSave<
   O extends { photoId: string | null },
-  B extends { photoIds: string[]; overlays: O[] },
+  B extends { photoIds: (string | null)[]; overlays: O[] },
 >(blocks: readonly B[], ids: LayoutIdResolver): { blocks: B[]; stripped: number } {
   let stripped = 0;
   const out = blocks.map((b) => {
-    const photoIds: string[] = [];
-    for (const id of b.photoIds) {
-      const resolved = ids.resolve(id);
-      if (ids.isUnresolvedTemp(resolved)) stripped += 1;
-      else photoIds.push(resolved);
-    }
+    // Base slots are POSITIONAL: an unresolvable id vacates its slot, exactly as an overlay keeps
+    // its container. Pushing survivors into a fresh array used to compact the row, so a photo that
+    // was still uploading on the LEFT page moved the right page's photo across on the next load.
+    const photoIds = trimBaseIds(
+      b.photoIds.map((id) => {
+        if (!id) return null;
+        const resolved = ids.resolve(id);
+        if (ids.isUnresolvedTemp(resolved)) {
+          stripped += 1;
+          return null;
+        }
+        return resolved;
+      }),
+    );
     const overlays = b.overlays.map((o) => {
       if (!o.photoId) return o;
       const resolved = ids.resolve(o.photoId);
@@ -71,17 +80,18 @@ export function resolveLayoutForSave<
  * Record where each UNRESOLVED photo was meant to go, so the intent can be replayed once its
  * upload confirms (see `pending-placements`).
  *
- * Coordinates are taken against the blocks AS THEY WILL BE PERSISTED, not against the generated
- * ones: stripping compacts `photoIds` (the model has no way to express "right slot filled, left
- * empty"), so a base index read before the strip can point at the wrong slot afterwards. Reading
- * the post-strip array keeps `blockIndex` + slot meaningful when the builder loads it back.
+ * The recorded slot is the index the photo was GENERATED into, and that index is now stable:
+ * base slots are positional and a stripped id leaves a hole rather than collapsing the row, so
+ * "slot 1" still means the right page after the strip. This used to have to count survivors and
+ * guess the next free index, precisely because the model could not express "right slot filled,
+ * left empty" — it can now, so the guess is gone.
  *
- * The recorded slot is a PREFERENCE, not a promise — restoration falls back to any free slot in
- * the same block, which keeps the photo on its intended page even if a neighbour resolved first.
+ * The recorded slot is still a PREFERENCE, not a promise: restoration falls back to any free slot
+ * in the same block, which keeps the photo on its intended page even if a neighbour resolved first.
  */
 export function pendingPlacementsFor(
-  generated: readonly { photoIds: string[]; overlays: { photoId: string | null }[] }[],
-  persisted: readonly { photoIds: string[]; overlays: { photoId: string | null }[] }[],
+  generated: readonly { photoIds: (string | null)[]; overlays: { photoId: string | null }[] }[],
+  _persisted: readonly { photoIds: (string | null)[]; overlays: { photoId: string | null }[] }[],
   ids: LayoutIdResolver,
 ): { tempPhotoId: string; blockIndex: number; slot: { kind: 'base'; index: number } | { kind: 'overlay'; index: number } }[] {
   const out: {
@@ -91,15 +101,11 @@ export function pendingPlacementsFor(
   }[] = [];
 
   generated.forEach((block, blockIndex) => {
-    // Base slots: the persisted array is compacted, so the first free index is where this photo
-    // can actually land. Count the survivors to find it.
-    const survivingBase = persisted[blockIndex]?.photoIds.length ?? 0;
-    let nextFreeBase = survivingBase;
-    for (const id of block.photoIds) {
-      if (!id || !ids.isUnresolvedTemp(ids.resolve(id))) continue;
-      out.push({ tempPhotoId: id, blockIndex, slot: { kind: 'base', index: nextFreeBase } });
-      nextFreeBase += 1;
-    }
+    // Base slots keep their index through the strip, so the generated position IS the target.
+    block.photoIds.forEach((id, index) => {
+      if (!id || !ids.isUnresolvedTemp(ids.resolve(id))) return;
+      out.push({ tempPhotoId: id, blockIndex, slot: { kind: 'base', index } });
+    });
     // Overlay containers are preserved 1:1 by the strip, so their indices are already stable.
     block.overlays.forEach((o, index) => {
       if (!o.photoId || !ids.isUnresolvedTemp(ids.resolve(o.photoId))) return;

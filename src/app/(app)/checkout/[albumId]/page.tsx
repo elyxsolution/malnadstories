@@ -7,7 +7,7 @@ import { DEFAULT_SHIPPING_METHOD, isShippingMethod, type ShippingMethod } from '
 import { isPaidStatus } from '@/lib/orders/status';
 import { presignGet } from '@/lib/r2';
 import { listActiveCoverOptions } from '@/lib/covers';
-import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
+import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
 import { hasFrontCover } from '@/lib/albums/cover';
 import { loadAlbumValidation } from '@/lib/albums/validation';
 import { loadRenderReadiness } from '@/lib/albums/render-readiness';
@@ -179,8 +179,12 @@ export default async function CheckoutPage({ params }: { params: { albumId: stri
     consumed += PAGE_COST[p.layout_template];
     const filled = (p.photo_ids ?? []).filter(Boolean);
     filled.forEach((id) => placedIds.add(id));
-    (p.layout_config?.overlays ?? []).forEach((o) => o.photoId && placedIds.add(o.photoId));
-    emptyFrames += Math.max(0, requiredBaseCount(p.layout_template) - filled.length);
+    const overlays = p.layout_config?.overlays ?? [];
+    overlays.forEach((o) => o.photoId && placedIds.add(o.photoId));
+    // An EMPTY FRAME is an overlay container with no photo in it — the only unfinished thing a
+    // page can carry now that pages are backgrounds rather than photo containers. Counting unfilled
+    // base halves (the old rule) would report every ordinary one-photo spread as short two photos.
+    emptyFrames += overlays.filter((o) => !o.photoId).length;
   }
   const lowResCount = photos.filter(
     (ph) =>

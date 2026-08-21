@@ -2,7 +2,7 @@ import 'server-only';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { albums, albumPages, photos } from '@/db/schema';
-import { PAGE_COST, requiredBaseCount, type LayoutTemplate } from '@/lib/builder/model';
+import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
 import { hasFrontCover } from '@/lib/albums/cover';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
 
@@ -44,7 +44,10 @@ export async function getAlbumReadiness(albumId: string): Promise<AlbumReadiness
     filled.forEach((id) => placedIds.add(id));
     const overlays = (p.layoutConfig as { overlays?: { photoId: string | null }[] } | null)?.overlays ?? [];
     overlays.forEach((o) => o.photoId && placedIds.add(o.photoId));
-    emptyFrames += Math.max(0, requiredBaseCount(t) - filled.length);
+    // An EMPTY FRAME is an overlay container with no photo in it — the only unfinished thing a
+    // page can carry now that pages are backgrounds rather than photo containers. Counting unfilled
+    // base halves (the old rule) would report every ordinary one-photo spread as short two photos.
+    emptyFrames += overlays.filter((o) => !o.photoId).length;
   }
 
   const lowResCount = photoRows.filter(

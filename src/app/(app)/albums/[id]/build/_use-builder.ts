@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useHistoryState } from './_history';
 import {
   canAdd,
@@ -10,6 +10,7 @@ import {
   makeOverlayId,
   withOverlayIds,
   stripOverlayIds,
+  trimBaseIds,
   DEFAULT_OVERLAY_GEOM,
   type Background,
   type Block,
@@ -50,13 +51,20 @@ export type Selection =
 
 export const NO_SELECTION: Selection = { kind: 'none' };
 
-/** Remove a photo from every base slot + overlay across all blocks (placed-once invariant). */
+/**
+ * Remove a photo from every base slot + overlay across all blocks (placed-once invariant).
+ *
+ * The base half VACATES the slot rather than removing it. Filtering the id out used to compact
+ * the array, so taking a photo off the LEFT page slid the right page's photo onto the left —
+ * an edit to one page silently moving a different page's picture. The hole stays; trailing ones
+ * are trimmed so an emptied unit still persists as `[]`.
+ */
 function stripPhoto(list: Block[], id: string): Block[] {
   return list.map((b) => {
     const inBase = b.photoIds.includes(id);
     const overlays = b.overlays.filter((o) => o.photoId !== id);
     if (!inBase && overlays.length === b.overlays.length) return b;
-    return { ...b, photoIds: b.photoIds.filter((pid) => pid !== id), overlays };
+    return { ...b, photoIds: trimBaseIds(b.photoIds.map((pid) => (pid === id ? null : pid))), overlays };
   });
 }
 
@@ -66,19 +74,35 @@ function stripPhoto(list: Block[], id: string): Block[] {
  * stay presentational. Persistence is unchanged: the orchestrator serializes + calls the
  * existing `saveLayout`. No new persistence path is introduced here.
  */
-export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
+export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onEntry?: () => void) {
   // Normalize on entry: every overlay inside builder state carries a stable id from here on.
   const hist = useHistoryState<Block[]>(withOverlayIds(initial));
   const blocks = hist.value;
   const [dirty, setDirty] = useState(false);
 
+  /**
+   * The layout's history is no longer the only one — image adjustments have their own (see
+   * `_use-photo-edits`). `onEntry` reports each new layout step to the shared timeline that
+   * orders the two, so one ⌘Z always undoes whatever actually happened last. Called from the
+   * two gates that create an entry — an unbatched mutation, and the opening of a batch — so a
+   * bulk command stays one step here exactly as it is one step in `useHistoryState`.
+   */
+  const onEntryRef = useRef(onEntry);
+  onEntryRef.current = onEntry;
+  const batching = useRef(0);
+  const noteEntry = useCallback(() => {
+    if (batching.current === 0) onEntryRef.current?.();
+  }, []);
+
   const mutate = useCallback(
     (updater: (prev: Block[]) => Block[]) => {
+      noteEntry();
       hist.set(updater);
       setDirty(true);
     },
-    [hist],
+    [hist, noteEntry],
   );
+
 
   const undo = useCallback(() => {
     hist.undo();
@@ -157,25 +181,39 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
   };
 
   // ── base photo slots ─────────────────────────────────────────────────────────
+  /**
+   * Put a photo in ONE named slot. Strictly positional: "right" means index 1, even when index 0
+   * is empty. The old "no left → fill left first" redirect made a page's photo land somewhere
+   * other than where it was dropped, which is the same class of surprise as the compaction below.
+   */
   const assignBaseSlot = (key: string, slot: BaseSlot, photoId: string) =>
     mutate((prev) =>
       stripPhoto(prev, photoId).map((b) => {
         if (b.key !== key) return b;
         if (slot === 'image') return { ...b, photoIds: [photoId] };
-        const ids = [...b.photoIds];
-        let idx = slot === 'left' ? 0 : 1;
-        if (idx === 1 && !ids[0]) idx = 0; // no left → fill left first
-        ids[idx] = photoId;
-        return { ...b, photoIds: ids.slice(0, 2) };
+        const ids: (string | null)[] = [b.photoIds[0] ?? null, b.photoIds[1] ?? null];
+        ids[slot === 'left' ? 0 : 1] = photoId;
+        return { ...b, photoIds: trimBaseIds(ids) };
       }),
     );
 
+  /**
+   * Empty ONE slot, leaving the other page exactly where it is.
+   *
+   * This is the fix for the reported migration: clearing the left photo used to `slice(1)`, which
+   * moved the right page's photo to index 0 — onto the left page. Deleting a picture from one page
+   * must never rearrange another page, so the slot becomes a hole and the neighbour keeps its
+   * index. Trailing holes are trimmed, so emptying the last photo returns the unit to `[]` and
+   * the page renders as its background alone.
+   */
   const clearBaseSlot = (key: string, slot: BaseSlot) =>
     mutate((prev) =>
       prev.map((b) => {
         if (b.key !== key) return b;
-        if (slot === 'image' || slot === 'left') return { ...b, photoIds: b.photoIds.slice(1) };
-        return { ...b, photoIds: b.photoIds.slice(0, 1) };
+        if (slot === 'image') return { ...b, photoIds: [] };
+        const ids: (string | null)[] = [b.photoIds[0] ?? null, b.photoIds[1] ?? null];
+        ids[slot === 'left' ? 0 : 1] = null;
+        return { ...b, photoIds: trimBaseIds(ids) };
       }),
     );
 
@@ -184,14 +222,32 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
   // position. Behaviour is identical for a single overlay, but an id survives reordering and
   // deletion — which array indices do not, and which is what made index-based selection unsafe
   // to build multi-selection on.
-  /** Append an overlay. Returns its new id so the caller can select it immediately. */
-  const addOverlay = (key: string, photoId: string) => {
+  /**
+   * Append an overlay. Returns its new id so the caller can select it immediately.
+   *
+   * `at` is where the customer put it — the normalized CENTRE of the new container. Dropping a
+   * photo onto the page is now the ordinary way a photo reaches a page (a page is a background,
+   * not a photo container), so "it appears where I dropped it" is the only acceptable answer.
+   * Omitted, the cascading default placement is used, exactly as before.
+   */
+  const addOverlay = (key: string, photoId: string, at?: { x: number; y: number }) => {
     const id = makeOverlayId();
     mutate((prev) =>
       stripPhoto(prev, photoId).map((b) => {
         if (b.key !== key) return b;
         const n = b.overlays.length;
         const { w, h } = DEFAULT_OVERLAY_GEOM;
+        if (at) {
+          const overlay: Overlay = {
+            id,
+            photoId,
+            x: clamp01(at.x - w / 2),
+            y: clamp01(at.y - h / 2),
+            w,
+            h,
+          };
+          return { ...b, overlays: [...b.overlays, overlay] };
+        }
         const overlay: Overlay = {
           id,
           photoId,
@@ -393,7 +449,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
     const block = blocks.find((b) => b.key === key);
     if (!block) return;
     const need = requiredBaseCount(preset.base);
-    const baseFilled = block.photoIds.filter(Boolean);
+    const baseFilled = block.photoIds.filter((id): id is string => !!id);
     const keptBase = baseFilled.slice(0, need);
     const droppedBase = baseFilled.slice(need);
 
@@ -420,13 +476,27 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
   /**
    * Run several mutations as ONE undo entry (Phase 6). Every bulk command wraps its work in
    * this, so "remove 12 photos from their pages" is one ⌘Z, not twelve. Nesting is safe.
+   *
+   * It is also one entry in the SHARED timeline: the depth counter suppresses the per-mutation
+   * report from `mutate`, so a twelve-frame command contributes exactly one step there too.
    */
   const batch = useCallback(
     (fn: () => void) => {
-      hist.batch(fn);
+      if (batching.current > 0) {
+        hist.batch(fn);
+        setDirty(true);
+        return;
+      }
+      noteEntry();
+      batching.current += 1;
+      try {
+        hist.batch(fn);
+      } finally {
+        batching.current -= 1;
+      }
       setDirty(true);
     },
-    [hist],
+    [hist, noteEntry],
   );
 
   // ── photos lifecycle (block side only — photo rows are owned by the orchestrator) ──
@@ -446,9 +516,14 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
         let overlays = b.overlays;
         for (const f of mine) {
           if (f.slot) {
-            // Clearing a base slot preserves the OTHER slot's photo — index-safe by construction.
-            const keepLeft = f.slot === 'right';
-            photoIds = keepLeft ? photoIds.slice(0, 1) : photoIds.slice(1);
+            // Vacate the named slot and leave the other page untouched — the same positional
+            // rule `clearBaseSlot` uses. Slicing used to shift the survivor onto the wrong page.
+            if (f.slot === 'image') photoIds = [];
+            else {
+              const ids: (string | null)[] = [photoIds[0] ?? null, photoIds[1] ?? null];
+              ids[f.slot === 'left' ? 0 : 1] = null;
+              photoIds = trimBaseIds(ids);
+            }
           } else if (f.overlayId) {
             // An overlay keeps its CONTAINER (geometry is the user's layout work); only the
             // photo reference is cleared — same rule the serialization boundary uses.
@@ -498,7 +573,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT) {
   const serialize = () =>
     blocks.map((b) => ({
       template: b.template,
-      photoIds: b.photoIds.filter(Boolean),
+      // Trailing holes only — an interior `null` IS the layout ("right page filled, left empty")
+      // and compacting it here would re-introduce the page-to-page slide on the next reload.
+      photoIds: trimBaseIds(b.photoIds),
       caption: b.caption,
       // Overlay ids are CLIENT-ONLY identity (like `Block.key`) — stripped here so the payload
       // reaching `saveLayout` is byte-identical to what it was before overlays gained ids.

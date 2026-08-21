@@ -17,6 +17,7 @@ import {
   type Rect,
   PAGE_COST,
   requiredBaseCount,
+  trimBaseIds,
   placedPhotoIds,
 } from './model';
 
@@ -201,14 +202,22 @@ function distributeOverlays(
  */
 export function fillEmptyFrames(blocks: Block[], available: EnginePhoto[]): Block[] {
   const queue = [...available];
-  // Pass 1 — base slots across all blocks (preserves the original left-to-right base priority).
+  /**
+   * Pass 1 — base slots, but ONLY on units that actually use them (a non-empty base row: a
+   * legacy page, a panorama, or one a preset just laid out). A page the customer created is a
+   * background with overlay frames on it, and filling an invisible base slot there would attach a
+   * full-page photo to a page that never offered one — the exact behaviour "photos arrive as
+   * overlays" exists to remove. Its empty OVERLAY frames are filled by pass 2, which is what
+   * "fill the empty frames" means on such a page.
+   */
   const withBases = blocks.map((b) => {
+    if (b.photoIds.length === 0) return b;
     const need = requiredBaseCount(b.template);
-    const ids = [...b.photoIds];
+    const ids: (string | null)[] = [...b.photoIds];
     for (let i = 0; i < need; i++) {
       if (!ids[i] && queue.length) ids[i] = queue.shift()!.id;
     }
-    return { ...b, photoIds: ids.filter(Boolean) };
+    return { ...b, photoIds: trimBaseIds(ids) };
   });
   // Pass 2 — empty overlay placeholders, in page/overlay order, from whatever photos remain.
   return withBases.map((b) => ({
@@ -264,7 +273,8 @@ export function summarizePlan(blocks: Block[], photosAnalyzed: number) {
 export function serializeBlocks(blocks: Block[]) {
   return blocks.map((b) => ({
     template: b.template,
-    photoIds: b.photoIds.filter(Boolean),
+    // Trailing holes only — an interior `null` is the layout ("right page filled, left empty").
+    photoIds: trimBaseIds(b.photoIds),
     caption: b.caption,
     overlays: b.overlays,
   }));

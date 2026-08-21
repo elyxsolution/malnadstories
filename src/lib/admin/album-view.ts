@@ -13,6 +13,7 @@ import {
   type QrElement,
   type StickerElement,
   type TextElement,
+  trimBaseIds,
 } from '@/lib/builder/model';
 import { normalizeCoverConfig, type CoverConfig } from '@/lib/builder/cover';
 import { resolveCoverImageKeys } from '@/lib/albums/cover';
@@ -141,7 +142,9 @@ export async function loadAlbumForAdmin(
     .map((r) => ({
       key: crypto.randomUUID(),
       template: r.layout_template as LayoutTemplate,
-      photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
+      // Vacate the slot of a photo that no longer exists — never compact the row, or the right
+      // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
+      photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
       caption: r.caption ?? '',
       // Preserve overlay containers; an unassigned/deleted-photo overlay becomes an empty
       // placeholder (photoId=null) — it renders nothing in the admin preview/PDF but the slot

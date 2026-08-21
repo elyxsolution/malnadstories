@@ -14,7 +14,7 @@ import { photoUiState } from './_photo-state';
 import UploadBadge, { stateOpacityClass } from './_upload-badge';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
-import { PAGE_COST, physicalStart, type Block } from '@/lib/builder/model';
+import { PAGE_COST, physicalStart, type Block, type EditConfig } from '@/lib/builder/model';
 import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { acceptPhotoDrag, leftDropTarget, readPhotoDrag, startPhotoDrag } from '@/lib/builder/photo-dnd';
@@ -148,6 +148,29 @@ export default function BlockCard({
   const cropOnThisBlock = cropTarget && cropTarget.blockKey === block.key ? cropTarget : null;
   const croppingSlot = cropOnThisBlock?.slot ?? null;
   const croppingOverlay = cropOnThisBlock?.overlayId ?? null;
+
+  /**
+   * THE FRAME BEING ADJUSTED, as a normalized rect on the open pair.
+   *
+   * Every photo container on a spread reduces to a rect here — the two page halves, the
+   * full-spread image, and any overlay whatever its shape — which is exactly what makes the
+   * adjustment experience identical for all of them rather than special-cased for one. An
+   * overlay's rect is its own geometry, so a square, a tall portrait or a rounded inset each get
+   * their own correctly-shaped preview with no extra cases.
+   */
+  const cropFrame = (() => {
+    if (!cropOnThisBlock) return null;
+    if (cropOnThisBlock.overlayId) {
+      const o = block.overlays.find((ov) => ov.id === cropOnThisBlock.overlayId);
+      return o ? { rect: { x: o.x, y: o.y, w: o.w, h: o.h }, rounded: true } : null;
+    }
+    if (cropOnThisBlock.slot === 'image') return { rect: { x: 0, y: 0, w: 1, h: 1 }, rounded: false };
+    if (cropOnThisBlock.slot === 'left') return { rect: { x: 0, y: 0, w: 0.5, h: 1 }, rounded: false };
+    if (cropOnThisBlock.slot === 'right') return { rect: { x: 0.5, y: 0, w: 0.5, h: 1 }, rounded: false };
+    return null;
+  })();
+  const cropPhoto = cropOnThisBlock ? photoMap.get(cropOnThisBlock.photoId) : undefined;
+  const cropUrl = cropPhoto ? resolvePhotoUrl(cropPhoto, 'full') : undefined;
   const [snap, setSnap] = useState<SnapLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [picking, setPicking] = useState<
@@ -258,17 +281,24 @@ export default function BlockCard({
 
   const leftPhoto = block.photoIds[0] ? photoMap.get(block.photoIds[0]) : undefined;
   const rightPhoto = block.photoIds[1] ? photoMap.get(block.photoIds[1]) : undefined;
+  /**
+   * Does this unit use base image slots at all? A non-empty base row means yes — a legacy page, a
+   * panorama, or one a preset just laid out. An empty one is a plain page: background only, and
+   * photos arrive as overlays. `clearBaseSlot` trims trailing holes, so removing the last base
+   * photo returns a page to exactly that state.
+   */
+  const usesBaseSlots = block.photoIds.length > 0;
 
   const sel = (s: Selection) => selection.kind === s.kind && JSON.stringify(selection) === JSON.stringify(s);
 
   return (
     <div className="group/block">
-      {/* Per-spread action bar — the explicit home for adding floating photo overlays. */}
+      {/* Per-spread action bar — the explicit home for adding photos to this spread. */}
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-muted-foreground">
           {block.overlays.length > 0
-            ? `${block.overlays.length} overlay${block.overlays.length === 1 ? '' : 's'} on this spread`
-            : 'Tip: add framed photo overlays on top of the page'}
+            ? `${block.overlays.length} photo${block.overlays.length === 1 ? '' : 's'} on this spread`
+            : 'This spread is a blank page — drop a photo on it, or add one below'}
         </span>
         <button
           type="button"
@@ -300,6 +330,29 @@ export default function BlockCard({
           }}
           className="album-page relative w-full select-none"
           style={{ aspectRatio: pair, containerType: 'inline-size' }}
+          /**
+           * THE PAGE ITSELF IS NOT A PHOTO CONTAINER — but it is a drop TARGET.
+           *
+           * A page is a background; photos live in overlay frames the customer places. Dropping a
+           * tray photo onto open paper therefore CREATES one of those frames, centred where it
+           * landed, instead of filling a hidden slot that owns half the spread. Frames that can
+           * accept a photo themselves (a base image, an existing overlay) stop the event, so this
+           * only ever fires on bare paper.
+           */
+          onDragOver={acceptPhotoDrag}
+          onDrop={(e) => {
+            e.preventDefault();
+            const id = readPhotoDrag(e);
+            drag?.end();
+            if (!id) return;
+            const box = pageRef.current?.getBoundingClientRect();
+            const at =
+              box && box.width > 0 && box.height > 0
+                ? { x: (e.clientX - box.left) / box.width, y: (e.clientY - box.top) / box.height }
+                : undefined;
+            const newId = api.addOverlay(block.key, id, at);
+            if (newId) onSelect({ kind: 'overlay', id: newId });
+          }}
         >
           {/* ── RENDER LAYER ────────────────────────────────────────────────────────────────
               EVERYTHING THAT DRAWS, CLIPPED AT THE TRIM. The page's own content was always
@@ -317,8 +370,20 @@ export default function BlockCard({
             <div className="absolute inset-0 bg-white" />
           )}
 
-          {/* Base photo slots */}
-          {isDouble ? (
+          {/*
+            BASE IMAGE SLOTS — present only for a unit that USES them.
+
+            A page created by the customer starts empty (`photoIds: []`) and stays that way: it is
+            a background, and photos arrive as overlays. It therefore draws no slots at all, which
+            is the visible half of "a page is not a photo container" — there is no full-page drop
+            zone lying in wait, and nothing is attached to a new page automatically.
+
+            A unit whose base row is NON-empty is one that genuinely works this way: a legacy
+            album, a double-page panorama, or a page a layout preset / blueprint just filled. Those
+            keep their slots — including an empty companion slot, so a half-filled preset is still
+            finishable — and render exactly as they always have.
+          */}
+          {usesBaseSlots && (isDouble ? (
             <BaseSlotView
               photo={leftPhoto}
               task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
@@ -342,8 +407,8 @@ export default function BlockCard({
               }
               onDragEndFrame={() => drag?.end()}
               onClear={() => api.clearBaseSlot(block.key, 'image')}
-              onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], pair, true) : undefined}
-              onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
+              onCrop={leftPhoto ? () => onQuickCrop(leftPhoto.id, pair, true) : undefined}
+              onEdit={leftPhoto ? () => onEditPhoto(leftPhoto.id) : undefined}
               readiness={baseReadiness('image')}
               cropping={croppingSlot === 'image'}
               cropHandlers={cropHandlers}
@@ -374,8 +439,8 @@ export default function BlockCard({
                   }
                   onDragEndFrame={() => drag?.end()}
                   onClear={() => api.clearBaseSlot(block.key, 'left')}
-                  onCrop={leftPhoto ? () => onQuickCrop(block.photoIds[0], page, false) : undefined}
-                  onEdit={leftPhoto ? () => onEditPhoto(block.photoIds[0]) : undefined}
+                  onCrop={leftPhoto ? () => onQuickCrop(leftPhoto.id, page, false) : undefined}
+                  onEdit={leftPhoto ? () => onEditPhoto(leftPhoto.id) : undefined}
                   readiness={baseReadiness('left')}
                   cropping={croppingSlot === 'left'}
                   cropHandlers={cropHandlers}
@@ -405,15 +470,15 @@ export default function BlockCard({
                   }
                   onDragEndFrame={() => drag?.end()}
                   onClear={() => api.clearBaseSlot(block.key, 'right')}
-                  onCrop={rightPhoto ? () => onQuickCrop(block.photoIds[1], page, false) : undefined}
-                  onEdit={rightPhoto ? () => onEditPhoto(block.photoIds[1]) : undefined}
+                  onCrop={rightPhoto ? () => onQuickCrop(rightPhoto.id, page, false) : undefined}
+                  onEdit={rightPhoto ? () => onEditPhoto(rightPhoto.id) : undefined}
                   readiness={baseReadiness('right')}
                   cropping={croppingSlot === 'right'}
                   cropHandlers={cropHandlers}
                 />
               </div>
             </>
-          )}
+          ))}
 
           {/* Overlays (floating framed photos — or empty placeholder containers) */}
           {block.overlays.map((o) => {
@@ -586,6 +651,13 @@ export default function BlockCard({
           */}
           <span aria-hidden className="pointer-events-none absolute inset-0 z-[10] ring-1 ring-inset ring-foreground/[0.09]" />
 
+          {/* THE ADJUSTMENT GHOST. Outside the clipped render layer for the same reason the
+              handles are: the part of the photo that spills past the frame has to be visible to
+              be aimed at. Inert — the capture surface stays inside the frame. */}
+          {cropFrame && cropUrl && (
+            <CropBleed rect={cropFrame.rect} rounded={cropFrame.rounded} url={cropUrl} edit={cropPhoto?.edit} />
+          )}
+
           {/* ── EDITING LAYER ───────────────────────────────────────────────────────────────
               Selection chrome only — outlines, handles, and the ghost that stands in for an
               element pushed fully off the paper. Deliberately OUTSIDE the clip so all of that
@@ -648,11 +720,11 @@ export type CropHandlers = {
 /**
  * IN-CANVAS CROP LAYER — a transparent capture surface laid over the frame being cropped.
  *
- * It draws nothing but affordance: a bright boundary saying "this is what will print", a
- * rule-of-thirds grid to compose against, and a dimming scrim over everything else on the page
- * (rendered by the caller) so the frame is unmistakably the subject. The photo underneath is the
- * live preview — it is the SAME `PhotoFrame` as always, re-rendering from the same `EditConfig`
- * the drag is mutating, so what you drag is exactly what prints.
+ * It draws NOTHING. Every visible part of adjustment mode — the bright frame boundary, the
+ * rule-of-thirds grid, the dimmed rest of the page and the faint spill of the image beyond the
+ * frame — is drawn by `CropBleed`, outside the page's clip, because most of it lies outside the
+ * frame by definition and would simply be cut away here. What is left is the job this layer
+ * actually has: capture the gesture over the frame, and nothing else.
  *
  * It takes focus on mount so arrow keys nudge and Escape finishes without touching the mouse.
  */
@@ -673,15 +745,69 @@ function CropLayer({ handlers }: { handlers?: CropHandlers }) {
       onKeyDown={handlers?.onKeyDown}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
-      className="absolute inset-0 z-[9] cursor-move touch-none select-none outline-none ring-2 ring-inset ring-studio-bright"
-    >
-      {/* Rule of thirds — the one compositional aid worth drawing while repositioning. */}
-      <span aria-hidden className="pointer-events-none absolute inset-0">
+      className="absolute inset-0 z-[9] cursor-move touch-none select-none outline-none"
+    />
+  );
+}
+
+/**
+ * THE ADJUSTMENT GHOST — what the frame is choosing FROM.
+ *
+ * Repositioning a photo inside a fixed frame is a question about the part of the picture you
+ * CANNOT currently see, and until now the canvas answered it with nothing: the page clips at the
+ * frame, so you dragged blind and judged the result afterwards. This draws the rest of the image,
+ * faintly, exactly where it sits — same `computeFrameLayout` geometry, same `EditConfig`, one
+ * `bleed` flag — so the crop you are choosing is visible before you commit to it.
+ *
+ * Three layers, in this order, all inert:
+ *   1. a scrim over the whole spread, so the frame is unmistakably the subject;
+ *   2. the FULL image at low opacity, unclipped — the part that will not print;
+ *   3. the frame itself, crisp, clipped to its real shape — the part that will.
+ *
+ * It is driven purely by a rect, so it is identical for a page half, a full-spread image and any
+ * overlay of any shape or rotation-free geometry. There is no per-frame-type branch to keep in
+ * step, which is the point: every photo container gets the same behaviour because they all reduce
+ * to the same three values.
+ */
+function CropBleed({
+  rect,
+  rounded,
+  url,
+  edit,
+}: {
+  rect: { x: number; y: number; w: number; h: number };
+  /** Overlays carry the canvas's 6px container radius; page halves are square-cornered paper. */
+  rounded: boolean;
+  url: string;
+  edit?: EditConfig | null;
+}) {
+  const box: React.CSSProperties = {
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.w * 100}%`,
+    height: `${rect.h * 100}%`,
+  };
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-[11]">
+      <div className="absolute inset-0 bg-foreground/45 motion-safe:animate-fade-in" />
+
+      {/* 2 — the whole picture, unclipped and faint. */}
+      <div className="absolute opacity-[0.28]" style={box}>
+        <PhotoFrame url={url} edit={edit} bleed alt="" />
+      </div>
+
+      {/* 3 — what will actually print, at full strength and clipped to the frame's own shape. */}
+      <div className={`absolute overflow-hidden ${rounded ? 'rounded-md' : ''}`} style={box}>
+        <PhotoFrame url={url} edit={edit} alt="" />
+      </div>
+
+      {/* The boundary + the one compositional aid worth drawing while repositioning. */}
+      <div className={`absolute ring-2 ring-inset ring-studio-bright ${rounded ? 'rounded-md' : ''}`} style={box}>
         <span className="absolute inset-y-0 left-1/3 w-px bg-white/45" />
         <span className="absolute inset-y-0 left-2/3 w-px bg-white/45" />
         <span className="absolute inset-x-0 top-1/3 h-px bg-white/45" />
         <span className="absolute inset-x-0 top-2/3 h-px bg-white/45" />
-      </span>
+      </div>
     </div>
   );
 }
@@ -885,6 +1011,9 @@ function BaseSlotView({
       }}
       onDrop={(e) => {
         e.preventDefault();
+        // The page turns a bare drop into a NEW overlay; a drop that landed in this slot means
+        // this slot, so it must not bubble on and create a second frame on top of it.
+        e.stopPropagation();
         setOver(false);
         const id = readPhotoDrag(e);
         if (id) onDrop(id);

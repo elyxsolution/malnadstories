@@ -145,10 +145,13 @@ function Face({
   /**
    * A click on the face itself. Resolves to the PHOTO when there is one and the BACKGROUND when
    * there isn't — the same object either way, described by whichever of the two is actually
-   * carrying the look. The spine has neither, so it selects nothing and leaves the cover toolbar up.
+   * carrying the look.
+   *
+   * The spine used to select nothing, because it had no backdrop to select. It has one now, so it
+   * behaves like its two neighbours: click it and you get the colour tools for it.
    */
   const pickBackdrop = () => {
-    if (side === 'spine') pick({ kind: 'none' });
+    if (side === 'spine') pick({ kind: 'background' });
     else pick(image.photoId || imageUrl ? { kind: 'base', slot: 'image' } : { kind: 'background' });
   };
 

@@ -64,10 +64,16 @@ export function layoutInputs(photos: Photo[]): LayoutInput[] {
   return out;
 }
 
-/** A stable fingerprint of a layout's photo placement — used to detect user edits. */
+/**
+ * A stable fingerprint of a layout's photo placement — used to detect user edits.
+ *
+ * Base slots are read POSITIONALLY (an empty one contributes an empty field) rather than
+ * compacted, so moving a photo from the right page to the left, or clearing one of two, is a
+ * change the fingerprint can see. Compacting made those two arrangements identical.
+ */
 function signature(blocks: Block[]): string {
   return blocks
-    .map((b) => `${b.template}:${b.photoIds.filter(Boolean).join(',')}|${b.overlays.map((o) => o.photoId ?? '').join(',')}`)
+    .map((b) => `${b.template}:${b.photoIds.map((id) => id ?? '').join(',')}|${b.overlays.map((o) => o.photoId ?? '').join(',')}`)
     .join(';');
 }
 

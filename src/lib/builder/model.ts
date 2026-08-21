@@ -272,9 +272,24 @@ export const REF_PAIR_W = 1000;
 export type Block = {
   key: string; // client-side id; not persisted (page_number is the persisted order)
   template: LayoutTemplate;
-  // single-pair: [leftId?, rightId?] (index 0 = left page, 1 = right page)
-  // double-spread: [imageId?] (one image split across both pages)
-  photoIds: string[];
+  /**
+   * The unit's BASE IMAGE SLOTS, positional:
+   *   single-pair    [leftId, rightId] — index 0 is the left page, 1 is the right page
+   *   double-spread  [imageId]         — one image split across both pages
+   *
+   * `null` IS A DELIBERATE HOLE, and the array is positional because of it.
+   *
+   * It used to be a compact list of ids, which could not express "the right page has a photo and
+   * the left one does not". Clearing the left slot therefore removed index 0 and the right photo
+   * SLID onto the left page — a photo migrating between pages because of an edit to a different
+   * page. There is no arrangement of a compact array that avoids this; the hole has to be
+   * representable, so it is. `uuid[]` carries nulls natively, and every reader either indexes
+   * positionally (which is now correct) or filters falsy values (which was already correct).
+   *
+   * Trailing holes are trimmed on the way out (`trimBaseIds`) so `[X]` and `[X, null]` are the
+   * same stored value, and an emptied unit persists as `[]`.
+   */
+  photoIds: (string | null)[];
   caption: string;
   overlays: Overlay[]; // normalized 0..1 across the OPEN PAIR (both pages)
   texts: TextElement[]; // free text elements (default [])
@@ -286,6 +301,17 @@ export type Block = {
   // never reads it; absent/legacy blocks fall back to inference from the geometry.
   preset?: string;
 };
+
+/**
+ * Normalize a base-slot array for storage: coerce `undefined` holes to `null` and drop trailing
+ * ones, so a unit with nothing in its last slot is byte-identical to one that never had it.
+ * Interior holes are PRESERVED — they are the whole point (see `Block.photoIds`).
+ */
+export function trimBaseIds(ids: readonly (string | null | undefined)[]): (string | null)[] {
+  const out = ids.map((id) => id ?? null);
+  while (out.length > 0 && out[out.length - 1] === null) out.pop();
+  return out;
+}
 
 /** Build a fresh, empty block with all rich-element fields initialized. */
 export function makeBlock(template: LayoutTemplate, key?: string): Block {
@@ -343,15 +369,35 @@ export function canAdd(blocks: Block[], size: number, template: LayoutTemplate):
   return pagesConsumed(blocks) + PAGE_COST[template] <= size;
 }
 
+/** Does this unit carry anything that will actually print? */
+export function blockHasContent(b: Block): boolean {
+  return (
+    b.photoIds.some(Boolean) ||
+    b.overlays.some((o) => o.photoId) ||
+    b.texts.length > 0 ||
+    b.stickers.length > 0 ||
+    b.qrs.length > 0 ||
+    b.background !== null
+  );
+}
+
 /**
- * Complete = every required base slot is filled. single-pair needs BOTH the left and
- * right photo; double-spread needs its one image. Overlays are optional and never gate.
+ * Complete = the unit is designed, and nothing on it is a half-finished container.
+ *
+ * This used to mean "every base slot is filled" — single-pair needed BOTH page photos, or the
+ * page was reported incomplete. That rule described a model where a page WAS a photo container,
+ * and it no longer is: a new page starts as background only, photos arrive as overlays the
+ * customer places deliberately, and a page carrying a colour and a caption is a finished page,
+ * not a page missing two photos.
+ *
+ * So the unfinished state is now an EMPTY CONTAINER — an overlay placed with no photo in it,
+ * which really is something the customer started and did not finish — plus the genuinely blank
+ * page, which has nothing on it at all. Base slots still count as content when a layout preset,
+ * a blueprint or a legacy album filled them; they are simply no longer demanded.
  */
 export function isBlockComplete(b: Block): boolean {
-  const need = requiredBaseCount(b.template);
-  let filled = 0;
-  for (let i = 0; i < need; i++) if (b.photoIds[i]) filled += 1;
-  return filled === need;
+  if (b.overlays.some((o) => !o.photoId)) return false;
+  return blockHasContent(b);
 }
 
 /**

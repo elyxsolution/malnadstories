@@ -8,6 +8,7 @@ import { TextBox, StickerBox, QrBox } from './_elements-render';
 import {
   coverBackgroundStyle,
   coverLayoutFraming,
+  spineBackgroundStyle,
   spineWidthFor,
   type BackCoverConfig,
   type CoverConfig,
@@ -222,10 +223,9 @@ export function SpineDesign({
   return (
     <div
       className="relative h-full w-full overflow-hidden"
-      style={{
-        background: 'linear-gradient(90deg, rgba(0,0,0,0.22), rgba(0,0,0,0.04) 40%, rgba(0,0,0,0.04) 60%, rgba(0,0,0,0.22)), #1e3a2f',
-        containerType: 'size',
-      }}
+      /* The spine's colour is its own, exactly like the front's and the back's. `null` resolves
+         to the legacy paint this used to hardcode, so an untouched cover is pixel-identical. */
+      style={{ ...spineBackgroundStyle(c.spine.background), containerType: 'size' }}
     >
       {renderElements && c.spine.texts.map((t) => <TextBox key={t.id} el={t} />)}
     </div>

@@ -19,6 +19,7 @@ import {
   isPermanentRole,
   metadataFromCoverObjects,
   migrateCoverConfig,
+  withAllCoverBackgrounds,
   withCoverSideElements,
   type CoverSide,
 } from '@/lib/builder/cover-objects';
@@ -82,6 +83,17 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
 
   const [side, setSide] = useState<CoverSide>('front');
   const [selection, setSelection] = useState<Selection>({ kind: 'none' });
+
+  /**
+   * "APPLY TO ALL" — an EDITING MODE, not a stored relationship.
+   *
+   * The three faces each own their colour permanently; this only decides where the NEXT colour
+   * you pick lands. That distinction is the whole requirement: once a face has been given its own
+   * colour, nothing may drag it back into lockstep with the others. So this is ephemeral UI state
+   * (off on every open), the config stores three independent backgrounds either way, and turning
+   * it off leaves every face exactly as it was.
+   */
+  const [linkBackgrounds, setLinkBackgrounds] = useState(false);
 
   /** The album title as the CANVAS currently states it. */
   const titleRef = useRef(title);
@@ -307,9 +319,21 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
           ? { ...prev, background: bg, photoId: bg ? null : prev.photoId }
           : target === 'back'
             ? { ...prev, back: { ...prev.back, background: bg, photoId: bg ? null : prev.back.photoId } }
-            : prev,
+            : { ...prev, spine: { ...prev.spine, background: bg } },
       ),
     [write, side],
+  );
+
+  /** Paint all three faces at once. ONE `write`, so it is ONE undo entry and one save. */
+  const setAllBackgrounds = useCallback((bg: Background | null) => write((prev) => withAllCoverBackgrounds(prev, bg)), [write]);
+
+  /**
+   * THE ONE ENTRY POINT the background toolbar uses, so "which faces does this colour reach?" is
+   * answered in a single place rather than at each of the swatch / picker / preset call sites.
+   */
+  const applyBackground = useCallback(
+    (bg: Background | null) => (linkBackgrounds ? setAllBackgrounds(bg) : setBackground(bg)),
+    [linkBackgrounds, setAllBackgrounds, setBackground],
   );
 
   /** Put an album photo on this face (or clear it). Clears the CSS backdrop, as above. */
@@ -521,6 +545,10 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
     patchQr,
     removeQr,
     setBackground,
+    setAllBackgrounds,
+    applyBackground,
+    linkBackgrounds,
+    setLinkBackgrounds,
     setPhoto,
     patchImageEdit,
     setShowLogo,

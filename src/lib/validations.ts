@@ -238,8 +238,16 @@ const BackgroundSchema = z.object({
 
 const BlockSchema = z.object({
   template: z.enum(['single-pair', 'double-spread']),
-  // single-pair: [leftId?, rightId?]; double-spread: [imageId?]. Up to 2 base slots.
-  photoIds: z.array(z.string().uuid()).max(2),
+  /**
+   * BASE IMAGE SLOTS, POSITIONAL — single-pair: [leftId, rightId]; double-spread: [imageId].
+   *
+   * `null` is a deliberate HOLE: "the right page has a photo, the left one does not". Without it
+   * the array compacted, and clearing the left photo slid the right page's photo onto the left.
+   * `photo_ids` is `uuid[]`, which carries NULL elements natively, and the length CHECK (0023)
+   * counts them — so this needs no migration. Trailing holes are trimmed client-side, so an
+   * emptied unit still arrives as `[]`.
+   */
+  photoIds: z.array(z.string().uuid().nullable()).max(2),
   caption: z.string().max(200).optional().default(''),
   overlays: z.array(OverlaySchema).max(50).optional().default([]),
   texts: z.array(TextElementSchema).max(30).optional().default([]),
@@ -311,9 +319,16 @@ export const CoverConfigSchema = z.object({
    * two faces. Capped like any element array.
    */
   spine: z
-    .object({ texts: z.array(TextElementSchema).max(10).optional().default([]) })
+    .object({
+      texts: z.array(TextElementSchema).max(10).optional().default([]),
+      /**
+       * The spine's OWN backdrop — independent of the front and the back, and absent on every
+       * cover saved before it existed (which the renderer reads as the legacy spine colour).
+       */
+      background: BackgroundSchema.nullable().optional().default(null),
+    })
     .optional()
-    .default({ texts: [] }),
+    .default({ texts: [], background: null }),
   subtitle: z.string().max(120).optional().default(''),
   author: z.string().max(80).optional().default(''),
   spineTitle: z.string().max(80).optional().default(''),

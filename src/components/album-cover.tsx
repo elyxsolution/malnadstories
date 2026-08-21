@@ -30,12 +30,13 @@ export function albumCoverFace(cover: CoverConfig | null, title: string) {
 /**
  * The album's real spine. See `albumCoverFace` — same source, same NULL rule.
  *
- * WHY THE SPINE IS NOT TINTED WITH THE COVER'S BACKGROUND: `SpineDesign` grounds itself in the house
- * `#1e3a2f`, which is exactly what `coverBackgroundStyle(null)` gives a cover with no background —
- * so for those covers the face and the binding match precisely. For a cover that DOES set a
- * background, the PRINTED spine is still `#1e3a2f` (see the print route, the in-app preview and
- * review mode, which all render this same component), so recolouring it here would invent a look
- * that disagrees with the physical product. Print fidelity wins over decoration.
+ * WHY THIS DOES NOT TINT THE SPINE FROM THE COVER'S BACKGROUND: it does not need to, and it must
+ * not. The spine owns its own colour now (`cover_config.spine.background`), and `SpineDesign`
+ * paints exactly that — falling back to the house `#1e3a2f` when it is unset, which is also what
+ * `coverBackgroundStyle(null)` gives a face with no background, so an undesigned album still shows
+ * a matching face and binding. Deriving a tint here would disagree with the PRINTED spine, which
+ * the print route, the in-app preview and review mode all draw through this same component. Print
+ * fidelity wins over decoration.
  */
 export function albumCoverSpine(cover: CoverConfig | null, title: string) {
   if (!cover) return undefined;

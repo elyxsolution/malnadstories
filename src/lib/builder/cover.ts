@@ -66,9 +66,46 @@ export const DEFAULT_BACK_COVER: BackCoverConfig = {
  */
 export type SpineConfig = {
   texts: TextElement[];
+  /**
+   * The spine's OWN backdrop, independent of the front and the back.
+   *
+   * It used to have none: `SpineDesign` painted a hardcoded `#1e3a2f` with a fixed edge gradient,
+   * so the one surface between two freely-coloured faces was the one surface that could not be
+   * coloured. Absent (`null`) still means exactly that hardcoded look, which is why every
+   * pre-existing cover keeps the spine it has until someone deliberately changes it.
+   */
+  background: Background | null;
 };
 
-export const DEFAULT_SPINE: SpineConfig = { texts: [] };
+export const DEFAULT_SPINE: SpineConfig = { texts: [], background: null };
+
+/**
+ * The spine's legacy paint — what every cover printed before the spine became colourable. It is
+ * the documented fallback for `spine.background === null`, never a value that gets written.
+ */
+export const SPINE_LEGACY_COLOR = '#1e3a2f';
+
+/**
+ * The bound-edge shading drawn OVER whatever colour the spine carries, so a coloured spine still
+ * reads as a folded edge rather than a flat stripe. Unchanged from the hardcoded original.
+ */
+const SPINE_EDGE_SHADING =
+  'linear-gradient(90deg, rgba(0,0,0,0.22), rgba(0,0,0,0.04) 40%, rgba(0,0,0,0.04) 60%, rgba(0,0,0,0.22))';
+
+/**
+ * Resolve the spine's CSS backdrop. `null` reproduces the legacy hardcoded spine EXACTLY, so an
+ * album saved before this existed prints identically. Shared by the builder canvas, the preview
+ * and the PDF print route — one definition, three surfaces.
+ */
+export function spineBackgroundStyle(bg: Background | null): CSSProperties {
+  if (!bg) return { background: `${SPINE_EDGE_SHADING}, ${SPINE_LEGACY_COLOR}` };
+  const resolved = backgroundStyle(bg);
+  // A texture resolves to `backgroundImage` + `backgroundSize`; layering the shading over an
+  // image would need a second background layer, so a texture keeps its own image and the shading
+  // steps aside rather than fighting it.
+  if (typeof resolved.background === 'string') return { background: `${SPINE_EDGE_SHADING}, ${resolved.background}` };
+  return resolved;
+}
 
 /**
  * The persisted custom-cover design. Top-level fields describe the FRONT cover (the book's
@@ -188,7 +225,10 @@ export function normalizeCoverConfig(c: Partial<CoverConfig> | null | undefined)
   if (!c) return { ...DEFAULT_COVER_CONFIG };
   return {
     v: typeof c.v === 'number' ? c.v : 1,
-    spine: c.spine && Array.isArray(c.spine.texts) ? { texts: c.spine.texts } : { ...DEFAULT_SPINE },
+    spine:
+      c.spine && Array.isArray(c.spine.texts)
+        ? { texts: c.spine.texts, background: c.spine.background ?? null }
+        : { ...DEFAULT_SPINE },
     subtitle: typeof c.subtitle === 'string' ? c.subtitle : '',
     author: typeof c.author === 'string' ? c.author : '',
     spineTitle: typeof c.spineTitle === 'string' ? c.spineTitle : '',
@@ -234,7 +274,8 @@ export function isCustomCover(c: CoverConfig): boolean {
     c.back.texts.length > 0 ||
     c.back.stickers.length > 0 ||
     c.back.qrs.length > 0 ||
-    c.back.showLogo
+    c.back.showLogo ||
+    c.spine.background !== null
   );
 }
 

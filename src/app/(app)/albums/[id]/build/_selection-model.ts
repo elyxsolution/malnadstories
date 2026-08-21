@@ -192,11 +192,19 @@ export function selectedElements(sel: SelectionState): Extract<SelectionTarget, 
  * makes dragging a photo back to the tray unambiguous: there is precisely one frame to clear.
  */
 export function findFrameHolding(
-  blocks: readonly { key: string; photoIds: (string | null)[]; overlays: readonly { id?: string; photoId: string | null }[] }[],
+  blocks: readonly {
+    key: string;
+    template: string;
+    photoIds: (string | null)[];
+    overlays: readonly { id?: string; photoId: string | null }[];
+  }[],
   photoId: string,
 ): { blockKey: string; slot?: BaseSlot; overlayId?: string } | null {
   for (const b of blocks) {
-    if (b.photoIds[0] === photoId) return { blockKey: b.key, slot: b.photoIds.length > 1 ? 'left' : 'image' };
+    // The TEMPLATE names the slot, not the row's length. Length worked only while base rows were
+    // compact; a row can now be [null, id], and inferring "image" from a one-entry row would name
+    // a slot a single-pair does not have.
+    if (b.photoIds[0] === photoId) return { blockKey: b.key, slot: b.template === 'double-spread' ? 'image' : 'left' };
     if (b.photoIds[1] === photoId) return { blockKey: b.key, slot: 'right' };
     const ov = b.overlays.find((o) => o.photoId === photoId);
     if (ov?.id) return { blockKey: b.key, overlayId: ov.id };

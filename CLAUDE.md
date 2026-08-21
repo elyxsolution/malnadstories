@@ -500,7 +500,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 9 files / 84 tests
+pnpm test              # app suite — 11 files / 131 tests
 cd worker && pnpm test # worker suite — 141 files / 1220 tests
 ```
 
@@ -963,6 +963,30 @@ action input; ownership is re-verified on every server action.
 - **Placement model**: each uploaded photo is placed **at most once** — as a base
   OR as an overlay — so per-photo edits live on `photos.edit_config` (not per-slot).
   The tray badges placed photos (base + overlay ids); assigning a placed photo moves it.
+- **A PAGE IS A BACKGROUND, NOT A PHOTO CONTAINER.** A page the customer creates starts with
+  `photoIds: []` and renders **only its background** — no empty base slots are drawn and none
+  can be filled. Photos arrive as **overlays**: the "Add photo overlay" control, the page
+  toolbar's Add photo, or dropping a tray photo on the page (which creates an overlay centred
+  where it landed). Base image slots still exist and still render, but only for a unit whose base
+  row is **non-empty** — a legacy album, a double-page panorama, or a page a layout preset /
+  blueprint just filled — so those keep their (fillable) companion slot. `activeBaseSlots()`
+  (`_quality-model`) is the single predicate; the canvas, Select All and the quality engine all
+  read it, so what is counted and what is clickable cannot drift.
+- **`Block.photoIds` is `(string | null)[]` and POSITIONAL.** `null` is a deliberate hole:
+  index 0 is the left page, 1 the right. It used to be a compact list, so clearing the left photo
+  removed index 0 and the **right page's photo slid onto the left** — an edit to one page moving a
+  different page's picture. `trimBaseIds()` drops trailing holes only (so `[X]` ≡ `[X, null]` and
+  an emptied unit persists as `[]`); interior holes are preserved through `serialize` →
+  `resolveLayoutForSave` → `SaveLayoutSchema` → `photo_ids uuid[]` → every loader.
+  **No migration was needed**: `uuid[]` carries NULL elements natively and
+  `album_pages_photo_ids_len_check` (0023) counts them.
+- **Completeness follows the containers, not the page halves.** `isBlockComplete` is now "no
+  empty overlay frame AND the page has something on it"; an empty page half is a finished design.
+  `evaluateAlbum` counts filled base images + every overlay frame as `expectedPhotos`, warns
+  `incomplete_page:<n>` for an unfilled overlay and `empty_page:<n>` for a page with nothing on
+  it at all, and `loadAlbumValidation` therefore reads `layout_config` as well as `photo_ids`.
+  `/checkout`, `lib/admin/readiness` and the builder's "remaining slots" indicator use the same
+  rule.
 - **Two templates** (`src/lib/builder/model.ts`):
   `single-full` (1 base photo, 1 page) and `spread-full` (1 base photo, **2 pages**).
   Both accept **any number of overlays**. (`pip` was retired in `0006` — it is just
@@ -997,6 +1021,22 @@ action input; ownership is re-verified on every server action.
     sharpen kernel, `useId()`-unique filter id per frame). It is attached **only
     when sharpness > 0** so default frames pay nothing — important in the preview
     where many frames render at once (watch convolution cost / edge artifacts there).
+- **Image adjustment inside a FIXED frame — every photo frame, one implementation.** Select any
+  frame (page half, spread image, or an overlay of any shape) → **Crop** on the floating photo
+  toolbar → drag to reposition, scroll / `+`/`−` to zoom, arrows to nudge, Escape or **Done** to
+  finish. The frame never moves; only `zoom` / `offsetX` / `offsetY` on `photos.edit_config`
+  change, so overlay geometry and image position are genuinely separate systems.
+  `useCanvasCrop` captures the gesture; `computeFrameLayout` renders it, so the canvas, the
+  preview and the PDF agree by construction and the image is never distorted.
+  While adjusting, `CropBleed` (`_block.tsx`) draws the page dimmed, **the whole photo faintly
+  and unclipped** (`PhotoFrame`'s `bleed` prop) so the part outside the frame is visible, and the
+  frame itself crisp and clipped to its real shape on top.
+- **Undo/redo spans image adjustments.** They live on `photos.edit_config`, not in `Block[]`, so
+  they used to be outside ⌘Z entirely. `usePhotoEditHistory` is a second lane (live `markLive` →
+  `commit` on release, consecutive commits on one photo coalesced within 800 ms), and
+  `useEditHistory` keeps the ORDER of the two lanes so one ⌘Z always undoes whatever actually
+  happened last. Undo re-persists through `savePhotoEdit`, so it survives a reload. The cover
+  keeps its own separate stack, selected by focus, exactly as before.
 - **Editor** (`_photo-editor.tsx`): left canvas shows the full oriented image
   (sized to its aspect, no letterbox) with an interactive rule-of-thirds crop rect;
   right side shows a live **result** `PhotoFrame` fed the real `edit_config`, so it
@@ -1052,6 +1092,16 @@ cover and pages. Refactor-not-duplicate: the cover and pages share the same elem
   `lib/builder/fonts-catalog.ts` (key→stack; `TextFontKey = FontKey`; Zod `font` enums widened to
   `FONT_KEYS`; legacy serif/sans/script kept). New `_font-picker.tsx` (live per-font preview) used on
   cover + pages. `builderFontVars` is applied on the builder, the **print route**, and admin preview.
+- **Front, spine and back covers each own their colour.** `SpineConfig` gained
+  `background: Background | null`; `coverSideBackground`/`setBackground` treat the spine as a
+  third face, and `SpineDesign` paints `spineBackgroundStyle(c.spine.background)` instead of the
+  hardcoded `#1e3a2f`. **`null` reproduces that legacy paint exactly**, so every cover saved
+  before this renders identically until someone changes it — no backfill. The Back│Spine│Front
+  switcher already existed; the spine now also gets the Background tool, and the background bar
+  carries an opt-in **"Apply to all three"** (`withAllCoverBackgrounds`, one write ⇒ one undo
+  entry). The link is an editing MODE, not a stored relationship — it is ephemeral, off by
+  default, and never re-couples faces that have been edited individually. The Backgrounds rail's
+  "apply to all" means the three faces when the cover is focused.
 - **#9 Professional colour picker** — `_color-picker.tsx` `ColorField` (HSV square + hue slider +
   hex/RGB + presets + localStorage recent/saved; drop-in for the old `ColorRow`), used for text,
   cover, and QR colours. **#7 Location autocomplete** — `_location-autocomplete.tsx` over the

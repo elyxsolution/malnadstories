@@ -18,8 +18,19 @@ domain logic that had no durable coverage before Phase 9 Prompt 4.
 | `pdf-blueprint-gate.test.ts` | a blueprint draft can never generate a PDF — `force`, `override` and every combination are refused before anything is written; PDF start stays idempotent |
 | `album-title.test.ts` | derived-title fallback chain; never empty; 100 **code point** cap; ZWJ/ZWNJ preserved for Indic and emoji |
 | `migration-inventory.test.ts` | migration ids/filenames unique and contiguous; CLAUDE.md documents every file on disk, in order, and invents none |
+| `builder-page-and-cover.test.ts` | base slots are POSITIONAL (clearing the left photo never slides the right one across), the hole survives save/reload/Zod, a page is a background rather than a photo container, print-readiness counts photo FRAMES not page halves, and the front/spine/back cover colours are independently stored, migrated and applied |
+| `overlay-image-adjust.test.ts` | image adjustment inside a FIXED frame: cover-fit with no distortion in every frame shape, zoom/pan clamped so no blank edge is reachable, the pan range the drag maths converts against, and the exact crop restored from the persisted `edit_config` |
 
 ## What is deliberately NOT here
+
+- **The builder canvas itself.** The two builder test files above cover the model, the
+  persistence boundary and the render geometry — which is where the page-to-page photo migration
+  actually lived — but not the gestures on top of them. `_block.tsx`, `_use-builder.ts`,
+  `_use-cover.ts`, `_use-photo-edits.ts` and `_use-edit-history.ts` are client components and
+  hooks behind an authenticated route; asserting on them needs a DOM harness this suite does not
+  have, and a signed-in session it cannot create. Drag-to-place, the in-canvas crop gesture, the
+  adjustment ghost, undo ordering across the two history lanes and the cover toolbars were
+  verified by static analysis and by typecheck/build, NOT by driving the app.
 
 - **Database-level guarantees.** Atomic cart increment, the `quantity <= 10` cap, RLS row
   filtering, `create_order_with_items`' money re-checks, the `orders_one_pending_per_album`

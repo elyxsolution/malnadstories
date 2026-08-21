@@ -16,6 +16,7 @@ import {
   type QrElement,
   type StickerElement,
   type TextElement,
+  trimBaseIds,
 } from '@/lib/builder/model';
 import { getProductDimensions } from '@/lib/products/catalog';
 import { FALLBACK_DIMENSIONS, type ProductDimensions } from '@/lib/products/model';
@@ -181,7 +182,9 @@ export async function getProductPreview(input: unknown): Promise<ProductPreviewR
     .map((r) => ({
       key: `${r.page_number}`,
       template: r.layout_template as LayoutTemplate,
-      photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
+      // Vacate the slot of a photo that no longer exists — never compact the row, or the right
+      // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
+      photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
       caption: r.caption ?? '',
       overlays: (r.layout_config?.overlays ?? []).filter((o) => o.photoId != null && photoIdSet.has(o.photoId)),
       texts: r.layout_config?.texts ?? [],

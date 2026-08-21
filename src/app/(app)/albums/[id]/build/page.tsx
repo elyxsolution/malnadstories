@@ -23,6 +23,7 @@ import {
   type QrElement,
   type StickerElement,
   type TextElement,
+  trimBaseIds,
 } from '@/lib/builder/model';
 import { listActiveCoverOptions } from '@/lib/covers';
 import { listActiveStickers, resolveStickerUrls } from '@/lib/stickers';
@@ -141,7 +142,9 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     .map((r) => ({
       key: crypto.randomUUID(),
       template: r.layout_template as LayoutTemplate,
-      photoIds: (r.photo_ids ?? []).filter((id) => photoIdSet.has(id)),
+      // Vacate the slot of a photo that no longer exists — never compact the row, or the right
+      // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
+      photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
       caption: r.caption ?? '',
       // Keep every overlay CONTAINER; only its photo assignment is provisional. A slot that is
       // an intentional placeholder (photoId=null) OR whose photo was since deleted hydrates as an

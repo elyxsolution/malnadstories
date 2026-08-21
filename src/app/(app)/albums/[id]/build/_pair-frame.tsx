@@ -104,27 +104,41 @@ export default function PairContent({
     // (identical ratio in canvas, preview, and PDF). Background renders beneath everything.
     <div className="absolute inset-0" style={{ containerType: 'inline-size' }}>
       {block.background && <div className="absolute inset-0" style={backgroundStyle(block.background)} />}
-      {isDouble ? (
-        // One image across the whole open pair; per-page clipping performs the split.
-        left ? (
-          <Framed photo={left} badge={badge} onFrameReady={onFrameReady} />
-        ) : (
-          <EmptyHalf full label="Double-page image" />
-        )
-      ) : (
-        <>
-          {showLeft && (
-            <div className="absolute left-0 top-0 h-full w-1/2 overflow-hidden">
-              {left ? <Framed photo={left} badge={badge} onFrameReady={onFrameReady} /> : <EmptyHalf label="Left page" />}
-            </div>
-          )}
-          {showRight && (
-            <div className="absolute left-1/2 top-0 h-full w-1/2 overflow-hidden">
-              {right ? <Framed photo={right} badge={badge} onFrameReady={onFrameReady} /> : <EmptyHalf label="Right page" />}
-            </div>
-          )}
-        </>
-      )}
+      {/*
+        A HALF WITH NO BASE PHOTO IS BLANK PAPER, NOT A GAP.
+
+        Pages are backgrounds now — photos arrive as overlays the customer places — so "no base
+        image on this half" is the ordinary state of most pages, and drawing a grey plate labelled
+        "Left page" over it would put a placeholder into the customer's preview and their PDF. The
+        label is kept for `showPlaceholders`, the blueprint-preview mode, on exactly the same
+        reasoning the empty-overlay branch below already applies to unfilled containers.
+      */}
+      {isDouble
+        ? left
+          ? <Framed photo={left} badge={badge} onFrameReady={onFrameReady} />
+          : showPlaceholders && <EmptyHalf full label="Double-page image" />
+        : (
+          <>
+            {showLeft && (
+              <div className="absolute left-0 top-0 h-full w-1/2 overflow-hidden">
+                {left ? (
+                  <Framed photo={left} badge={badge} onFrameReady={onFrameReady} />
+                ) : (
+                  showPlaceholders && <EmptyHalf label="Left page" />
+                )}
+              </div>
+            )}
+            {showRight && (
+              <div className="absolute left-1/2 top-0 h-full w-1/2 overflow-hidden">
+                {right ? (
+                  <Framed photo={right} badge={badge} onFrameReady={onFrameReady} />
+                ) : (
+                  showPlaceholders && <EmptyHalf label="Right page" />
+                )}
+              </div>
+            )}
+          </>
+        )}
 
       {block.overlays.map((o, i) => {
         if (!overlapsHalf(o, half)) return null;

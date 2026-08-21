@@ -88,6 +88,13 @@ export type CommandDeps = {
   allTargets: () => SelectionState['targets'];
   /** Server photo deletion + optimistic-upload cancellation, owned by the host. */
   deletePhotoIds: (ids: string[]) => Promise<void>;
+  /**
+   * Undo / redo. Optional, and defaults to the layout history on `api`, so a host without a
+   * second lane is unchanged. The builder passes the SHARED timeline (`useEditHistory`), which
+   * spans the layout and image adjustments — otherwise the command-palette Undo and ⌘Z would
+   * disagree about what "last" means.
+   */
+  history?: { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void };
   /** Persist one photo's edit config (the existing `savePhotoEdit` path). */
   savePhotoEdit: (photoId: string, edit: EditConfig) => void;
   /** Patch the local photo list so an edit shows immediately. */
@@ -144,6 +151,7 @@ export function useCommands(deps: CommandDeps) {
     setSelection,
     allTargets,
     deletePhotoIds,
+    history: historyDep,
     savePhotoEdit,
     patchPhotoEdit,
     albumSize,
@@ -153,6 +161,8 @@ export function useCommands(deps: CommandDeps) {
     onDuplicatedPreset,
     focus,
   } = deps;
+
+  const history = historyDep ?? api;
 
   const photoIds = selectedPhotoIds(selection);
   const frames = selectedFrames(selection);
@@ -671,8 +681,8 @@ export function useCommands(deps: CommandDeps) {
         destructive: true,
         run: () => doDeletePage(),
       },
-      undo: { id: 'undo', label: 'Undo', enabled: api.canUndo, run: api.undo },
-      redo: { id: 'redo', label: 'Redo', enabled: api.canRedo, run: api.redo },
+      undo: { id: 'undo', label: 'Undo', enabled: history.canUndo, run: history.undo },
+      redo: { id: 'redo', label: 'Redo', enabled: history.canRedo, run: history.redo },
     };
   }, [
     targetPhotoIds,
@@ -680,10 +690,10 @@ export function useCommands(deps: CommandDeps) {
     blockKeys,
     photos,
     selection.targets.length,
-    api.canUndo,
-    api.canRedo,
-    api.undo,
-    api.redo,
+    history.canUndo,
+    history.canRedo,
+    history.undo,
+    history.redo,
     doSelectAll,
     doClearSelection,
     doDeletePhotos,

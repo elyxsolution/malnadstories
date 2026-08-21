@@ -75,8 +75,21 @@ export function frameKey(f: FrameRef): string {
   return f.kind === 'base' ? `base:${f.blockKey}:${f.slot}` : `overlay:${f.blockKey}:${f.id}`;
 }
 
-/** Base slots a template exposes, in reading order. */
-function baseSlots(block: Block): BaseSlot[] {
+/**
+ * The base image slots this unit ACTUALLY exposes, in reading order.
+ *
+ * A template no longer decides this on its own. A page created by the customer is a background —
+ * photos arrive as overlays — so it exposes no base slots at all, and enumerating two for it would
+ * invent two empty frames on every ordinary page and report the album as permanently unfinished.
+ * A non-empty base row means the unit genuinely works that way (a legacy album, a panorama, or a
+ * page a layout preset just filled), and there both halves are real frames again — including an
+ * empty companion, which is exactly the "you have a slot left to fill" the canvas still shows.
+ *
+ * This is the same predicate `_block` renders from, so what the quality engine counts and what the
+ * customer can see and click cannot drift apart.
+ */
+export function activeBaseSlots(block: Pick<Block, 'template' | 'photoIds'>): BaseSlot[] {
+  if (block.photoIds.length === 0) return [];
   return block.template === 'double-spread' ? ['image'] : ['left', 'right'];
 }
 
@@ -93,7 +106,7 @@ export function framePhotoId(block: Block, f: FrameRef): string | null {
 export function enumerateFrames(blocks: Block[]): FrameRef[] {
   const out: FrameRef[] = [];
   blocks.forEach((b, blockIndex) => {
-    for (const slot of baseSlots(b)) out.push({ kind: 'base', blockKey: b.key, blockIndex, slot });
+    for (const slot of activeBaseSlots(b)) out.push({ kind: 'base', blockKey: b.key, blockIndex, slot });
     for (const o of b.overlays) if (o.id) out.push({ kind: 'overlay', blockKey: b.key, blockIndex, id: o.id });
   });
   return out;

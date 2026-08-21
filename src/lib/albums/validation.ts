@@ -20,7 +20,7 @@
  *   • info     — advisory / optional (blank back cover, missing cover title). Blocks nothing.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { PAGE_COST, requiredBaseCount, LAYOUT_TEMPLATES, type LayoutTemplate } from '@/lib/builder/model';
+import { PAGE_COST, LAYOUT_TEMPLATES, type LayoutTemplate } from '@/lib/builder/model';
 import { hasFrontCover, hasBackCover, resolveCoverResolution, type CoverResolution } from './cover';
 
 /** Bump when the rule set changes so stored/streamed reports are unambiguous. */
@@ -88,7 +88,28 @@ export type ValidationRules = {
 };
 const DEFAULT_RULES: Required<ValidationRules> = { requireBackCover: false };
 
-export type EvalBlock = { template: LayoutTemplate | string | null; photoIds: (string | null | undefined)[] };
+/**
+ * One content unit, as the validator needs to see it.
+ *
+ * It gained the page's OTHER contents because the definition of "incomplete" moved. A page used
+ * to be a photo container, so "incomplete" meant an unfilled base slot. A page is now a
+ * background that photos are placed ONTO, as overlay frames — so an empty base half is an
+ * ordinary finished design, and the thing that is genuinely unfinished is an overlay CONTAINER
+ * the customer placed and never filled. Judging that needs the overlays; judging "this page is
+ * completely blank" needs the rest.
+ *
+ * Every added field is optional, so a caller that cannot supply them degrades to reporting only
+ * what it can see rather than inventing issues.
+ */
+export type EvalBlock = {
+  template: LayoutTemplate | string | null;
+  photoIds: (string | null | undefined)[];
+  overlays?: readonly { photoId?: string | null }[];
+  texts?: readonly unknown[];
+  qrs?: readonly unknown[];
+  stickers?: readonly unknown[];
+  background?: unknown;
+};
 export type AlbumEvalInput = { size: number; blocks: EvalBlock[]; cover: CoverResolution };
 
 const isTemplate = (t: unknown): t is LayoutTemplate => !!t && (LAYOUT_TEMPLATES as readonly string[]).includes(t as string);
@@ -152,21 +173,55 @@ export function evaluateAlbum(input: AlbumEvalInput, rules: ValidationRules = {}
       return;
     }
     currentPages += PAGE_COST[b.template];
-    const need = requiredBaseCount(b.template);
-    const filled = (b.photoIds ?? []).filter(Boolean).length;
-    expectedPhotos += need;
-    placedPhotos += Math.min(filled, need);
-    if (filled < need) {
+
+    /**
+     * A page's PHOTO CONTAINERS are the base images it actually carries plus every overlay frame
+     * on it — filled or not. Empty base halves are deliberately NOT counted as expected photos:
+     * demanding two photos from every spread described the old page-as-container model, and under
+     * the current one it would report a perfectly finished page (a colour, a caption, one framed
+     * photo) as missing something.
+     */
+    const overlays = b.overlays ?? [];
+    const baseFilled = (b.photoIds ?? []).filter(Boolean).length;
+    const overlaysFilled = overlays.filter((o) => !!o.photoId).length;
+    const emptyFrames = overlays.length - overlaysFilled;
+
+    expectedPhotos += baseFilled + overlays.length;
+    placedPhotos += baseFilled + overlaysFilled;
+
+    const designed =
+      baseFilled > 0 ||
+      overlays.length > 0 ||
+      (b.texts?.length ?? 0) > 0 ||
+      (b.qrs?.length ?? 0) > 0 ||
+      (b.stickers?.length ?? 0) > 0 ||
+      !!b.background;
+
+    if (emptyFrames > 0) {
+      // A frame the customer placed and never filled — the one genuinely unfinished thing a page
+      // can now contain. It prints as nothing, so it is a print warning, not a corruption.
       incompletePages.push(pageNo);
       issues.push({
         id: `incomplete_page:${pageNo}`,
         severity: 'warning',
         category: 'pages',
-        title: `Page ${pageNo} is incomplete`,
-        description:
-          b.template === 'single-pair'
-            ? `Add a photo to both the left and right pages of page ${pageNo}.`
-            : `Page ${pageNo} (double-page spread) is missing its image.`,
+        title: `Page ${pageNo} has an empty photo frame`,
+        description: `${emptyFrames} photo frame${emptyFrames === 1 ? '' : 's'} on page ${pageNo} ${
+          emptyFrames === 1 ? 'has' : 'have'
+        } no photo yet — add one, or remove the frame.`,
+        page: pageNo,
+        action: { type: 'goto-page', page: pageNo },
+      });
+    } else if (!designed) {
+      // Nothing on it at all — not even a background. A blank page is a legitimate CHOICE, but an
+      // untouched one is almost always a page the customer has not reached yet, so it is surfaced.
+      incompletePages.push(pageNo);
+      issues.push({
+        id: `empty_page:${pageNo}`,
+        severity: 'warning',
+        category: 'pages',
+        title: `Page ${pageNo} is blank`,
+        description: `Page ${pageNo} has nothing on it — add a photo, a background or some text.`,
         page: pageNo,
         action: { type: 'goto-page', page: pageNo },
       });
@@ -202,8 +257,8 @@ export function evaluateAlbum(input: AlbumEvalInput, rules: ValidationRules = {}
       id: 'missing_photos',
       severity: 'warning',
       category: 'photos',
-      title: `${missingPhotos} photo${missingPhotos === 1 ? '' : 's'} missing`,
-      description: `You’ve placed ${placedPhotos} of ${expectedPhotos} required photos.`,
+      title: `${missingPhotos} empty photo frame${missingPhotos === 1 ? '' : 's'}`,
+      description: `You’ve filled ${placedPhotos} of the ${expectedPhotos} photo frames you’ve placed.`,
       action: incompletePages.length ? { type: 'goto-page', page: incompletePages[0] } : null,
     });
   }
@@ -262,7 +317,18 @@ function computeScore(x: {
 
 // ── Server loader (authoritative) ─────────────────────────────────────────────────
 type AlbumRow = { id: string; size: number; title: string | null; cover_template_id: string | null; cover_config: unknown };
-type PageRow = { layout_template: string | null; photo_ids: string[] | null };
+type PageRow = {
+  layout_template: string | null;
+  photo_ids: (string | null)[] | null;
+  /** Overlays + text / QR / stickers / background — see `EvalBlock` for why they are needed. */
+  layout_config: {
+    overlays?: { photoId?: string | null }[];
+    texts?: unknown[];
+    qrs?: unknown[];
+    stickers?: unknown[];
+    background?: unknown;
+  } | null;
+};
 
 /**
  * Load + evaluate an album authoritatively. `client` may be the user's RLS client (builder/submit)
@@ -282,10 +348,22 @@ export async function loadAlbumValidation(
   if (!album) return null;
 
   const [{ data: pageData }, cover] = await Promise.all([
-    client.from('album_pages').select('layout_template, photo_ids').eq('album_id', albumId).order('page_number', { ascending: true }),
+    client
+      .from('album_pages')
+      .select('layout_template, photo_ids, layout_config')
+      .eq('album_id', albumId)
+      .order('page_number', { ascending: true }),
     resolveCoverResolution(client, album),
   ]);
 
-  const blocks: EvalBlock[] = ((pageData ?? []) as PageRow[]).map((p) => ({ template: p.layout_template, photoIds: p.photo_ids ?? [] }));
+  const blocks: EvalBlock[] = ((pageData ?? []) as PageRow[]).map((p) => ({
+    template: p.layout_template,
+    photoIds: p.photo_ids ?? [],
+    overlays: p.layout_config?.overlays ?? [],
+    texts: p.layout_config?.texts ?? [],
+    qrs: p.layout_config?.qrs ?? [],
+    stickers: p.layout_config?.stickers ?? [],
+    background: p.layout_config?.background ?? null,
+  }));
   return evaluateAlbum({ size: album.size, blocks, cover }, rules);
 }

@@ -65,6 +65,8 @@ import PropertiesPanel from './_properties-panel';
 // moved into `_element-inspectors` beside their siblings, and its page actions became the
 // context bar's page toolbar. Nothing it did was dropped; everything it did moved.
 import { useBlocks, NO_SELECTION, type Selection, type BaseSlot } from './_use-builder';
+import { useEditHistory } from './_use-edit-history';
+import { usePhotoEditHistory } from './_use-photo-edits';
 import { useSelection } from './_use-selection';
 import { findFrameHolding, selectedFrames, selectedPhotoIds, targetKey, type SelectionTarget } from './_selection-model';
 import SelectionBar from './_selection-bar';
@@ -78,6 +80,7 @@ import { useLabels, PHOTO_LABELS, LABEL_META } from './_photo-labels';
 import { useLayoutMemory } from './_layout-memory';
 import { profileShapes, suggestLayouts } from './_layout-suggestions';
 import {
+  activeBaseSlots,
   albumStatistics,
   inspectAlbum,
   pairWidthInches,
@@ -96,8 +99,8 @@ import {
   pagesConsumed,
   canAdd,
   placedPhotoIds,
-  requiredBaseCount,
   isBlockComplete,
+  trimBaseIds,
   PAGE_COST,
   type Block,
   type EditConfig,
@@ -229,7 +232,18 @@ export default function Builder({
   // this page rendered, so "now" is accurate to within the request — and it is what lets the
   // expiry-aware refresh (Phase 5) know when they need replacing, without touching the server.
   // `photos` now comes from the photo pipeline (declared below, once `api` exists).
-  const api = useBlocks(initialBlocks, pairA);
+  /**
+   * THE SHARED UNDO TIMELINE.
+   *
+   * Two lanes hold genuinely different state — the layout (`useBlocks`) and image adjustments
+   * (`usePhotoEditHistory`, which edits `photos.edit_config`) — and `useEditHistory` keeps the
+   * ORDER they happened in, so one ⌘Z always undoes the last thing the customer actually did.
+   * The ref indirection exists only because the two lanes are constructed after this line and
+   * before the timeline can be; nothing else reads it.
+   */
+  const pushHistoryRef = useRef<(lane: 'blocks' | 'photos') => void>(() => {});
+  const noteLayoutEntry = useCallback(() => pushHistoryRef.current('blocks'), []);
+  const api = useBlocks(initialBlocks, pairA, noteLayoutEntry);
   const { blocks } = api;
 
   const [status, setStatus] = useState(initialStatus);
@@ -441,11 +455,15 @@ export default function Builder({
       const blockKey = block.key;
       const baseCapacity = block.template === 'double-spread' ? 1 : 2;
 
-      /** Write base slots wholesale — the only shape that can express an INSERT, not just a set. */
-      const putBase = (photoIds: string[]) => {
-        api.patchBlock(blockKey, { photoIds });
-        if (view) view[at] = { ...block, photoIds };
+      /** Write base slots wholesale, so a hole can be filled without disturbing its neighbour. */
+      const putBase = (photoIds: (string | null)[]) => {
+        const next = trimBaseIds(photoIds);
+        api.patchBlock(blockKey, { photoIds: next });
+        if (view) view[at] = { ...block, photoIds: next };
       };
+      /** This block's base row padded to its full capacity, so a slot index is always addressable. */
+      const baseRow = (): (string | null)[] =>
+        Array.from({ length: baseCapacity }, (_, i) => block.photoIds[i] ?? null);
       const putOverlay = (overlayId: string) => {
         api.replaceOverlay(blockKey, overlayId, realId);
         if (view) {
@@ -458,26 +476,21 @@ export default function Builder({
 
       if (pending.slot.kind === 'base') {
         /**
-         * ORDER SURVIVES OUT-OF-ORDER CONFIRMATION. Base slots compact — the model cannot express
-         * "right filled, left empty" — so a photo landing while an earlier one is still uploading
-         * has to sit further left than it was arranged. Inserting (rather than assigning) at a
-         * position that DISCOUNTS the neighbours still in flight makes that self-correcting: each
-         * late arrival slots in ahead of the ones that beat it, and the page ends up in the order
-         * Auto Create chose, whatever order the network delivered. If a neighbour never arrives
-         * (cancelled, failed) the photos simply stay compacted — no gap, nothing lost.
+         * ORDER SURVIVES OUT-OF-ORDER CONFIRMATION, and now it does so trivially.
+         *
+         * Base slots used to compact, so a photo landing while an earlier neighbour was still
+         * uploading could not be put where it belonged — it had to be INSERTED at a position that
+         * discounted whatever was still in flight, and the arithmetic only worked because every
+         * late arrival shifted the rest along. Slots are positional now, so the recorded index IS
+         * the destination: each photo lands where Auto Create put it, in any delivery order, and a
+         * neighbour that never arrives simply leaves its own slot empty instead of dragging the
+         * others across.
          */
-        const earlierInFlight = waiting.filter(
-          (p) =>
-            p.tempPhotoId !== tempId &&
-            p.blockIndex === pending.blockIndex &&
-            p.slot.kind === 'base' &&
-            p.slot.index < pending.slot.index,
-        ).length;
-        const insertAt = Math.max(0, pending.slot.index - earlierInFlight);
-        if (block.photoIds.length < baseCapacity && insertAt <= block.photoIds.length) {
-          const next = [...block.photoIds];
-          next.splice(insertAt, 0, realId);
-          putBase(next.slice(0, baseCapacity));
+        const idx = pending.slot.index;
+        if (idx < baseCapacity && !block.photoIds[idx]) {
+          const next = baseRow();
+          next[idx] = realId;
+          putBase(next);
           return;
         }
       } else {
@@ -499,8 +512,11 @@ export default function Builder({
         return true;
       };
       const takeFreeBase = () => {
-        if (block.photoIds.length >= baseCapacity) return false;
-        putBase([...block.photoIds, realId]);
+        const next = baseRow();
+        const free = next.findIndex((id) => !id);
+        if (free < 0) return false;
+        next[free] = realId;
+        putBase(next);
         return true;
       };
       if (pending.slot.kind === 'overlay') {
@@ -747,16 +763,19 @@ export default function Builder({
   // ── tray ───────────────────────────────────────────────────────────────────
   const readyUnplaced = photos.filter((p) => p.status === 'ready' && !placed.has(p.id));
 
-  // Photo indicators (capacity/placed/remaining/unused) — derived from existing state only.
-  // "Remaining slots" = empty BASE frames across the current layout; "Unused" = ready photos
-  // not yet placed. Reuses requiredBaseCount + placedPhotoIds; no new model.
+  /**
+   * Photo indicators (capacity / placed / remaining / unused), derived from existing state only.
+   *
+   * "Remaining slots" counts FRAMES WAITING FOR A PHOTO — overlay containers the customer placed
+   * and has not filled. It used to count unfilled base halves, which described the old model where
+   * every spread demanded two photos; a page is a background now, so an empty half is a finished
+   * design and counting it would tell the customer they are permanently behind.
+   */
   const placedCount = placed.size;
-  const emptyBaseSlots = blocks.reduce(
-    (s, b) => s + Math.max(0, requiredBaseCount(b.template) - b.photoIds.filter(Boolean).length),
-    0,
-  );
-  // Blueprint/layout CAPACITY = every base + overlay photo slot across the current spreads.
-  const totalSlots = blocks.reduce((s, b) => s + requiredBaseCount(b.template) + b.overlays.length, 0);
+  const emptyBaseSlots = blocks.reduce((s, b) => s + b.overlays.filter((o) => !o.photoId).length, 0);
+  // Layout CAPACITY = the photos this arrangement actually holds: filled base images + every
+  // overlay frame, empty or not.
+  const totalSlots = blocks.reduce((s, b) => s + b.photoIds.filter(Boolean).length + b.overlays.length, 0);
   /**
    * TRAY FILTERING (Phase 6) — independent axes combined with AND, so "unplaced" and "portrait"
    * and "favourites" can all be on at once. The result is a plain array, so the virtual grid
@@ -894,6 +913,30 @@ export default function Builder({
   /** Which layouts this photographer reaches for — remembered across albums, on this device. */
   const layoutMemory = useLayoutMemory();
 
+  /**
+   * THE IMAGE-ADJUSTMENT LANE. Undo/redo for crop, zoom, rotation, flip and tone — state that
+   * lives on `photos.edit_config` rather than in `Block[]`, and was therefore outside ⌘Z until
+   * now. Applying a step writes local state AND persists, so undo survives a reload exactly as
+   * the original edit does.
+   */
+  const photoEdits = usePhotoEditHistory(
+    useCallback((photoId: string, e: EditConfig) => {
+      setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit: e } : p)));
+      void savePhotoEdit({ photoId, edit: e });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
+  /** The two lanes, in the order the customer edited them. See `_use-edit-history`. */
+  const history = useEditHistory({
+    blocks: { canUndo: api.canUndo, canRedo: api.canRedo, undo: api.undo, redo: api.redo },
+    photos: { canUndo: photoEdits.canUndo, canRedo: photoEdits.canRedo, undo: photoEdits.undo, redo: photoEdits.redo },
+  });
+  pushHistoryRef.current = history.push;
+  // Stable by construction (see `_use-edit-history`) — pulled out so the keyboard table can name
+  // them without naming `history`, whose identity changes whenever either stack changes depth.
+  const { undo: undoEdits, redo: redoEdits } = history;
+
   // ── photos ─────────────────────────────────────────────────────────────────
   const onPhotoDeleted = (id: string) => {
     // Release the local preview (if any) before the row leaves state — nothing can show it
@@ -919,34 +962,67 @@ export default function Builder({
     setRemovingUnused(false);
   };
 
-  // Modal editor / quick crop persist via savePhotoEdit; we just sync local state.
-  const onPhotoSaved = (photoId: string, edit: EditConfig) =>
-    setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit } : p)));
+  /**
+   * THE LIVE HALF of every adjustment: patch local photo state so the canvas updates on the same
+   * frame. It also opens a history entry (`markLive` records what the edit was BEFORE the gesture
+   * started, once per gesture), which is what makes crop, zoom and the tone sliders undoable
+   * without any of them growing their own bookkeeping.
+   */
+  const patchPhotoLocal = useCallback(
+    (photoId: string, edit: EditConfig) => {
+      photoEdits.markLive(photoId, photosRef.current.find((p) => p.id === photoId)?.edit ?? null);
+      setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit } : p)));
+    },
+    // `photoEdits` is a stable object of stable callbacks; `setPhotos` is a React setter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   /**
-   * IN-CANVAS CROP. Reuses `EditConfig`'s existing zoom/offset fields and the existing
-   * `frameOverflow` maths — see `_use-canvas-crop` for why this is a relocation of the Quick Crop
-   * gesture rather than a second crop implementation. The live/persist pair below is the SAME one
-   * the inspector sliders have always used: patch local state per frame, one `savePhotoEdit` on
-   * release.
+   * THE COMMIT HALF: close the history entry. The modal editors have already persisted by the
+   * time they call this, so persistence is the caller's business and this only records.
    */
+  const closePhotoEdit = useCallback(
+    (photoId: string, edit: EditConfig) => {
+      if (photoEdits.commit(photoId, edit)) pushHistoryRef.current('photos');
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  /** Modal editor / quick crop: they persist themselves, so sync local state and close the entry. */
+  const onPhotoSaved = useCallback(
+    (photoId: string, edit: EditConfig) => {
+      patchPhotoLocal(photoId, edit);
+      closePhotoEdit(photoId, edit);
+    },
+    [patchPhotoLocal, closePhotoEdit],
+  );
+
+  /** Live + persist + record — the shape every non-modal adjustment surface uses. */
+  const commitPhotoEdit = useCallback(
+    (photoId: string, edit: EditConfig) => {
+      void savePhotoEdit({ photoId, edit });
+      closePhotoEdit(photoId, edit);
+    },
+    [closePhotoEdit],
+  );
+
   /**
-   * Both callbacks are stabilized so the crop handlers keep their identity across renders — they
-   * are passed to the canvas on every render, and churning them would invalidate props on a
-   * component that is re-rendering on every frame of a drag.
+   * IN-CANVAS IMAGE ADJUSTMENT — available on EVERY photo frame: both page slots, a full-spread
+   * image, and every overlay whatever its shape. Reuses `EditConfig`'s zoom/offset fields and the
+   * existing `frameOverflow` maths (see `_use-canvas-crop` for why this is a relocation of the
+   * Quick Crop gesture rather than a second crop implementation), and it drives exactly the pair
+   * above — `patchPhotoLocal` per frame, `commitPhotoEdit` on release — so an adjustment is
+   * live, persisted and undoable without this surface knowing anything about any of the three.
    *
-   * Capturing the first `onPhotoSaved` is safe: it closes over nothing but `setPhotos`, which is
-   * a React state setter and therefore stable for the component's lifetime. That is why the
-   * exhaustive-deps warning is suppressed here rather than satisfied — adding the dep would
-   * recreate the callback every render for no behavioural difference.
+   * Both callbacks are stable, which matters here: they are handed to a canvas that re-renders on
+   * every frame of a drag, and churning their identity would invalidate its props each time.
    */
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const cropChange = useCallback((photoId: string, edit: EditConfig) => onPhotoSaved(photoId, edit), []);
-  const cropCommit = useCallback((photoId: string, edit: EditConfig) => void savePhotoEdit({ photoId, edit }), []);
   const crop = useCanvasCrop({
     photoFor: useCallback((id: string) => photoMap.get(id), [photoMap]),
-    onChange: cropChange,
-    onCommit: cropCommit,
+    onChange: patchPhotoLocal,
+    onCommit: commitPhotoEdit,
   });
 
   // ── Phase 6: selection + commands ─────────────────────────────────────────────
@@ -981,8 +1057,9 @@ export default function Builder({
   const allTargets = useCallback((): SelectionTarget[] => {
     const out: SelectionTarget[] = photos.map((p) => ({ kind: 'photo', photoId: p.id }));
     for (const b of blocks) {
-      const slots: BaseSlot[] = b.template === 'double-spread' ? ['image'] : ['left', 'right'];
-      for (const slot of slots) out.push({ kind: 'base', blockKey: b.key, slot });
+      // Only slots the spread actually exposes — a background-only page has none, and Select All
+      // must not hand the command layer frames the canvas does not draw.
+      for (const slot of activeBaseSlots(b)) out.push({ kind: 'base', blockKey: b.key, slot });
       for (const o of b.overlays) if (o.id) out.push({ kind: 'overlay', blockKey: b.key, id: o.id });
     }
     return out;
@@ -1026,8 +1103,10 @@ export default function Builder({
     setSelection: sel.setSelection,
     allTargets,
     deletePhotoIds,
-    savePhotoEdit: (photoId, edit) => void savePhotoEdit({ photoId, edit }),
-    patchPhotoEdit: onPhotoSaved,
+    /* Undo/redo spans both lanes — the registry must reach the same stack the keyboard does. */
+    history,
+    savePhotoEdit: commitPhotoEdit,
+    patchPhotoEdit: patchPhotoLocal,
     albumSize: size,
     onMessage: setMessage,
     /**
@@ -1240,11 +1319,10 @@ export default function Builder({
   favouritesRemapRef.current = favourites.remapId;
   labelsRemapRef.current = labels.remapId;
 
-  // Inspector: live (local) change then persist on release.
-  const onPhotoChange = (photoId: string, edit: EditConfig) => onPhotoSaved(photoId, edit);
-  const onPhotoCommit = (photoId: string, edit: EditConfig) => {
-    void savePhotoEdit({ photoId, edit });
-  };
+  // Inspector: live (local) change then persist on release — the same pair the canvas crop uses,
+  // so a slider drag becomes exactly one undo step just as a crop gesture does.
+  const onPhotoChange = patchPhotoLocal;
+  const onPhotoCommit = commitPhotoEdit;
 
   /**
    * WHAT THE PROPERTIES PANEL SHOWS (Pass 3) — derived from the selection, exactly like the
@@ -2060,8 +2138,8 @@ export default function Builder({
   const shortcuts = useMemo<Shortcut[]>(
     () => [
       // Undo follows the focused surface — the cover is history-backed now, not an exception.
-      { combo: "mod+z", label: "Undo", group: "Editing", allowInInput: false, run: () => (coverFocused ? cover.undo() : api.undo()) },
-      { combo: "mod+shift+z", label: "Redo", group: "Editing", run: () => (coverFocused ? cover.redo() : api.redo()) },
+      { combo: "mod+z", label: "Undo", group: "Editing", allowInInput: false, run: () => (coverFocused ? cover.undo() : undoEdits()) },
+      { combo: "mod+shift+z", label: "Redo", group: "Editing", run: () => (coverFocused ? cover.redo() : redoEdits()) },
       {
         combo: "mod+s",
         label: "Save",
@@ -2201,7 +2279,7 @@ export default function Builder({
         },
       ]),
     ],
-    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused],
+    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused, undoEdits, redoEdits],
   );
   /**
    * Review mode owns the keyboard while it is open (it binds its own capture-phase listener), so
@@ -2237,10 +2315,10 @@ export default function Builder({
         // Undo follows the FOCUSED SURFACE. The cover has real history now (`useCover` uses the
         // same `useHistoryState` container `useBlocks` does), so ⌘Z means the same thing on it as
         // it does on a spread — it used to mean nothing at all.
-        canUndo={coverFocused ? cover.canUndo : api.canUndo}
-        canRedo={coverFocused ? cover.canRedo : api.canRedo}
-        onUndo={coverFocused ? cover.undo : api.undo}
-        onRedo={coverFocused ? cover.redo : api.redo}
+        canUndo={coverFocused ? cover.canUndo : history.canUndo}
+        canRedo={coverFocused ? cover.canRedo : history.canRedo}
+        onUndo={coverFocused ? cover.undo : history.undo}
+        onRedo={coverFocused ? cover.redo : history.redo}
         showGuides={showGuides}
         onToggleGuides={() => setShowGuides((v) => !v)}
         onShortcuts={() => setShortcutsOpen(true)}
@@ -2619,9 +2697,12 @@ export default function Builder({
             {railTab === 'backgrounds' && (
               <BackgroundsPanel
                 current={coverFocused ? cover.background : block?.background ?? null}
-                hasTarget={coverFocused ? cover.side !== 'spine' : !!block}
-                onApply={(bg) => (coverFocused ? cover.setBackground(bg) : block && api.setBackground(block.key, bg))}
-                onApplyAll={(bg) => (coverFocused ? cover.setBackground(bg) : api.setBackgroundAll(bg))}
+                /* The spine has its own backdrop now, so every cover face is a valid target. */
+                hasTarget={coverFocused ? true : !!block}
+                onApply={(bg) => (coverFocused ? cover.applyBackground(bg) : block && api.setBackground(block.key, bg))}
+                /* On the cover, "all" means the three cover faces — front, spine and back. */
+                onApplyAll={(bg) => (coverFocused ? cover.setAllBackgrounds(bg) : api.setBackgroundAll(bg))}
+                surface={coverFocused ? 'cover' : 'page'}
               />
             )}
 
@@ -2993,19 +3074,28 @@ export default function Builder({
             onToggleCollapsed={() => setNavCollapsed((v) => !v)}
             dragActive={drag.dragging}
             /**
-             * CROSS-PAGE MOVE. Dropping a photo on a page thumb places it on that spread — into
-             * the first empty base slot, or replacing the first one if the spread is full. It
-             * runs through the SAME `placePhoto` command as every other placement, so
-             * "placed at most once" and the single-undo-entry guarantee both still hold.
+             * CROSS-PAGE MOVE. Dropping a photo on a page thumb puts it on that spread.
+             *
+             * WHERE depends on what the spread is. A page that uses base slots (a legacy album, a
+             * panorama, or one a preset laid out) takes it into the first empty slot, or replaces
+             * the first if it is full — unchanged, through the same `placePhoto` command as every
+             * other placement. A plain page has no base slots to fill, so the photo becomes an
+             * OVERLAY, which is how a photo reaches a page everywhere else in the builder; doing
+             * anything else here would quietly re-attach a full-page image to a page that never
+             * offered one.
              */
             onDropPhotoOnPage={(blockKey, photoId) => {
               const target = blocks.find((b) => b.key === blockKey);
               if (!target) return;
-              const slots: BaseSlot[] = target.template === 'double-spread' ? ['image'] : ['left', 'right'];
+              drag.end();
+              if (activeBaseSlots(target).length === 0) {
+                api.addOverlay(blockKey, photoId);
+                return;
+              }
+              const slots = activeBaseSlots(target);
               const emptyIndex = slots.findIndex((_, i) => !target.photoIds[i]);
               const slot = slots[emptyIndex >= 0 ? emptyIndex : 0];
               cmd.placePhoto(photoId, { blockKey, slot });
-              drag.end();
             }}
             onJump={focusBlock}
             onReorder={api.reorderBlocks}
