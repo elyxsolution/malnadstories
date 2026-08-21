@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X, Crop, SlidersHorizontal, ImagePlus } from 'lucide-react';
+import { X, Crop, SlidersHorizontal, ImagePlus, Move } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
 import Movable, { SnapGuides, type SnapLine, type SelectMods } from './_movable';
 import { PrintGutter } from './_pair-frame';
@@ -456,6 +456,9 @@ export default function BlockCard({
               onLongPress={
                 onBeginCrop && leftPhoto?.status === 'ready' ? () => onBeginCrop({ slot: 'image', photoId: leftPhoto.id }) : undefined
               }
+              onAdjust={
+                onBeginCrop && leftPhoto?.status === 'ready' ? () => onBeginCrop({ slot: 'image', photoId: leftPhoto.id }) : undefined
+              }
               onCrop={leftPhoto ? () => onQuickCrop(leftPhoto.id, pair, true) : undefined}
               onEdit={leftPhoto ? () => onEditPhoto(leftPhoto.id) : undefined}
               readiness={baseReadiness('image')}
@@ -491,6 +494,9 @@ export default function BlockCard({
                   onLongPress={
                     onBeginCrop && leftPhoto?.status === 'ready' ? () => onBeginCrop({ slot: 'left', photoId: leftPhoto.id }) : undefined
                   }
+                  onAdjust={
+                    onBeginCrop && leftPhoto?.status === 'ready' ? () => onBeginCrop({ slot: 'left', photoId: leftPhoto.id }) : undefined
+                  }
                   onCrop={leftPhoto ? () => onQuickCrop(leftPhoto.id, page, false) : undefined}
                   onEdit={leftPhoto ? () => onEditPhoto(leftPhoto.id) : undefined}
                   readiness={baseReadiness('left')}
@@ -523,6 +529,11 @@ export default function BlockCard({
                   onDragEndFrame={() => drag?.end()}
                   onClear={() => api.clearBaseSlot(block.key, 'right')}
                   onLongPress={
+                    onBeginCrop && rightPhoto?.status === 'ready'
+                      ? () => onBeginCrop({ slot: 'right', photoId: rightPhoto.id })
+                      : undefined
+                  }
+                  onAdjust={
                     onBeginCrop && rightPhoto?.status === 'ready'
                       ? () => onBeginCrop({ slot: 'right', photoId: rightPhoto.id })
                       : undefined
@@ -563,6 +574,13 @@ export default function BlockCard({
                     : undefined
                 }
                 onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
+                /* Only when there is a picture to adjust, and not while it is already being
+                   adjusted — the crop surface is the affordance at that point. */
+                centerControl={
+                  onBeginCrop && photo?.status === 'ready' && croppingOverlay !== oid ? (
+                    <AdjustHandle onAdjust={() => onBeginCrop({ overlayId: oid, photoId: photo.id })} />
+                  ) : null
+                }
                 onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
                 onSnap={setSnap}
                 peers={peersExcept(oid)}
@@ -754,6 +772,49 @@ export default function BlockCard({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * THE ADJUST HANDLE — the affordance for the thing the frame's edge handles do NOT do.
+ *
+ * A selected photo frame already says "you can move and resize this box": that is what eight
+ * handles on its edge mean. Nothing said that the PICTURE inside the box is independently
+ * movable, so the capability was there and invisible — you had to know to reach for Crop, or to
+ * press and hold. This is that sentence, said where the gesture happens.
+ *
+ * It is CHROME, not an object: it has no id, is not in `Block`, is never persisted, and is drawn
+ * from the frame's own geometry — so it stays centred through a resize and does not move when the
+ * image inside is panned or zoomed. It opens the SAME adjustment state the toolbar's Crop button
+ * and press-and-hold open (`beginCropOn`); there is no second editing mode behind it.
+ *
+ * Pointer-down is stopped so that grabbing it can never be read as the start of a drag of the
+ * frame — the one way a centred control could damage an existing interaction.
+ */
+function AdjustHandle({ onAdjust }: { onAdjust: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Adjust the photo inside this frame"
+      title="Adjust the photo inside this frame — drag to reposition, scroll to zoom"
+      /* A base slot is itself HTML-draggable (that is how a page→page move works); without this,
+         pressing the handle and moving would start dragging the PHOTO instead of opening the
+         adjustment. Stopping pointer-down covers the pointer gestures; this covers the drag. */
+      draggable={false}
+      onDragStart={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onAdjust();
+      }}
+      className="pointer-events-auto grid h-7 w-7 place-items-center rounded-full border border-white/70 bg-card/90 text-studio shadow-elevated backdrop-blur-sm transition-all duration-150 ease-glide hover:scale-105 hover:bg-card active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-1"
+    >
+      <Move className="h-3.5 w-3.5" />
+    </button>
   );
 }
 
@@ -1006,6 +1067,7 @@ function BaseSlotView({
   onCrop,
   onEdit,
   onLongPress,
+  onAdjust,
   readiness,
   cropping,
   cropHandlers,
@@ -1042,6 +1104,11 @@ function BaseSlotView({
   onEdit?: () => void;
   /** Press and hold this photo → image adjustment. Same action the toolbar's Crop button runs. */
   onLongPress?: () => void;
+  /**
+   * Enter image adjustment on this slot — the centre handle's action. A page photo is adjusted the
+   * same way a floating one is, so it gets the same affordance rather than a quieter version of it.
+   */
+  onAdjust?: () => void;
 }) {
   const [over, setOver] = useState(false);
   /**
@@ -1127,6 +1194,13 @@ function BaseSlotView({
         over ? 'ring-2 ring-inset ring-studio-bright' : tapToPlace ? 'ring-2 ring-inset ring-studio-bright/70' : ''
       } ${selected ? 'ring-2 ring-inset ring-studio-bright' : multiSelected ? 'ring-2 ring-inset ring-studio' : ''}`}
     >
+{/* The centre affordance, from the SLOT's box — unaffected by the crop inside it. It is not
+          drawn while adjusting, because the adjustment surface is the affordance then. */}
+      {selected && onAdjust && editable && !cropping && (
+        <div className="pointer-events-none absolute inset-0 z-[8] grid place-items-center">
+          <AdjustHandle onAdjust={onAdjust} />
+        </div>
+      )}
       {photo ? (
         <>
           <div

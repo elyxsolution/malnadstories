@@ -20,7 +20,7 @@ domain logic that had no durable coverage before Phase 9 Prompt 4.
 | `migration-inventory.test.ts` | migration ids/filenames unique and contiguous; CLAUDE.md documents every file on disk, in order, and invents none |
 | `builder-page-and-cover.test.ts` | base slots are POSITIONAL (clearing the left photo never slides the right one across), the hole survives save/reload/Zod, a page is a background rather than a photo container, print-readiness counts photo FRAMES not page halves, and the front/spine/back cover colours are independently stored, migrated and applied |
 | `overlay-image-adjust.test.ts` | image adjustment inside a FIXED frame: cover-fit with no distortion in every frame shape, zoom/pan clamped so no blank edge is reachable, the pan range the drag maths converts against, and the exact crop restored from the persisted `edit_config` |
-| `builder-workspace-fit.test.ts` | the album is fitted to the measured workspace on BOTH axes (so 100% needs no scrolling) with editor zoom composing on top and album/page/overlay coordinates untouched; and a new page’s starting frame is an ordinary EMPTY overlay — full-page, photo-less, valid through the save schema, and reported as waiting rather than blank |
+| `builder-workspace-fit.test.ts` | the album is fitted to the measured workspace on BOTH axes (so 100% needs no scrolling) with editor zoom composing on top and album/page/overlay coordinates untouched; and a new spread's starting frames are TWO ordinary EMPTY overlays — one per page, meeting exactly at the fold with no overlap or gap, each photo-less, page ownership carried by geometry alone, a panorama still getting one full-pair frame, valid through the save schema, and reported as waiting rather than blank |
 
 ## What is deliberately NOT here
 

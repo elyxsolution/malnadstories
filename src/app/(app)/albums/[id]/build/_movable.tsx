@@ -211,6 +211,7 @@ export default function Movable({
   ariaLabel,
   children,
   controls,
+  centerControl,
 }: {
   rect: Rect;
   rotation?: number;
@@ -273,6 +274,19 @@ export default function Movable({
   ariaLabel?: string;
   children: ReactNode;
   controls?: ReactNode;
+  /**
+   * A control pinned to the middle of the element while it is selected — the affordance that says
+   * what the INSIDE of this box does, as opposed to the handles on its edge, which say what the
+   * box itself does.
+   *
+   * It lives in the CHROME, with the handles, for the two reasons the chrome exists: it is drawn
+   * above whatever the element is buried under, and it follows the element's own geometry, so it
+   * stays centred through a resize and is unaffected by anything happening to the content inside
+   * (a crop, a zoom, a pan). The host decides what it is and when it makes sense; `Movable`
+   * decides only that it belongs in the middle of a selected element. Absent → nothing renders,
+   * which is every element that has no such affordance.
+   */
+  centerControl?: ReactNode;
 }) {
   const drag = useRef<{
     mode: 'move' | 'resize' | 'rotate';
@@ -594,6 +608,12 @@ export default function Movable({
               dragging ? 'cursor-grabbing' : 'cursor-grab'
             } ${selected ? 'border-transparent' : 'border-studio-bright/70'}`}
           />
+        )}
+
+        {selected && centerControl && (
+          /* Centred on the element's box, and inert as a container so it never eats a gesture
+             meant for the element — the control inside re-enables pointer events for itself. */
+          <div className="pointer-events-none absolute inset-0 grid place-items-center">{centerControl}</div>
         )}
 
         {selected && (

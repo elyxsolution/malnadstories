@@ -500,7 +500,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 12 files / 146 tests
+pnpm test              # app suite — 12 files / 152 tests
 cd worker && pnpm test # worker suite — 141 files / 1220 tests
 ```
 
@@ -963,15 +963,31 @@ action input; ownership is re-verified on every server action.
 - **Placement model**: each uploaded photo is placed **at most once** — as a base
   OR as an overlay — so per-photo edits live on `photos.edit_config` (not per-slot).
   The tray badges placed photos (base + overlay ids); assigning a placed photo moves it.
-- **Every page starts with ONE empty full-page photo frame**, and **"Add photo overlay" creates
-  an empty frame rather than opening the picker.** `addBlock`/`insertBlockAt` seed
-  `overlays: [{ photoId: null, ...FULL_PAGE_OVERLAY_GEOM }]` (0,0,1,1 — the trim IS the usable
-  area; the page model has no margin); `duplicateBlock` copies the source's frames emptied, so
-  duplicating a page keeps its layout. `api.addOverlay(key, photoId | null, at?)` accepts a null
-  photo and an `at` of `{x,y}` (a drop point) or `'center'`; `addPageOverlay` in `_builder` is the
-  single implementation behind both add-overlay affordances. **No photo record is created until a
-  photo is attached**, and dropping onto an existing empty frame fills it rather than stacking a
-  second one (`OverlayContent` stops the drop from reaching the page).
+- **A new spread starts with ONE empty full-page photo frame PER PAGE**, and **"Add photo
+  overlay" creates an empty frame rather than opening the picker.** `newUnitOverlayGeoms(template)`
+  (model.ts) is the single source: a `single-pair` gets `LEFT_PAGE_OVERLAY_GEOM` (0,0,.5,1) +
+  `RIGHT_PAGE_OVERLAY_GEOM` (.5,0,.5,1) — **two genuine `Overlay` objects, each with its own id,
+  `photoId` and geometry**, never one box split in half; a `double-spread` keeps ONE
+  `FULL_PAIR_OVERLAY_GEOM` frame, because a panorama really is one image across the gutter.
+  **PAGE OWNERSHIP IS THE GEOMETRY** — overlays are normalized to the open pair, so x < 0.5 is the
+  left page and x ≥ 0.5 is the right; nothing else records it and nothing can disagree with it.
+  Full bleed per page: the trim IS the usable area (the page model has no margin). Filling,
+  cropping and clearing one frame cannot touch the other — an overlay keeps its container when its
+  photo is cleared, so neither frame ever moves or reorders. `addBlock`/`insertBlockAt` seed them;
+  `duplicateBlock` copies the source's frames emptied, so duplicating a page keeps its layout.
+  `api.addOverlay(key, photoId | null, at?)` accepts a null photo and an `at` of `{x,y}` (a drop
+  point) or `'center'`; `addPageOverlay` in `_builder` is the single implementation behind both
+  add-overlay affordances. **No photo record is created until a photo is attached**, and dropping
+  onto an existing empty frame fills it rather than stacking a second one (`OverlayContent` stops
+  the drop from reaching the page).
+- **A selected photo frame shows a centre ADJUST HANDLE** (`AdjustHandle` in `_block.tsx`) — the
+  affordance for what the edge handles do NOT do. It is CHROME, not an object: no id, not in
+  `Block`, never persisted. On an overlay it rides in `Movable`'s `centerControl` (drawn from the
+  frame's geometry, so it stays centred through a resize and is unmoved by panning or zooming the
+  image inside); a base slot renders it from its own box. Shown only for a `ready` photo and only
+  while NOT already adjusting. Clicking it calls the same `beginCropOn` the toolbar's Crop button
+  and press-and-hold call — **three doors, one crop state**. Pointer-down, click and dragstart are
+  all stopped on it so it can never start a frame drag, an HTML photo drag, or a canvas deselect.
 - **Press and hold a photo → image adjustment**, the SAME state the toolbar's Crop button opens.
   `_use-long-press.ts` (480 ms / 8 px slop) is the shared recogniser; `Movable` arbitrates it
   against the drag it owns (the press abandons the drag and releases pointer capture; travel past

@@ -12,7 +12,7 @@ import {
   stripOverlayIds,
   trimBaseIds,
   DEFAULT_OVERLAY_GEOM,
-  FULL_PAGE_OVERLAY_GEOM,
+  newUnitOverlayGeoms,
   type Background,
   type Block,
   type LayoutTemplate,
@@ -119,21 +119,23 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
 
   // ── blocks ─────────────────────────────────────────────────────────────────
   /**
-   * A FRESH PAGE: its background, plus ONE empty full-page photo frame.
+   * A FRESH SPREAD'S STARTING FRAMES: one empty full-page photo frame PER PAGE.
    *
-   * The frame carries no photo and creates no photo record — it is a container, exactly like one
-   * the customer places by hand, and the page underneath stays a background. That is the whole
-   * point of it being an overlay rather than a return of `Block.photoIds`: it can be moved,
-   * resized, cropped, replaced, deleted and undone, and it round-trips through `layout_config`
-   * with every other overlay.
+   * They carry no photo and create no photo record — they are containers, exactly like ones the
+   * customer places by hand, and the pages underneath stay backgrounds. That is the whole point of
+   * them being overlays rather than a return of `Block.photoIds`: each can be moved, resized,
+   * cropped, replaced, deleted and undone independently, and they round-trip through
+   * `layout_config` with every other overlay. See `newUnitOverlayGeoms` for why a pair gets two
+   * and a panorama gets one.
    */
-  const newPageOverlay = (): Overlay => ({ id: makeOverlayId(), photoId: null, ...FULL_PAGE_OVERLAY_GEOM });
+  const newUnitOverlays = (template: LayoutTemplate): Overlay[] =>
+    newUnitOverlayGeoms(template).map((geom) => ({ id: makeOverlayId(), photoId: null, ...geom }));
 
   const addBlock = (template: LayoutTemplate, size: number) => {
     if (!canAdd(blocks, size, template)) return;
     // A manually-added spread maps to the base preset (Single / Full bleed) for accurate breakdowns.
     const preset = template === 'double-spread' ? 'full-bleed' : 'single';
-    mutate((prev) => [...prev, { ...makeBlock(template), preset, overlays: [newPageOverlay()] }]);
+    mutate((prev) => [...prev, { ...makeBlock(template), preset, overlays: newUnitOverlays(template) }]);
   };
 
   const patchBlock = (key: string, patch: Partial<Block>) => mutate((prev) => patchBlockByKey(prev, key, patch));
@@ -163,9 +165,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     if (!canAdd(blocks, size, template)) return;
     mutate((prev) => {
       const next = [...prev];
-      // Inserted pages are new pages — same starting frame as `addBlock`, or "insert here" would
+      // Inserted pages are new pages — same starting frames as `addBlock`, or "insert here" would
       // hand back a blank sheet while the Add button hands back a usable one.
-      next.splice(Math.max(0, Math.min(index, next.length)), 0, { ...makeBlock(template), overlays: [newPageOverlay()] });
+      next.splice(Math.max(0, Math.min(index, next.length)), 0, { ...makeBlock(template), overlays: newUnitOverlays(template) });
       return next;
     });
   };

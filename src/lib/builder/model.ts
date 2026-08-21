@@ -152,19 +152,41 @@ export function stripOverlayIds(overlays: Overlay[]): Overlay[] {
 export const DEFAULT_OVERLAY_GEOM = { x: 0.55, y: 0.08, w: 0.34, h: 0.34 };
 
 /**
- * The frame a NEW PAGE starts with: one empty photo container covering the whole open pair.
+ * THE FRAMES A NEW SPREAD STARTS WITH.
  *
  * A page is a background, and photos live in overlay frames — so a page that starts with nothing
- * gives the customer a blank sheet and no obvious way in. This is the frame the old model implied
- * and drew implicitly (the page WAS the photo container); making it an explicit overlay is what
- * lets it be moved, resized, cropped, layered, deleted and undone like anything else, instead of
- * being a special case built into the page.
+ * gives the customer a blank sheet and no obvious way in. These are the frames the old model
+ * implied and drew implicitly (the page WAS the photo container); making them explicit overlays is
+ * what lets them be moved, resized, cropped, layered, deleted and undone like anything else,
+ * instead of being a special case built into the page.
  *
- * Full bleed, deliberately: the trim IS the usable area (there is no margin in the page model —
- * every renderer clips at the page edge), so anything smaller would invent a margin that nothing
- * else in the builder or the PDF honours.
+ * ── WHY TWO, AND WHY THIS IS NOT ONE BOX SPLIT IN HALF ─────────────────────────────────────
+ *
+ * A `single-pair` unit is TWO independent printed pages that happen to be edited together. One
+ * spread-wide frame would therefore be a single photo crossing the gutter — the thing
+ * `double-spread` exists to express — and it would make the two pages inseparable: filling the
+ * left would fill the right, and cropping one would crop both. So a new pair gets two genuine
+ * `Overlay` objects, one per page, each with its own id, its own `photoId` and its own geometry.
+ * Page ownership is the geometry: an overlay is normalized to the OPEN PAIR, so x ∈ [0, 0.5) is
+ * the left page and x ∈ [0.5, 1] is the right. Nothing else needs to record it, and nothing can
+ * disagree with it.
+ *
+ * A `double-spread` unit really is one image across both pages, so it keeps one full-pair frame.
+ *
+ * Full bleed on each page, deliberately: the trim IS the usable area (there is no margin in the
+ * page model — every renderer clips at the page edge), so anything smaller would invent a margin
+ * that nothing else in the builder or the PDF honours.
  */
-export const FULL_PAGE_OVERLAY_GEOM = { x: 0, y: 0, w: 1, h: 1 };
+export const LEFT_PAGE_OVERLAY_GEOM = { x: 0, y: 0, w: 0.5, h: 1 };
+export const RIGHT_PAGE_OVERLAY_GEOM = { x: 0.5, y: 0, w: 0.5, h: 1 };
+export const FULL_PAIR_OVERLAY_GEOM = { x: 0, y: 0, w: 1, h: 1 };
+
+/** The starting frame geometry for a freshly created unit of `template`, in reading order. */
+export function newUnitOverlayGeoms(template: LayoutTemplate): Rect[] {
+  return template === 'double-spread'
+    ? [{ ...FULL_PAIR_OVERLAY_GEOM }]
+    : [{ ...LEFT_PAGE_OVERLAY_GEOM }, { ...RIGHT_PAGE_OVERLAY_GEOM }];
+}
 
 /** Hard cap on overlays per block — UI is unlimited, this rejects abusive payloads. */
 export const MAX_OVERLAYS_PER_BLOCK = 50;

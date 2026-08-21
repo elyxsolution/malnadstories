@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { fitBlockWidth } from '@/app/(app)/albums/[id]/build/_use-fit-scale';
-import { FULL_PAGE_OVERLAY_GEOM, DEFAULT_OVERLAY_GEOM, type Overlay } from '@/lib/builder/model';
+import {
+  DEFAULT_OVERLAY_GEOM,
+  LEFT_PAGE_OVERLAY_GEOM,
+  RIGHT_PAGE_OVERLAY_GEOM,
+  FULL_PAIR_OVERLAY_GEOM,
+  makeOverlayId,
+  newUnitOverlayGeoms,
+  type Overlay,
+} from '@/lib/builder/model';
 import { EDIT_BOUNDS } from '@/lib/builder/edit-bounds';
 import { resolveLayoutForSave } from '@/lib/builder/persist-layout';
 import { SaveLayoutSchema } from '@/lib/validations';
@@ -93,44 +101,70 @@ describe('fitting the album into the workspace', () => {
 
 // ── the frame a new page starts with ─────────────────────────────────────────────
 
-describe('a new page starts with one empty full-page photo frame', () => {
+describe('a new spread starts with one empty full-page frame PER PAGE', () => {
   const ALBUM = '44444444-4444-4444-8444-444444444444';
   const PHOTO = '11111111-1111-4111-8111-111111111111';
+  const OTHER = '22222222-2222-4222-8222-222222222222';
 
-  const startingFrame = (): Overlay => ({ id: 'o1', photoId: null, ...FULL_PAGE_OVERLAY_GEOM });
+  /** `useBlocks.newUnitOverlays`, expressed here so the invariant is testable without the hook. */
+  const startingFrames = (template: 'single-pair' | 'double-spread' = 'single-pair'): Overlay[] =>
+    newUnitOverlayGeoms(template).map((geom) => ({ id: makeOverlayId(), photoId: null, ...geom }));
 
-  it('covers the whole page and stays inside the persisted bounds', () => {
-    expect(FULL_PAGE_OVERLAY_GEOM).toEqual({ x: 0, y: 0, w: 1, h: 1 });
-    const { x, y, w, h } = FULL_PAGE_OVERLAY_GEOM;
-    expect(x).toBeGreaterThanOrEqual(EDIT_BOUNDS.minX);
-    expect(y).toBeGreaterThanOrEqual(EDIT_BOUNDS.minY);
-    expect(w).toBeGreaterThan(0);
-    expect(w).toBeLessThanOrEqual(1);
-    expect(h).toBeGreaterThan(0);
-    expect(h).toBeLessThanOrEqual(1);
+  it('creates TWO frames on a pair — one per page, not one box across the gutter', () => {
+    const frames = startingFrames('single-pair');
+    expect(frames).toHaveLength(2);
+    const [left, right] = frames;
+    expect(left).toMatchObject(LEFT_PAGE_OVERLAY_GEOM);
+    expect(right).toMatchObject(RIGHT_PAGE_OVERLAY_GEOM);
+    // Two genuine objects, each independently addressable.
+    expect(left.id).not.toBe(right.id);
   });
 
-  it('carries NO photo — the page holds a container, not a picture', () => {
-    expect(startingFrame().photoId).toBeNull();
+  it('gives each page its own half, with no overlap and no gap across the gutter', () => {
+    const [left, right] = startingFrames('single-pair');
+    expect(left.x + left.w).toBeCloseTo(0.5, 6); // ends exactly at the fold
+    expect(right.x).toBeCloseTo(0.5, 6); // starts exactly at the fold
+    expect(left.x + left.w + right.w).toBeCloseTo(1, 6); // together they cover the pair
+  });
+
+  it('page ownership IS the geometry — left of the fold, right of the fold', () => {
+    const [left, right] = startingFrames('single-pair');
+    const centre = (o: Overlay) => o.x + o.w / 2;
+    expect(centre(left)).toBeLessThan(0.5);
+    expect(centre(right)).toBeGreaterThan(0.5);
+  });
+
+  it('leaves the panorama alone: a double-spread still gets ONE frame across both pages', () => {
+    const frames = startingFrames('double-spread');
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toMatchObject(FULL_PAIR_OVERLAY_GEOM);
+  });
+
+  it('every frame stays inside the persisted bounds', () => {
+    for (const template of ['single-pair', 'double-spread'] as const) {
+      for (const { x, y, w, h } of startingFrames(template)) {
+        expect(x).toBeGreaterThanOrEqual(EDIT_BOUNDS.minX);
+        expect(y).toBeGreaterThanOrEqual(EDIT_BOUNDS.minY);
+        expect(w).toBeGreaterThan(0);
+        expect(w).toBeLessThanOrEqual(1);
+        expect(h).toBeGreaterThan(0);
+        expect(h).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('carries NO photo — the page holds containers, not pictures', () => {
+    expect(startingFrames().every((o) => o.photoId === null)).toBe(true);
   });
 
   it('is a page-level object: the base row stays empty, so no photo container returns to the page', () => {
-    const page = { photoIds: [] as (string | null)[], overlays: [startingFrame()] };
+    const page = { photoIds: [] as (string | null)[], overlays: startingFrames() };
     const { blocks } = resolveLayoutForSave([page], { resolve: (id: string) => id, isUnresolvedTemp: () => false });
     expect(blocks[0].photoIds).toEqual([]);
-    expect(blocks[0].overlays).toHaveLength(1);
+    expect(blocks[0].overlays).toHaveLength(2);
   });
 
-  it('round-trips through the save schema as an empty container', () => {
-    const parsed = SaveLayoutSchema.safeParse({
-      albumId: ALBUM,
-      blocks: [{ template: 'single-pair', photoIds: [], overlays: [{ photoId: null, ...FULL_PAGE_OVERLAY_GEOM }] }],
-    });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) expect(parsed.data.blocks[0].overlays[0].photoId).toBeNull();
-  });
-
-  it('two empty frames on one page are legal — "placed at most once" counts photos, not containers', () => {
+  it('round-trips through the save schema as two empty containers in order', () => {
     const parsed = SaveLayoutSchema.safeParse({
       albumId: ALBUM,
       blocks: [
@@ -138,7 +172,47 @@ describe('a new page starts with one empty full-page photo frame', () => {
           template: 'single-pair',
           photoIds: [],
           overlays: [
-            { photoId: null, ...FULL_PAGE_OVERLAY_GEOM },
+            { photoId: null, ...LEFT_PAGE_OVERLAY_GEOM },
+            { photoId: null, ...RIGHT_PAGE_OVERLAY_GEOM },
+          ],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const [l, r] = parsed.data.blocks[0].overlays;
+      expect(l).toMatchObject({ photoId: null, ...LEFT_PAGE_OVERLAY_GEOM });
+      expect(r).toMatchObject({ photoId: null, ...RIGHT_PAGE_OVERLAY_GEOM });
+    }
+  });
+
+  it('two photos, one per page, are legal and independent', () => {
+    const parsed = SaveLayoutSchema.safeParse({
+      albumId: ALBUM,
+      blocks: [
+        {
+          template: 'single-pair',
+          photoIds: [],
+          overlays: [
+            { photoId: PHOTO, ...LEFT_PAGE_OVERLAY_GEOM },
+            { photoId: OTHER, ...RIGHT_PAGE_OVERLAY_GEOM },
+          ],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('a manually added frame coexists with the two defaults', () => {
+    const parsed = SaveLayoutSchema.safeParse({
+      albumId: ALBUM,
+      blocks: [
+        {
+          template: 'single-pair',
+          photoIds: [],
+          overlays: [
+            { photoId: null, ...LEFT_PAGE_OVERLAY_GEOM },
+            { photoId: null, ...RIGHT_PAGE_OVERLAY_GEOM },
             { photoId: null, ...DEFAULT_OVERLAY_GEOM },
           ],
         },
@@ -147,23 +221,41 @@ describe('a new page starts with one empty full-page photo frame', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('reads as unfinished until a photo is put in it, and finished once one is', () => {
+  it('emptying ONE frame leaves the other exactly where it was', () => {
+    // Clearing an overlay's photo keeps its CONTAINER — the rule `clearFrames` and the
+    // serialization boundary both apply — so neither frame can move or be reordered.
+    const overlays: Overlay[] = [
+      { id: 'l', photoId: PHOTO, ...LEFT_PAGE_OVERLAY_GEOM },
+      { id: 'r', photoId: OTHER, ...RIGHT_PAGE_OVERLAY_GEOM },
+    ];
+    const cleared = overlays.map((o) => (o.id === 'l' ? { ...o, photoId: null } : o));
+    expect(cleared[0]).toMatchObject({ id: 'l', photoId: null, ...LEFT_PAGE_OVERLAY_GEOM });
+    expect(cleared[1]).toMatchObject({ id: 'r', photoId: OTHER, ...RIGHT_PAGE_OVERLAY_GEOM });
+    expect(cleared.map((o) => o.id)).toEqual(['l', 'r']);
+  });
+
+  it('reads as unfinished until BOTH frames are filled', () => {
     const cover = { activeTemplate: true, config: DEFAULT_COVER_CONFIG, title: 'Coorg, 2019' };
-    const page = (photoId: string | null): EvalBlock => ({
+    const spread = (left: string | null, right: string | null): EvalBlock => ({
       template: 'single-pair',
       photoIds: [],
-      overlays: [{ photoId }],
+      overlays: [{ photoId: left }, { photoId: right }],
       background: { kind: 'color', value: 'sand' },
     });
 
-    const fresh = evaluateAlbum({ size: 2, blocks: [page(null)], cover });
+    const fresh = evaluateAlbum({ size: 2, blocks: [spread(null, null)], cover });
     expect(fresh.printReady).toBe(false);
     expect(fresh.warnings.some((w) => w.id === 'incomplete_page:1')).toBe(true);
-    // Not "blank" — the page IS designed; it is the frame on it that is waiting.
+    // Not "blank" — the page IS designed; it is the frames on it that are waiting.
     expect(fresh.warnings.some((w) => w.id === 'empty_page:1')).toBe(false);
+    expect(fresh.statistics.expectedPhotos).toBe(2);
 
-    const filled = evaluateAlbum({ size: 2, blocks: [page(PHOTO)], cover });
-    expect(filled.printReady).toBe(true);
-    expect(filled.statistics.placedPhotos).toBe(1);
+    const half = evaluateAlbum({ size: 2, blocks: [spread(PHOTO, null)], cover });
+    expect(half.printReady).toBe(false);
+    expect(half.statistics.placedPhotos).toBe(1);
+
+    const done = evaluateAlbum({ size: 2, blocks: [spread(PHOTO, OTHER)], cover });
+    expect(done.printReady).toBe(true);
+    expect(done.statistics.placedPhotos).toBe(2);
   });
 });
