@@ -172,7 +172,7 @@ export default async function AdminSupportPage({
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Ticket</th>
@@ -187,28 +187,28 @@ export default async function AdminSupportPage({
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
+                  <td data-label="Ticket" className="px-3 py-2">
                     <Link href={`/admin/support/${r.id}`} className="font-mono text-primary hover:underline">
                       #{shortId(r.id)}
                     </Link>
                   </td>
-                  <td className="max-w-[260px] px-3 py-2">
+                  <td data-label="Subject" className="max-w-[260px] px-3 py-2">
                     <Link href={`/admin/support/${r.id}`} className="block truncate hover:underline">
                       {r.subject}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Customer" data-block className="px-3 py-2">
                     <div>{r.customerName ?? '—'}</div>
                     <div className="text-xs text-muted-foreground">{emails.get(r.customerId) ?? ''}</div>
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{categoryLabel(r.category)}</td>
-                  <td className="px-3 py-2">
+                  <td data-label="Category" className="px-3 py-2 text-muted-foreground">{categoryLabel(r.category)}</td>
+                  <td data-label="Priority" className="px-3 py-2">
                     <StatusBadge className={priorityChip(r.priority)} label={priorityLabel(r.priority)} />
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Status" className="px-3 py-2">
                     <StatusBadge className={statusChip(r.status)} label={adminStatusLabel(r.status)} />
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
+                  <td data-label="Updated" className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
                 </tr>
               ))}
             </tbody>

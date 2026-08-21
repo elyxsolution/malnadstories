@@ -94,7 +94,7 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
       )}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className="ms-stack w-full text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="w-8 px-3 py-2">
@@ -117,7 +117,7 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
                     aria-label={`Select ${r.title}`}
                   />
                 </td>
-                <td className="px-3 py-2">
+                <td data-label="Title" data-block className="px-3 py-2">
                   <Link href={`/admin/cms/content/${r.id}`} className="text-primary hover:underline">
                     {r.title}
                   </Link>
@@ -125,11 +125,11 @@ export default function ContentList({ rows }: { rows: ContentRow[] }) {
                     {r.slug} · #{shortId(r.id)}
                   </div>
                 </td>
-                <td className="px-3 py-2">{typeLabel(r.type)}</td>
-                <td className="px-3 py-2">
+                <td data-label="Type" className="px-3 py-2">{typeLabel(r.type)}</td>
+                <td data-label="Status" className="px-3 py-2">
                   <StatusBadge className={statusChip(r.status)} label={statusLabel(r.status)} />
                 </td>
-                <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt)}</td>
+                <td data-label="Updated" className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt)}</td>
               </tr>
             ))}
           </tbody>

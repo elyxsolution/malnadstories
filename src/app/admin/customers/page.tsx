@@ -39,7 +39,7 @@ export default async function AdminCustomersPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Name</th>
@@ -53,16 +53,16 @@ export default async function AdminCustomersPage() {
             <tbody>
               {custs.map((c) => (
                 <tr key={c.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
+                  <td data-label="Name" className="px-3 py-2">
                     <Link href={`/admin/customers/${c.id}`} className="text-primary hover:underline">
                       {c.name ?? '—'}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{emails.get(c.id) ?? ''}</td>
-                  <td className="px-3 py-2 text-center">{orderMap.get(c.id) ?? 0}</td>
-                  <td className="px-3 py-2 text-center">{albumMap.get(c.id) ?? 0}</td>
-                  <td className="px-3 py-2 text-center">{couponMap.get(c.id) ?? 0}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDate(c.createdAt as unknown as string)}</td>
+                  <td data-label="Email" className="px-3 py-2 text-muted-foreground">{emails.get(c.id) ?? ''}</td>
+                  <td data-label="Orders" className="px-3 py-2 text-center">{orderMap.get(c.id) ?? 0}</td>
+                  <td data-label="Albums" className="px-3 py-2 text-center">{albumMap.get(c.id) ?? 0}</td>
+                  <td data-label="Coupons used" className="px-3 py-2 text-center">{couponMap.get(c.id) ?? 0}</td>
+                  <td data-label="Joined" className="px-3 py-2 text-muted-foreground">{fmtDate(c.createdAt as unknown as string)}</td>
                 </tr>
               ))}
             </tbody>

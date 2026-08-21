@@ -132,7 +132,7 @@ export default function OrdersTable({ rows }: { rows: OrderRow[] }) {
       {msg && <p className="mb-2 text-xs text-primary">{msg}</p>}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className="ms-stack w-full text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-2">
@@ -158,23 +158,23 @@ export default function OrdersTable({ rows }: { rows: OrderRow[] }) {
                     {selected.has(r.id) && <Check className="h-3 w-3" />}
                   </button>
                 </td>
-                <td className="px-3 py-2">
+                <td data-label="Order" className="px-3 py-2">
                   <Link href={`/admin/orders/${r.id}`} className="font-mono text-primary hover:underline">
                     #{shortId(r.id)}
                   </Link>
                 </td>
-                <td className="px-3 py-2">
+                <td data-label="Customer" data-block className="px-3 py-2">
                   <div>{r.customerName ?? '—'}</div>
                   <div className="text-xs text-muted-foreground">{r.email}</div>
                 </td>
-                <td className="px-3 py-2">{r.albumTitle ?? '—'}</td>
-                <td className="px-3 py-2 text-right">{inr(r.total)}</td>
-                <td className="px-3 py-2 text-center">{r.copies}</td>
-                <td className="px-3 py-2 font-mono text-xs">{r.couponCode ?? '—'}</td>
-                <td className="px-3 py-2">
+                <td data-label="Album" className="px-3 py-2">{r.albumTitle ?? '—'}</td>
+                <td data-label="Amount" className="px-3 py-2 text-right">{inr(r.total)}</td>
+                <td data-label="Copies" className="px-3 py-2 text-center">{r.copies}</td>
+                <td data-label="Coupon" className="px-3 py-2 font-mono text-xs">{r.couponCode ?? '—'}</td>
+                <td data-label="Status" className="px-3 py-2">
                   <StatusBadge className={statusChip(r.status)} label={adminStatusLabel(r.status)} />
                 </td>
-                <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt)}</td>
+                <td data-label="Created" className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt)}</td>
               </tr>
             ))}
           </tbody>

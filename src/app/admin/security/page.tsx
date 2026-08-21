@@ -108,7 +108,7 @@ export default async function SecurityPage({ searchParams }: { searchParams: Sea
             No security events match these filters — nothing to review.
           </p>
         ) : (
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-4 py-2.5 font-medium">Event</th>
@@ -120,19 +120,19 @@ export default async function SecurityPage({ searchParams }: { searchParams: Sea
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id} className="hover:bg-muted/30">
-                  <td className="px-4 py-2.5 align-top">
+                  <td data-label="Event" className="px-4 py-2.5 align-top">
                     <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase text-foreground">
                       {ACTION_LABEL[r.action] ?? r.action}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 align-top text-xs text-muted-foreground">
+                  <td data-label="Actor" className="px-4 py-2.5 align-top text-xs text-muted-foreground">
                     {r.actorType}
                     {r.actorId ? ` · ${r.actorId.slice(0, 8)}` : ''}
                   </td>
-                  <td className="max-w-md px-4 py-2.5 align-top text-xs text-muted-foreground">
+                  <td data-label="Detail" className="max-w-md px-4 py-2.5 align-top text-xs text-muted-foreground">
                     <code className="line-clamp-2 break-all font-mono text-[11px]">{summarize(r.metadata)}</code>
                   </td>
-                  <td className="px-4 py-2.5 align-top text-xs text-muted-foreground">{fmt(r.createdAt)}</td>
+                  <td data-label="When" className="px-4 py-2.5 align-top text-xs text-muted-foreground">{fmt(r.createdAt)}</td>
                 </tr>
               ))}
             </tbody>

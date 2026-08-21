@@ -72,7 +72,7 @@ export default async function AdminCouponDetail({ params }: { params: { id: stri
         <p className="text-sm text-muted-foreground">No redemptions yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Order</th>
@@ -86,25 +86,25 @@ export default async function AdminCouponDetail({ params }: { params: { id: stri
             <tbody>
               {reds.map((r) => (
                 <tr key={r.orderId} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
+                  <td data-label="Order" className="px-3 py-2">
                     <Link href={`/admin/orders/${r.orderId}`} className="font-mono text-primary hover:underline">
                       #{shortId(r.orderId)}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Customer" data-block className="px-3 py-2">
                     <div>{r.customerName ?? '—'}</div>
                     <div className="text-xs text-muted-foreground">{emails.get(r.userId) ?? ''}</div>
                   </td>
-                  <td className="px-3 py-2 text-right">− {inr(r.amountDiscounted)}</td>
-                  <td className="px-3 py-2 text-right">{inr(r.orderTotal)}</td>
-                  <td className="px-3 py-2">
+                  <td data-label="Discount" className="px-3 py-2 text-right">− {inr(r.amountDiscounted)}</td>
+                  <td data-label="Order total" className="px-3 py-2 text-right">{inr(r.orderTotal)}</td>
+                  <td data-label="Status" className="px-3 py-2">
                     {r.orderStatus && (
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.orderStatus)}`}>
                         {r.orderStatus}
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.redeemedAt as unknown as string)}</td>
+                  <td data-label="Redeemed" className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.redeemedAt as unknown as string)}</td>
                 </tr>
               ))}
             </tbody>

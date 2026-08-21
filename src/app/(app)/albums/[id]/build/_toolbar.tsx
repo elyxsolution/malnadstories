@@ -89,13 +89,19 @@ export default function CanvasToolbar({
   onExitBlueprint?: () => void;
   blueprintSaving?: boolean;
 }) {
+  // On phone the fixed-width tool groups exceed 375px, which squeezed the identity block to zero
+  // width and let its title and save chip spill out from under the bar. Below md the bar becomes
+  // a horizontally scrollable strip: the title keeps a readable minimum and truncates, every tool
+  // group stays at its designed size, and nothing is hidden — a tool strip is the one place a
+  // scroll is the honest answer, because the alternative is removing tools. `ms-scroll` matches
+  // the thin scrollbar used elsewhere in the builder. At md and up the bar is unchanged.
   return (
-    <div className="flex h-14 flex-none items-center gap-2 border-b border-border/70 bg-card/60 px-3 sm:px-4">
+    <div className="ms-scroll flex h-14 flex-none items-center gap-2 overflow-x-auto border-b border-border/70 bg-card/60 px-3 max-md:gap-1.5 max-md:px-2 sm:px-4 xl:overflow-x-visible">
       {/* Identity + status — customer mode only. In Blueprint Mode the dedicated header carries
           identity + save state, so the toolbar is tools-only. */}
       {!blueprintMode && (
-      <div className="flex min-w-0 items-center gap-2">
-        <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-foreground">{title}</h1>
+      <div className="flex min-w-0 items-center gap-2 max-md:min-w-[7rem] max-md:shrink">
+        <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-foreground max-md:min-w-[4.5rem]">{title}</h1>
         {reviewMode ? (
           /* ONE consolidated workflow status chip (replaces competing Submitted + review pills). */
           <span className="hidden items-center gap-1.5 rounded-full bg-warning/10 px-2.5 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/20 sm:inline-flex">
@@ -118,7 +124,9 @@ export default function CanvasToolbar({
         )}
         {/* Save status (CHANGE 7) — never leave the user guessing: Saving… / Unsaved / All changes saved. */}
         <span
-          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+          // flex-none + nowrap: in the phone scroll strip this chip was being compressed
+          // until 'All changes saved' wrapped onto three lines and grew the bar.
+          className={`inline-flex items-center gap-1 rounded-full max-md:flex-none max-md:whitespace-nowrap px-2 py-0.5 text-[11px] font-medium ${
             saving
               ? 'bg-studio/10 text-studio ring-1 ring-studio/20'
               : dirty
@@ -133,7 +141,7 @@ export default function CanvasToolbar({
       )}
 
       {/* Right cluster — editing tools (shared across the cover + content pages). */}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-2 max-md:flex-none max-md:gap-1.5">
         <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
           <Button variant="ghost" size="icon-sm" onClick={onUndo} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">
             <Undo2 />

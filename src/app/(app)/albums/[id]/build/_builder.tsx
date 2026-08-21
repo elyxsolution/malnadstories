@@ -240,6 +240,12 @@ export default function Builder({
 
   // Blueprint Mode opens on Layouts (blueprints carry no photos); customer albums open on Images.
   const [railTab, setRailTab] = useState<RailTab>(blueprintDraftOf ? 'layouts' : 'images');
+  /**
+   * Phone only: is the tool panel raised over the canvas? On desktop the panel is always beside
+   * the canvas and this is ignored (the `max-md:` classes are the only readers). It starts closed
+   * so a phone opens on the canvas — the thing being edited — rather than on a photo list.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false);
   // Cover is page 0 of one continuous editor: `coverFocused` swaps the canvas + inspector to
   // the cover; `current` is the focused content spread otherwise.
   const [coverFocused, setCoverFocused] = useState(false);
@@ -2210,7 +2216,7 @@ export default function Builder({
   const photoForOverview = usePhotoFor(photoMap, photoStateFor);
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)]">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)] max-md:pb-[calc(3.25rem+env(safe-area-inset-bottom))]">
       {blueprintMode ? (
         <BlueprintHeader
           meta={blueprintMeta}
@@ -2282,9 +2288,25 @@ export default function Builder({
 
       {/* 3 columns — one continuous editor (the cover is page 0) */}
       <div className="flex min-h-0 flex-1">
-        {/* LEFT — rail + sidebar */}
-        <div className="flex flex-none border-r border-border/70 bg-card">
-          <nav className="flex w-[68px] flex-col items-center gap-1 border-r border-border/70 py-3" aria-label="Tools">
+        {/*
+          LEFT — rail + sidebar.
+
+          ≥lg: unchanged — a 68px icon rail beside a 284px panel, exactly as before.
+          md–lg: same shape, narrower panel, so a tablet still gets a real canvas beside it.
+          <md: the pair leaves the flow entirely and becomes bottom chrome — the rail is a
+          horizontal tab bar pinned to the bottom edge and the panel is a sheet above it. At
+          375px the fixed 68+284 left column left 23px for the canvas, i.e. the one thing the
+          builder is for was off screen. Canvas-first is the only workable phone layout.
+        */}
+        <div
+          className={`flex flex-none border-border/70 bg-card max-md:pointer-events-none max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-30 max-md:flex-col-reverse max-md:border-r-0 md:border-r ${
+            sheetOpen ? 'max-md:top-0' : ''
+          }`}
+        >
+          <nav
+            className="pointer-events-auto order-2 flex w-[68px] flex-col items-center gap-1 border-border/70 py-3 max-md:order-none max-md:w-full max-md:flex-row max-md:justify-between max-md:gap-0 max-md:border-t max-md:bg-card max-md:px-1 max-md:py-1 max-md:pb-[max(0.25rem,env(safe-area-inset-bottom))] md:order-none md:border-r"
+            aria-label="Tools"
+          >
             {RAIL.filter((t) => (coverFocused ? t.key !== 'layouts' : t.key !== 'templates')).map((t) => {
               const active = railTab === t.key;
               // The Quality tab carries a count of what needs attention — the ONLY badge on the
@@ -2294,10 +2316,18 @@ export default function Builder({
                 <button
                   key={t.key}
                   type="button"
-                  onClick={() => setRailTab(t.key)}
+                  onClick={() => {
+                    // Desktop: unchanged — just switch the panel.
+                    // Phone: the rail is a tab bar, so tapping the active tool closes the sheet
+                    // and hands the whole screen back to the canvas.
+                    if (railTab === t.key) setSheetOpen((o) => !o);
+                    else setSheetOpen(true);
+                    setRailTab(t.key);
+                  }}
                   aria-current={active ? 'page' : undefined}
                   aria-label={flagged > 0 ? `${t.label} — ${flagged} needing attention` : undefined}
-                  className={`relative flex w-[56px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+                  // Phone: each tool becomes an equal-width tab with a ≥44px touch height.
+                  className={`relative flex w-[56px] flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright max-md:w-auto max-md:min-h-[44px] max-md:flex-1 max-md:gap-0.5 max-md:rounded-lg max-md:px-0.5 max-md:py-1.5 max-md:text-[9px] ${
                     active ? 'bg-studio text-studio-foreground shadow-soft' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
                   }`}
                 >
@@ -2318,7 +2348,25 @@ export default function Builder({
             })}
           </nav>
 
-          <aside className="flex w-[284px] flex-col overflow-hidden">
+          {/*
+            The panel. On phone it is a bottom sheet: hidden until a tool is tapped, capped at
+            most of the viewport, and scrollable inside itself so the canvas and the tab bar are
+            never pushed off screen.
+          */}
+          <aside
+            className={`pointer-events-auto flex w-[284px] flex-col overflow-hidden max-md:w-full max-md:rounded-t-2xl max-md:border-t max-md:border-border/70 max-md:shadow-[0_-8px_28px_-12px_hsl(var(--foreground)/0.18)] md:w-[240px] lg:w-[284px] ${
+              sheetOpen ? 'max-md:max-h-[calc(100dvh-8.5rem)] max-md:flex-1' : 'max-md:hidden'
+            }`}
+          >
+            {/* Sheet handle — phone only; the panel has no dismiss affordance on desktop. */}
+            <button
+              type="button"
+              onClick={() => setSheetOpen(false)}
+              className="hidden shrink-0 items-center justify-center gap-2 border-b border-border/60 py-2 text-[11px] font-medium text-muted-foreground max-md:flex"
+              aria-label="Close panel"
+            >
+              <span aria-hidden className="h-1 w-9 rounded-full bg-border" />
+            </button>
             {railTab === 'images' && (
               <>
                 {/*
@@ -2583,7 +2631,8 @@ export default function Builder({
           </aside>
         </div>
 
-        {/* CENTER — canvas */}
+        {/* CENTER — canvas. On phone it owns the full width; the bottom padding keeps the
+            filmstrip and page controls clear of the fixed tool tab bar. */}
         <main className="relative flex min-w-0 flex-1 flex-col">
           {/* canvas strip — one linear sequence: Cover → Spread 1 → … */}
           <div className="flex h-11 flex-none items-center justify-between gap-2 border-b border-border/60 px-4">
@@ -2899,14 +2948,14 @@ export default function Builder({
       </div>
 
       {/* BOTTOM — timeline (the Cover is page 0, then the content spreads) */}
-      <div className="flex flex-none items-center gap-3 border-t border-border/70 bg-card px-4 py-2">
+      <div className="flex flex-none items-center gap-3 border-t border-border/70 bg-card px-4 py-2 max-md:gap-2 max-md:px-2 max-md:py-1.5">
         {/* Cover thumbnail — page 0 (fixed first, not reorderable/deletable) */}
         <button
           type="button"
           onClick={focusCover}
           aria-current={coverFocused ? 'true' : undefined}
           title="Cover — back · spine · front"
-          className={`group relative h-[58px] w-[92px] flex-none overflow-hidden rounded-lg bg-white ring-2 transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-studio-bright ${coverFocused ? 'ring-studio shadow-card' : 'ring-border'}`}
+          className={`group relative h-[58px] w-[92px] flex-none overflow-hidden rounded-lg bg-white ring-2 max-md:h-[42px] max-md:w-[66px] transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-studio-bright ${coverFocused ? 'ring-studio shadow-card' : 'ring-border'}`}
         >
           <div className="absolute inset-0">
             <CoverSpread
@@ -2985,9 +3034,9 @@ export default function Builder({
               onClick={() => setFlipbookOpen(true)}
               aria-label="Preview album"
               title="Preview album"
-              className="flex-none gap-2 rounded-lg border-transparent bg-[hsl(150_48%_29%)] px-4 font-semibold text-studio-foreground shadow-[0_1px_2px_rgb(16_24_20/0.14),0_8px_20px_-8px_hsl(150_46%_22%/0.55)] transition-all duration-200 ease-glide hover:-translate-y-px hover:bg-[hsl(150_50%_25%)] hover:shadow-[0_3px_10px_rgb(16_24_20/0.18),0_16px_30px_-10px_hsl(150_46%_20%/0.6)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-2"
+              className="flex-none gap-2 rounded-lg border-transparent bg-[hsl(150_48%_29%)] px-4 font-semibold max-md:px-3 text-studio-foreground shadow-[0_1px_2px_rgb(16_24_20/0.14),0_8px_20px_-8px_hsl(150_46%_22%/0.55)] transition-all duration-200 ease-glide hover:-translate-y-px hover:bg-[hsl(150_50%_25%)] hover:shadow-[0_3px_10px_rgb(16_24_20/0.18),0_16px_30px_-10px_hsl(150_46%_20%/0.6)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-2"
             >
-              <Eye /> Preview
+              <Eye /> <span className="max-md:hidden">Preview</span>
             </Button>
           </>
         )}
@@ -3256,7 +3305,7 @@ function EmptyCanvas({
   awaitingShapes?: boolean;
 }) {
   return (
-    <div className="mx-auto mt-6 max-w-md animate-scale-in rounded-2xl border border-dashed border-border bg-card/70 p-12 text-center">
+    <div className="mx-auto mt-6 max-w-md animate-scale-in rounded-2xl border border-dashed border-border bg-card/70 p-12 text-center max-md:mt-3 max-md:p-6">
       <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-secondary text-muted-foreground ring-1 ring-border">
         <LayoutGrid className="h-6 w-6" />
       </div>
@@ -3280,9 +3329,22 @@ function EmptyCanvas({
             {!hasPhotos ? 'Start your story' : awaitingShapes ? 'Getting your photos ready' : 'Ready when you are'}
           </p>
           <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-            {!hasPhotos
-              ? 'Add photos on the left — you can start placing them the moment you pick them, while they upload.'
-              : awaitingShapes
+            {/*
+              "on the left" is only true where the panel IS on the left. Desktop keeps its exact
+              original sentence; the phone, where the panel is a bottom sheet, gets the same
+              sentence with the direction it can actually follow. Two spans rather than one
+              rewritten string, so the desktop copy is untouched.
+            */}
+            {!hasPhotos ? (
+              <>
+                <span className="max-md:hidden">
+                  Add photos on the left — you can start placing them the moment you pick them, while they upload.
+                </span>
+                <span className="md:hidden">
+                  Add photos from the Images tab — you can start placing them the moment you pick them, while they upload.
+                </span>
+              </>
+            ) : awaitingShapes
                 ? 'We’re preparing your photos. You can build pages by hand now, and let us arrange them once they’re ready.'
                 : 'Add a single page (a photo on each side) or a double page (one image across the fold) — or let us arrange your photos.'}
           </p>

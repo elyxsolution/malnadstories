@@ -93,7 +93,7 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
         <p className="text-sm text-muted-foreground">No orders.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Order</th>
@@ -107,22 +107,22 @@ export default async function AdminCustomerDetail({ params }: { params: { id: st
             <tbody>
               {orderRows.map((o) => (
                 <tr key={o.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
+                  <td data-label="Order" className="px-3 py-2">
                     <Link href={`/admin/orders/${o.id}`} className="font-mono text-primary hover:underline">
                       #{shortId(o.id)}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Album" className="px-3 py-2">
                     {o.itemCount > 1 ? `${o.firstTitle ?? 'Album'} + ${o.itemCount - 1} more` : (o.firstTitle ?? '—')}
                   </td>
-                  <td className="px-3 py-2 text-right">{inr(o.total)}</td>
-                  <td className="px-3 py-2 text-center">{o.copies}</td>
-                  <td className="px-3 py-2">
+                  <td data-label="Amount" className="px-3 py-2 text-right">{inr(o.total)}</td>
+                  <td data-label="Copies" className="px-3 py-2 text-center">{o.copies}</td>
+                  <td data-label="Status" className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(o.status)}`}>
                       {o.status}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDate(o.placedAt as unknown as string)}</td>
+                  <td data-label="Placed" className="px-3 py-2 text-muted-foreground">{fmtDate(o.placedAt as unknown as string)}</td>
                 </tr>
               ))}
             </tbody>

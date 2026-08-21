@@ -383,6 +383,249 @@
   /* Quiet, premium thin scrollbar for the builder's scrollable regions (sidebar,
      canvas, timeline). Track is invisible; the thumb is a soft neutral that warms
      to the studio green on hover — never a heavy default bar competing with content. */
+  /**
+   * TOUCH HIT AREAS.
+   *
+   * The audit found sub-32px controls on 57 of 61 routes — icon buttons at 24–28px, filter
+   * chips at 26px, table checkboxes at 16px. They are correct for a mouse and too small for a
+   * thumb.
+   *
+   * `pointer: coarse` is the guard, and it is the reason this cannot touch desktop: a mouse is
+   * `pointer: fine`, so none of these rules are even evaluated at 1440/1600/1920. It also beats
+   * a width breakpoint here, because the problem is the input device, not the viewport — a
+   * 1024px tablet needs the bigger target and a 1024px laptop window does not.
+   *
+   * The hit area is expanded with a centred pseudo-element rather than by resizing the control,
+   * so NOTHING MOVES: the painted button keeps its designed size and the touchable region grows
+   * underneath it to 44px. Scoped to genuinely small controls (`size-6/7/8`, `h-6/7/8`) so
+   * already-comfortable buttons are left alone, and excluded inside `[data-no-touch-target]`
+   * for the rare dense cluster where overlapping hit areas would be worse than small ones.
+   */
+  /* Size container for the builder's selection chrome — read by the coarse-pointer handle rule
+     below to decide whether the element can afford a thumb-sized handle. Declared outside the
+     media query so the containment context exists regardless of pointer type; it has no visual
+     effect (the element is absolutely positioned with an explicit geometry). */
+  .bj-chrome {
+    container-type: size;
+  }
+
+  @media (pointer: coarse) {
+    :where(button, [role='button'], a[href], summary):not([data-no-touch-target] *)::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      translate: -50% -50%;
+      min-width: 44px;
+      min-height: 44px;
+      width: 100%;
+      height: 100%;
+      /* Behind the label, above nothing — purely a touch surface. */
+      z-index: 0;
+    }
+
+    /* The pseudo-element needs a positioned ancestor to centre against. `relative` is a no-op
+       for an element that is already positioned, and buttons are inline-flex leaf controls, so
+       this does not disturb any layout. */
+    :where(button, [role='button'], a[href], summary):not([data-no-touch-target] *) {
+      position: relative;
+    }
+
+    /**
+     * R4 — album-builder transform handles.
+     *
+     * The eight resize handles and the rotate handle are `<span role="presentation">`, so the
+     * button rule above never reached them: measured 12×12 (corners), 20×8 / 8×20 (edges) and
+     * 14×14 (rotate) with no expansion at all. They are correct sizes for a cursor and
+     * impossible to hit with a thumb.
+     *
+     * 36px rather than 44px is deliberate. On a small overlay (measured 97×158) the corner and
+     * edge handles sit close together; at 44px their hit areas would overlap enough that the
+     * wrong handle would win, which is worse than a small target. 36px clears the gap on that
+     * overlay while still being a comfortable touch target.
+     *
+     * Painted size is untouched — the dot stays 12px. Desktop is `pointer: fine` and never
+     * evaluates any of this.
+     */
+    /**
+     * The expansion is gated on the ELEMENT's size (`.bj-chrome` is the size container drawn
+     * around the selection). A 36px box on the bottom-edge handle of a 151×30 text block covers
+     * the block's centre and eats the taps meant for the text — measured, and it is what made
+     * text editing unreachable on touch. Above 96×96 there is room for a thumb-sized handle
+     * without occluding the element; below it the handles keep their painted size and the
+     * element itself stays tappable, which matters more.
+     */
+    @container (min-width: 96px) and (min-height: 96px) {
+      [data-mv-handle]::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        translate: -50% -50%;
+        width: 100%;
+        height: 100%;
+        min-width: 36px;
+        min-height: 36px;
+        /* The handle is the drag target; this only widens where the pointer is accepted. */
+        pointer-events: auto;
+      }
+    }
+
+    /* Links inside running prose are not controls — a 44px box around every inline link would
+       overlap neighbouring lines and swallow taps meant for the text. Table cells are excluded
+       for the opposite reason: rows are ~40px apart, so a 44px hit area would bleed into the
+       row above and turn a precise tap into a wrong one. */
+    :where(p, td, dd, blockquote) a[href]::after {
+      content: none;
+    }
+
+    /* Navigation lists (footers, menus) ARE controls. They get a slightly smaller 40px target so
+       stacked links stay comfortably tappable without their hit areas overlapping. */
+    :where(li) a[href]::after {
+      min-width: 0;
+      min-height: 40px;
+    }
+
+    /**
+     * R9 — the cross-navigation between the auth screens ("Create an account" on /login,
+     * "Sign In" on /signup, "Back to log in" on /forgot-password) is a link inside a short
+     * `<p>`, so the prose exclusion below strips its hit area and leaves it 16px tall —
+     * measured 126x16, 46x16 and 93x16. On these four screens that link is the only way to
+     * reach the other one. Same reasoning and same 36px as the admin breadcrumb rule; the
+     * paragraphs here are one short line, so nothing else is near enough to lose a tap.
+     */
+    [data-auth] p a[href]::after {
+      content: '';
+      min-width: 0;
+      min-height: 36px;
+    }
+
+    /**
+     * R7 — admin breadcrumbs. They are written as `<p><Link>Orders</Link> / #id</p>`, so the
+     * prose exclusion above strips their hit area — but a breadcrumb is navigation, not
+     * running text, and on a detail page it is the way back out. Restored to 36px inside the
+     * back office only; everything around it is text, so a taller target steals no taps.
+     */
+    [data-admin] p a[href]::after {
+      content: '';
+      min-width: 0;
+      min-height: 36px;
+    }
+
+    /**
+     * R7 — back-office filter controls. Every admin search box, status select and filter
+     * button is `h-8` (32px), which is a comfortable mouse target and a mean one for a thumb.
+     * A min-height lifts them to 36px on touch devices ONLY; `pointer: fine` never sees it, so
+     * the desktop console keeps its designed density. Scoped to `[data-admin]` so no customer
+     * surface changes. Painted width and every other style are untouched.
+     */
+    [data-admin] :where(input, select, textarea) {
+      min-height: 36px;
+    }
+
+    /**
+     * R7 — a link inside a STACKED admin table cell is the row's action, and the reason the
+     * rule above excludes `td a[href]` no longer holds there: once the row is a card, the
+     * neighbouring lines are plain text, so an expanded hit area cannot steal a tap from
+     * another link. 36px rather than 44px because the stacked lines are ~30px apart.
+     * Still excluded while the table is tabular — that layout is the one with 40px rows.
+     */
+    table.ms-stack tbody td a[href]::after {
+      content: '';
+      /* A very short title ("ABC") is a 23px-wide link. In a stacked cell it is alone on its
+         line — the only thing beside it is its own label, which is not interactive — so a
+         wider hit area cannot steal a tap from anything. */
+      min-width: 44px;
+      min-height: 36px;
+    }
+  }
+
+  /**
+   * R7 — ADMIN TABLES ON A PHONE.
+   *
+   * The admin tables are wide by nature (orders carries 9 columns). At 375 the content column
+   * is 315px, so the orders table was 858px inside a 315px scroller: a third of a row visible
+   * at a time, with no indication the rest existed. Measured overflow-past-container before
+   * this rule: orders +543, coupons +483, reviews +343, customers +328, albums +264.
+   *
+   * Below md each row becomes a card: every cell keeps its value and its controls, and the
+   * column name is restored from `data-label` so NO information is dropped — the same cells,
+   * the same links, the same actions, reflowed. Above md nothing here applies and the table
+   * stays exactly as designed, which is why desktop cannot be affected.
+   *
+   * The header row is visually hidden rather than `display: none` so the column names stay in
+   * the accessibility tree; any `th` holding a control (the orders select-all) keeps rendering.
+   * If a browser lacks `:has()` the whole selector is dropped and the headers simply stay
+   * visible — a cosmetic failure, never a missing control.
+   */
+  @media (max-width: 767px) {
+    table.ms-stack thead th:not(:has(button)):not(:has(input)) {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    table.ms-stack tbody tr {
+      display: block;
+      padding: 0.375rem 0;
+    }
+
+    table.ms-stack tbody td {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      width: 100%;
+      padding: 0.25rem 0.75rem;
+      text-align: right;
+      /* A table still sizes itself from its cells' min-content width, so one long unbroken
+         value (an error message, an email) would push the whole table past the viewport even
+         though the rows are stacked. Measured on /admin/errors: 399px inside a 283px column.
+         Letting long strings wrap makes the min-content width small enough to fit. */
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    /* The column name, taken from the cell's own data-label. Cells that deliberately carry no
+       label (a leading checkbox, a trailing action) simply render without one. */
+    table.ms-stack tbody td[data-label]::before {
+      content: attr(data-label);
+      flex: 0 0 auto;
+      text-align: left;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: hsl(var(--muted-foreground));
+      white-space: nowrap;
+    }
+
+    /* A cell whose content is itself a block (name over email, a badge) reads better stacked
+       under its label than squeezed onto the same line. */
+    table.ms-stack tbody td[data-block] {
+      display: block;
+      text-align: left;
+    }
+    table.ms-stack tbody td[data-block]::before {
+      display: block;
+      margin-bottom: 0.125rem;
+    }
+
+    /* Admin filter bars fix their search boxes at 220–240px. On a 320 phone the content column
+       is 260px, so a fixed 240px box plus its Search button cannot sit on one line. Capping the
+       width lets them fill what is actually available instead of forcing a wrap or an overflow;
+       the elements, their order and their behaviour are unchanged. */
+    [data-admin] :where(input, select) {
+      max-width: 100%;
+    }
+  }
+
   .ms-scroll {
     scrollbar-width: thin;
     scrollbar-color: hsl(150 8% 78%) transparent;

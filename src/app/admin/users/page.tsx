@@ -40,7 +40,7 @@ export default async function AdminUsersPage() {
       </p>
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className="ms-stack w-full text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-2">User</th>
@@ -52,12 +52,12 @@ export default async function AdminUsersPage() {
           <tbody>
             {admins.map((a) => (
               <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
-                <td className="px-3 py-2 font-medium">{a.name ?? '—'}</td>
-                <td className="px-3 py-2 text-muted-foreground">{emails.get(a.id) ?? '—'}</td>
-                <td className="px-3 py-2">
+                <td data-label="User" className="px-3 py-2 font-medium">{a.name ?? '—'}</td>
+                <td data-label="Email" className="px-3 py-2 text-muted-foreground">{emails.get(a.id) ?? '—'}</td>
+                <td data-label="Role" className="px-3 py-2">
                   <RoleSelect userId={a.id} currentRole={roleBy.get(a.id) ?? 'super_admin'} isSelf={a.id === me.userId} />
                 </td>
-                <td className="px-3 py-2 text-right text-muted-foreground">
+                <td data-label="Last active" className="px-3 py-2 text-right text-muted-foreground">
                   {lastBy.get(a.id) ? fmtDateTime(lastBy.get(a.id) as unknown as string) : '—'}
                 </td>
               </tr>

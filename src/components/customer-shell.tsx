@@ -40,7 +40,13 @@ export default function CustomerShell({ email, children }: { email: string; chil
 
   return (
     <div className="brand-surface flex min-h-[calc(100vh-3.5rem)]">
-      <aside className="sticky top-14 z-20 flex h-[calc(100vh-3.5rem)] w-[68px] flex-none flex-col bg-primary-deep py-6 text-primary-foreground/80 sm:w-[236px]">
+      {/* R8 — the rail is a fixed-height sticky column, so anything taller than the viewport was
+          simply unreachable: in phone landscape (667x375) its content is 480px inside a 319px
+          box, hiding 161px — Support, Account, New album and the user chip could be focused by
+          keyboard but never scrolled into view. `overflow-y-auto` makes them reachable and is a
+          no-op wherever the content already fits (portrait 611/611, desktop 844/844), which is
+          why no other viewport changes. Matches the admin rail, which already scrolls. */}
+      <aside className="sticky top-14 z-20 flex h-[calc(100vh-3.5rem)] w-[68px] flex-none flex-col overflow-y-auto bg-primary-deep py-6 text-primary-foreground/80 sm:w-[236px]">
         <Link href="/dashboard" className="mb-9 flex items-center gap-3 px-4 sm:px-6">
           <span className="grid h-8 w-8 flex-none place-items-center border border-gold-light text-gold-pale">
             <Sprig className="h-4 w-4" />

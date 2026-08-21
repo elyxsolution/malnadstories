@@ -158,7 +158,7 @@ export default async function ReviewQueue({
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Review</th>
@@ -174,7 +174,7 @@ export default async function ReviewQueue({
                   r.status === 'pending_review' && new Date(r.updatedAt as unknown as string).getTime() < staleBefore;
                 return (
                   <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2">
+                    <td data-label="Review" className="px-3 py-2">
                       <Link href={`${base}/${r.id}`} className="font-mono text-primary hover:underline">
                         #{shortId(r.id)}
                       </Link>
@@ -184,15 +184,15 @@ export default async function ReviewQueue({
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2">{r.albumTitle ?? '—'}</td>
-                    <td className="px-3 py-2">
+                    <td data-label="Album" className="px-3 py-2">{r.albumTitle ?? '—'}</td>
+                    <td data-label="Customer" data-block className="px-3 py-2">
                       <div>{r.customerName ?? '—'}</div>
                       <div className="text-xs text-muted-foreground">{emails.get(r.customerId) ?? ''}</div>
                     </td>
-                    <td className="px-3 py-2">
+                    <td data-label="Status" className="px-3 py-2">
                       <StatusBadge className={reviewStatusChip(r.status)} label={reviewStatusLabel(r.status)} />
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
+                    <td data-label="Updated" className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
                   </tr>
                 );
               })}

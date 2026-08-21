@@ -444,6 +444,36 @@ export default function Movable({
       if (settled !== rect) onChange(settled);
     }
     onCommit?.();
+    maybeDoubleTap(e);
+  };
+
+  /**
+   * R5 — reach `onDoubleClick` from a finger.
+   *
+   * The native `dblclick` this component already listens for only survives when both clicks land
+   * on the SAME node: the first click selects the element, React re-renders the Movable, and the
+   * pairing is lost if the second click arrives after that. Measured: an atomic `clickCount: 2`
+   * opens the editor, two clicks 220ms apart do not — on DESKTOP as well as on touch. A mouse
+   * double-click is fast enough to win that race in practice; two taps with a thumb never are, so
+   * text editing was unreachable on touch.
+   *
+   * This pairs two touch taps on the same element and calls the SAME `onDoubleClick` callback —
+   * no new action, no new workflow, nothing added to the UI. It is gated on
+   * `pointerType === 'touch'`, so a mouse never enters this path and desktop behaviour, including
+   * the existing native `dblclick`, is untouched.
+   */
+  const lastTap = useRef(0);
+  const maybeDoubleTap = (e: ReactPointerEvent) => {
+    if (!onDoubleClick || e.pointerType !== 'touch') return;
+    const now = e.timeStamp || Date.now();
+    // 450ms is deliberately more generous than the mouse interval: a thumb is slower than a
+    // finger on a button, and the first tap has a re-render to pay for.
+    if (now - lastTap.current < 450) {
+      lastTap.current = 0;
+      onDoubleClick();
+      return;
+    }
+    lastTap.current = now;
   };
 
   /** The element's box geometry — shared verbatim by the element and its selection chrome. */
@@ -471,7 +501,15 @@ export default function Movable({
   const chrome =
     !locked && (selected || fullyOffPage) ? (
       <div
-        className="pointer-events-none absolute z-[40]"
+        /**
+         * R5 — `bj-chrome` makes this a size container so the handle hit-area rule in globals.css
+         * can ask how big the element actually is. R4 grew every handle's touch target to 36px,
+         * which is right for a photo (measured 97×158) and wrong for a text block (measured
+         * 151×30): the bottom handle's 36px box then covered the element's centre and swallowed
+         * the taps meant for the text. The rule now only expands when the element can spare the
+         * room. Nothing about the painted chrome changes.
+         */
+        className="bj-chrome pointer-events-none absolute z-[40]"
         style={{
           ...geometry,
           ...(selected
@@ -529,12 +567,22 @@ export default function Movable({
                   key={hd.id}
                   role="presentation"
                   aria-label={hd.label}
+                  /**
+                   * R4 — touch. These are 12×12 dots and 20×8 bars: correct for a cursor,
+                   * unhittable with a thumb. `data-mv-handle` opts them into the coarse-pointer
+                   * hit-area rule in globals.css, which grows the TOUCHABLE region only and
+                   * leaves the painted dot exactly as it is. `touch-none` is the other half:
+                   * `touch-action` does not inherit, so although the movable wrapper already
+                   * sets it, a drag starting ON a handle was still being claimed by the
+                   * browser's scroll gesture.
+                   */
+                  data-mv-handle=""
                   onPointerDown={begin('resize', { x: hd.x, y: hd.y })}
                   onPointerMove={onMove}
                   onPointerUp={end}
                   onPointerCancel={end}
                   style={{ cursor: hd.cursor }}
-                  className={`pointer-events-auto absolute border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 ${hd.pos} ${
+                  className={`pointer-events-auto absolute touch-none border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 ${hd.pos} ${
                     isCorner
                       ? 'h-3 w-3 rounded-full'
                       : hd.x === 0
@@ -552,11 +600,13 @@ export default function Movable({
                 <span
                   role="presentation"
                   aria-label="Rotate"
+                  /* Same treatment as the resize handles: 14×14 painted, thumb-sized to touch. */
+                  data-mv-handle=""
                   onPointerDown={begin('rotate')}
                   onPointerMove={onMove}
                   onPointerUp={end}
                   onPointerCancel={end}
-                  className="pointer-events-auto absolute -top-1.5 left-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab rounded-full border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 active:cursor-grabbing"
+                  className="pointer-events-auto absolute -top-1.5 left-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab touch-none rounded-full border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 active:cursor-grabbing"
                 />
               </>
             )}

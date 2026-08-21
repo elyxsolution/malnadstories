@@ -255,16 +255,21 @@ export default function Flipbook({
 
       {/* Top bar */}
       <div className="relative z-10 flex items-center justify-between px-4 py-3 text-white/90 sm:px-6">
-        <span className="font-display text-[15px] tracking-tight">{cover?.name ?? 'Album preview'}</span>
-        <div className="flex items-center gap-1.5">
+        {/* The controls need a fixed amount of room, so the title is the part that gives: it
+            truncates rather than wrapping. Below sm the cluster is 281px of a 375px bar, which
+            left the title 62px and three wrapped lines — hence the two max-sm drops below. */}
+        <span className="min-w-0 flex-1 truncate font-display text-[15px] tracking-tight">{cover?.name ?? 'Album preview'}</span>
+        <div className="flex shrink-0 items-center gap-1.5">
           <CircleBtn label="Zoom out" onClick={() => setZoom((z) => Math.max(0.6, +(z - 0.15).toFixed(2)))}>
             <ZoomOut className="h-4 w-4" />
           </CircleBtn>
-          <span className="w-12 text-center text-[12px] tabular-nums text-white/70">{Math.round(zoom * 100)}%</span>
+          <span className="w-12 text-center text-[12px] tabular-nums text-white/70 max-sm:hidden">{Math.round(zoom * 100)}%</span>
           <CircleBtn label="Zoom in" onClick={() => setZoom((z) => Math.min(2, +(z + 0.15).toFixed(2)))}>
             <ZoomIn className="h-4 w-4" />
           </CircleBtn>
-          <CircleBtn label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} onClick={toggleFullscreen}>
+          {/* A phone browser is already full-bleed and iOS Safari will not fullscreen a div, so
+              below sm this control costs 40px of title width for nothing. */}
+          <CircleBtn label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} onClick={toggleFullscreen} className="max-sm:hidden">
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </CircleBtn>
           {/* The other half of the persistent Edit ↔ Preview toggle. In preview the way back to
@@ -387,14 +392,14 @@ function StaticSpreads({
   );
 }
 
-function CircleBtn({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+function CircleBtn({ label, onClick, children, className = '' }: { label: string; onClick: () => void; children: ReactNode; className?: string }) {
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white/90 transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+      className={`grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white/90 transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${className}`}
     >
       {children}
     </button>

@@ -30,7 +30,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const allowed = navHrefsForRole(ctx.role);
 
   return (
-    <div className={`${brandFontVars} font-ui flex min-h-screen flex-col`}>
+    // `data-admin` is a styling hook only (R7): it scopes the touch-target and narrow-viewport
+    // rules in globals.css to the back office, so the customer surfaces cannot be affected.
+    <div data-admin className={`${brandFontVars} font-ui flex min-h-screen flex-col`}>
       <AppHeader email={ctx.email ?? ''} />
       <div className="flex flex-1">
         <AdminNav allowed={allowed} />

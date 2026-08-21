@@ -89,7 +89,7 @@ export default async function StoragePage() {
           <EmptyState title="No stored albums yet" description="Album photo + PDF storage will appear here as customers build and order." />
         ) : (
           <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
+            <table className="ms-stack w-full text-sm">
               <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">Album</th>
@@ -102,13 +102,13 @@ export default async function StoragePage() {
               <tbody>
                 {largest.map((a) => (
                   <tr key={a.albumId} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2">
+                    <td data-label="Album" className="px-3 py-2">
                       <Link href={`/admin/albums/${a.albumId}`} className="text-primary hover:underline">{a.title ?? `#${shortId(a.albumId)}`}</Link>
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{a.customer}</td>
-                    <td className="px-3 py-2 text-center tabular-nums">{a.photoCount}</td>
-                    <td className="px-3 py-2 text-center text-muted-foreground">{a.hasPdf ? '✓' : '—'}</td>
-                    <td className="px-3 py-2 text-right font-medium tabular-nums">≈ {formatBytes(a.bytes)}</td>
+                    <td data-label="Customer" className="px-3 py-2 text-muted-foreground">{a.customer}</td>
+                    <td data-label="Photos" className="px-3 py-2 text-center tabular-nums">{a.photoCount}</td>
+                    <td data-label="PDF" className="px-3 py-2 text-center text-muted-foreground">{a.hasPdf ? '✓' : '—'}</td>
+                    <td data-label="Est. size" className="px-3 py-2 text-right font-medium tabular-nums">≈ {formatBytes(a.bytes)}</td>
                   </tr>
                 ))}
               </tbody>

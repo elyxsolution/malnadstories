@@ -76,7 +76,7 @@ export default async function AdminShippingPage() {
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Order</th>
@@ -91,12 +91,12 @@ export default async function AdminShippingPage() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
+                  <td data-label="Order" className="px-3 py-2">
                     <Link href={`/admin/orders/${r.id}`} className="font-mono text-primary hover:underline">
                       #{shortId(r.id)}
                     </Link>
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Album / To" data-block className="px-3 py-2">
                     <div>
                       {r.itemCount > 1
                         ? `${r.firstTitle ?? 'Album'} + ${r.itemCount - 1} more · ${r.totalCopies} copies`
@@ -107,19 +107,19 @@ export default async function AdminShippingPage() {
                       {r.city ? ` · ${r.city}, ${r.state}` : ''}
                     </div>
                   </td>
-                  <td className="px-3 py-2">{r.carrier ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-amber-700">{r.trackingNumber ?? '—'}</td>
-                  <td className="px-3 py-2">
+                  <td data-label="Courier" className="px-3 py-2">{r.carrier ?? '—'}</td>
+                  <td data-label="Tracking" className="px-3 py-2 font-mono text-xs text-amber-700">{r.trackingNumber ?? '—'}</td>
+                  <td data-label="Order status" className="px-3 py-2">
                     <StatusBadge className={statusChip(r.status)} label={adminStatusLabel(r.status)} />
                   </td>
-                  <td className="px-3 py-2">
+                  <td data-label="Shipment" className="px-3 py-2">
                     {r.shipmentStatus ? (
                       <StatusBadge className={shipmentStatusChip(r.shipmentStatus)} label={shipmentStatusLabel(r.shipmentStatus)} />
                     ) : (
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.shippedAt as unknown as string)}</td>
+                  <td data-label="Shipped" className="px-3 py-2 text-muted-foreground">{fmtDate(r.shippedAt as unknown as string)}</td>
                 </tr>
               ))}
             </tbody>

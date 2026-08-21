@@ -106,7 +106,7 @@ export default async function ErrorsPage({ searchParams }: { searchParams: Searc
             No errors match these filters — nothing to investigate.
           </p>
         ) : (
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-4 py-2.5 font-medium">Severity</th>
@@ -119,13 +119,13 @@ export default async function ErrorsPage({ searchParams }: { searchParams: Searc
             <tbody className="divide-y">
               {rows.map((r) => (
                 <tr key={r.id} className="group hover:bg-muted/30">
-                  <td className="px-4 py-2.5 align-top">
+                  <td data-label="Severity" className="px-4 py-2.5 align-top">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${severityChip(r.severity)}`}>
                       {severityLabel(r.severity)}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 align-top text-xs text-muted-foreground">{categoryLabel(r.category)}</td>
-                  <td className="max-w-md px-4 py-2.5 align-top">
+                  <td data-label="Category" className="px-4 py-2.5 align-top text-xs text-muted-foreground">{categoryLabel(r.category)}</td>
+                  <td data-label="Message" className="max-w-md px-4 py-2.5 align-top">
                     <Link href={`/admin/errors/${r.id}`} className="block">
                       <span className="line-clamp-2 font-medium text-foreground group-hover:underline">{r.message}</span>
                       <span className="mt-0.5 block text-[11px] text-muted-foreground">
@@ -135,8 +135,8 @@ export default async function ErrorsPage({ searchParams }: { searchParams: Searc
                       </span>
                     </Link>
                   </td>
-                  <td className="px-4 py-2.5 text-right align-top tabular-nums">{r.occurrences}</td>
-                  <td className="px-4 py-2.5 align-top text-xs text-muted-foreground">{fmt(r.lastSeenAt)}</td>
+                  <td data-label="Count" className="px-4 py-2.5 text-right align-top tabular-nums">{r.occurrences}</td>
+                  <td data-label="Last seen" className="px-4 py-2.5 align-top text-xs text-muted-foreground">{fmt(r.lastSeenAt)}</td>
                 </tr>
               ))}
             </tbody>

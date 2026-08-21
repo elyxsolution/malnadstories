@@ -90,7 +90,7 @@ export default async function CmsDashboardPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Title</th>
@@ -102,19 +102,19 @@ export default async function CmsDashboardPage() {
             <tbody>
               {recent.map((r) => (
                 <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-3 py-2">
+                  <td data-label="Title" className="px-3 py-2">
                     <Link href={`/admin/cms/content/${r.id}`} className="text-primary hover:underline">
                       {r.title}
                     </Link>
                     <span className="ml-2 font-mono text-xs text-muted-foreground">#{shortId(r.id)}</span>
                   </td>
-                  <td className="px-3 py-2">{typeLabel(r.type)}</td>
-                  <td className="px-3 py-2">
+                  <td data-label="Type" className="px-3 py-2">{typeLabel(r.type)}</td>
+                  <td data-label="Status" className="px-3 py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
                       {statusLabel(r.status)}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
+                  <td data-label="Updated" className="px-3 py-2 text-muted-foreground">{fmtDateTime(r.updatedAt as unknown as string)}</td>
                 </tr>
               ))}
             </tbody>

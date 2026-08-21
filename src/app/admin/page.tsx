@@ -224,7 +224,7 @@ export default async function AdminDashboard() {
         </Link>
       </div>
       <div className="mt-2 overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className="ms-stack w-full text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="px-3 py-2">Order</th>
@@ -238,22 +238,22 @@ export default async function AdminDashboard() {
           <tbody>
             {recent.map((r) => (
               <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                <td className="px-3 py-2">
+                <td data-label="Order" className="px-3 py-2">
                   <Link href={`/admin/orders/${r.id}`} className="font-mono text-primary hover:underline">
                     #{shortId(r.id)}
                   </Link>
                 </td>
-                <td className="px-3 py-2">{r.customerName ?? emails.get(r.userId) ?? '—'}</td>
-                <td className="px-3 py-2">
+                <td data-label="Customer" className="px-3 py-2">{r.customerName ?? emails.get(r.userId) ?? '—'}</td>
+                <td data-label="Album" className="px-3 py-2">
                   {r.itemCount > 1 ? `${r.firstTitle ?? 'Album'} + ${r.itemCount - 1} more` : (r.firstTitle ?? '—')}
                 </td>
-                <td className="px-3 py-2 text-right">{inr(r.total)}</td>
-                <td className="px-3 py-2">
+                <td data-label="Amount" className="px-3 py-2 text-right">{inr(r.total)}</td>
+                <td data-label="Status" className="px-3 py-2">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusChip(r.status)}`}>
                     {r.status}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt as unknown as string)}</td>
+                <td data-label="Created" className="px-3 py-2 text-muted-foreground">{fmtDate(r.placedAt as unknown as string)}</td>
               </tr>
             ))}
           </tbody>

@@ -155,8 +155,14 @@ export default function StepBuild({
           </p>
         ) : (
           /* The grid stays comfortable: tiles are unchanged in size, there are simply more
-             columns available now that the section around them is tighter. */
-          <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 xl:grid-cols-10">
+             columns available now that the section around them is tighter.
+
+             R3: only the BASE (mobile) column count changed — `sm:` and up are untouched, so
+             every tablet and desktop width renders exactly as before. Four columns measured
+             64×64 at 320px and 78×78 at 375px, too small to tell one photograph from another
+             and cramped for the Retry overlay. Three columns give ~88px at 320 and ~106px at
+             375; the fourth column returns at 420px where there is room for it. */
+          <ul className="grid grid-cols-3 gap-2 min-[420px]:grid-cols-4 sm:grid-cols-6 md:grid-cols-8 xl:grid-cols-10">
             {photos.map((p) => {
               const src = resolvePhotoUrl(p, 'thumb');
               const task = uploads.taskByTempPhotoId.get(p.id);

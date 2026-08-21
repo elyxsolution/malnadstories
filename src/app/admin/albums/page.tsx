@@ -52,7 +52,7 @@ export default async function AdminAlbumsPage() {
         />
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Album</th>
@@ -67,18 +67,18 @@ export default async function AdminAlbumsPage() {
                 const ord = latestOrder.get(a.id);
                 return (
                   <tr key={a.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2">
+                    <td data-label="Album" className="px-3 py-2">
                       <Link href={`/admin/albums/${a.id}`} className="text-primary hover:underline">
                         {a.title}
                       </Link>
                     </td>
-                    <td className="px-3 py-2">
+                    <td data-label="Customer" className="px-3 py-2">
                       <Link href={`/admin/customers/${a.userId}`} className="hover:underline">
                         {a.customerName ?? emails.get(a.userId) ?? '—'}
                       </Link>
                     </td>
-                    <td className="px-3 py-2 capitalize text-muted-foreground">{a.status}</td>
-                    <td className="px-3 py-2">
+                    <td data-label="Album status" className="px-3 py-2 capitalize text-muted-foreground">{a.status}</td>
+                    <td data-label="Order" className="px-3 py-2">
                       {ord ? (
                         <Link href={`/admin/orders/${ord.id}`} className="inline-flex items-center gap-2 hover:underline">
                           <span className="font-mono text-primary">#{shortId(ord.id)}</span>
@@ -89,7 +89,7 @@ export default async function AdminAlbumsPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{fmtDate(a.updatedAt as unknown as string)}</td>
+                    <td data-label="Updated" className="px-3 py-2 text-muted-foreground">{fmtDate(a.updatedAt as unknown as string)}</td>
                   </tr>
                 );
               })}

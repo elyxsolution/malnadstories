@@ -68,6 +68,26 @@
     height: min(88svh, 720px);
     border-radius: clamp(0.75rem, 3vw, 1rem);
   }
+
+  /**
+   * R8 — the album manipulation hint.
+   *
+   * The stage markup is a verbatim port, so the hint is inlined as one nowrap row: 506px wide,
+   * centred with translateX(-50%). Its `pointerdown` handler fires on touch too, so tapping the
+   * book on a phone really does show it — clipped by 93px on BOTH sides at 320 (66/58/38 at
+   * 375/390/430), which cuts off the first and last instruction.
+   *
+   * Overridden here rather than in the ported string. Every span and its text is kept; the row
+   * is simply allowed to wrap inside the viewport.
+   */
+  [data-album-hint] {
+    max-width: min(92vw, 22rem);
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0.3rem;
+    white-space: normal;
+    text-align: center;
+  }
 }
 
 .bj-frame a {

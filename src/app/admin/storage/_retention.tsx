@@ -93,7 +93,7 @@ export default function RetentionQueue({ rows, canManage }: { rows: RetentionRow
       )}
 
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className="ms-stack w-full text-sm">
           <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
             <tr>
               {canManage && (
@@ -120,20 +120,20 @@ export default function RetentionQueue({ rows, canManage }: { rows: RetentionRow
                     <input type="checkbox" checked={selected.has(r.albumId)} onChange={() => toggle(r.albumId)} aria-label={`Select ${r.title ?? r.albumId}`} />
                   </td>
                 )}
-                <td className="px-3 py-2">
+                <td data-label="Album / Order" data-block className="px-3 py-2">
                   <Link href={`/admin/albums/${r.albumId}`} className="text-primary hover:underline">{r.title ?? 'Album'}</Link>
                   <div className="font-mono text-xs text-muted-foreground">order #{r.orderId.slice(0, 8)}</div>
                 </td>
-                <td className="px-3 py-2 text-muted-foreground">{r.customer}</td>
-                <td className="px-3 py-2 text-muted-foreground">{fmt(r.deliveredAt)}</td>
-                <td className="px-3 py-2 text-center tabular-nums">{r.daysSince}</td>
-                <td className="px-3 py-2 text-center tabular-nums">{r.photoCount}</td>
-                <td className="px-3 py-2 text-center text-muted-foreground">{r.hasPdf ? '✓' : '—'}</td>
-                <td className="px-3 py-2 text-right font-medium tabular-nums">≈ {formatBytes(r.bytes)}</td>
-                <td className="px-3 py-2">
+                <td data-label="Customer" className="px-3 py-2 text-muted-foreground">{r.customer}</td>
+                <td data-label="Delivered" className="px-3 py-2 text-muted-foreground">{fmt(r.deliveredAt)}</td>
+                <td data-label="Days" className="px-3 py-2 text-center tabular-nums">{r.daysSince}</td>
+                <td data-label="Photos" className="px-3 py-2 text-center tabular-nums">{r.photoCount}</td>
+                <td data-label="PDF" className="px-3 py-2 text-center text-muted-foreground">{r.hasPdf ? '✓' : '—'}</td>
+                <td data-label="Est. size" className="px-3 py-2 text-right font-medium tabular-nums">≈ {formatBytes(r.bytes)}</td>
+                <td data-label="Priority" className="px-3 py-2">
                   <StatusBadge className={PRIORITY_CHIP[r.priority]} label={r.priority} />
                 </td>
-                <td className="px-3 py-2">
+                <td data-label="Actions" data-block className="px-3 py-2">
                   <div className="flex items-center gap-1.5">
                     <Link href={`/admin/albums/${r.albumId}`} title="View assets" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted">
                       <Eye className="h-3.5 w-3.5" /> View

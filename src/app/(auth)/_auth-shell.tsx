@@ -26,7 +26,9 @@ export default function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <div className="animate-fade-in flex min-h-screen flex-col md:flex-row">
+    // `data-auth` is a styling hook only (R9): it scopes the coarse-pointer hit-area rule in
+    // globals.css to the four auth screens, so no other surface can be affected.
+    <div data-auth className="animate-fade-in flex min-h-screen flex-col md:flex-row">
       {/* LEFT — immersive image panel */}
       <aside className="relative isolate flex min-h-[32vh] flex-col justify-end overflow-hidden bg-[hsl(156_36%_12%)] md:min-h-screen md:w-[45%] lg:w-[42%]">
         {/* Image layer (gradient fallback shows through if the asset is absent). */}

@@ -79,7 +79,7 @@ export default async function AdminCouponsPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="ms-stack w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="px-3 py-2">Code</th>
@@ -99,32 +99,32 @@ export default async function AdminCouponsPage() {
                 const lc = lifecycle(r);
                 return (
                   <tr key={r.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-3 py-2">
+                    <td data-label="Code" className="px-3 py-2">
                       <Link href={`/admin/coupons/${r.id}`} className="font-mono text-primary hover:underline">
                         {r.code}
                       </Link>
                     </td>
-                    <td className="px-3 py-2">
+                    <td data-label="Status" className="px-3 py-2">
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${LIFECYCLE_CHIP[lc]}`}>
                         {lc}
                       </span>
                     </td>
-                    <td className="px-3 py-2 capitalize">{r.discountType}</td>
-                    <td className="px-3 py-2 text-right">
+                    <td data-label="Type" className="px-3 py-2 capitalize">{r.discountType}</td>
+                    <td data-label="Value" className="px-3 py-2 text-right">
                       {r.discountType === 'flat' ? inr(r.discountValue) : `${Number(r.discountValue)}%`}
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    <td data-label="Uses" className="px-3 py-2 text-center">
                       {r.currentUses}
                       {r.maxUses != null ? ` / ${r.maxUses}` : ''}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    <td data-label="Revenue impact" className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                       {(impact.get(r.id) ?? 0) > 0 ? `− ${inr(impact.get(r.id) ?? 0)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{fmtDate(r.expiresAt as unknown as string)}</td>
-                    <td className="px-3 py-2 text-xs">
+                    <td data-label="Expires" className="px-3 py-2 text-muted-foreground">{fmtDate(r.expiresAt as unknown as string)}</td>
+                    <td data-label="Created by" className="px-3 py-2 text-xs">
                       {r.createdByName ?? (r.createdBy && emails.get(r.createdBy)) ?? '—'}
                     </td>
-                    <td className="px-3 py-2 max-w-[16rem] truncate text-xs text-muted-foreground" title={r.createdReason ?? ''}>
+                    <td data-label="Reason" className="px-3 py-2 max-w-[16rem] truncate text-xs text-muted-foreground" title={r.createdReason ?? ''}>
                       {r.createdReason ?? '—'}
                     </td>
                     <td className="px-3 py-2 text-right">
