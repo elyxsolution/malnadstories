@@ -19,8 +19,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // than throwing, so chrome can never break the app shell.
   const cartCount = await getCartCount(supabase);
 
+  /*
+   * `min-h-[100dvh]`, not `min-h-screen`. `100vh` is the LARGE viewport — it ignores a visible
+   * mobile URL bar — so a shell sized to it is taller than the window whenever that bar is
+   * showing, and the DOCUMENT scrolls by exactly that difference even when nothing overflows.
+   * The builder is a fixed-viewport editor (`h-[100dvh]`, its own header, its own scroll areas),
+   * so that gap was the one place it could still be scrolled as a page. `dvh` tracks the real
+   * window on every route, which is what every page here already wanted.
+   */
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-[100dvh]">
       {/* Hidden on the builder route, which renders its own unified full-bleed header. */}
       <AppHeaderGate email={user.email!} />
       {/*

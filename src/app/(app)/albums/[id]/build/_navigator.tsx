@@ -240,7 +240,15 @@ export default function Navigator({
             }`}
             style={{ containerType: 'inline-size' }}
           >
-            {b.background || b.photoIds.some(Boolean) || b.overlays.length || b.texts.length || b.qrs.length || b.stickers.length ? (
+            {/* An overlay with no photo in it draws nothing, so counting containers here would
+                label a brand-new page (which now starts with one empty frame) as designed and
+                show a blank white thumbnail instead of saying "Empty". Count what will draw. */}
+            {b.background ||
+            b.photoIds.some(Boolean) ||
+            b.overlays.some((o) => o.photoId) ||
+            b.texts.length ||
+            b.qrs.length ||
+            b.stickers.length ? (
               <PairContent block={b} photoFor={photoFor} stickerUrlFor={stickerUrlFor} badge="micro" />
             ) : (
               <span className="grid h-full w-full place-items-center text-[10px] text-muted-foreground/60">Empty</span>

@@ -35,6 +35,9 @@ export type CropTarget = {
 
 export const cropTargetKey = (t: CropTarget) => `${t.blockKey}:${t.slot ?? t.overlayId}`;
 
+/** The only part of a wheel event this needs — satisfied by both React's and the DOM's. */
+export type WheelLike = { deltaY: number; stopPropagation: () => void };
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export function useCanvasCrop({
@@ -122,9 +125,16 @@ export function useCanvasCrop({
     [target, onCommit],
   );
 
-  /** Wheel zoom, committed immediately (a wheel gesture has no reliable "release"). */
+  /**
+   * Wheel zoom, committed immediately (a wheel gesture has no reliable "release").
+   *
+   * Typed structurally rather than as `React.WheelEvent` on purpose: React registers `wheel` as a
+   * PASSIVE listener at its root, so `preventDefault()` inside a React `onWheel` does nothing and
+   * the page scrolls underneath the zoom. The host therefore drives this from a native
+   * `{ passive: false }` listener instead, and a native `WheelEvent` satisfies this shape exactly.
+   */
   const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelLike) => {
       if (!target) return;
       e.stopPropagation();
       const edit = editOf(target.photoId);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
+import { useLongPress } from './_use-long-press';
 import { createPortal } from 'react-dom';
 import type { Rect } from '@/lib/builder/model';
 import { clampRect, isFullyOffPage, type Bounds } from '@/lib/builder/edit-bounds';
@@ -204,6 +205,7 @@ export default function Movable({
   peers = [],
   pageSpan = 2,
   onDoubleClick,
+  onLongPress,
   className = '',
   zIndex,
   ariaLabel,
@@ -253,6 +255,19 @@ export default function Movable({
    */
   pageSpan?: 1 | 2;
   onDoubleClick?: () => void;
+  /**
+   * PRESS AND HOLD — a second door into whatever the host considers this element's primary
+   * adjustment. On a photo overlay that is image-adjustment mode, the same state the Crop button
+   * opens; this component does not know or care which, it only recognises the gesture.
+   *
+   * It lives here rather than in the host because a move gesture and a long press are the SAME
+   * pointer-down, and only the thing that owns the drag can tell them apart: the press has to be
+   * abandoned the moment the pointer travels far enough to be a drag, and the drag has to be
+   * abandoned the moment the press wins. Two components watching one pointer would fight.
+   *
+   * Absent → no timer is ever started and behaviour is byte-for-byte what it was.
+   */
+  onLongPress?: () => void;
   className?: string;
   zIndex?: number;
   ariaLabel?: string;
@@ -272,6 +287,13 @@ export default function Movable({
   } | null>(null);
   /** True while a gesture is in flight — suppresses hover chrome so the drag reads cleanly. */
   const [dragging, setDragging] = useState(false);
+
+  /**
+   * PRESS AND HOLD. The recognition lives in `useLongPress` so a photo behaves identically
+   * whichever kind of frame holds it; what stays here is the part only this component can do —
+   * deciding, on one pointer, whether the gesture became a drag or a hold.
+   */
+  const press = useLongPress(onLongPress);
 
   /**
    * The pointer is asking for a position the element is not allowed to occupy, and the drag is
@@ -314,7 +336,32 @@ export default function Movable({
       ey: edges.y,
     };
     setDragging(true);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const target = e.target as HTMLElement;
+    target.setPointerCapture(e.pointerId);
+
+    /**
+     * ARM THE PRESS — moves only, and only when the host wants one. A resize or rotate handle is
+     * already an unambiguous intent, so holding one must not turn into something else.
+     */
+    if (mode === 'move') {
+      const pointerId = e.pointerId;
+      press.arm(e, () => {
+        /**
+         * THE DRAG IS ABANDONED, NOT COMPLETED. The pointer is still down when the press wins, so
+         * without this the next twitch would move the element behind the surface that just
+         * opened. Capture is released for the same reason: whatever the host mounts needs it.
+         */
+        drag.current = null;
+        setDragging(false);
+        flagLimit(false);
+        onSnap?.([]);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch {
+          /* the pointer is already gone — nothing to release */
+        }
+      });
+    }
   };
 
   /**
@@ -331,6 +378,10 @@ export default function Movable({
   const flagLimit = (v: boolean) => setAtLimit((prev) => (prev === v ? prev : v));
 
   const onMove = (e: ReactPointerEvent) => {
+    // TRAVEL, NOT TIME: past a few pixels this is a drag, so the pending press is abandoned.
+    // Checked before the drag guard below, so it also applies to a gesture that has already ended.
+    press.track(e);
+
     const d = drag.current;
     const box = containerRef.current?.getBoundingClientRect();
     if (!d || !box || box.width === 0 || box.height === 0) return;
@@ -420,6 +471,7 @@ export default function Movable({
   };
 
   const end = (e: ReactPointerEvent) => {
+    press.cancel();
     if (!drag.current) return;
     drag.current = null;
     setDragging(false);
@@ -626,7 +678,15 @@ export default function Movable({
         onPointerMove={onMove}
         onPointerUp={end}
         onPointerCancel={end}
-        onContextMenu={onContextMenu}
+        onContextMenu={(ev) => {
+          // A long press has already acted. Some browsers synthesise `contextmenu` from the same
+          // hold, which would open the menu on top of the adjustment surface it just opened.
+          if (press.consumeFired()) {
+            ev.preventDefault();
+            return;
+          }
+          onContextMenu?.(ev);
+        }}
         onDoubleClick={onDoubleClick}
         /* Selection already happened on pointer-down; this only stops the canvas from treating
            the same gesture as a click on empty space and deselecting. */

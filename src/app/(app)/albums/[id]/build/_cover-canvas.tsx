@@ -6,6 +6,7 @@ import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { TextContent, StickerContent, QrContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
 import { useBuilderDimensions } from './_dimensions';
+import { fitBlockWidth, useMeasuredBox } from './_use-fit-scale';
 import { PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { squareQrHeight } from '@/lib/builder/elements';
 import { COVER_SIDES, coverSideElements, coverSideImage, roleLabel, type CoverSide } from '@/lib/builder/cover-objects';
@@ -52,6 +53,9 @@ export type CoverCanvasProps = {
   onFaceEl?: (el: HTMLDivElement | null) => void;
 };
 
+/** The caption under the book, plus the flex gap above it. Vertical furniture the fit must clear. */
+const COVER_CAPTION_PX = 36;
+
 export default function CoverCanvas({
   cover,
   frontImageUrl,
@@ -64,14 +68,27 @@ export default function CoverCanvas({
   const { page } = useBuilderDimensions();
   const { pagePct, spinePct, aspect } = coverSpreadMetrics(size, page);
 
+  /**
+   * FIT, then zoom — the same rule the page canvas follows, so switching between the cover and a
+   * spread does not change how the workspace behaves. A cover spread is much wider than it is
+   * tall, so it was usually the WIDTH that ran out here; solving both axes at once covers either.
+   * The caption line below the book is the only vertical furniture to budget for.
+   */
+  const canvas = useMeasuredBox<HTMLDivElement>();
+  const fitWidth = fitBlockWidth(canvas.box, { aspect, chromePx: COVER_CAPTION_PX, maxPx: 740 });
+
   return (
     <div
+      ref={canvas.ref}
       className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10"
       /* The pasteboard around the book: a click out here means "nothing selected", which is the
          cover-level toolbar — the same rule the page canvas follows. */
       onPointerDown={() => cover.setSelection({ kind: 'none' })}
     >
-      <div className="mx-auto flex flex-col items-center gap-4" style={{ width: `min(${Math.round(7.4 * zoomPct)}px, 96%)` }}>
+      <div
+        className="mx-auto flex flex-col items-center gap-4"
+        style={fitWidth ? { width: (fitWidth * zoomPct) / 100 } : { width: `min(${Math.round(7.4 * zoomPct)}px, 96%)` }}
+      >
         {/* No `overflow-hidden`: each face clips its own content at its own trim, and clipping the
             whole spread would take the selection handles of anything near the outer edge with it. */}
         <div

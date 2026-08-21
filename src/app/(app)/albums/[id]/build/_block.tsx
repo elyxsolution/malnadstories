@@ -7,7 +7,7 @@ import Movable, { SnapGuides, type SnapLine, type SelectMods } from './_movable'
 import { PrintGutter } from './_pair-frame';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
-import type { CropTarget } from './_use-canvas-crop';
+import type { CropTarget, WheelLike } from './_use-canvas-crop';
 import type { Photo } from '@/lib/builder/photo';
 import type { UploadTask } from '@/lib/uploads';
 import { photoUiState } from './_photo-state';
@@ -19,6 +19,7 @@ import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { acceptPhotoDrag, leftDropTarget, readPhotoDrag, startPhotoDrag } from '@/lib/builder/photo-dnd';
 import { useBuilderDimensions } from './_dimensions';
+import { useLongPress } from './_use-long-press';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
 import type { DragApi } from './_use-drag';
 import { selectionFromTarget, type SelectionTarget } from './_selection-model';
@@ -71,6 +72,7 @@ export default function BlockCard({
   drag,
   onEditPhoto,
   onQuickCrop,
+  onBeginCrop,
   onPlacePhoto,
   stickerUrlFor,
   pickActive = false,
@@ -104,6 +106,15 @@ export default function BlockCard({
   onSelect: (s: Selection) => void;
   onEditPhoto: (photoId: string) => void;
   onQuickCrop: (photoId: string, frameAspect: number, showGutter: boolean) => void;
+  /**
+   * PRESS AND HOLD A PHOTO → image-adjustment mode, on the frame that was held.
+   *
+   * The host owns this so there is exactly one crop-entry action: the same function the floating
+   * toolbar's Crop button calls. This component only reports WHICH frame the gesture landed on;
+   * it decides nothing about adjustment, and there is no second crop state anywhere.
+   * Absent → holding a photo does nothing, which is how any host without a crop layer behaves.
+   */
+  onBeginCrop?: (target: { slot?: BaseSlot; overlayId?: string; photoId: string }) => void;
   /**
    * Put a photo into one of this spread's frames, through the host's command layer. Optional:
    * a host without one (the admin cover designer) falls back to the local `api` calls, which
@@ -171,11 +182,25 @@ export default function BlockCard({
   })();
   const cropPhoto = cropOnThisBlock ? photoMap.get(cropOnThisBlock.photoId) : undefined;
   const cropUrl = cropPhoto ? resolvePhotoUrl(cropPhoto, 'full') : undefined;
+
+  /**
+   * WHILE ADJUSTING, THE WHEEL BELONGS TO THE IMAGE.
+   *
+   * Scrolling over the page during adjustment used to do two things at once: zoom the photo AND
+   * scroll the canvas out from under it, so the frame you were aiming at slid away as you zoomed.
+   * The fix cannot live in a React `onWheel` — React registers `wheel` passively at its root, so
+   * `preventDefault()` there is ignored — so this is a native `{ passive: false }` listener.
+   *
+   * It is SCOPED, deliberately: attached to this page element only, and only while one of its own
+   * frames is in adjustment mode. Nothing else in the editor loses its scrolling, and the moment
+   * adjustment ends the listener is gone.
+   */
+  useCropWheel(pageRef, !!cropOnThisBlock, cropHandlers);
   const [snap, setSnap] = useState<SnapLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
-  const [picking, setPicking] = useState<
-    { kind: 'base'; slot: BaseSlot } | { kind: 'replace'; overlayId: string } | { kind: 'overlay-add' } | null
-  >(null);
+  const [picking, setPicking] = useState<{ kind: 'base'; slot: BaseSlot } | { kind: 'replace'; overlayId: string } | null>(
+    null,
+  );
 
   const isDouble = block.template === 'double-spread';
   const start = physicalStart(blocks, index);
@@ -289,20 +314,41 @@ export default function BlockCard({
    */
   const usesBaseSlots = block.photoIds.length > 0;
 
+  /**
+   * What this spread currently holds, said honestly. A frame with no photo in it is not "a photo
+   * on this spread" — a new page starts with exactly one of those, and calling it a photo would
+   * make the count disagree with the page, with the readiness panel and with the print gate.
+   */
+  const spreadSummary = (() => {
+    const filled = block.overlays.filter((o) => o.photoId).length + block.photoIds.filter(Boolean).length;
+    const empty = block.overlays.length - block.overlays.filter((o) => o.photoId).length;
+    if (filled === 0 && empty === 0) return 'This spread is a blank page — drop a photo on it, or add a frame below';
+    const parts: string[] = [];
+    if (filled > 0) parts.push(`${filled} photo${filled === 1 ? '' : 's'}`);
+    if (empty > 0) parts.push(`${empty} empty frame${empty === 1 ? '' : 's'} — drop a photo in`);
+    return parts.join(' · ');
+  })();
+
   const sel = (s: Selection) => selection.kind === s.kind && JSON.stringify(selection) === JSON.stringify(s);
 
   return (
     <div className="group/block">
       {/* Per-spread action bar — the explicit home for adding photos to this spread. */}
       <div className="mb-2.5 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">
-          {block.overlays.length > 0
-            ? `${block.overlays.length} photo${block.overlays.length === 1 ? '' : 's'} on this spread`
-            : 'This spread is a blank page — drop a photo on it, or add one below'}
-        </span>
+        <span className="text-[11px] font-medium text-muted-foreground">{spreadSummary}</span>
+        {/*
+          ADD THE FRAME, THEN THE PHOTO — not the other way round.
+          This used to open the photo picker and create nothing until something was chosen, which
+          made "add a photo frame" impossible without already having decided which photo goes in
+          it. The container is the thing being added; it is created empty, selected, and filled
+          afterwards by dropping, by Replace on the toolbar, or from the tray.
+        */}
         <button
           type="button"
-          onClick={() => setPicking({ kind: 'overlay-add' })}
+          onClick={() => {
+            const newId = api.addOverlay(block.key, null, 'center');
+            if (newId) onSelect({ kind: 'overlay', id: newId });
+          }}
           className="inline-flex items-center gap-1.5 rounded-lg border border-studio/30 bg-card px-2.5 py-1.5 text-[12px] font-medium text-studio shadow-xs transition-all duration-150 ease-glide hover:border-studio/50 hover:bg-studio-soft active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
         >
           <ImagePlus className="h-3.5 w-3.5" /> Add photo overlay
@@ -407,6 +453,9 @@ export default function BlockCard({
               }
               onDragEndFrame={() => drag?.end()}
               onClear={() => api.clearBaseSlot(block.key, 'image')}
+              onLongPress={
+                onBeginCrop && leftPhoto?.status === 'ready' ? () => onBeginCrop({ slot: 'image', photoId: leftPhoto.id }) : undefined
+              }
               onCrop={leftPhoto ? () => onQuickCrop(leftPhoto.id, pair, true) : undefined}
               onEdit={leftPhoto ? () => onEditPhoto(leftPhoto.id) : undefined}
               readiness={baseReadiness('image')}
@@ -439,6 +488,9 @@ export default function BlockCard({
                   }
                   onDragEndFrame={() => drag?.end()}
                   onClear={() => api.clearBaseSlot(block.key, 'left')}
+                  onLongPress={
+                    onBeginCrop && leftPhoto?.status === 'ready' ? () => onBeginCrop({ slot: 'left', photoId: leftPhoto.id }) : undefined
+                  }
                   onCrop={leftPhoto ? () => onQuickCrop(leftPhoto.id, page, false) : undefined}
                   onEdit={leftPhoto ? () => onEditPhoto(leftPhoto.id) : undefined}
                   readiness={baseReadiness('left')}
@@ -470,6 +522,11 @@ export default function BlockCard({
                   }
                   onDragEndFrame={() => drag?.end()}
                   onClear={() => api.clearBaseSlot(block.key, 'right')}
+                  onLongPress={
+                    onBeginCrop && rightPhoto?.status === 'ready'
+                      ? () => onBeginCrop({ slot: 'right', photoId: rightPhoto.id })
+                      : undefined
+                  }
                   onCrop={rightPhoto ? () => onQuickCrop(rightPhoto.id, page, false) : undefined}
                   onEdit={rightPhoto ? () => onEditPhoto(rightPhoto.id) : undefined}
                   readiness={baseReadiness('right')}
@@ -497,6 +554,14 @@ export default function BlockCard({
                 escape={PASTEBOARD_ESCAPE}
                 ariaLabel="Photo overlay"
                 onSelect={(mods) => selectResolved({ kind: 'overlay', blockKey: block.key, id: oid }, mods ?? NO_MODS)}
+                /* Hold the PHOTO to adjust it. An empty frame has nothing to adjust, and one
+                   still processing has no sanitized master to author against — both simply have
+                   no handler, so the hold falls through to ordinary behaviour. */
+                onLongPress={
+                  onBeginCrop && photo?.status === 'ready'
+                    ? () => onBeginCrop({ overlayId: oid, photoId: photo.id })
+                    : undefined
+                }
                 onContextMenu={(e) => onFrameContextMenu?.(e, { kind: 'overlay', blockKey: block.key, id: oid })}
                 onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
                 onSnap={setSnap}
@@ -677,21 +742,12 @@ export default function BlockCard({
               ? picking.slot === 'image'
                 ? 'Choose the spread image'
                 : `Choose the ${picking.slot} page photo`
-              : picking.kind === 'replace'
-                ? 'Replace overlay photo'
-                : 'Add a photo overlay'
+              : 'Replace overlay photo'
           }
           available={availablePhotos}
           onPick={(id) => {
             if (picking.kind === 'base') place(id, { slot: picking.slot });
-            else if (picking.kind === 'replace') place(id, { overlayId: picking.overlayId });
-            else {
-              // `addOverlay` appends, so the new overlay's id is discoverable from the block
-              // only after the mutation commits. Minting it here keeps selection immediate and
-              // correct without reaching back into state.
-              const newId = api.addOverlay(block.key, id);
-              if (newId) onSelect({ kind: 'overlay', id: newId });
-            }
+            else place(id, { overlayId: picking.overlayId });
             setPicking(null);
           }}
           onClose={() => setPicking(null)}
@@ -708,12 +764,37 @@ export default function BlockCard({
  * exactly like a base slot, so a user fills a placeholder overlay by dragging onto it. Dropping
  * onto a filled overlay replaces its photo. The parent Movable still handles select/drag/resize.
  */
+/**
+ * Give the wheel to the image while a frame on this page is being adjusted, and to nobody else.
+ *
+ * A native, non-passive listener is the only thing that can actually stop the scroll (React's own
+ * wheel listener is passive), and attaching it to the PAGE rather than to the frame means the
+ * gesture keeps working when the pointer strays off a small overlay mid-zoom — which is most of
+ * the time, since zooming in is exactly when the frame is smallest relative to the pointer.
+ */
+function useCropWheel(page: React.RefObject<HTMLElement>, active: boolean, handlers?: CropHandlers) {
+  const handlersRef = useRef(handlers);
+  handlersRef.current = handlers;
+
+  useEffect(() => {
+    const el = page.current;
+    if (!el || !active) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault(); // requires `passive: false` — this is the whole reason for the listener
+      e.stopPropagation();
+      handlersRef.current?.onWheel(e);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [page, active]);
+}
+
 /** The pointer/keyboard surface `useCanvasCrop` supplies. Passed straight through to the layer. */
 export type CropHandlers = {
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: (e: React.PointerEvent) => void;
-  onWheel: (e: React.WheelEvent) => void;
+  onWheel: (e: WheelLike) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
 };
 
@@ -741,7 +822,8 @@ function CropLayer({ handlers }: { handlers?: CropHandlers }) {
       onPointerMove={handlers?.onPointerMove}
       onPointerUp={handlers?.onPointerUp}
       onPointerCancel={handlers?.onPointerUp}
-      onWheel={handlers?.onWheel}
+      /* NO React `onWheel` here — see `useCropWheel`: React's wheel listener is passive, so the
+         only place the scroll can actually be prevented is a native listener on the page. */
       onKeyDown={handlers?.onKeyDown}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -923,6 +1005,7 @@ function BaseSlotView({
   onClear,
   onCrop,
   onEdit,
+  onLongPress,
   readiness,
   cropping,
   cropHandlers,
@@ -957,8 +1040,16 @@ function BaseSlotView({
   onClear: () => void;
   onCrop?: () => void;
   onEdit?: () => void;
+  /** Press and hold this photo → image adjustment. Same action the toolbar's Crop button runs. */
+  onLongPress?: () => void;
 }) {
   const [over, setOver] = useState(false);
+  /**
+   * The SAME recogniser the overlay's `Movable` uses, so a hold feels identical on a page half
+   * and on a floating frame. There is no drag to arbitrate here — a base slot is moved by HTML
+   * drag-and-drop, not by pointer maths — so arming and cancelling is all this surface needs.
+   */
+  const press = useLongPress(onLongPress);
   const tapToPlace = pickActive && !photo && !!onTapPlace;
   const uiState = photo ? photoUiState(photo, task) : 'ready';
   // Crop + edit are authored against the worker's sanitized master, so they wait for it.
@@ -969,9 +1060,20 @@ function BaseSlotView({
       onPointerDown={(e) => {
         e.stopPropagation();
         if (photo) onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
+        press.arm(e);
       }}
+      onPointerMove={press.track}
+      onPointerUp={press.cancel}
+      onPointerCancel={press.cancel}
+      onPointerLeave={press.cancel}
       onContextMenu={(e) => {
         e.stopPropagation();
+        // A hold that already opened adjustment must not also open the menu some browsers
+        // synthesise from it — one gesture, one outcome.
+        if (press.consumeFired()) {
+          e.preventDefault();
+          return;
+        }
         onContextMenu?.(e);
       }}
       onClick={(e) => {
@@ -993,6 +1095,9 @@ function BaseSlotView({
       onDragStart={(e) => {
         if (!photo) return;
         e.stopPropagation();
+        // An HTML drag has begun, so the gesture is unambiguously a move; `pointermove` does not
+        // fire during a native drag, so the slop test would never cancel the press on its own.
+        press.cancel();
         startPhotoDrag(e, photo.id);
         onDragStartFrame?.(photo.id);
       }}

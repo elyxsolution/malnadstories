@@ -65,6 +65,7 @@ import PropertiesPanel from './_properties-panel';
 // moved into `_element-inspectors` beside their siblings, and its page actions became the
 // context bar's page toolbar. Nothing it did was dropped; everything it did moved.
 import { useBlocks, NO_SELECTION, type Selection, type BaseSlot } from './_use-builder';
+import { fitBlockWidth, useMeasuredBox } from './_use-fit-scale';
 import { useEditHistory } from './_use-edit-history';
 import { usePhotoEditHistory } from './_use-photo-edits';
 import { useSelection } from './_use-selection';
@@ -109,7 +110,7 @@ import {
 } from '@/lib/builder/model';
 import { type LayoutPreset } from '@/lib/builder/elements';
 import { layoutCycleSteps, nextCycleIndex, layoutByDensity, currentLayoutLabel } from '@/lib/builder/layout-cycle';
-import { clampRect, EDIT_BOUNDS } from '@/lib/builder/edit-bounds';
+import { clampRect, EDIT_BOUNDS, PASTEBOARD_PCT } from '@/lib/builder/edit-bounds';
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
@@ -901,13 +902,15 @@ export default function Builder({
    */
   const pageElRef = useRef<HTMLDivElement | null>(null);
   /**
-   * Which frame the photo picker is open for. `add` creates a NEW overlay from the chosen photo,
-   * which is how "Add photo" works from the page toolbar — one picker, three destinations,
-   * dispatching to the `api` primitives that already existed for each.
+   * Which EXISTING frame the photo picker is open for — a base slot or an overlay.
+   *
+   * There is no "create an overlay from the chosen photo" destination any more: adding a frame
+   * and filling it are two separate steps now (see `addPageOverlay`), so the picker only ever
+   * fills something that already exists.
    */
-  const [pickerFor, setPickerFor] = useState<
-    { kind: 'base'; slot: BaseSlot } | { kind: 'overlay'; overlayId: string } | { kind: 'add' } | null
-  >(null);
+  const [pickerFor, setPickerFor] = useState<{ kind: 'base'; slot: BaseSlot } | { kind: 'overlay'; overlayId: string } | null>(
+    null,
+  );
   // (`useCanvasCrop` is set up below, once the photo-write callbacks it drives exist.)
 
   /** Which layouts this photographer reaches for — remembered across albums, on this device. */
@@ -1229,12 +1232,40 @@ export default function Builder({
     return undefined;
   }, [block, selection, photoMap]);
 
-  /** Enter in-canvas crop on whatever photo frame is selected. */
+  /**
+   * ENTER IMAGE-ADJUSTMENT MODE ON ONE NAMED FRAME — the single implementation behind every way
+   * in.
+   *
+   * The Crop button on the floating toolbar and press-and-hold on the photo itself are two
+   * gestures for one thing, so they must not be two code paths: they both land here, and what
+   * they produce is one `crop.begin` call with the same `CropTarget` shape. There is exactly one
+   * adjustment state (`useCanvasCrop`), one renderer for it (`CropBleed` + `CropLayer`) and one
+   * place edits are committed (`commitPhotoEdit`), whichever door was used.
+   *
+   * Selecting the frame first is part of the contract, not a nicety: the toolbar renders from the
+   * selection, so a long press has to leave the same thing selected the button path would have,
+   * or the adjustment controls would be describing a different frame.
+   */
+  const beginCropOn = useCallback(
+    (target: { slot?: BaseSlot; overlayId?: string; photoId: string }) => {
+      if (!block) return;
+      const photo = photoMap.get(target.photoId);
+      // Adjustments are authored against the worker's sanitized master — the same gate every
+      // other editing entry point applies, applied once more at this one.
+      if (!photo || photo.status !== 'ready') return notYetEditable();
+      setSelection(target.overlayId ? { kind: 'overlay', id: target.overlayId } : { kind: 'base', slot: target.slot ?? 'image' });
+      crop.begin({ blockKey: block.key, slot: target.slot, overlayId: target.overlayId, photoId: target.photoId });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [block, photoMap, crop],
+  );
+
+  /** Enter image adjustment on whatever photo frame is selected — the toolbar's Crop button. */
   const startCrop = useCallback(() => {
-    if (!block || !selectedFramePhoto || selectedFramePhoto.status !== 'ready') return;
-    if (selection.kind === 'base') crop.begin({ blockKey: block.key, slot: selection.slot, photoId: selectedFramePhoto.id });
-    else if (selection.kind === 'overlay') crop.begin({ blockKey: block.key, overlayId: selection.id, photoId: selectedFramePhoto.id });
-  }, [block, selection, selectedFramePhoto, crop]);
+    if (!selectedFramePhoto) return;
+    if (selection.kind === 'base') beginCropOn({ slot: selection.slot, photoId: selectedFramePhoto.id });
+    else if (selection.kind === 'overlay') beginCropOn({ overlayId: selection.id, photoId: selectedFramePhoto.id });
+  }, [selection, selectedFramePhoto, beginCropOn]);
 
   /**
    * SMART SUGGESTIONS read the photos the user is about to place: their tray SELECTION when they
@@ -1721,6 +1752,21 @@ export default function Builder({
     [coverConfig, albumTitle, size, coverImageUrl, backCoverImageUrl],
   );
 
+  /**
+   * ADD AN EMPTY PHOTO FRAME to the focused spread, and select it.
+   *
+   * THE single implementation behind every "add overlay" affordance — the page toolbar's Photo
+   * button and the per-spread button on the canvas — so both create the same object in the same
+   * place through the same `api.addOverlay`. It creates a container and nothing else: no picker,
+   * no photo record, no image request. The customer fills it afterwards, which is the same order
+   * a new page's starting frame is filled in.
+   */
+  const addPageOverlay = () => {
+    if (!block) return;
+    const newId = api.addOverlay(block.key, null, 'center');
+    if (newId) setSelection({ kind: 'overlay', id: newId });
+  };
+
   // ── page sticker add (from the Stickers rail) ──────────────────────────────────
   const addPageSticker = (stickerId: string) => {
     if (!block) return;
@@ -2124,6 +2170,25 @@ export default function Builder({
   };
 
   // ── zoom ────────────────────────────────────────────────────────────────────────
+  /**
+   * THE WORKSPACE, MEASURED — and the width the spread is drawn at so it fits inside it.
+   *
+   * The canvas used to size the spread as a percentage of its own WIDTH, which says nothing about
+   * the height available, so on most screens a spread was taller than the workspace and the
+   * canvas scrolled. Measuring the box and solving for a width that fits BOTH axes is what makes
+   * "100%" mean "the whole spread" rather than "as wide as the panel".
+   *
+   * It changes only how large the album is DRAWN. Page dimensions, overlay coordinates, text
+   * sizes, the print CSS and the PDF are untouched — see `_use-fit-scale`.
+   */
+  const canvas = useMeasuredBox<HTMLDivElement>();
+  /** The per-spread action row above the page, plus its margin — vertical furniture to budget for. */
+  const SPREAD_CHROME_PX = 44;
+  const fitWidth = useMemo(
+    () => fitBlockWidth(canvas.box, { aspect: pairA, padFrac: PASTEBOARD_PCT / 100, chromePx: SPREAD_CHROME_PX, maxPx: 1400 }),
+    [canvas.box, pairA],
+  );
+
   const zoomIn = () => setZoomPct((z) => Math.min(200, z + 15));
   const zoomOut = () => setZoomPct((z) => Math.max(50, z - 15));
   const resetZoom = () => setZoomPct(100);
@@ -2766,6 +2831,7 @@ export default function Builder({
            * finish" with no modal, no confirm, no Done button required.
            */
           <div
+            ref={canvas.ref}
             className="ms-scroll relative min-h-0 flex-1 overflow-auto p-4 lg:p-7"
             onPointerDown={() => {
               if (crop.target) crop.end();
@@ -2803,7 +2869,17 @@ export default function Builder({
               </div>
             ) : (
               block && (
-                <div className="mx-auto" style={{ width: `${zoomPct}%`, maxWidth: zoomPct <= 100 ? '1400px' : 'none' }}>
+                /* fit × zoom. At 100% the whole spread is visible with no scrolling; zooming past
+                   it overflows the canvas deliberately, which is what a zoom control is for. The
+                   percentage fallback covers the single frame before the box is measured. */
+                <div
+                  className="mx-auto"
+                  style={
+                    fitWidth
+                      ? { width: (fitWidth * zoomPct) / 100 }
+                      : { width: `${zoomPct}%`, maxWidth: zoomPct <= 100 ? '1400px' : 'none' }
+                  }
+                >
                   <BlockCard
                     api={api}
                     block={block}
@@ -2871,6 +2947,8 @@ export default function Builder({
                     onPageEl={(el) => {
                       pageElRef.current = el;
                     }}
+                    /* Press-and-hold on a photo — the same entry point the Crop button uses. */
+                    onBeginCrop={beginCropOn}
                     cropTarget={crop.target}
                     cropHandlers={crop.handlers}
                   />
@@ -2977,7 +3055,7 @@ export default function Builder({
               cropping={!!crop.target}
               onEndCrop={crop.end}
               onAddText={() => addText('heading')}
-              onAddPhotoOverlay={() => setPickerFor({ kind: 'add' })}
+              onAddPhotoOverlay={addPageOverlay}
               onAddQr={() => addQr('')}
               onOpenLayouts={() => setRailTab('layouts')}
               onCycleLayout={cycleLayout}
@@ -3211,16 +3289,12 @@ export default function Builder({
           Same component the canvas has always used — see `PhotoPicker` in `_block`. */}
       {pickerFor && block && (
         <PhotoPicker
-          title={pickerFor.kind === 'add' ? 'Add a photo overlay' : 'Choose a photo'}
+          title="Choose a photo"
           available={availablePhotos}
           onClose={() => setPickerFor(null)}
           onPick={(id) => {
             if (pickerFor.kind === 'base') api.assignBaseSlot(block.key, pickerFor.slot, id);
-            else if (pickerFor.kind === 'overlay') api.replaceOverlay(block.key, pickerFor.overlayId, id);
-            else {
-              const newId = api.addOverlay(block.key, id);
-              if (newId) setSelection({ kind: 'overlay', id: newId });
-            }
+            else api.replaceOverlay(block.key, pickerFor.overlayId, id);
             setPickerFor(null);
           }}
         />

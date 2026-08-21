@@ -500,7 +500,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 11 files / 131 tests
+pnpm test              # app suite — 12 files / 146 tests
 cd worker && pnpm test # worker suite — 141 files / 1220 tests
 ```
 
@@ -963,6 +963,35 @@ action input; ownership is re-verified on every server action.
 - **Placement model**: each uploaded photo is placed **at most once** — as a base
   OR as an overlay — so per-photo edits live on `photos.edit_config` (not per-slot).
   The tray badges placed photos (base + overlay ids); assigning a placed photo moves it.
+- **Every page starts with ONE empty full-page photo frame**, and **"Add photo overlay" creates
+  an empty frame rather than opening the picker.** `addBlock`/`insertBlockAt` seed
+  `overlays: [{ photoId: null, ...FULL_PAGE_OVERLAY_GEOM }]` (0,0,1,1 — the trim IS the usable
+  area; the page model has no margin); `duplicateBlock` copies the source's frames emptied, so
+  duplicating a page keeps its layout. `api.addOverlay(key, photoId | null, at?)` accepts a null
+  photo and an `at` of `{x,y}` (a drop point) or `'center'`; `addPageOverlay` in `_builder` is the
+  single implementation behind both add-overlay affordances. **No photo record is created until a
+  photo is attached**, and dropping onto an existing empty frame fills it rather than stacking a
+  second one (`OverlayContent` stops the drop from reaching the page).
+- **Press and hold a photo → image adjustment**, the SAME state the toolbar's Crop button opens.
+  `_use-long-press.ts` (480 ms / 8 px slop) is the shared recogniser; `Movable` arbitrates it
+  against the drag it owns (the press abandons the drag and releases pointer capture; travel past
+  the slop abandons the press), `BaseSlotView` uses it directly. Both doors call ONE action —
+  `beginCropOn` in `_builder` — which selects the frame and calls `crop.begin`, so there is one
+  adjustment state, one renderer and one commit path. A fired press swallows the synthesised
+  `contextmenu`; an empty or still-processing frame has no handler at all.
+- **The album is FITTED to the workspace** (`_use-fit-scale.ts`): `useMeasuredBox` observes the
+  canvas and `fitBlockWidth` solves for a width where the spread, its pasteboard and its chrome
+  fit on BOTH axes; the spread renders at `fit × zoomPct`. The cover canvas does the same with the
+  spread aspect and its caption. **Display only** — page dimensions, overlay rects, text sizes,
+  `edit_config`, the print CSS and the PDF are untouched; 100% now means "the whole spread" and
+  zooming past it scrolls deliberately. `(app)/layout.tsx` uses `min-h-[100dvh]` (not
+  `min-h-screen`) so a visible mobile URL bar cannot make the document scrollable.
+- **During adjustment the wheel belongs to the image.** React registers `wheel` PASSIVELY at its
+  root, so `preventDefault()` in an `onWheel` is ignored and the canvas scrolled out from under
+  the zoom. `useCropWheel` (`_block.tsx`) attaches a native `{ passive: false }` listener to the
+  PAGE element, and only while one of its own frames is being adjusted — scoped, not global, and
+  gone the moment adjustment ends. `useCanvasCrop.onWheel` is typed structurally (`WheelLike`) so
+  a native `WheelEvent` drives it.
 - **A PAGE IS A BACKGROUND, NOT A PHOTO CONTAINER.** A page the customer creates starts with
   `photoIds: []` and renders **only its background** — no empty base slots are drawn and none
   can be filled. Photos arrive as **overlays**: the "Add photo overlay" control, the page

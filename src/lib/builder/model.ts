@@ -151,6 +151,21 @@ export function stripOverlayIds(overlays: Overlay[]): Overlay[] {
 /** Geometry for a freshly added overlay (no photo yet — caller sets photoId, or null for a placeholder). */
 export const DEFAULT_OVERLAY_GEOM = { x: 0.55, y: 0.08, w: 0.34, h: 0.34 };
 
+/**
+ * The frame a NEW PAGE starts with: one empty photo container covering the whole open pair.
+ *
+ * A page is a background, and photos live in overlay frames — so a page that starts with nothing
+ * gives the customer a blank sheet and no obvious way in. This is the frame the old model implied
+ * and drew implicitly (the page WAS the photo container); making it an explicit overlay is what
+ * lets it be moved, resized, cropped, layered, deleted and undone like anything else, instead of
+ * being a special case built into the page.
+ *
+ * Full bleed, deliberately: the trim IS the usable area (there is no margin in the page model —
+ * every renderer clips at the page edge), so anything smaller would invent a margin that nothing
+ * else in the builder or the PDF honours.
+ */
+export const FULL_PAGE_OVERLAY_GEOM = { x: 0, y: 0, w: 1, h: 1 };
+
 /** Hard cap on overlays per block — UI is unlimited, this rejects abusive payloads. */
 export const MAX_OVERLAYS_PER_BLOCK = 50;
 

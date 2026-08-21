@@ -12,6 +12,7 @@ import {
   stripOverlayIds,
   trimBaseIds,
   DEFAULT_OVERLAY_GEOM,
+  FULL_PAGE_OVERLAY_GEOM,
   type Background,
   type Block,
   type LayoutTemplate,
@@ -117,11 +118,22 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     prev.map((b) => (b.key === key ? { ...b, ...patch } : b));
 
   // ── blocks ─────────────────────────────────────────────────────────────────
+  /**
+   * A FRESH PAGE: its background, plus ONE empty full-page photo frame.
+   *
+   * The frame carries no photo and creates no photo record — it is a container, exactly like one
+   * the customer places by hand, and the page underneath stays a background. That is the whole
+   * point of it being an overlay rather than a return of `Block.photoIds`: it can be moved,
+   * resized, cropped, replaced, deleted and undone, and it round-trips through `layout_config`
+   * with every other overlay.
+   */
+  const newPageOverlay = (): Overlay => ({ id: makeOverlayId(), photoId: null, ...FULL_PAGE_OVERLAY_GEOM });
+
   const addBlock = (template: LayoutTemplate, size: number) => {
     if (!canAdd(blocks, size, template)) return;
     // A manually-added spread maps to the base preset (Single / Full bleed) for accurate breakdowns.
     const preset = template === 'double-spread' ? 'full-bleed' : 'single';
-    mutate((prev) => [...prev, { ...makeBlock(template), preset }]);
+    mutate((prev) => [...prev, { ...makeBlock(template), preset, overlays: [newPageOverlay()] }]);
   };
 
   const patchBlock = (key: string, patch: Partial<Block>) => mutate((prev) => patchBlockByKey(prev, key, patch));
@@ -151,7 +163,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     if (!canAdd(blocks, size, template)) return;
     mutate((prev) => {
       const next = [...prev];
-      next.splice(Math.max(0, Math.min(index, next.length)), 0, makeBlock(template));
+      // Inserted pages are new pages — same starting frame as `addBlock`, or "insert here" would
+      // hand back a blank sheet while the Add button hands back a usable one.
+      next.splice(Math.max(0, Math.min(index, next.length)), 0, { ...makeBlock(template), overlays: [newPageOverlay()] });
       return next;
     });
   };
@@ -167,6 +181,10 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     const clone: Block = {
       ...makeBlock(src.template),
       background: src.background,
+      // Photo FRAMES are layout and are copied (emptied); the photos in them are not, because a
+      // photo is placed at most once. Dropping them would make "duplicate this page" return a
+      // blank sheet now that a page's photos live in overlays rather than in base slots.
+      overlays: src.overlays.map((o) => ({ ...o, id: makeOverlayId(), photoId: null })),
       texts: src.texts.map((t) => ({ ...t, id: cryptoId() })),
       qrs: src.qrs.map((q) => ({ ...q, id: cryptoId() })),
       stickers: src.stickers.map((s) => ({ ...s, id: cryptoId() })),
@@ -225,24 +243,37 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
   /**
    * Append an overlay. Returns its new id so the caller can select it immediately.
    *
-   * `at` is where the customer put it — the normalized CENTRE of the new container. Dropping a
-   * photo onto the page is now the ordinary way a photo reaches a page (a page is a background,
-   * not a photo container), so "it appears where I dropped it" is the only acceptable answer.
-   * Omitted, the cascading default placement is used, exactly as before.
+   * `photoId` may be NULL — an empty container is a first-class overlay (`Overlay.photoId` has
+   * always been nullable, which is what lets a blueprint store geometry with no photos). "Add
+   * overlay" creates one of these and the customer fills it afterwards; no photo record exists
+   * until a photo is actually attached.
+   *
+   * `at` says WHERE:
+   *   `{x, y}`   the normalized CENTRE the customer chose — a drop point. Dropping a photo onto
+   *              the page is the ordinary way a photo reaches a page, so "it appears where I
+   *              dropped it" is the only acceptable answer.
+   *   `'center'` the middle of the page, cascaded slightly per existing overlay so repeated adds
+   *              are visibly separate rather than stacked exactly. This is what "Add overlay"
+   *              with nothing else selected means.
+   *   omitted    the original cascading default placement, unchanged.
    */
-  const addOverlay = (key: string, photoId: string, at?: { x: number; y: number }) => {
+  const addOverlay = (key: string, photoId: string | null, at?: { x: number; y: number } | 'center') => {
     const id = makeOverlayId();
     mutate((prev) =>
-      stripPhoto(prev, photoId).map((b) => {
+      // An empty container displaces nothing — there is no photo to take from anywhere else.
+      (photoId ? stripPhoto(prev, photoId) : prev).map((b) => {
         if (b.key !== key) return b;
         const n = b.overlays.length;
         const { w, h } = DEFAULT_OVERLAY_GEOM;
         if (at) {
+          const drift = ((n % 5) - 2) * 0.035; // a gentle cascade around the anchor, both axes
+          const cx = at === 'center' ? 0.5 + drift : at.x;
+          const cy = at === 'center' ? 0.5 + drift : at.y;
           const overlay: Overlay = {
             id,
             photoId,
-            x: clamp01(at.x - w / 2),
-            y: clamp01(at.y - h / 2),
+            x: clamp01(cx - w / 2),
+            y: clamp01(cy - h / 2),
             w,
             h,
           };
