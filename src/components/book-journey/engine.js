@@ -59,7 +59,6 @@ export class BookJourneyEngine {
     this.panels = Array.from(this.stageRef.current.querySelectorAll('[data-panel]'));
     this.ctaEl = this.stageRef.current.querySelector('[data-cta]');
     this.markers = Array.from(this.trailRef.current.querySelectorAll('[data-marker]'));
-    this.hintEl = this.stageRef.current.querySelector('[data-album-hint]');
     this.sceneIdx = 0; this.fromIdx = 0; this.toIdx = 0;
     this.fromU = 0; this.toU = 0; this.tw = 1; this.twV = 0; this.damp = 1;
     this.bandX = 0; this.bandV = 0; this.pending = 0; this.dirNow = 1;
@@ -90,13 +89,8 @@ export class BookJourneyEngine {
       this.inputEl = null;
     }
     window.removeEventListener('resize', this.onResize);
-    window.removeEventListener('pointermove', this.onBookMove);
-    window.removeEventListener('pointerup', this.onBookUp);
-    window.removeEventListener('pointercancel', this.onBookUp);
-    if (this.pinRef.current) {
-      this.pinRef.current.removeEventListener('wheel', this.onBookWheel, true);
-      this.pinRef.current.removeEventListener('keydown', this.onBookKey, true);
-    }
+    // The window pointermove/pointerup/pointercancel and the capture-phase wheel/keydown that
+    // used to be removed here belonged to bindBookDrag, which no longer exists.
     this.dead = true;
     this.releaseGL();
   }
@@ -327,7 +321,6 @@ export class BookJourneyEngine {
     this.buildTrailRibbon(THREE, scene);
     this.buildTrailLife(THREE, scene);
     this.buildClimbers(THREE, scene);
-    this.bindBookDrag();
     // the finale looks straight up the peak: camera stands off the south side, aimed at the body
     // of the cone so it fills the middle of the frame, with the album held out to the left
     this.finaleLook = this.summitTop.clone().add(new THREE.Vector3(0, -15, 0));
@@ -1223,7 +1216,13 @@ export class BookJourneyEngine {
       ctx.fillRect(240, 750, 160, 2);
     };
     img.onload = () => { (this.redraws || []).forEach(f => f()); };
-    img.src = encodeURI('uploads/LOGO (2)-Photoroom.png');
+    // THE M. The artifact loaded this from a RELATIVE `uploads/…` path that only existed beside
+    // the .dc.html file; in the app it resolved to /uploads/… and 404'd, so `img.complete &&
+    // img.naturalWidth` was never true and the cover rendered with the title but no mark. The
+    // same artwork is already served at /logo.png (public/logo.png — the site's own wordmark,
+    // used by the header, footer and auth shell), so the asset is reused rather than duplicated.
+    // Same-origin, so drawing it does not taint the canvas the texture is read from.
+    img.src = '/logo.png';
     draw();
     return { canvas: c, draw };
   }
@@ -1784,6 +1783,14 @@ export class BookJourneyEngine {
    */
   canConsume(dir) {
     if (this.reduced) return false;               // reduced motion: never hold the page
+    // FAIL OPEN. If the renderer was never built (no WebGL, blocklisted GPU, context limit) the
+    // scene cannot move, so consuming a gesture would preventDefault forever and hold the page
+    // hostage inside a box the reader cannot scroll out of. No engine ⇒ no claim on the wheel.
+    if (!this.renderer) return false;
+    // The boundary rule, and the whole of it: another scene in the requested direction means the
+    // journey acts on the gesture; no scene left in that direction means the page gets it back.
+    // It reads ONLY the scene index — never window.scrollY — so reversing out of scene 3 works
+    // exactly the same whether the page is at the top or half way down.
     return dir > 0 ? this.sceneIdx < 5 : this.sceneIdx > 0;
   }
 
@@ -1792,8 +1799,11 @@ export class BookJourneyEngine {
       // BOUNDARY RELEASE: at the first scene scrolling up, or the last scrolling down, nothing
       // is prevented — the page scrolls and the user leaves the section the way they came.
       if (!this.canConsume(e.deltaY > 0 ? 1 : -1)) return;
-      e.preventDefault();
       const ad = Math.abs(e.deltaY);
+      // Sub-threshold noise is not a gesture, so it must not cost the page its scroll either.
+      // preventDefault now happens ONLY on the paths that actually act on the wheel, or that
+      // deliberately hold the page still while a scene is in flight — never merely because the
+      // pointer happens to be inside .bj-frame.
       if (ad < 4) return;
       const now = performance.now();
       const gap = now - (this.lastWheelT || 0);
@@ -1801,9 +1811,14 @@ export class BookJourneyEngine {
       // a scene only advances on a fresh flick: the wheel has to fall quiet first, so a
       // trackpad's inertia tail can never carry you past a stop
       if (gap > 150) this.wheelArmed = true;
-      if (this.isAnimating || now - (this.settledAt || 0) < 260) { this.wheelArmed = false; return; }
-      if (!this.wheelArmed) return;
+      // A scene is mid-flight (or just landed): hold the page still so the transition the reader
+      // asked for is not fought by the document scrolling out from under it.
+      if (this.isAnimating || now - (this.settledAt || 0) < 260) { this.wheelArmed = false; e.preventDefault(); return; }
+      // The inertia tail of the flick that just advanced a scene. Swallow it — releasing here
+      // would shove the page down the moment a scene landed.
+      if (!this.wheelArmed) { e.preventDefault(); return; }
       this.wheelArmed = false;
+      e.preventDefault();
       this.gesture(e.deltaY > 0 ? 1 : -1, Math.min(ad / 300, 1.1));
     };
     this.onKey = (e) => {
@@ -1816,9 +1831,22 @@ export class BookJourneyEngine {
     };
     this.onTouchStart = (e) => { this.touchY = e.touches[0].clientY; this.touchT = performance.now(); this.touchUsed = false; };
     this.onTouchMove = (e) => {
-      if (this.touchUsed || this.touchY == null) return;
+      if (this.touchY == null || !e.touches[0]) return;
+      // ONCE CLAIMED, STAY CLAIMED FOR THE REST OF THE SWIPE.
+      // `touchUsed` used to return HERE, before preventDefault. So of a seven-touchmove swipe only
+      // the two before the 38px threshold were ever prevented, and the remaining finger travel was
+      // handed straight to the browser: one swipe advanced a scene AND scrolled the page a few
+      // hundred pixels, which then dragged the section out from under the reader (measured: scene
+      // 0 → 1 plus scrollY 0 → 284 from a single swipe). Keep preventing until the finger lifts;
+      // the flag still does its real job of stopping a second gesture firing from one swipe.
+      if (this.touchUsed) { e.preventDefault(); return; }
       const dy = this.touchY - e.touches[0].clientY;
       if (!this.canConsume(dy > 0 ? 1 : -1)) return; // boundary → normal touch scrolling
+      // Touch is NOT symmetrical with the wheel here, deliberately. Once the browser has begun a
+      // native touch scroll it stops honouring preventDefault on later touchmoves, so waiting for
+      // the 38px threshold before claiming the gesture would lose the swipe entirely. canConsume
+      // above is the boundary gate that matters: at scene 0 up / scene 5 down we never reach this
+      // line and the page scrolls natively.
       e.preventDefault();
       if (Math.abs(dy) < 38) return;
       this.touchUsed = true;
@@ -1847,186 +1875,125 @@ export class BookJourneyEngine {
     }, 200);
   }
 
-  // at the final stop the album is the reader's to place: pick it up and put it where they want it
-  // the album is the reader's to arrange, at every stop: pick it up, put it where they want it,
-  // size it how they want it. each scene keeps its own placement, and it survives a reload.
-  bookAdjFor(i) {
-    this.bookAdj = this.bookAdj || {};
-    const a = this.bookAdj[i];
-    if (a && typeof a.x === 'number' && typeof a.y === 'number' && typeof a.s === 'number') return a;
-    return (this.bookAdj[i] = { x: 0, y: 0, s: 1 });
-  }
+  /**
+   * THE ALBUM IS A FIXED VISUAL ANCHOR.
+   *
+   * It used to be the reader's to place: `bookAdj` held a per-scene {x, y, scale} that pointer
+   * drag, shift-drag, wheel, +/-/0 and a double-click all wrote to, persisted in localStorage.
+   * All of that is gone — the album is now presentation, not a control — so there is no
+   * `bookAdj`, no `bookAdjFor`, no `saveBookAdj`, no drag state and no hint overlay.
+   *
+   * EVERY scene is now a "held" scene. That is the smallest change that makes the album visually
+   * fixed, because apparent size is camera DISTANCE, not scale: scenes 1/3/4 already anchored the
+   * album a constant `HOLD_D` in front of the lens, while 0/2/5 left it out on the curve where
+   * the camera's own choreography (`slot().d`, 10.5 → 34 world units, plus fitAlbum's corrective
+   * pass) made it swell and shrink as the reader scrolled. Anchoring all six to the same distance
+   * and the same scale makes the size constant BY CONSTRUCTION — no clamping, no correction.
+   *
+   * The environment keeps every bit of its storytelling: the camera still flies the curve, the
+   * terrain, mist, clouds, leaves, snow, trekkers and climbers are untouched, and the panels
+   * still cross-fade. Only the album stops moving relative to the frame.
+   */
+  heldScene() { return true; }
 
-  // scenes 3 and 4 hold the album up for reading: camera-anchored a short way in front of the
-  // lens, square to the screen, sitting in the empty half of frame beside that scene's copy card
-  // (measured live, since the cards are sized and anchored in css pixels).
-  heldScene(i) { return i === 1 || i === 3 || i === 4; }
-
+  /**
+   * Screen placement for the album at scene `i`, measured against the CANVAS — not the window.
+   *
+   * The artifact ran full-bleed, so `window.innerWidth/innerHeight` and the canvas were the same
+   * box and mixing them was invisible. Embedded in the landing page they are not: the canvas is
+   * `min(94vw, 1600px)` x `min(82svh, 880px)` inside `.bj-frame`. Measuring the gutters and the
+   * world-units-per-pixel `k` against the window put the album at the wrong size and the wrong
+   * place. Everything below is canvas-relative and therefore self-consistent with `camera.aspect`,
+   * which `resize()` already derives from the same element.
+   */
   readSlot(i, d) {
+    const cv = this.renderer && this.renderer.domElement;
+    const box = cv && cv.getBoundingClientRect();
+    const vw = (box && box.width) || window.innerWidth || 1;
+    const vh = (box && box.height) || window.innerHeight || 1;
     const now = performance.now();
-    const vw = window.innerWidth || 1, vh = window.innerHeight || 1;
-    this._slots = this._slots || {};
-    let c = this._slots[i];
+    this._read = this._read || null;
+    let c = this._read;
     if (!c || c.vw !== vw || c.vh !== vh || now - c.t > 500) {
-      const el = this.cards && this.cards[i];
-      const r = el && el.getBoundingClientRect();
-      // the wider of the two gutters beside the card is the album's half of the frame
-      const L = r && r.width ? r.left : vw * 0.5;
-      const R = r && r.width ? vw - r.right : vw * 0.5;
-      c = this._slots[i] = { vw, vh, t: now, left: R > L ? vw - R : 0, width: Math.max(L, R) };
-    }
-    const k = (2 * Math.tan(this.camera.fov * Math.PI / 360) * Math.max(1, d)) / vh;  // world units per px
-    const strip = Math.max(90, c.width - 26);
-    // 1.15 pads for the rotated, pitched footprint swinging outside the flat spread
-    const halfW = (this.bookW * 1.45) / k, halfH = (2.15 * 1.45) / k;   // px, at scale 1
-    // floor 0.78: below that the printed captions stop being readable, which is the whole point
-    // of holding the album up here — a slightly overhanging spread beats an illegible one
-    const s = clamp(Math.min((strip * 0.9) / (2 * halfW), (vh * 0.62) / (2 * halfH)), 0.78, 1);
-    return { k, s, vw, vh, centre: c.left + strip / 2 + 13, halfW: halfW * s, halfH: halfH * s };
-  }
-
-  bookBaseOff(i, d) {
-    return this.heldScene(i) ? { x: 0, y: 0, s: this.readSlot(i, 13).s } : { x: 0, y: 0, s: 1 };
-  }
-
-  saveBookAdj() {
-    try { localStorage.setItem('malnad.album.place.v3', JSON.stringify(this.bookAdj || {})); } catch (e) {}
-  }
-
-  updateBookHint() {
-    if (this.hintEl) this.hintEl.style.opacity = this.bookSel ? '1' : '0';
-  }
-
-  bindBookDrag() {
-    const el = this.renderer && this.renderer.domElement;
-    if (!el) return;
-    const THREE = this.THREE;
-    try {
-      // earlier keys held world-space drags. a held scene reads its drag in screen px off a
-      // camera anchor instead, so a value saved in the old frame lands nowhere near where it was
-      // put — carry the free scenes forward verbatim and reset the held ones as they convert.
-      let v = JSON.parse(localStorage.getItem('malnad.album.place.v3') || 'null');
-      if (!v) {
-        v = JSON.parse(localStorage.getItem('malnad.album.place.v2')
-          || localStorage.getItem('malnad.album.place.v1') || '{}') || {};
-        if (v && typeof v === 'object') {
-          for (let i = 0; i <= 5; i++) if (this.heldScene(i)) v[i] = { x: 0, y: 0, s: 1 };
-          this.bookAdj = v;
-          this.saveBookAdj();
+      // Measure ALL SIX stops in one pass. The scale has to be shared across scenes (see below),
+      // so a per-scene cache cannot answer the question — it would only ever know its own gutter.
+      const strips = [];
+      for (let n = 0; n <= 5; n++) {
+        const el = this.cards && this.cards[n];
+        const r = el && el.getBoundingClientRect();
+        const L = r && r.width ? r.left - (box ? box.left : 0) : vw * 0.5;
+        const R = r && r.width ? (box ? box.right : vw) - r.right : vw * 0.5;
+        // A gutter narrower than a third of the box is not a gutter. On a phone every card is
+        // full width, so there is no "empty half of frame" to sit in — and centring the album
+        // there parks it right behind the copy. Fall back to the same question on the OTHER axis:
+        // take the taller of the bands above and below the card, which is where the free space
+        // actually is once the cards go full width.
+        const wide = Math.max(L, R) >= vw * 0.34;
+        if (wide) {
+          strips[n] = { left: R > L ? vw - R : 0, width: Math.max(L, R), top: 0, height: vh, hf: 0.62 };
+        } else {
+          const T = r && r.height ? r.top - (box ? box.top : 0) : vh * 0.5;
+          const B = r && r.height ? (box ? box.bottom : vh) - r.bottom : vh * 0.5;
+          strips[n] = { left: 0, width: vw, top: B > T ? vh - B : 0, height: Math.max(T, B), hf: 0.9 };
         }
       }
-      if (v && typeof v === 'object') this.bookAdj = v;
-    } catch (e) {}
-    const SMIN = 0.45, SMAX = 2.6;
-    // gate on the tween value, not the isAnimating flag: at the finale the loop idles and that
-    // flag can still be set, which locked the album exactly where it most needs to be grabbable
-    const live = () => this.book && this.bookBasis && this.tw >= 0.98;
-    const onAlbum = (ev) => {
-      const r = el.getBoundingClientRect();
-      if (!r.width || !r.height) return false;
-      const nx = ((ev.clientX - r.left) / r.width) * 2 - 1;
-      const ny = -((ev.clientY - r.top) / r.height) * 2 + 1;
-      // the loop idles at a stop, so refresh the matrices the pick reads rather than trusting
-      // whatever the last rendered frame left behind
-      this.camera.updateMatrixWorld();
-      this.book.updateMatrixWorld(true);
-      this.ray = this.ray || new THREE.Raycaster();
-      this.ray.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
-      if (this.ray.intersectObject(this.book, true).length) return true;
-      // a closed album is a thin slab and can present almost no surface to a ray, so fall back
-      // to its projected footprint and keep it an easy thing to pick up
-      const c = this.book.getWorldPosition(this._pv || (this._pv = new THREE.Vector3())).clone().project(this.camera);
-      if (c.z > 1) return false;
-      const s = this.book.scale.x || 1;
-      const tanH = Math.tan(this.camera.fov * Math.PI / 360);
-      const d = Math.max(1, this.camera.position.distanceTo(this.book.position));
-      return Math.abs(nx - c.x) < (this.bookW * 0.62 * s) / (tanH * this.camera.aspect * d)
-        && Math.abs(ny - c.y) < (2.3 * s) / (tanH * d);
+      c = this._read = { vw, vh, t: now, strips };
+    }
+    const k = (2 * Math.tan(this.camera.fov * Math.PI / 360) * Math.max(1, d)) / vh;  // world units per px
+    // 1.45 pads for the rotated, pitched footprint swinging outside the flat spread
+    const halfW0 = (this.bookW * 1.45) / k, halfH0 = (2.15 * 1.45) / k;   // px, at scale 1
+    // ONE SCALE FOR THE WHOLE JOURNEY. This used to be solved per scene, so the album grew and
+    // shrank between stops as each card left a different gutter — visible size change driven by
+    // nothing but scrolling. Taking the tightest of the six means it fits every stop and never
+    // changes between them. It still tracks the viewport, so it stays responsive.
+    let s = 1;
+    for (let n = 0; n <= 5; n++) {
+      const t = c.strips[n];
+      s = Math.min(s, (Math.max(90, t.width - 26) * 0.9) / (2 * halfW0), (t.height * t.hf) / (2 * halfH0));
+    }
+    // floor 0.42: a narrow phone box has no gutter at all, and an album clipped by the frame edge
+    // is worse than a small one. On desktop the height term keeps this at ~1 anyway.
+    s = clamp(s, 0.42, 1);
+    const t = c.strips[i];
+    const strip = Math.max(90, t.width - 26);
+    return {
+      k, s, vw, vh,
+      centre: t.left + strip / 2 + 13,        // horizontal placement
+      middle: t.top + t.height / 2,           // vertical placement (vh/2 whenever a gutter exists)
+      halfW: halfW0 * s, halfH: halfH0 * s,
     };
-    let hoverT = 0;
-    this.onBookDown = (ev) => {
-      if (!live()) return;
-      if (!onAlbum(ev)) { if (this.bookSel) { this.bookSel = false; this.updateBookHint(); } return; }
-      const a = this.bookAdjFor(this.sceneIdx);
-      this.bookSel = true;
-      this.updateBookHint();
-      this.dragging = true;
-      // shift turns the same drag into a resize, so a trackpad with no wheel can still size it
-      this.dragFrom = { x: ev.clientX, y: ev.clientY, dx: a.x, dy: a.y, ds: a.s, size: ev.shiftKey };
-      el.style.cursor = ev.shiftKey ? 'ns-resize' : 'grabbing';
-      try { el.setPointerCapture(ev.pointerId); } catch (e) {}
-      ev.preventDefault();
-    };
-    this.onBookMove = (ev) => {
-      if (!this.dragging) {
-        const now = performance.now();
-        if (now - hoverT < 60) return;
-        hoverT = now;
-        el.style.cursor = live() && onAlbum(ev) ? (this.bookSel ? 'move' : 'grab') : '';
-        return;
-      }
-      const a = this.bookAdjFor(this.sceneIdx), f = this.dragFrom;
-      if (f.size) a.s = clamp(f.ds * (1 - (ev.clientY - f.y) / 300), SMIN, SMAX);
-      else {
-        const r = el.getBoundingClientRect();
-        // pixels to world units at the album's own distance, so it tracks the pointer exactly
-        const k = (2 * Math.tan(this.camera.fov * Math.PI / 360) * this.bookBasis.d) / r.height;
-        a.x = clamp(f.dx + (ev.clientX - f.x) * k, -14, 14);
-        a.y = clamp(f.dy - (ev.clientY - f.y) * k, -9, 9);
-      }
-      this.frame();
-      ev.preventDefault();
-    };
-    this.onBookUp = () => {
-      if (!this.dragging) return;
-      this.dragging = false;
-      this.saveBookAdj();
-      el.style.cursor = 'grab';
-    };
-    this.onBookReset = () => {
-      if (!live() || !this.bookSel) return;
-      this.bookAdj[this.sceneIdx] = { x: 0, y: 0, s: 1 };
-      this.saveBookAdj();
-      this.frame();
-    };
-    // while the album is selected the wheel sizes it instead of turning the page. capture phase
-    // plus stopImmediatePropagation is what keeps the scene navigation out of it.
-    this.onBookWheel = (ev) => {
-      if (!this.bookSel || !live()) return;
-      const a = this.bookAdjFor(this.sceneIdx);
-      a.s = clamp(a.s * (ev.deltaY > 0 ? 0.94 : 1.064), SMIN, SMAX);
-      this.saveBookAdj();
-      this.frame();
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-    };
-    this.onBookKey = (ev) => {
-      if (!this.bookSel || !live()) return;
-      const a = this.bookAdjFor(this.sceneIdx);
-      if (ev.key === '+' || ev.key === '=') a.s = clamp(a.s * 1.08, SMIN, SMAX);
-      else if (ev.key === '-' || ev.key === '_') a.s = clamp(a.s / 1.08, SMIN, SMAX);
-      else if (ev.key === '0') this.bookAdj[this.sceneIdx] = { x: 0, y: 0, s: 1 };
-      else if (ev.key === 'Escape') { this.bookSel = false; this.updateBookHint(); }
-      else return;
-      this.saveBookAdj();
-      this.frame();
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-    };
-    el.addEventListener('pointerdown', this.onBookDown);
-    window.addEventListener('pointermove', this.onBookMove);
-    window.addEventListener('pointerup', this.onBookUp);
-    window.addEventListener('pointercancel', this.onBookUp);
-    el.addEventListener('dblclick', this.onBookReset);
-    const section = this.pinRef.current;
-    section.addEventListener('wheel', this.onBookWheel, { passive: false, capture: true });
-    section.addEventListener('keydown', this.onBookKey, true);
   }
+
+  /** Constant world distance from the lens to the album, in every scene. Apparent size is this. */
+  HOLD_D = 13;
+
+  bookBaseOff(i) {
+    return { x: 0, y: 0, s: this.readSlot(i, this.HOLD_D).s };
+  }
+
+  /**
+   * bindBookDrag() IS GONE, DELIBERATELY.
+   *
+   * It bound pointerdown/dblclick on the canvas, a CAPTURE-phase wheel + keydown on the section,
+   * and pointermove/pointerup/pointercancel on WINDOW. The hover branch of that pointermove ran
+   * on every mouse move anywhere on the page: getBoundingClientRect on the canvas,
+   * camera.updateMatrixWorld(), book.updateMatrixWorld(true) and a recursive
+   * Raycaster.intersectObject(this.book, true) through the covers, spine and three page groups,
+   * plus a projected-footprint fallback — roughly sixteen times a second, for the whole life of
+   * the page, purely to decide a cursor shape and to support dragging the album.
+   *
+   * The album is a fixed visual anchor now, so every one of those inputs has nothing left to
+   * write to and the raycast has nothing left to answer. The listeners, the raycaster, the
+   * localStorage placement store and the hint overlay were all removed together.
+   *
+   * Nothing else in the engine used pointer events, so no pointer functionality was lost: scene
+   * gestures are wheel/touch/key on .bj-frame (bindInput) and the panel CTAs are ordinary
+   * anchors handled natively by the browser.
+   */
 
   // one gesture = one scene, but the flight stays grabbable: a reverse gesture
   // re-targets from the live value with velocity carried; a same-way gesture queues one step
   gesture(dir, vel) {
-    if (this.dragging) return;   // placing the album is not a scroll
     const now = performance.now();
     const v = vel === undefined ? 0.3 : vel;
     // watchdog: never let a stalled frame loop brick the rig
@@ -2276,9 +2243,9 @@ export class BookJourneyEngine {
     // book — closed at the trailhead, open from scene 1 on, one page turned per scene
     const b = this.book;
     b.position.copy(pos);
-    // held still for the reader at the trailhead and at the summit, and a little larger there
-    const s0F = this.fromIdx === 0 ? 1 : 0, s0T = this.toIdx === 0 ? 1 : 0;
-    const big = 1 + 0.18 * Math.max(s0F + (s0T - s0F) * e, fin);
+    // The trailhead and the summit used to swell the album by 18% (`1 + 0.18 * max(scene0, fin)`).
+    // That is a size change driven purely by scrolling, so it is gone: one scale, every scene.
+    const big = 1;
     // 4 → 5 was a straight lerp to a fixed point and that line ran clean through the cone, so
     // the album surfaced inside the snow face. anchor it to the live camera instead: held a set
     // distance in front of the lens it cannot come out behind the mountain, and the approach is
@@ -2292,33 +2259,32 @@ export class BookJourneyEngine {
         .addScaledVector(fw2, 13).addScaledVector(rr2, -4.4).addScaledVector(uu2, 1.3);
       b.position.lerp(anchor, ss(0, 1, fin));
     }
-    // scenes 3 and 4: same trick, held up in the free half of frame beside that scene's card
+    // EVERY scene now holds the album up: pinned HOLD_D in front of the lens, square to the
+    // screen, sitting in the free half of frame beside that scene's card. heldScene() is true for
+    // all six, so s3 is a constant 1 — kept as a value rather than inlined because the blend below
+    // still reads it, and because it is what makes the album immune to the camera's own flight.
     const hF = this.heldScene(this.fromIdx) ? 1 : 0, hT = this.heldScene(this.toIdx) ? 1 : 0;
     const s3 = hF + (hT - hF) * ss(0, 1, e);
-    // the reader's own placement and size, kept per scene and blended across the flight between
-    // them, applied in screen axes so a drag moves the album exactly where the pointer went
-    const aF = this.bookAdjFor(this.fromIdx), aT = this.bookAdjFor(this.toIdx);
-    // scene 3's card sits on the right, so the album is held out to the left of frame there,
-    // square to the lens. this base offset composes with whatever the reader dragged.
-    const camD = this.camera.position.distanceTo(pos);
-    const bF = this.bookBaseOff(this.fromIdx, camD), bT = this.bookBaseOff(this.toIdx, camD);
-    const adjX = (aF.x + bF.x) + ((aT.x + bT.x) - (aF.x + bF.x)) * e,
-      adjY = (aF.y + bF.y) + ((aT.y + bT.y) - (aF.y + bF.y)) * e,
-      adjS = (aF.s * bF.s) + ((aT.s * bT.s) - (aF.s * bF.s)) * e;
+    // No reader placement any more — the album is not draggable, so there is no per-scene {x,y,s}
+    // to compose in. The only offset left is the design's own, and the only scale is the shared
+    // fit, which is identical for every scene by construction (see readSlot).
+    const bF = this.bookBaseOff(this.fromIdx), bT = this.bookBaseOff(this.toIdx);
+    const adjX = 0, adjY = 0;
+    const adjS = bF.s + (bT.s - bF.s) * e;
     const fw = this.lookAt.clone().sub(this.camera.position).normalize();
     const rr = new THREE.Vector3().crossVectors(fw, new THREE.Vector3(0, 1, 0)).normalize();
     const uu = new THREE.Vector3().crossVectors(rr, fw).normalize();
-    b.position.addScaledVector(rr, adjX).addScaledVector(uu, adjY);
-    // held scenes override that: the album is pinned a short way in front of the lens, and the
-    // reader's own drag moves it within the frame rather than out of it — clamped to stay in view
+    // held scenes override the curve position entirely: the album is pinned a fixed distance in
+    // front of the lens, so its apparent size cannot be changed by where the camera flew.
     if (s3 > 0) {
-      const D = 13;
-      const slF = this.readSlot(this.heldScene(this.fromIdx) ? this.fromIdx : this.toIdx, D);
-      const slT = this.readSlot(this.heldScene(this.toIdx) ? this.toIdx : this.fromIdx, D);
+      const D = this.HOLD_D;
+      const slF = this.readSlot(this.fromIdx, D);
+      const slT = this.readSlot(this.toIdx, D);
       const sl = e < 0.5 ? slF : slT, kk = sl.k, M = 24;
       const centre = slF.centre + (slT.centre - slF.centre) * e;
+      const middle = slF.middle + (slT.middle - slF.middle) * e;
       const cx = clamp(centre + adjX / kk, M + sl.halfW, sl.vw - M - sl.halfW);
-      const cy = clamp(sl.vh / 2 - adjY / kk, M + sl.halfH, sl.vh - M - sl.halfH);
+      const cy = clamp(middle - adjY / kk, M + sl.halfH, sl.vh - M - sl.halfH);
       const anchor = this.camera.position.clone().addScaledVector(fw, D)
         .addScaledVector(rr, (cx - sl.vw / 2) * kk).addScaledVector(uu, (sl.vh / 2 - cy) * kk);
       b.position.lerp(anchor, s3);
@@ -2395,23 +2361,28 @@ export class BookJourneyEngine {
     // camera's own basis instead — that is what "square to the screen" actually means.
     if (s3 > 0) b.quaternion.slerp(this.camera.quaternion, s3);
 
-    // last word on clearance goes to the spread's four real corners: once the album is rotated and
-    // pitched they swing well outside its own centre column, which is what let a corner cut the slope
-    const cv = this._cv || (this._cv = new THREE.Vector3());
-    const hx = this.bookW * (0.5 + 0.5 * open) * bScale, hy = 2.05 * bScale;
-    let need = -1e9;
-    for (const [qx, qy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      cv.set(hx * qx, hy * qy, 0).applyQuaternion(b.quaternion);
-      const g = this.surfaceY(b.position.x + cv.x, b.position.z + cv.z) - cv.y;
-      if (g > need) need = g;
+    // Terrain clearance only ever applied to an album sitting out on the curve, and its whole
+    // effect was `* (1 - max(fin, s3))`. With every scene camera-anchored s3 is 1, so the factor
+    // is 0 and this can never move the album — it would only resample the slope four times a
+    // frame to multiply the answer by nothing. Kept behind the guard so a future scene that goes
+    // back to riding the curve still gets its clearance.
+    if (s3 < 1) {
+      const cv = this._cv || (this._cv = new THREE.Vector3());
+      const hx = this.bookW * (0.5 + 0.5 * open) * bScale, hy = 2.05 * bScale;
+      let need = -1e9;
+      for (const [qx, qy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        cv.set(hx * qx, hy * qy, 0).applyQuaternion(b.quaternion);
+        const g = this.surfaceY(b.position.x + cv.x, b.position.z + cv.z) - cv.y;
+        if (g > need) need = g;
+      }
+      need += 0.55;
+      // the four corners resample the slope every frame, so this target is noisy while the album
+      // banks and drifts. rise with it at once (a corner must never cut the ground) but let it fall
+      // away smoothly, which is what turns the trailhead lift from a chatter into a glide.
+      this._need = this._need === undefined ? need
+        : Math.max(need, this._need + (need - this._need) * (1 - Math.pow(0.002, dt)));
+      if (b.position.y < this._need) b.position.y += (this._need - b.position.y) * (1 - Math.max(fin, s3));
     }
-    need += 0.55;
-    // the four corners resample the slope every frame, so this target is noisy while the album
-    // banks and drifts. rise with it at once (a corner must never cut the ground) but let it fall
-    // away smoothly, which is what turns the trailhead lift from a chatter into a glide.
-    this._need = this._need === undefined ? need
-      : Math.max(need, this._need + (need - this._need) * (1 - Math.pow(0.002, dt)));
-    if (b.position.y < this._need) b.position.y += (this._need - b.position.y) * (1 - Math.max(fin, s3));
 
     this.key.target.position.copy(b.position);
     this.key.position.copy(b.position).add(this.keyOffset);
@@ -2603,7 +2574,13 @@ export class BookJourneyEngine {
     }
     if (this.flag) this.flag.rotation.y = Math.sin(t * 1.4) * 0.22;
     if (this.prayer) this.prayer.children.forEach((q) => { q.rotation.y = 0.5 + Math.sin(t * 2.6 + q.userData.p) * 0.5; });
-    if (!this.isAnimating) this.fitAlbum();   // only ever fit a scene at rest, never mid-flight
+    // fitAlbum() is NO LONGER CALLED. It pulled the CAMERA back or pushed it in until the album's
+    // projected width matched its gutter — changing apparent album size by moving the camera,
+    // which is precisely the scroll-driven zoom that had to stop. It would also now misbehave:
+    // the album is anchored a fixed HOLD_D in front of the lens, so its projected width no longer
+    // responds to `sl.d`, the ratio never converges, and 90 settle frames of `sl.d *= k` would
+    // walk the camera to a clamp bound for nothing. readSlot's measured shared fit replaces it.
+    // The method is left intact and unreferenced so it stays diffable against the artifact.
 
     // leaves
     const thin = 1 - dwell * 0.42;

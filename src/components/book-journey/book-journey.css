@@ -44,9 +44,18 @@
      those units are now `cqw`/`cqh`, so the same numbers resolve against this box instead of the
      window. One declaration re-bases the whole overlay system — no panel had to be re-measured. */
   container-type: size;
-  /* The journey manages wheel input itself; this stops a consumed gesture from also chaining
-     into the page behind it, without locking anything. */
-  overscroll-behavior: contain;
+  /*
+   * NO `overscroll-behavior: contain` HERE. It used to be set to stop a consumed gesture from
+   * chaining into the page — but a consumed gesture already calls preventDefault(), so it was
+   * buying nothing, and it was the reason the journey would not hand scrolling back.
+   *
+   * `overflow: hidden` above makes this box a scroll container with no scrollable overflow.
+   * `contain` tells the browser NOT to chain a scroll out of such a container, so at the two
+   * boundaries — scene 5 scrolling down, scene 0 scrolling up — where the engine deliberately
+   * declines the gesture and prevents nothing, the browser still refused to scroll the document.
+   * The page only moved once the cursor left the box. That is the bug; the default (`auto`) is
+   * the fix, and the engine's canConsume() remains the only thing that decides ownership.
+   */
 }
 
 /* Shorter viewports: keep the box from eating the whole screen so the hero stays discoverable. */
@@ -68,27 +77,10 @@
     height: min(88svh, 720px);
     border-radius: clamp(0.75rem, 3vw, 1rem);
   }
-
-  /**
-   * R8 — the album manipulation hint.
-   *
-   * The stage markup is a verbatim port, so the hint is inlined as one nowrap row: 506px wide,
-   * centred with translateX(-50%). Its `pointerdown` handler fires on touch too, so tapping the
-   * book on a phone really does show it — clipped by 93px on BOTH sides at 320 (66/58/38 at
-   * 375/390/430), which cuts off the first and last instruction.
-   *
-   * Overridden here rather than in the ported string. Every span and its text is kept; the row
-   * is simply allowed to wrap inside the viewport.
-   */
-  [data-album-hint] {
-    max-width: min(92vw, 22rem);
-    flex-wrap: wrap;
-    justify-content: center;
-    row-gap: 0.3rem;
-    white-space: normal;
-    text-align: center;
-  }
 }
+
+/* The `[data-album-hint]` override that used to live here is gone with the hint itself: the
+   album is a fixed visual anchor now, so there is no drag / resize / reset / Esc to explain. */
 
 .bj-frame a {
   color: #dce8e2;
