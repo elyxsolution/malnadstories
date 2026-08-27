@@ -44,6 +44,10 @@ export type PdfStage =
 export type PdfFailureCode =
   | 'render_timeout'
   | 'render_engine_failed'
+  /** Chromium could not connect to the configured render base URL (refused / timeout / TLS). */
+  | 'render_unreachable'
+  /** The render base URL's hostname does not resolve. */
+  | 'render_dns_failed'
   | 'print_route_error'
   | 'render_empty'
   | 'upload_failed'
@@ -107,4 +111,25 @@ export function printUrl(
 /** sha256 hex of a print token — compared against the stored `album_pdfs.token_hash`. */
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * REDACT THE PRINT TOKEN from any string that might contain a render URL.
+ *
+ * The token in `?t=` IS the authorization for the print route. Chromium puts the full URL into its
+ * navigation errors — `net::ERR_CONNECTION_REFUSED at http://host/albums/<id>/print?t=<token>` —
+ * and that message used to travel unmodified into the log line, the processor event, and
+ * `album_pdfs.error`, which the admin console renders. A short-lived, single-use token is still a
+ * credential; it does not belong in any of those places.
+ *
+ * Applied at every boundary where a message could carry a URL, so redaction does not depend on
+ * remembering to call it at the one site that happens to log today.
+ */
+export function redactToken(text: string): string {
+  return text.replace(/([?&]t=)[^&\s"')]+/gi, '$1[REDACTED]');
+}
+
+/** The render URL with its token removed — safe to log, safe to store, safe to show an admin. */
+export function redactedPrintUrl(url: string): string {
+  return redactToken(url);
 }

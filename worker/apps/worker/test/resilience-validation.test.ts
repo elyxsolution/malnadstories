@@ -258,6 +258,7 @@ describe('long-running stability', () => {
     for (let i = 0; i < 200; i += 1) {
       await renderer.render({
         url: `https://app.example.com/albums/a${i}/print?t=x`,
+        origin: 'http://localhost:3000',
         readinessFlag: 'READY',
         timeouts: { newPageMs: 10, navigationMs: 10, readinessMs: 10, settleMs: 1, pdfMs: 10 },
       });

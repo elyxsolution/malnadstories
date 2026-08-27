@@ -155,3 +155,51 @@ describe('the preview spine keeps its ADVISORY, page-count-dependent width', () 
     expect(render(24)).toContain('rgba(0,0,0,0.22)');
   });
 });
+
+describe('the preview book KEEPS the overlay chrome the print export drops', () => {
+  /**
+   * The converse of the white-hairline fix, and the reason it is safe.
+   *
+   * `PairContent`'s `print` prop defaults to false, so the preview still draws the white photo
+   * border and its drop shadow exactly as it always did. If a future change made the suppression
+   * unconditional, the customer's preview would silently change appearance — this fails first.
+   */
+  const withOverlay: Block = {
+    key: '0',
+    template: 'single-pair',
+    photoIds: [],
+    caption: '',
+    overlays: [
+      { id: 'o1', photoId: 'p1', x: 0, y: 0, w: 0.5, h: 1 },
+      { id: 'o2', photoId: 'p2', x: 0.5, y: 0, w: 0.5, h: 1 },
+    ] as Block['overlays'],
+    texts: [],
+    qrs: [],
+    stickers: [],
+    background: null,
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(PrintAlbum, {
+      blocks: [withOverlay],
+      photos: [photo('p1'), photo('p2')],
+      cover: cover(2),
+      dimensions: STANDARD,
+      stickerUrls: {},
+    }),
+  );
+
+  it('still draws the white photo border', () => {
+    expect(html).toContain('border-2 border-white');
+  });
+
+  it('still draws the drop shadow', () => {
+    expect(html).toMatch(/class="[^"]*\bshadow\b/);
+  });
+
+  it('carries none of the printer-ready guide geometry', () => {
+    expect(html).not.toContain('stroke-dasharray');
+    expect(html).not.toContain('data-guide');
+    expect(html).not.toMatch(/inside the dotted line/i);
+  });
+});

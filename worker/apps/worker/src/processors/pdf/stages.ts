@@ -1,7 +1,11 @@
 import type { RenderContext, RenderDeps, RenderStage } from './render-context.js';
 import { PermanentPdfError, SupersededError, TransientPdfError } from './errors.js';
-import { PrintRouteError, RendererCrashedError } from './page-renderer.js';
-import { PRINT_READY_FLAG, albumPdfKey, hashToken, printUrl } from './pdf-contract.js';
+import {
+  PrintRouteError,
+  RendererCrashedError,
+  RenderTargetUnreachableError,
+} from './page-renderer.js';
+import { PRINT_READY_FLAG, albumPdfKey, hashToken, printUrl, redactToken } from './pdf-contract.js';
 
 /**
  * THE RENDER STAGES — a composable rendering pipeline over the print route (the source of truth). Each
@@ -69,6 +73,8 @@ export class RenderStep implements RenderStage {
     try {
       const result = await deps.renderer.render({
         url,
+        // Origin only — the safe half of the URL, for diagnostics that must never carry the token.
+        origin: new URL(deps.appUrl).origin,
         readinessFlag: PRINT_READY_FLAG,
         timeouts: deps.timeouts,
       });
@@ -148,17 +154,29 @@ export function defaultRenderStages(): readonly RenderStage[] {
   ];
 }
 
-/** Map a renderer error into a typed PDF error carrying a failure code. */
+/**
+ * Map a renderer error into a typed PDF error carrying a failure code.
+ *
+ * CONNECTIVITY IS ITS OWN CLASS. "The app is unreachable" used to arrive here as a
+ * `RendererCrashedError` and be recorded as `render_engine_failed` — an answer that sends an
+ * operator to look at Chromium when the actual fault is a base URL pointing at a host that is not
+ * running the app. It is now typed, kept TRANSIENT (the app may simply not be up yet, and the
+ * recovery sweep should re-drive), and carries an origin plus an actionable sentence.
+ */
 function toRenderError(error: unknown): Error {
+  if (error instanceof RenderTargetUnreachableError) {
+    const code = error.reason === 'dns' ? 'render_dns_failed' : 'render_unreachable';
+    return new TransientPdfError(redactToken(error.message), code);
+  }
   if (error instanceof PrintRouteError)
-    return new PermanentPdfError(error.message, 'print_route_error');
+    return new PermanentPdfError(redactToken(error.message), 'print_route_error');
   if (error instanceof RendererCrashedError) {
     const code = /timeout|timed out/i.test(error.message)
       ? 'render_timeout'
       : 'render_engine_failed';
-    return new TransientPdfError(error.message, code);
+    return new TransientPdfError(redactToken(error.message), code);
   }
-  const msg = message(error);
+  const msg = redactToken(message(error));
   if (/0 bytes/i.test(msg)) return new PermanentPdfError(msg, 'render_empty');
   if (/timeout|timed out/i.test(msg)) return new TransientPdfError(msg, 'render_timeout');
   return new TransientPdfError(msg, 'render_failed');

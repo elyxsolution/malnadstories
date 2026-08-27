@@ -16,6 +16,7 @@ import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
 import { PAGE_COST, physicalStart, type Block, type EditConfig } from '@/lib/builder/model';
 import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
+import { TrimGuides, SafeAreaGuides, TRIM_GUIDE_CAPTION } from './_print-guides';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { acceptPhotoDrag, leftDropTarget, readPhotoDrag, startPhotoDrag } from '@/lib/builder/photo-dnd';
 import { useBuilderDimensions } from './_dimensions';
@@ -703,14 +704,29 @@ export default function BlockCard({
             </Movable>
           ))}
 
-          {/* Guides — margins + safe-zone + bleed (client-only; never printed). */}
-          {showGuides && (
-            <div className="pointer-events-none absolute inset-0 z-[8]">
-              <div className="absolute inset-[1.5%] border border-dashed border-destructive/40" />
-              <div className="absolute left-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
-              <div className="absolute right-[4%] top-[6%] h-[88%] w-[42%] border border-dashed border-studio/45" />
-            </div>
-          )}
+          {/*
+            THE TRIM REFERENCE — always on, and the one guide every customer needs.
+
+            The page rectangle drawn here IS the 206 × 291 mm artwork (bleed) area: the export
+            scales this design to fill exactly that box. The dotted rectangle is the 200 × 285 mm
+            that survives the printer's cut, so the 3 mm ring outside it is the bleed — paper that
+            is printed and then trimmed away.
+
+            Inset by `INTERIOR_TRIM_INSET_FRACTION` (3/206 and 3/291) rather than a hand-picked
+            percentage, so the guide and the printed sheet are the same geometry. Client-only and
+            inert; it is never exported, never saved, and cannot be selected.
+          */}
+          <TrimGuides />
+
+          {/*
+            THE 15 MM IMPORTANT-CONTENT BOUNDARY — behind the existing Show guides toggle.
+
+            A second, quieter rectangle inside the trim: faces, horizons and text should stay
+            within it, because the gutter and the binding eat the edge. It used to be drawn at
+            4%/6% of the page, numbers that corresponded to nothing physical; it is now the real
+            15 mm, measured from the trim edge, from the same specification the exporter uses.
+          */}
+          {showGuides && <SafeAreaGuides />}
 
           {/* The physical fold. Same component the preview, review and flat-spread views use, so
               the gutter a customer designs around is the gutter they are shown everywhere. */}
@@ -751,6 +767,25 @@ export default function BlockCard({
           {/* Snap guides while dragging — chrome too, so they read across the full spread. */}
           <SnapGuides lines={snap} />
         </div>
+
+        {/*
+          WHAT THE DOTTED LINE MEANS.
+
+          A guide nobody can read is decoration, so the trim rectangle says what it is — once,
+          quietly, in the pasteboard directly beneath the page. It sits INSIDE the pasteboard the
+          card already reserves, so it costs the workspace-fit budget nothing and the book does
+          not shrink to make room for it.
+
+          Deliberately precise about which boundary this is: the paper printed is the whole sheet,
+          and the dotted line is where it gets CUT. Saying "only this area is printed" would be
+          the wrong sentence about the wrong rectangle.
+        */}
+        <p
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-1 select-none text-center text-[10px] font-medium leading-tight text-muted-foreground/70 sm:text-[11px]"
+        >
+          {TRIM_GUIDE_CAPTION}
+        </p>
       </div>
 
       {picking && (

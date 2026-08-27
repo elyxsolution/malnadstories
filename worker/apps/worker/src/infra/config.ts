@@ -2,9 +2,42 @@ import {
   ConfigError,
   parseBoolean,
   parseIntInRange,
-  parseUrl,
+  parseRenderBaseUrl,
   requireEnv,
 } from '../config-error.js';
+
+/**
+ * THE RENDER TARGET — the app origin Chromium loads the print route from.
+ *
+ * ── THE FAILURE THIS EXISTS TO PREVENT ────────────────────────────────────────────────────────
+ *
+ * "localhost" is resolved by whichever process opens the connection. Chromium runs INSIDE THE
+ * WORKER, so `http://localhost:3000` means "port 3000 on the worker's own machine" — not the
+ * developer's laptop, not the Docker host, and certainly not a deployment. When the worker is
+ * pointed at localhost while the app runs anywhere else, every render dies with
+ * `net::ERR_CONNECTION_REFUSED` and nothing upstream is wrong.
+ *
+ * ── VARIABLE ──────────────────────────────────────────────────────────────────────────────────
+ *
+ * `APP_URL` is the canonical, pre-existing, server-only name and stays the one to set.
+ * `PDF_RENDER_BASE_URL` is accepted as an explicit alias, because it is the name the requirement
+ * describes and a variable that is set but silently ignored is worse than one that is missing.
+ * APP_URL wins if both are present. Neither is ever a `NEXT_PUBLIC_*` value: this is server-side
+ * configuration for a backend process.
+ *
+ * The local-development default is RETAINED so `pnpm dev` on one machine needs no setup, but it
+ * is no longer silent — the source travels with the value and the startup banner names it.
+ */
+function renderConfig(env: NodeJS.ProcessEnv): InfrastructureConfig['render'] {
+  const resolved = parseRenderBaseUrl(
+    [
+      { name: 'APP_URL', value: env['APP_URL'] },
+      { name: 'PDF_RENDER_BASE_URL', value: env['PDF_RENDER_BASE_URL'] },
+    ],
+    'http://localhost:3000',
+  );
+  return { appUrl: resolved.url, appUrlSource: resolved.source, appUrlVar: resolved.varName };
+}
 
 /**
  * INFRASTRUCTURE CONFIGURATION — the external, injectable config for the production I/O adapters
@@ -63,6 +96,10 @@ export interface DatabaseInfraConfig {
 /** Album-PDF rendering config — the app origin Chromium navigates to (the print route). */
 export interface RenderInfraConfig {
   readonly appUrl: string;
+  /** Whether `appUrl` was configured or fell back to the local-development default. */
+  readonly appUrlSource: 'env' | 'default';
+  /** WHICH variable supplied it — for the startup banner. Null when defaulted. */
+  readonly appUrlVar: string | null;
 }
 
 /** Recovery/self-healing config — the periodic sweep + per-domain stale thresholds + caps. */
@@ -185,11 +222,7 @@ export function loadInfrastructureConfig(
         'WV2_DB_MAX_CONNECTIONS',
       ),
     },
-    render: {
-      // The app origin Chromium loads the print route from (default = local dev). Validated as an
-      // absolute http(s) URL here, so a typo fails at boot rather than on the first PDF job.
-      appUrl: parseUrl(env['APP_URL'], 'http://localhost:3000', 'APP_URL'),
-    },
+    render: renderConfig(env),
     recovery: {
       enabled: parseBoolean(env['WV2_RECOVERY'], true, 'WV2_RECOVERY'),
       intervalMs: parseIntInRange(

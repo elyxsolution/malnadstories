@@ -9,10 +9,13 @@ import {
 import { spinePrintBackgroundStyle, type CoverConfig } from '@/lib/builder/cover';
 import {
   COVER_ARTWORK,
+  COVER_FOLD_LINES_MM,
   COVER_HINGE_FILL,
   COVER_PANEL,
   COVER_PANELS,
   COVER_SPREAD_BOX,
+  GUIDE_STYLE,
+  dashArray,
   mmCss,
   mmToPxCeil,
   type CoverPanelName,
@@ -46,9 +49,12 @@ import {
  * the spine's element list is `config.spine.texts` and nothing else — the same single source of
  * truth the builder edits.
  *
- * ── NO PRINTER MARKS ──────────────────────────────────────────────────────────────────────────
+ * ── REFERENCE LINES, BUT NO PRINTER MARKS ─────────────────────────────────────────────────────
  *
- * No crop marks, registration marks, colour bars, slug or trim-line artwork are drawn anywhere.
+ * The cover DOES carry black dotted fold / spine / finished-edge reference lines — an explicit
+ * project requirement, with the pattern and positions taken from the supplied drawing. See
+ * `CoverGuides` for why those are not printer marks. No crop marks, registration marks, colour
+ * bars or slug are drawn, here or anywhere else.
  */
 
 /** Physical geometry, computed once. Pure — every value traces back to `lib/print/spec`. */
@@ -80,6 +86,9 @@ function buildCoverCss(): string {
   /* Each panel is positioned in absolute millimetres from the spread's own origin, so the
      210 / 10 / 13 / 10 / 210 construction is exact and independent of any page proportion. */
   .cover-panel { position: absolute; top: 0; height: 100%; overflow: hidden; }
+  /* The reference lines sit ABOVE the artwork so they stay readable over a dark photo, and cover
+     the whole page so their millimetre viewBox maps 1:1 onto the artwork coordinates. */
+  .cover-guides { position: absolute; inset: 0; width: 100%; height: 100%; }
 `;
 }
 
@@ -93,6 +102,80 @@ declare global {
 function panelStyle(name: CoverPanelName): { left: string; width: string } {
   const rect: MmRect = COVER_PANELS.find((p) => p.name === name)!.rect;
   return { left: mmCss(rect.x - COVER_SPREAD_BOX.x), width: mmCss(rect.w) };
+}
+
+/**
+ * THE REFERENCE / PARTITION LINES — an explicit requirement, drawn from `dimensions.pdf`.
+ *
+ * These are NOT printer marks. A crop mark tells a machine where to cut; these tell a PERSON where
+ * the case creases, so the back / hinge / spine / hinge / front construction can be checked
+ * against the specification on the printed artwork itself. No crop marks, registration marks,
+ * colour bars or slug are drawn anywhere.
+ *
+ * ── WHY SVG, IN MILLIMETRES ───────────────────────────────────────────────────────────────────
+ *
+ * The viewBox is the artwork in millimetres, so every coordinate below IS the spec value — 225,
+ * 235, 248, 258 — with no conversion to get wrong. `preserveAspectRatio="none"` maps the box onto
+ * the fragmentainer-ceilinged page exactly, so the lines land on the folds to within the same
+ * sub-pixel the whole page already carries.
+ *
+ * VERIFIED IN THE EXPORTED FILE, not assumed: Chromium converts a dashed SVG stroke into explicit
+ * filled VECTOR subpaths — one thin quad per dash — which is the same encoding `dimensions.pdf`
+ * itself uses for its guides. Nothing is rasterised. In a generated cover the dash subpaths sit at
+ * x = 225.275 / 235.275 / 248.275 / 258.275 (each fold ± half of the 0.55 mm width) and the
+ * finished-edge rule at x = 14.75 / 468.25, in black.
+ *
+ * ── THE PATTERN ───────────────────────────────────────────────────────────────────────────────
+ *
+ * Measured out of Plate 02 rather than invented (`GUIDE_STYLE`): the folds use the drawing's
+ * dash-dot centre line (7 · 2 · 1.6 · 2 mm at 0.55 mm), the finished edge its finer 3 · 2.2 mm at
+ * 0.5 mm. Black, per the product decision recorded in the spec.
+ *
+ * ── THE WRAP STAYS BLANK ──────────────────────────────────────────────────────────────────────
+ *
+ * Every line is confined to the finished spread (y 15 → 312, x 15 → 468). The drawing runs its
+ * fold guides through the full artwork height, but the 15 mm turn-in is required to be blank and a
+ * reference line is not an exception to that — it would be glued down inside the case anyway.
+ */
+function CoverGuides() {
+  const { fold, trim, color } = GUIDE_STYLE;
+  const top = COVER_SPREAD_BOX.y;
+  const bottom = COVER_SPREAD_BOX.y + COVER_SPREAD_BOX.h;
+
+  return (
+    <svg
+      className="cover-guides"
+      viewBox={`0 0 ${COVER_ARTWORK.w} ${COVER_ARTWORK.h}`}
+      preserveAspectRatio="none"
+      aria-hidden
+    >
+      {/* The finished edge — where the 483 × 327 artwork is trimmed back to 453 × 297. */}
+      <rect
+        x={COVER_SPREAD_BOX.x}
+        y={COVER_SPREAD_BOX.y}
+        width={COVER_SPREAD_BOX.w}
+        height={COVER_SPREAD_BOX.h}
+        fill="none"
+        stroke={color}
+        strokeWidth={trim.widthMm}
+        strokeDasharray={dashArray(trim.dashMm)}
+      />
+      {/* The four folds: back|hinge · hinge|spine · spine|hinge · hinge|front. The middle pair IS
+          the 13 mm spine, so its width is readable straight off the printed sheet. */}
+      {COVER_FOLD_LINES_MM.map((x) => (
+        <line
+          key={x}
+          x1={x}
+          y1={top}
+          x2={x}
+          y2={bottom}
+          stroke={color}
+          strokeWidth={fold.widthMm}
+          strokeDasharray={dashArray(fold.dashMm)}
+        />
+      ))}
+    </svg>
+  );
 }
 
 export default function PrintCover({
@@ -201,6 +284,10 @@ export default function PrintCover({
             />
           </div>
         </div>
+
+        {/* Dotted fold / spine / finished-edge reference lines — an explicit requirement, drawn
+            from dimensions.pdf. Above the artwork, never inside the wrap. */}
+        <CoverGuides />
       </div>
     </>
   );

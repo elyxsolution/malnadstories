@@ -1,7 +1,14 @@
 import type { Browser } from 'puppeteer';
 import type { ResourceHandle } from '../../resources/resource-manager.js';
 import type { PageRenderer, RenderRequest, RenderResult } from './page-renderer.js';
-import { PrintRouteError, RendererCrashedError } from './page-renderer.js';
+import {
+  PrintRouteError,
+  RendererCrashedError,
+  RenderTargetUnreachableError,
+  classifyNetworkError,
+  unreachableAdvice,
+} from './page-renderer.js';
+import { redactToken } from './pdf-contract.js';
 
 /**
  * PUPPETEER PAGE RENDERER — the production `PageRenderer`. It acquires a shared `Browser` from the
@@ -49,11 +56,35 @@ export class PuppeteerPageRenderer implements PageRenderer {
       return { pdf: bytes, httpStatus };
     } catch (error) {
       if (error instanceof PrintRouteError) throw error; // browser is healthy — page-level HTTP problem
+
+      // EVERY message out of this block is redacted: Chromium puts the full navigation URL —
+      // token and all — into its network errors, and that string ends up in the log, the
+      // processor event and `album_pdfs.error`.
+      const raw = error instanceof Error ? error.message : String(error);
+      const message = redactToken(raw);
+
+      // THE APPLICATION IS NOT THERE vs THE BROWSER DIED. Same Puppeteer symptom, completely
+      // different fix, so they are separated before the generic browser-level check — a connection
+      // failure must never be mistaken for a crashed Chromium and answered with a browser rebuild.
+      const reason = classifyNetworkError(raw);
+      if (reason !== null) {
+        throw new RenderTargetUnreachableError(
+          reason,
+          request.origin,
+          `${message} — ${unreachableAdvice(reason, request.origin)}`,
+        );
+      }
+
       if (isBrowserLevel(error) || !browser.connected) {
         browserBroke = true;
-        throw new RendererCrashedError(error instanceof Error ? error.message : String(error));
+        throw new RendererCrashedError(message);
       }
-      throw error;
+      // NOTHING LEAVES THIS BLOCK UNREDACTED. Re-throwing the original error here used to carry
+      // Chromium's raw navigation message — token included — past every redaction downstream. Any
+      // error that reaches this line is re-wrapped around the redacted text.
+      throw error instanceof Error
+        ? Object.assign(new Error(message), { name: error.name, cause: undefined })
+        : new Error(message);
     } finally {
       if (page !== null) {
         try {

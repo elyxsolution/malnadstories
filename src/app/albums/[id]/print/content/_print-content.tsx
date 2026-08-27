@@ -201,7 +201,9 @@ function PhysicalPage({
     <div className="print-page">
       <div className="page-fill">
         <div className="pair-clip" style={{ left: side === 'left' ? '0' : '-100%' }}>
-          <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} half={side} />
+          {/* `print` drops the overlay's white border + drop shadow — the screen chrome that
+              otherwise prints as a hairline between the artwork and the trimmed page edge. */}
+          <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} half={side} print />
         </div>
       </div>
     </div>

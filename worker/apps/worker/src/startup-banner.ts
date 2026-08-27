@@ -67,7 +67,37 @@ export function renderStartupBanner(inputs: BannerInputs): string {
   } else {
     row('  Database', 'configured (DIRECT_URL)');
     row('  R2 bucket', 'configured');
-    row('  App URL', config.infrastructure?.render.appUrl ?? '—');
+    /**
+     * THE RENDER TARGET, AND WHERE IT CAME FROM.
+     *
+     * Printing the URL alone was not enough: a configured `http://localhost:3000` and an
+     * unconfigured one are the same string, and only one of them is a mistake. Chromium runs
+     * inside this worker, so a defaulted localhost means "port 3000 on THIS machine" — which is
+     * how every render came to die with ERR_CONNECTION_REFUSED while the app was healthy
+     * elsewhere. The source is now stated, and a default is called out as a default.
+     */
+    const render = config.infrastructure?.render;
+    if (render) {
+      const origin = (() => {
+        try {
+          return new URL(render.appUrl).origin;
+        } catch {
+          return render.appUrl;
+        }
+      })();
+      row(
+        '  App URL',
+        render.appUrlSource === 'env'
+          ? `${origin}  (from ${render.appUrlVar})`
+          : `${origin}  (DEFAULT — no APP_URL set)`,
+      );
+      if (render.appUrlSource === 'default') {
+        row('  ⚠ Note', 'Chromium resolves this "localhost" to the WORKER\'s own machine.');
+        row('', 'If the app runs anywhere else, set APP_URL — see worker/.env.example.');
+      }
+    } else {
+      row('  App URL', '—');
+    }
   }
 
   row('Storage', config.runtime.storage.kind);

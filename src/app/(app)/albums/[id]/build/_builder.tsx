@@ -2184,8 +2184,20 @@ export default function Builder({
   const canvas = useMeasuredBox<HTMLDivElement>();
   /** The per-spread action row above the page, plus its margin — vertical furniture to budget for. */
   const SPREAD_CHROME_PX = 44;
+  /**
+   * The upper bound on how large the spread may be drawn. Raised from 1400 so the bleed ring and
+   * the dotted trim reference are comfortably legible on a wide display — the page rectangle now
+   * represents the 206 × 291 mm ARTWORK, and the 3 mm that gets trimmed is 1.46 % of it, so the
+   * guide's readability scales directly with this.
+   *
+   * It is a CEILING, not a target: `fitBlockWidth` still takes the minimum of the workspace width,
+   * the height that keeps the whole spread visible, and this. On a height-constrained laptop the
+   * spread is already as large as it can be without scrolling, so nothing changes there — which is
+   * the point of the fit logic and the reason this is the only lever touched.
+   */
+  const SPREAD_MAX_PX = 1700;
   const fitWidth = useMemo(
-    () => fitBlockWidth(canvas.box, { aspect: pairA, padFrac: PASTEBOARD_PCT / 100, chromePx: SPREAD_CHROME_PX, maxPx: 1400 }),
+    () => fitBlockWidth(canvas.box, { aspect: pairA, padFrac: PASTEBOARD_PCT / 100, chromePx: SPREAD_CHROME_PX, maxPx: SPREAD_MAX_PX }),
     [canvas.box, pairA],
   );
 
@@ -2877,7 +2889,7 @@ export default function Builder({
                   style={
                     fitWidth
                       ? { width: (fitWidth * zoomPct) / 100 }
-                      : { width: `${zoomPct}%`, maxWidth: zoomPct <= 100 ? '1400px' : 'none' }
+                      : { width: `${zoomPct}%`, maxWidth: zoomPct <= 100 ? `${SPREAD_MAX_PX}px` : 'none' }
                   }
                 >
                   <BlockCard

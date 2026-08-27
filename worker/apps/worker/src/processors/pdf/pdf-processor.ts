@@ -8,14 +8,19 @@ import type { CancellationToken } from '../../recovery/cancellation.js';
 import { Pipeline } from '../pipeline/pipeline.js';
 import { LoggingEventSink } from '../pipeline/events.js';
 import type { ProcessorEventSink, ProcessorEventType } from '../pipeline/events.js';
-import { DEFAULT_RENDER_TIMEOUTS, PrintRouteError, RendererCrashedError } from './page-renderer.js';
+import {
+  DEFAULT_RENDER_TIMEOUTS,
+  PrintRouteError,
+  RendererCrashedError,
+  RenderTargetUnreachableError,
+} from './page-renderer.js';
 import type { PageRenderer, RenderTimeouts } from './page-renderer.js';
 import { AlbumPdfRepository } from './album-pdf-repository.js';
 import type { AlbumPdfStore } from './album-pdf-repository.js';
 import type { RenderContext, RenderDeps, RenderStage } from './render-context.js';
 import { defaultRenderStages } from './stages.js';
 import { PermanentPdfError, SupersededError, TransientPdfError } from './errors.js';
-import { DEFAULT_PDF_KIND, isPdfKind } from './pdf-contract.js';
+import { DEFAULT_PDF_KIND, isPdfKind, redactToken } from './pdf-contract.js';
 import type { PdfFailureCode, PdfKind } from './pdf-contract.js';
 
 /** The album-pdf job type — matches the pg-boss queue the app enqueues onto. */
@@ -116,7 +121,7 @@ export class PdfProcessor implements Processor<PdfPayload> {
           reason: 'superseded',
           albumId: payload.albumId,
           kind: payload.kind,
-          note: error.message,
+          note: redactToken(error.message),
         });
         return;
       }
@@ -182,16 +187,28 @@ export function createPdfProcessor(deps: {
   });
 }
 
+/**
+ * Classify a failure into a typed code + a message safe to store and display.
+ *
+ * EVERY branch redacts. `album_pdfs.error` is rendered in the admin console, and a Chromium
+ * navigation error carries the full print URL including its token — see `redactToken`.
+ */
 function classify(error: unknown): { code: PdfFailureCode; message: string } {
   if (error instanceof PermanentPdfError || error instanceof TransientPdfError) {
-    return { code: error.code, message: error.message };
+    return { code: error.code, message: redactToken(error.message) };
+  }
+  if (error instanceof RenderTargetUnreachableError) {
+    return {
+      code: error.reason === 'dns' ? 'render_dns_failed' : 'render_unreachable',
+      message: redactToken(error.message),
+    };
   }
   if (error instanceof PrintRouteError)
-    return { code: 'print_route_error', message: error.message };
+    return { code: 'print_route_error', message: redactToken(error.message) };
   if (error instanceof RendererCrashedError) {
-    return { code: 'render_engine_failed', message: error.message };
+    return { code: 'render_engine_failed', message: redactToken(error.message) };
   }
-  return { code: 'render_failed', message: toMessage(error) };
+  return { code: 'render_failed', message: redactToken(toMessage(error)) };
 }
 
 function parsePayload(payload: unknown): PdfPayload | null {

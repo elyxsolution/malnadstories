@@ -35,6 +35,13 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
+    // Operator DIAGNOSTICS print their findings to a terminal — that is the whole deliverable, the
+    // same reason the existing CLIs under src/diagnostics/ do. Confined to `scripts/`, which is
+    // excluded from the build (see tsup config) and imported by nothing.
+    files: ['apps/*/scripts/**/*.ts'],
+    rules: { 'no-console': 'off' },
+  },
+  {
     // Config/build files run in a Node script context.
     files: ['*.config.ts', '*.config.mjs', 'scripts/**/*.mjs'],
     languageOptions: {

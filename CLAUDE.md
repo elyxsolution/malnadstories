@@ -487,7 +487,7 @@ Album `size` is data-driven: the create-album form renders `products.pages`, and
 | `RAZORPAY_WEBHOOK_SECRET` | Webhook secret (matches the Razorpay dashboard webhook) — **server-only**. Verifies `X-Razorpay-Signature`. |
 | `WORKER_URL` | App-side, **server-only** (never `NEXT_PUBLIC`); base URL of the worker service. The app probes `WORKER_URL/health` to gate/wake worker-dependent ops (Phase G). Unset → gating disabled (probe reports "ready"), for local dev. |
 | `PORT` | Worker-only; port the worker's `/health` availability server binds to (Render injects it; default `8080`) |
-| `APP_URL` | Worker-only; base URL the PDF job's Chromium navigates to (default `http://localhost:3000`) |
+| `APP_URL` | **Worker-only, server-side.** The ORIGIN Chromium loads the print route from. Chromium runs *inside the worker*, so `localhost` here means the WORKER's machine — pointing it at localhost while the app runs elsewhere fails every PDF with `ERR_CONNECTION_REFUSED`. Same host → `http://localhost:3000`; worker in Docker → `http://host.docker.internal:3000`; deployed app → its https origin. `PDF_RENDER_BASE_URL` is an accepted alias (APP_URL wins). Unset → defaults to `http://localhost:3000` and the startup banner says **DEFAULT**. |
 | `WV2_INFRA` | **Worker-only; THE MASTER SWITCH.** `on`/`true`/`1`/`yes` enables production mode. Unset → the worker runs *reference mode*: healthy, idle, processing nothing. |
 
 The worker auto-loads `.env.local` / `.env`, searching from its working directory **upward**, so the
@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 19 files / 313 tests
+pnpm test              # app suite — 21 files / 367 tests
 cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
@@ -897,8 +897,9 @@ a bug. Every value below is asserted in `tests/print-spec.test.ts` against the s
   finished edge and every fold.
 - **Safe areas are ADVISORY.** They are reported geometry, never a crop. Clipping a customer's photo
   at a safe boundary would silently destroy their design; the trim is the printer's job.
-- **NO printer marks of any kind** — no crop marks, registration marks, colour bars, slug, filename
-  strip or trim-line artwork. `PRINTER_MARKS_ENABLED = false` pins the intent for a test.
+- **NO printer marks** — no crop marks, registration marks, colour bars, slug or filename strip.
+  `PRINTER_MARKS_ENABLED = false` pins the intent for a test. The cover's dotted **reference**
+  lines are a separate, explicitly-requested thing — see below.
 
 ### Spine — 13 mm, for EVERY page count
 
@@ -936,6 +937,67 @@ title come from the existing `cover_config` — there is no second source of tru
   reads as one surface, introducing no cover artwork into a region the drawing does not describe.
   **⚠️ CONFIRM WITH THE PRINT PARTNER** — the alternative (extending the adjacent cover panel) is
   equally defensible and is a one-line change.
+
+### Reference guides — exported (cover) and on-screen (builder)
+
+**`GUIDE_STYLE` was MEASURED out of `dimensions.pdf`, not invented.** Plate 02 draws its guides as
+explicit filled paths rather than PDF dash arrays, so the pattern was read off the geometry: the
+fold lines are **0.55 mm** wide and repeat **7 · 2 · 1.6 · 2 mm** (the dash-dot centre line an
+engineering drawing uses for a fold); the finer rules are **0.5 mm** and repeat **3 · 2.2 mm**. The
+drawing strokes them blue-grey; the exports use **black**, a product decision — a reference line has
+to survive a greyscale proof.
+
+- **Cover PDF** — an SVG overlay whose `viewBox` IS the artwork in millimetres, so every coordinate
+  is the spec value. Four fold lines at **225 · 235 · 248 · 258 mm** (`COVER_FOLD_LINES_MM`, derived
+  by walking `COVER_PANELS`) plus the finished-edge rectangle at 15 → 468 / 15 → 312. **Confined to
+  the finished spread**: the drawing runs its folds through the full artwork height, but the 15 mm
+  turn-in must stay blank and a reference line is not an exception to that.
+  **Verified in a generated file**: Chromium converts the dashed strokes into filled VECTOR
+  subpaths — the same encoding the source drawing uses — landing at x = 225.275 / 235.275 /
+  248.275 / 258.275 (fold ± half the 0.55 mm width) and 14.75 / 468.25, in `0 0 0 rg`.
+- **These are NOT printer marks**, and the distinction is deliberate: a crop mark tells a machine
+  where to cut and is stripped before production; these tell a PERSON where the case creases so the
+  210/10/13/10/210 construction can be checked on the artwork. Only the cover carries them — the
+  interior exports nothing at all.
+- **Builder, content pages** (`_print-guides.tsx`) — the page rectangle IS the 206 × 291 bleed, so
+  the dotted **trim** rectangle is inset by exactly `3/206` and `3/291`
+  (`INTERIOR_TRIM_INSET_FRACTION`), drawn ONCE PER PAGE HALF because the printer trims two separate
+  sheets. Always visible, with a caption in the pasteboard beneath the page. The old
+  `inset-[1.5%]` / `4%` / `6%` guides corresponded to no physical dimension and are gone; the
+  **Show guides** toggle now draws the real 15 mm important-content boundary instead.
+- **Builder, cover** — the canvas is now composed from the print specification
+  (`COVER_PANEL_FRACTIONS`): back · hinge · **spine** · hinge · front at their true widths, with
+  dotted fold lines and a region label on each. It used to be composed from `coverSpreadMetrics`,
+  whose spine came from the advisory `spineWidthFor` — once folds were drawn, a dotted "13 mm spine"
+  over a strip of a different width was two contradictory answers to one question. **Nothing stored
+  changed**: each face keeps its own normalized space, so every saved position means what it did.
+  `coverSpreadMetrics` still serves the timeline thumbnail and the preview PDF still uses
+  `spineWidthFor` — neither was touched.
+- **Guides are inert everywhere**: `pointer-events-none`, `aria-hidden`, no id, no album field, no
+  migration, never exported. The builder's overlay cannot be selected, dragged or persisted, and no
+  print route imports it.
+
+### THE WHITE HAIRLINE — root cause and fix
+
+The interior PDF used to show a thin white line between the artwork and the trimmed page edge.
+
+**Cause: `border-2 border-white shadow` on every overlay in `_pair-frame.tsx`.** That is screen
+chrome — it makes an overlay read as a grabbable photo card, it is hardcoded in the renderer, and
+the customer never chose it and cannot change it. Because a page created today starts as ONE
+FULL-PAGE overlay per side (`newUnitOverlayGeoms`), the 2 px white ring landed exactly at the page
+edge, and `overflow-hidden` on the same element clipped the photo to the box INSIDE that border.
+The drop shadow printed as grey haze along the same edge. It was never a geometry bug: the fill box
+already overscanned the fragmentainer on both axes.
+
+**Fix: a `print` prop on `PairContent`,** set only by the printer-ready interior. The builder, the
+in-app preview, the flipbook, the navigator and the **customer preview PDF** all leave it false and
+are pixel-identical to before. Nothing about the page size, the bleed, scale-to-fill or the
+photo's aspect changed.
+
+**Measured in a real headless-Chromium render** (not inferred): with the album's compiled CSS
+loaded, the page is 779 × 1100 px, the fill box is 780 × 1103.14 at (−0.5, −1.56), the overlay and
+its `<img>` occupy that same box with `object-fit: cover`, and computed `border-width` is `0px`.
+Every corner and edge-midpoint pixel of the printed page is artwork; none is white.
 
 ### Routes, storage, worker
 
@@ -991,6 +1053,57 @@ Until then the print partner performs the conversion, which is routine — but t
 worker never downscales them), text and solid fills stay vector, and `_quality-model.ts` already
 computes true effective DPI per frame. Below 300 ppi is surfaced as a quality warning; generation is
 **never** blocked on it, and a low-resolution photo is **never** upscaled to manufacture the number.
+
+## Worker → Next.js render connectivity
+
+The PDF worker drives **the app's own print route** with headless Chromium, so a PDF can only be
+produced if the worker can reach the app over HTTP. That link is `APP_URL`, and it is the one piece
+of configuration whose absence is invisible until every render fails.
+
+**`localhost` is resolved by whoever opens the connection, and Chromium runs INSIDE the worker.**
+So `http://localhost:3000` in the worker means port 3000 on the *worker's* machine — not your
+laptop, not the Docker host, not a deployment. A worker left on that default while the app runs
+anywhere else produces, on every job:
+
+    net::ERR_CONNECTION_REFUSED at http://localhost:3000/albums/<id>/print?t=<token>
+
+| where Next.js runs | where the worker runs | `APP_URL` |
+|---|---|---|
+| `pnpm dev` on this machine | same machine | `http://localhost:3000` |
+| host machine | Docker container | `http://host.docker.internal:3000` (+ `extra_hosts` on Linux) |
+| deployed | anywhere | the deployed origin, e.g. `https://malnadstories.vercel.app` |
+
+- **One builder, one config.** `printUrl(appUrl, albumId, token, kind)`
+  (`worker/.../pdf/pdf-contract.ts`) is the only place a render URL is constructed, for all three
+  kinds — `/print`, `/print/cover`, `/print/content`. The base comes from
+  `InfrastructureConfig.render`, which resolves `APP_URL` (canonical) or `PDF_RENDER_BASE_URL`
+  (alias), validates it as a bare http(s) origin — rejecting a query, a fragment, or a pasted full
+  print URL — and **records whether it was configured or defaulted**. The startup banner prints the
+  origin plus `(from APP_URL)` or `(DEFAULT — no APP_URL set)`, because a configured localhost and
+  an unconfigured one are the same string and only one is a mistake.
+- **Connectivity failures are their own class.** `classifyNetworkError` maps Chromium/Node errors
+  onto `dns` · `refused` · `timeout` · `tls` · `blocked` · `network`, and the pipeline records
+  `render_dns_failed` or `render_unreachable` with an actionable sentence naming the origin —
+  instead of collapsing "the app is not there" into `render_engine_failed`, which sends an operator
+  to inspect a perfectly healthy Chromium. Both stay TRANSIENT, so the recovery sweep re-drives once
+  the app is reachable.
+- **The token never reaches a log.** Chromium embeds the full navigation URL — token included — in
+  its network errors, and that string used to flow into the log line, the processor event and
+  `album_pdfs.error`, which the admin console renders. `redactToken` is applied at every boundary
+  the message can cross, and the renderer re-wraps any error that escapes it, so `?t=` is always
+  `t=[REDACTED]`. Diagnostics carry the ORIGIN only (`RenderRequest.origin`), never the path.
+- **Nothing about security changed.** The routes are still token-gated, kind-scoped, single-use and
+  expiring; the worker reaches exactly the same protected route it always did.
+
+**Diagnostics** (both launch a real browser; neither is part of the test suite):
+
+```bash
+cd worker/apps/worker
+npx tsx scripts/verify-render-connectivity.ts              # local stand-in, all 3 kinds + failure modes
+npx tsx scripts/verify-render-connectivity.ts https://…    # can Chromium reach a real deployment?
+APP_URL=… npx tsx scripts/verify-pdf-pipeline.ts <albumId> # the REAL 6-stage pipeline, all 3 kinds
+npx tsx scripts/inspect-pdf.ts <albumId>                   # page count + MediaBox of each generated file
+```
 
 ## Delete album — built
 

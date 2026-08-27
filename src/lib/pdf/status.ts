@@ -36,6 +36,8 @@ export function pdfStageStep(stage: string | null | undefined): number {
 export type PdfFailureCode =
   | 'render_timeout' // a render stage exceeded its watchdog (nav / readiness / pdf)
   | 'render_engine_failed' // Chromium launch / page create failed
+  | 'render_unreachable' // the worker could not CONNECT to the configured app URL (refused/timeout/TLS)
+  | 'render_dns_failed' // the configured app URL's hostname does not resolve
   | 'print_route_error' // the print route returned a non-OK HTTP status
   | 'render_empty' // page.pdf produced 0 bytes
   | 'upload_failed' // R2 putObject failed
@@ -54,6 +56,8 @@ export type PdfFailureCode =
 const FAILURE_LABEL: Record<PdfFailureCode, string> = {
   render_timeout: 'Rendering timed out',
   render_engine_failed: 'Render engine failed to start',
+  render_unreachable: 'Rendering service could not reach the site',
+  render_dns_failed: 'Rendering service could not resolve the site address',
   print_route_error: 'Print page failed to load',
   render_empty: 'Renderer produced an empty file',
   upload_failed: 'Storage upload failed',
@@ -84,6 +88,11 @@ export function pdfFailureCustomerNote(code: string | null | undefined): string 
       return 'We hit a snag preparing one of your images and are finalizing your album.';
     case 'render_timeout':
       return 'Your album is taking a little longer than usual to prepare. We’ll keep working on it.';
+    case 'render_unreachable':
+    case 'render_dns_failed':
+      // Deliberately vague to the customer: the cause is our configuration, not their album, and
+      // the admin console carries the precise reason.
+      return 'We’re finishing your album — this will resume automatically.';
     case 'upload_failed':
     case 'upload_timeout':
     case 'storage_failure':

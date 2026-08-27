@@ -133,6 +133,7 @@ describe('Chromium crash', () => {
     await expect(
       renderer.render({
         url: 'https://app.example.com/albums/a/print?t=x',
+        origin: 'http://localhost:3000',
         readinessFlag: 'READY',
         timeouts: { newPageMs: 1, navigationMs: 1, readinessMs: 1, settleMs: 1, pdfMs: 1 },
       }),

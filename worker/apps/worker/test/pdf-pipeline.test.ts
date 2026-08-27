@@ -13,6 +13,8 @@ import {
   type PageRenderer,
   type RenderRequest,
   type RenderResult,
+  RenderTargetUnreachableError,
+  unreachableAdvice,
 } from '../src/processors/pdf/page-renderer.js';
 import type {
   AlbumOwner,
@@ -21,7 +23,7 @@ import type {
   StaleGeneration,
 } from '../src/processors/pdf/album-pdf-repository.js';
 import type { PdfFailureCode, PdfKind, PdfStage } from '../src/processors/pdf/pdf-contract.js';
-import { hashToken } from '../src/processors/pdf/pdf-contract.js';
+import { hashToken, redactToken } from '../src/processors/pdf/pdf-contract.js';
 
 // --- Fakes ------------------------------------------------------------------------------------
 
@@ -87,13 +89,27 @@ class FakePdfStore implements AlbumPdfStore {
 
 class FakeRenderer implements PageRenderer {
   readonly calls: RenderRequest[] = [];
-  mode: 'ok' | 'print-error' | 'crash' | 'empty' = 'ok';
+  mode: 'ok' | 'print-error' | 'crash' | 'empty' | 'refused' | 'dns' = 'ok';
   pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
   async render(request: RenderRequest): Promise<RenderResult> {
     this.calls.push(request);
     if (this.mode === 'print-error') throw new PrintRouteError(500);
     if (this.mode === 'crash') throw new RendererCrashedError('Target closed');
     if (this.mode === 'empty') throw new Error('page.pdf produced 0 bytes');
+    // The REAL renderer classifies before throwing; these reproduce what it hands the pipeline.
+    // Faithful to PuppeteerPageRenderer: it redacts, then appends the operator advice.
+    if (this.mode === 'refused' || this.mode === 'dns') {
+      const reason = this.mode;
+      const chromium =
+        reason === 'refused'
+          ? `net::ERR_CONNECTION_REFUSED at ${request.url}`
+          : `net::ERR_NAME_NOT_RESOLVED at ${request.url}`;
+      throw new RenderTargetUnreachableError(
+        reason,
+        request.origin,
+        `${redactToken(chromium)} — ${unreachableAdvice(reason, request.origin)}`,
+      );
+    }
     return { pdf: this.pdf, httpStatus: 200 };
   }
 }
@@ -142,6 +158,88 @@ function build(): {
 }
 
 // --- Tests ------------------------------------------------------------------------------------
+
+describe('worker → Next.js connectivity failures', () => {
+  /**
+   * The incident: every PDF failed with net::ERR_CONNECTION_REFUSED because the render base URL
+   * defaulted to localhost while the app ran elsewhere. It used to surface as a generic
+   * `render_engine_failed` — pointing an operator at Chromium, which was fine. These pin the
+   * distinct diagnosis, and pin that the token never reaches the stored error.
+   */
+  it('records a refused connection as render_unreachable, not a Chromium fault', async () => {
+    const ctx = build();
+    ctx.pdf.state = generatingState();
+    ctx.renderer.mode = 'refused';
+    await ctx.processor.process(job());
+    expect(ctx.pdf.failed?.code).toBe('render_unreachable');
+    expect(ctx.pdf.failed?.code).not.toBe('render_engine_failed');
+  });
+
+  it('records an unresolvable host as render_dns_failed', async () => {
+    const ctx = build();
+    ctx.pdf.state = generatingState();
+    ctx.renderer.mode = 'dns';
+    await ctx.processor.process(job());
+    expect(ctx.pdf.failed?.code).toBe('render_dns_failed');
+  });
+
+  it('REDACTS the token from the stored error, which the admin console renders', async () => {
+    const ctx = build();
+    ctx.pdf.state = generatingState();
+    ctx.renderer.mode = 'refused';
+    await ctx.processor.process(job());
+    const stored = ctx.pdf.failed!.message;
+    expect(stored).not.toContain(TOKEN);
+    expect(stored).toContain('t=[REDACTED]');
+    // The diagnosis survives redaction.
+    expect(stored).toContain('ERR_CONNECTION_REFUSED');
+    expect(stored).toMatch(/APP_URL/);
+  });
+
+  it('keeps the token out of every emitted log record too', async () => {
+    const ctx = build();
+    ctx.pdf.state = generatingState();
+    ctx.renderer.mode = 'refused';
+    await ctx.processor.process(job());
+    expect(JSON.stringify(ctx.logger.records)).not.toContain(TOKEN);
+  });
+
+  it('stays TRANSIENT, so the recovery sweep re-drives once the app is reachable', async () => {
+    // A misconfiguration is fixed by a human, but an app that is merely not up yet fixes itself.
+    // Marking this permanent would strand every album until an admin noticed.
+    const ctx = build();
+    ctx.pdf.state = generatingState();
+    ctx.renderer.mode = 'refused';
+    await ctx.processor.process(job());
+    expect(ctx.pdf.failed?.code).toBe('render_unreachable');
+  });
+
+  it('hands the renderer the ORIGIN separately from the token-bearing URL', async () => {
+    const ctx = build();
+    ctx.pdf.state = generatingState();
+    await ctx.processor.process(job());
+    const req = ctx.renderer.calls[0]!;
+    expect(req.origin).toBe('https://app.example.com');
+    expect(req.origin).not.toContain('t=');
+    expect(req.url).toContain(`t=${TOKEN}`);
+  });
+
+  it('drives the configured base URL for every kind — never a hardcoded localhost', async () => {
+    for (const [kind, path] of [
+      ['preview', '/albums/a1/print?t='],
+      ['print_cover', '/albums/a1/print/cover?t='],
+      ['print_content', '/albums/a1/print/content?t='],
+    ] as const) {
+      const ctx = build();
+      ctx.pdf.state = generatingState();
+      await ctx.processor.process(job('a1', TOKEN, kind));
+      const url = ctx.renderer.calls[0]!.url;
+      expect(url.startsWith('https://app.example.com')).toBe(true);
+      expect(url).toContain(path);
+      expect(url).not.toContain('localhost');
+    }
+  });
+});
 
 describe('pdf pipeline — happy path', () => {
   it('renders the print route, uploads, and finalizes album_pdfs → ready', async () => {

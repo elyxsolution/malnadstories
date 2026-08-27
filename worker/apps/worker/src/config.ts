@@ -246,6 +246,9 @@ export function summarizeConfig(config: AppConfig): Record<string, unknown> {
           ? `every ${config.infrastructure.recovery.intervalMs}ms (batch ${config.infrastructure.recovery.batchSize})`
           : 'disabled',
     appUrl: config.infrastructure?.render.appUrl ?? null,
+    // WHERE the render URL came from — a defaulted localhost and a configured one are the same
+    // string, and only one of them is a misconfiguration. See infra/config.ts.
+    appUrlSource: config.infrastructure?.render.appUrlSource ?? null,
     warnings: config.warnings.length,
   };
 }

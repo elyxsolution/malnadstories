@@ -105,6 +105,48 @@ export function parseEnum<T extends string>(
  * at startup is what stops a mis-set `APP_URL` from surfacing as a mystifying Chromium navigation
  * failure minutes later, on the first PDF job.
  */
+/**
+ * THE RENDER BASE URL — parsed, validated, and honest about where it came from.
+ *
+ * `parseUrl` alone could not answer the one question that mattered when a PDF failed with
+ * `ERR_CONNECTION_REFUSED`: *was this value configured, or did the worker quietly fall back to
+ * `http://localhost:3000`?* Both produced the same string. The fallback is retained — local
+ * development is the common case and must keep working with no configuration — but it is now
+ * REPORTED, so the startup banner can say "default" and an operator can see the answer before a
+ * job ever runs.
+ *
+ * The extra validation catches the mistakes that produce a URL which parses but cannot work:
+ *   • a query string or fragment — never meaningful on an origin, always a paste error;
+ *   • a path that already contains the print route, i.e. someone pasted a full render URL
+ *     (which would build `…/albums/x/print/albums/y/print`).
+ * A plain path prefix is allowed: an app may legitimately be hosted under a sub-path.
+ */
+export type UrlWithSource = { readonly url: string; readonly source: 'env' | 'default'; readonly varName: string | null };
+
+export function parseRenderBaseUrl(
+  candidates: readonly { readonly name: string; readonly value: string | undefined }[],
+  fallback: string,
+): UrlWithSource {
+  const chosen = candidates.find((c) => (c.value ?? '').trim() !== '');
+  const name = chosen?.name ?? candidates[0]?.name ?? 'APP_URL';
+  const url = parseUrl(chosen?.value, fallback, name);
+
+  const parsed = new URL(url);
+  if (parsed.search !== '' || parsed.hash !== '') {
+    throw new ConfigError(
+      `${name} must be a bare origin — it must not carry a query string or fragment (got "${url}").`,
+    );
+  }
+  if (/\/albums(\/|$)|\/print(\/|$)/i.test(parsed.pathname)) {
+    throw new ConfigError(
+      `${name} must be the SITE's base URL, not a render URL. It looks like a full print URL was ` +
+        `pasted (got path "${parsed.pathname}"). Use just the origin, e.g. https://example.com`,
+    );
+  }
+
+  return { url, source: chosen ? 'env' : 'default', varName: chosen ? chosen.name : null };
+}
+
 export function parseUrl(value: string | undefined, fallback: string, name: string): string {
   const raw = (value ?? fallback).trim();
   let parsed: URL;

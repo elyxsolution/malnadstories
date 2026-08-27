@@ -135,6 +135,30 @@ export const INTERIOR_SAFE_BOX: MmRect = {
   h: INTERIOR_TRIM.h - INTERIOR_SAFE_INSET_MM * 2,
 };
 
+/**
+ * THE TRIM BOX AS A FRACTION OF THE ARTWORK BOX — the builder's reference guide.
+ *
+ * The builder draws each page at whatever pixel size the workspace fit produces, in a normalized
+ * 0..1 coordinate space. Its page rectangle IS the artwork/bleed area, because that is what the
+ * export's scale-to-fill maps it onto. So "where does the paper actually get cut?" is a fixed
+ * FRACTION of that rectangle — exactly `3/206` horizontally and `3/291` vertically — and never a
+ * hand-tuned percentage. This is what makes the on-screen guide and the printed sheet the same
+ * geometry rather than two things that merely look alike.
+ */
+export const INTERIOR_TRIM_INSET_FRACTION = {
+  x: INTERIOR_BLEED_MM / INTERIOR_ARTWORK.w,
+  y: INTERIOR_BLEED_MM / INTERIOR_ARTWORK.h,
+} as const;
+
+/**
+ * The 15 mm important-content boundary, as a fraction of the artwork box.
+ * `(3 + 15) / 206` and `(3 + 15) / 291` — measured from the artwork edge, i.e. 15 mm inside trim.
+ */
+export const INTERIOR_SAFE_INSET_FRACTION = {
+  x: (INTERIOR_BLEED_MM + INTERIOR_SAFE_INSET_MM) / INTERIOR_ARTWORK.w,
+  y: (INTERIOR_BLEED_MM + INTERIOR_SAFE_INSET_MM) / INTERIOR_ARTWORK.h,
+} as const;
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 // COVER — Plate 02
 // ═════════════════════════════════════════════════════════════════════════════════════════════
@@ -265,6 +289,61 @@ export const COVER_BACK_SAFE_BOX: MmRect = coverSafeBox('back');
 export const COVER_FRONT_SAFE_BOX: MmRect = coverSafeBox('front');
 
 /**
+ * THE FOUR FOLD LINES, in artwork coordinates — where the case actually creases.
+ *
+ * Derived by walking the panels, never restated: back|hinge at 225, hinge|spine at 235,
+ * spine|hinge at 248, hinge|front at 258. Plate 02 draws its fold guides at x = 277 / 287 / 300 /
+ * 310 in the drawing's own millimetre space, where the finished spread starts at 67 — i.e. at
+ * 210 / 220 / 233 / 243 from the spread's left edge, which is exactly what these are.
+ */
+export const COVER_FOLD_LINES_MM: readonly number[] = COVER_PANELS.slice(0, -1).map(
+  (p) => p.rect.x + p.rect.w,
+);
+
+/**
+ * The same four folds as a fraction of the FINISHED SPREAD's width — the form the builder overlay
+ * needs, since the builder draws the spread at whatever pixel width the workspace fit produces.
+ */
+export const COVER_FOLD_FRACTIONS: readonly number[] = COVER_FOLD_LINES_MM.map(
+  (x) => (x - COVER_SPREAD_BOX.x) / COVER_SPREAD_BOX.w,
+);
+
+/** Each panel's span as a fraction of the finished spread — back · hinge · spine · hinge · front. */
+export const COVER_PANEL_FRACTIONS: readonly { name: CoverPanelName; start: number; width: number }[] =
+  COVER_PANELS.map((p) => ({
+    name: p.name,
+    start: (p.rect.x - COVER_SPREAD_BOX.x) / COVER_SPREAD_BOX.w,
+    width: p.rect.w / COVER_SPREAD_BOX.w,
+  }));
+
+/**
+ * GUIDE LINE STYLE — measured out of `dimensions.pdf`, not invented.
+ *
+ * Plate 02 draws its guides as explicit filled paths rather than PDF dash arrays, so the pattern
+ * had to be read off the geometry. The fold lines at x = 277/287/300/310 are 0.55 mm wide and
+ * repeat `7 mm dash · 2 mm gap · 1.6 mm dash · 2 mm gap` — the dash-dot centre line an engineering
+ * drawing uses for a fold. The finer guides (the safe-area rules at x = 79/265/322/508) are 0.5 mm
+ * wide and repeat `3 mm dash · 2.2 mm gap`.
+ *
+ * The drawing strokes them in a blue-grey (`.349 .502 .651`); the exported cover uses BLACK, which
+ * is an explicit product decision — these are reference lines a person reads off the printed
+ * artwork, and they have to survive a greyscale proof.
+ */
+export const GUIDE_STYLE = {
+  /** Fold / panel divisions: the dash-dot centre line, 7 · 2 · 1.6 · 2 mm. */
+  fold: { dashMm: [7, 2, 1.6, 2] as readonly number[], widthMm: 0.55 },
+  /** Finished-edge / trim references: 3 · 2.2 mm. */
+  trim: { dashMm: [3, 2.2] as readonly number[], widthMm: 0.5 },
+  /** Black — see above. */
+  color: '#000000',
+} as const;
+
+/** A CSS/SVG `stroke-dasharray` value in millimetres for one of the guide patterns. */
+export function dashArray(pattern: readonly number[]): string {
+  return pattern.join(' ');
+}
+
+/**
  * WHAT IS PAINTED IN THE TWO 10 MM HINGES.
  *
  * The supplied specification fixes the hinge WIDTH but says nothing about its content. The hinge
@@ -348,8 +427,20 @@ export function effectivePpi(sourcePx: number, printedMm: number): number {
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 
 /**
- * NO PRINTER MARKS OF ANY KIND are emitted: no crop marks, no registration marks, no colour bars,
- * no slug, no filename strip, no trim-line artwork. This constant exists so the intent is
- * assertable by a test rather than provable only by reading every renderer.
+ * NO PRINTER MARKS are emitted: no crop marks, no registration marks, no colour bars, no slug and
+ * no filename strip. This constant exists so the intent is assertable by a test rather than
+ * provable only by reading every renderer.
+ *
+ * THE COVER'S DOTTED PARTITION LINES ARE NOT PRINTER MARKS, and this is a deliberate distinction
+ * rather than a loophole. A crop mark tells a cutting machine where to cut and is stripped before
+ * production; the cover's fold/spine lines are REFERENCE geometry a person reads off the artwork
+ * to check the case was built to the right widths — an explicit project requirement, drawn from
+ * the supplied specification, and confined to the cover. The interior emits nothing at all.
  */
 export const PRINTER_MARKS_ENABLED = false;
+
+/**
+ * The cover export draws the dotted fold / spine / finished-edge reference lines described above.
+ * Deliberately separate from `PRINTER_MARKS_ENABLED`, which stays false.
+ */
+export const COVER_GUIDE_LINES_ENABLED = true;
