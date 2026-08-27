@@ -4,7 +4,11 @@
 -- Location : drizzle/dev/verify_clean_database.sql
 -- Docs     : drizzle/dev/DEVELOPMENT_RESET_README.md
 -- Purpose  : Confirm development_reset.sql succeeded and the environment is
---            ready for Worker V2 development.
+--            ready for fresh development/testing.
+--
+-- Schema   : Current as of migration 0058_album_pdf_kind.sql (58 migrations,
+--            0001-0058; 38 tables in `public`, all with RLS enabled).
+--            Reconciled against src/db/schema.ts and the live catalog.
 --
 -- 100% READ-ONLY. Runs no DELETE, UPDATE, INSERT or DDL against any
 -- application table. Safe to run at any time, in any environment, including
@@ -12,8 +16,9 @@
 -- which is the correct answer for a live database).
 --
 -- WHEN TO RUN
---   Immediately after development_reset.sql Parts 1 and 2, and after the R2
---   folder deletion — BEFORE creating your first test user or test album.
+--   Immediately after development_reset.sql PART 1 and PART 2, and after the
+--   manual R2 cleanup (PART 3 of that script) — BEFORE creating your first
+--   test user or test album.
 --   Once you create test data the TRANSACTIONAL checks will legitimately turn
 --   FAIL. That is expected and does not indicate a problem.
 --
@@ -67,8 +72,15 @@ DECLARE
   -- telemetry that any running app or worker repopulates within seconds, so
   -- "= 0" tests whether the system is switched off, not whether the reset
   -- worked. They are checked against the reset marker in category G instead.
+  --
+  -- cart_items (0055) and order_items (0056) were added after the first
+  -- version of this script and are BOTH transactional: a cart is pre-purchase
+  -- staging, and order_items is the authoritative list of albums in an order.
+  -- album_pdfs is keyed (album_id, kind) since 0058 and holds up to three rows
+  -- per album — preview, print_cover, print_content — all of them render state.
   c_transactional text[] := ARRAY[
     'albums', 'album_pages', 'photos', 'album_pdfs',
+    'cart_items', 'order_items',
     'orders', 'payments', 'order_notes', 'addresses',
     'coupon_redemptions', 'email_log', 'webhook_events',
     'support_tickets', 'support_messages',
@@ -77,12 +89,24 @@ DECLARE
     'shipments', 'shipment_events'
   ];
 
-  -- Configuration the RESET actively preserves and the APPLICATION cannot
-  -- function without. Empty here means the reset destroyed something.
+  -- Configuration the RESET actively preserves and WITHOUT WHICH THE APP
+  -- CANNOT FUNCTION AT ALL. Empty here means the reset destroyed something.
+  --
+  -- Deliberately only two. insertAlbumForUser refuses to create an album
+  -- without an ACTIVE album_products row, and it reads album_product_prices to
+  -- offer page counts — so those two are load-bearing. Everything else
+  -- degrades gracefully:
+  --   cover_templates    legacy uploaded-PNG artwork; resolveCoverImageKeys
+  --                      falls back photo -> template -> design/default, and
+  --                      the live catalog currently has ZERO rows while albums
+  --                      create and print normally. Optional.
+  --   layout_templates   auto-layout is byte-for-byte identical when none
+  --                      exist (see CLAUDE.md, Phase 9E). Optional.
+  --   stickers           purely decorative. Optional.
+  -- Listing any of those as REQUIRED made an unseeded-but-healthy environment
+  -- report a false reset failure.
   c_config_required text[] := ARRAY[
-    'album_products', 'album_product_prices',
-    'cover_templates', 'layout_templates',
-    'stickers'
+    'album_products', 'album_product_prices'
   ];
 
   -- Configuration that survives the reset but may legitimately be empty in a
@@ -92,11 +116,20 @@ DECLARE
   c_config_optional text[] := ARRAY[
     'content_pages',
     'album_product_previews', 'products',
-    'cover_design_templates', 'sticker_categories',
+    'cover_templates', 'cover_design_templates',
+    'layout_templates', 'stickers', 'sticker_categories',
     'coupons', 'admin_roles'
   ];
 
-  -- Expected pg-boss queues (worker/src/index.ts createQueue calls).
+  -- The five PROJECT queues. Created by the app on first enqueue
+  -- (src/lib/queue.ts) and subscribed to by the worker (WORKER_QUEUES in
+  -- worker/apps/worker/src/infra/config.ts). pg-boss also maintains its own
+  -- internal '__pgboss__send-it' queue, which is reported separately as INFO.
+  --
+  -- Only three have a processor registered in
+  -- worker/apps/worker/src/main.ts — image-hardening, album-pdf, r2-cleanup.
+  -- cover-thumbnail and blueprint-thumbnail are declared but unimplemented;
+  -- the worker's own startup report flags that as a queue-coverage warning.
   c_queues text[] := ARRAY[
     'image-hardening', 'album-pdf', 'r2-cleanup',
     'cover-thumbnail', 'blueprint-thumbnail'
@@ -195,7 +228,7 @@ BEGIN
     v_seq := v_seq + 1;
 
     -- G4: post-reset errors. NOT a reset failure, but you are about to start
-    -- Worker V2 on this environment and something is already throwing. WARN is
+    -- the app or worker on this environment and something is already throwing. WARN is
     -- the correct level: non-blocking, but you should know what it is.
     SELECT count(*) INTO v_n
       FROM public.error_events WHERE first_seen_at >= v_marker;
@@ -511,6 +544,76 @@ BEGIN
   );
   v_seq := v_seq + 1;
 
+  -- D4b: ORPHANED CHILDREN. Every one of these relationships is protected by
+  -- a foreign key, so a non-zero count means genuine corruption (a constraint
+  -- was dropped, or rows were inserted with the constraint disabled) rather
+  -- than an ordinary reset miss. Cheap to check and unambiguous when hit.
+  --
+  -- Each pair below is (child table, the parent it must still resolve to):
+  --   album_pages  -> albums          CASCADE
+  --   album_pdfs   -> albums          CASCADE
+  --   cart_items   -> albums, profiles  CASCADE      (0055)
+  --   order_items  -> orders CASCADE, albums NO ACTION (0056)
+  --   payments     -> orders          CASCADE
+  --   order_notes  -> orders          CASCADE
+  --   addresses    -> profiles        CASCADE
+  --   shipments    -> orders          CASCADE
+  --   shipment_events -> shipments    CASCADE
+  --   album_reviews -> albums         CASCADE
+  --   revision_requests -> album_reviews CASCADE
+  --   support_messages -> support_tickets CASCADE
+  SELECT
+      (SELECT count(*) FROM public.album_pages x       WHERE NOT EXISTS (SELECT 1 FROM public.albums a WHERE a.id = x.album_id))
+    + (SELECT count(*) FROM public.album_pdfs x        WHERE NOT EXISTS (SELECT 1 FROM public.albums a WHERE a.id = x.album_id))
+    + (SELECT count(*) FROM public.cart_items x        WHERE NOT EXISTS (SELECT 1 FROM public.albums a WHERE a.id = x.album_id))
+    + (SELECT count(*) FROM public.cart_items x        WHERE NOT EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = x.user_id))
+    + (SELECT count(*) FROM public.order_items x       WHERE NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.id = x.order_id))
+    + (SELECT count(*) FROM public.order_items x       WHERE NOT EXISTS (SELECT 1 FROM public.albums a WHERE a.id = x.album_id))
+    + (SELECT count(*) FROM public.payments x          WHERE NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.id = x.order_id))
+    + (SELECT count(*) FROM public.order_notes x       WHERE NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.id = x.order_id))
+    + (SELECT count(*) FROM public.addresses x         WHERE NOT EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = x.user_id))
+    + (SELECT count(*) FROM public.shipments x         WHERE NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.id = x.order_id))
+    + (SELECT count(*) FROM public.shipment_events x   WHERE NOT EXISTS (SELECT 1 FROM public.shipments sh WHERE sh.id = x.shipment_id))
+    + (SELECT count(*) FROM public.album_reviews x     WHERE NOT EXISTS (SELECT 1 FROM public.albums a WHERE a.id = x.album_id))
+    + (SELECT count(*) FROM public.revision_requests x WHERE NOT EXISTS (SELECT 1 FROM public.album_reviews r WHERE r.id = x.album_review_id))
+    + (SELECT count(*) FROM public.support_messages x  WHERE NOT EXISTS (SELECT 1 FROM public.support_tickets tk WHERE tk.id = x.ticket_id))
+  INTO v_n;
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'D. INTEGRITY', 'orphaned child rows (all FK pairs)', '0', v_n::text,
+    CASE WHEN v_n = 0 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  -- D4c: user-owned assets whose owner is gone. albums.user_id and
+  -- photos.user_id are ON DELETE RESTRICT (0054, "prevent orphaned user
+  -- assets") precisely so this can never happen — those columns name R2
+  -- objects, and a row without an owner is an object nothing can reclaim.
+  -- A non-zero count means 0054's protection was bypassed.
+  SELECT
+      (SELECT count(*) FROM public.albums x WHERE NOT EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = x.user_id))
+    + (SELECT count(*) FROM public.photos x WHERE NOT EXISTS (SELECT 1 FROM public.profiles pr WHERE pr.id = x.user_id))
+  INTO v_n;
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'D. INTEGRITY', 'user assets without an owner (0054)', '0', v_n::text,
+    CASE WHEN v_n = 0 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  -- D4d: duplicate configuration. Each of these is backed by a UNIQUE
+  -- constraint, so a duplicate means the constraint is missing — schema drift
+  -- that would let the catalog offer two prices for one page count.
+  SELECT
+      (SELECT count(*) FROM (SELECT product_id, page_count FROM public.album_product_prices GROUP BY 1,2 HAVING count(*) > 1) a)
+    + (SELECT count(*) FROM (SELECT slug FROM public.album_products GROUP BY 1 HAVING count(*) > 1) b)
+    + (SELECT count(*) FROM (SELECT user_id FROM public.admin_roles GROUP BY 1 HAVING count(*) > 1) c)
+    + (SELECT count(*) FROM (SELECT code FROM public.coupons GROUP BY 1 HAVING count(*) > 1) d)
+  INTO v_n;
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'D. INTEGRITY', 'duplicate config rows', '0', v_n::text,
+    CASE WHEN v_n = 0 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
   -- D5: every active product must be purchasable.
   SELECT count(*) INTO v_n
     FROM public.album_products p
@@ -572,8 +675,8 @@ BEGIN
     JOIN pg_namespace n ON n.oid = c.connamespace
    WHERE c.contype = 'f' AND n.nspname = 'public';
   INSERT INTO _verify_results VALUES (
-    v_seq, 'D. INTEGRITY', 'public FK constraints declared', '>= 40', v_n::text,
-    CASE WHEN v_n >= 40 THEN 'PASS' ELSE 'WARN' END
+    v_seq, 'D. INTEGRITY', 'public FK constraints declared', '>= 65', v_n::text,
+    CASE WHEN v_n >= 65 THEN 'PASS' ELSE 'WARN' END
   );
   v_seq := v_seq + 1;
 
@@ -655,17 +758,19 @@ BEGIN
         v_seq := v_seq + 1;
       END LOOP;
 
-      -- E5: queue policy readout. Every queue is currently created with no
-      -- options, so policy resolves to 'standard' — under which singletonKey
-      -- does NOT deduplicate (pg-boss scopes its dedupe indexes to the
-      -- short/singleton/stately policies). Reported so Worker V2 makes this
-      -- an explicit decision rather than inheriting it.
+      -- E5: queue policy readout. Every queue is created with no options, so
+      -- policy resolves to 'standard' — under which singletonKey does NOT
+      -- deduplicate (pg-boss scopes its dedupe indexes to the short/singleton/
+      -- stately policies). That is currently relied upon: enqueueAlbumPdf
+      -- deliberately passes NO singletonKey so a newer print token is never
+      -- dropped in favour of a stale queued job. Reported so the choice stays
+      -- explicit rather than inherited.
       EXECUTE $q$
         SELECT string_agg(name || '=' || COALESCE(policy, 'null'), ', ' ORDER BY name)
         FROM pgboss.queue
       $q$ INTO v_txt;
       INSERT INTO _verify_results VALUES (
-        v_seq, 'E. QUEUE', 'queue policies', 'review for Worker V2',
+        v_seq, 'E. QUEUE', 'queue policies', 'informational',
         COALESCE(v_txt, '(none)'), 'INFO'
       );
       v_seq := v_seq + 1;
@@ -743,20 +848,103 @@ BEGIN
   );
   v_seq := v_seq + 1;
 
-  -- F2: RLS still enabled on the user-data tables. The reset runs as postgres
+  -- F2: RLS enabled on EVERY table in public. The reset runs as postgres
   -- (BYPASSRLS) and must not have disturbed this.
+  --
+  -- Checked as "tables without RLS = 0" rather than against a hand-maintained
+  -- list of 13 names: the previous form silently stopped covering every table
+  -- added after it was written, which is exactly the drift this script exists
+  -- to catch. The live catalog has RLS on all 38 tables.
+  SELECT count(*) INTO v_n
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity;
+  SELECT string_agg(c.relname, ', ' ORDER BY c.relname) INTO v_txt
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity;
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'F. SCHEMA', 'public tables WITHOUT RLS', '0',
+    COALESCE(v_n::text || CASE WHEN v_n > 0 THEN ' (' || v_txt || ')' ELSE '' END, '0'),
+    CASE WHEN v_n = 0 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  -- F2b: the two SERVICE-ROLE-ONLY tables — RLS enabled with NO policies at
+  -- all, so neither anon nor authenticated can reach them by any path. This is
+  -- the privilege model 0008 and 0010 established; the reset must not have
+  -- relaxed it. album_pdfs holds print tokens; webhook_events holds Razorpay
+  -- idempotency markers.
   SELECT count(*) INTO v_n
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'public'
-     AND c.relkind = 'r'
-     AND c.relname IN ('profiles','addresses','albums','album_pages','photos',
-                       'orders','payments','album_pdfs','support_tickets',
-                       'album_products','layout_templates','stickers','content_pages')
-     AND c.relrowsecurity;
+     AND c.relname IN ('album_pdfs', 'webhook_events')
+     AND c.relrowsecurity
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_policies pp
+        WHERE pp.schemaname = 'public' AND pp.tablename = c.relname
+     );
   INSERT INTO _verify_results VALUES (
-    v_seq, 'F. SCHEMA', 'RLS enabled on core tables', '13', v_n::text,
-    CASE WHEN v_n = 13 THEN 'PASS' ELSE 'FAIL' END
+    v_seq, 'F. SCHEMA', 'service-role-only tables locked', '2', v_n::text,
+    CASE WHEN v_n = 2 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  -- F2c: album_pdfs must carry the 0058 print-PDF shape. Without it the app
+  -- cannot generate ANY PDF: every read and write is scoped by kind, so a
+  -- pre-0058 database throws "column kind does not exist" on the first
+  -- generate, and the customer preview poll fails too.
+  --
+  -- Three things are checked because each fails differently:
+  --   the column        -> queries error outright
+  --   the CHECK         -> an invalid kind could be stored
+  --   the composite PK  -> the three artifacts would collapse onto one row,
+  --                        so a print export would overwrite the preview
+  SELECT count(*) INTO v_n
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'album_pdfs' AND column_name = 'kind';
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'F. SCHEMA', 'album_pdfs.kind column (0058)', '1', v_n::text,
+    CASE WHEN v_n = 1 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  SELECT count(*) INTO v_n
+    FROM pg_constraint
+   WHERE conrelid = 'public.album_pdfs'::regclass
+     AND contype = 'c'
+     AND pg_get_constraintdef(oid) ILIKE '%print_cover%'
+     AND pg_get_constraintdef(oid) ILIKE '%print_content%';
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'F. SCHEMA', 'album_pdfs kind CHECK (3 kinds)', '1', v_n::text,
+    CASE WHEN v_n >= 1 THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  SELECT string_agg(a.attname, ',' ORDER BY k.ord) INTO v_txt
+    FROM pg_constraint c
+    JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+   WHERE c.conrelid = 'public.album_pdfs'::regclass AND c.contype = 'p';
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'F. SCHEMA', 'album_pdfs primary key', 'album_id,kind',
+    COALESCE(v_txt, '(none)'),
+    CASE WHEN v_txt = 'album_id,kind' THEN 'PASS' ELSE 'FAIL' END
+  );
+  v_seq := v_seq + 1;
+
+  -- F2d: no PDF render state may survive the reset, in ANY kind. Reported
+  -- per kind so a stale print-cover row is not hidden inside a total. This
+  -- overlaps category A deliberately: A proves the table is empty, this proves
+  -- the reset understood that "empty" now means all three artifacts.
+  SELECT count(*) INTO v_n FROM public.album_pdfs;
+  SELECT string_agg(kind || '=' || n::text, ', ' ORDER BY kind) INTO v_txt
+    FROM (SELECT kind, count(*) AS n FROM public.album_pdfs GROUP BY kind) z;
+  INSERT INTO _verify_results VALUES (
+    v_seq, 'F. SCHEMA', 'album_pdfs rows by kind', '0',
+    COALESCE(v_txt, '0'),
+    CASE WHEN v_n = 0 THEN 'PASS' ELSE 'FAIL' END
   );
   v_seq := v_seq + 1;
 
@@ -774,10 +962,12 @@ BEGIN
   SELECT count(*) INTO v_n
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public'
-     AND p.proname IN ('is_admin','log_audit','record_error_event','process_razorpay_event');
+     AND p.proname IN ('is_admin','log_audit','record_error_event','process_razorpay_event',
+                       'create_order_with_items','cart_add_or_increment','cart_ensure_item',
+                       'submit_album_for_review','handle_new_user');
   INSERT INTO _verify_results VALUES (
-    v_seq, 'F. SCHEMA', 'core RPCs present', '>= 4', v_n::text,
-    CASE WHEN v_n >= 4 THEN 'PASS' ELSE 'FAIL' END
+    v_seq, 'F. SCHEMA', 'core RPCs present', '>= 9', v_n::text,
+    CASE WHEN v_n >= 9 THEN 'PASS' ELSE 'FAIL' END
   );
   v_seq := v_seq + 1;
 
@@ -802,14 +992,14 @@ BEGIN
   INSERT INTO _verify_results VALUES (
     1, '>>> VERDICT', 'next step', '-',
     CASE WHEN v_n = 0
-         THEN 'Ready for Worker V2. Verify R2 manually, then create the first test user.'
-         ELSE 'Do NOT begin Worker V2. Review every FAIL row below.' END,
+         THEN 'Database is clean. Verify R2 manually (development_reset.sql PART 3), then start the worker and create the first test user.'
+         ELSE 'Do NOT seed test data yet. Review every FAIL row below.' END,
     CASE WHEN v_n = 0 THEN 'INFO' ELSE 'FAIL' END
   );
 
   INSERT INTO _verify_results VALUES (
     2, '>>> VERDICT', 'R2 (not checkable in SQL)', 'manual',
-    'rclone lsd r2:<bucket>  -> expect ONLY album-products/ cover-templates/ stickers/ blueprints/',
+    'rclone lsd r2:<bucket>  -> expect ONLY album-products/ cover-templates/ stickers/ (no {userId}/ folders)',
     'INFO'
   );
 
@@ -833,7 +1023,7 @@ ORDER BY seq;
 -- INTERPRETING THE OUTPUT
 -- ============================================================================
 -- PASS  Check succeeded.
--- FAIL  Blocking. Do not begin Worker V2 development. Investigate.
+-- FAIL  Blocking. Do not seed test data. Investigate.
 -- WARN  Non-blocking but worth understanding. Common legitimate causes:
 --         - "active cover templates = 0"  -> catalog was never seeded
 --         - "pgboss schema MISSING"       -> DROP SCHEMA was used; restart worker
@@ -841,16 +1031,27 @@ ORDER BY seq;
 -- INFO  Context only, never a failure.
 --
 -- EXPECTED STATE IMMEDIATELY AFTER A SUCCESSFUL RESET
---   A. TRANSACTIONAL   every row PASS (all counts 0)
---   G. OBSERVABILITY   all PRE-reset rows 0; POST-reset rows INFO/WARN
---   B. ACCOUNTS        every row PASS; auth.users = profiles = admin count
---   C. CONFIG          required tables PASS; optional tables INFO
---   D. INTEGRITY       every row PASS
---   E. QUEUE           job/archive 0; 5 application queues present
---   F. SCHEMA          every row PASS
+--
+--   TRANSACTIONAL DATA          -> empty      (category A, 21 tables)
+--   ADMIN / BACK OFFICE         -> preserved  (category B)
+--   PRODUCT / CATALOG CONFIG    -> preserved  (category C, required)
+--   CMS / TEMPLATE / STICKERS   -> preserved  (category C, optional)
+--   DEMO ALBUMS                 -> deleted, and demo_album_id nulled; an admin
+--                                  re-attaches a fresh one from /admin/dimensions
+--   WORKER / QUEUE              -> structurally ready (category E)
+--   R2 OBJECT STORAGE           -> NOT verifiable here; manual (see below)
+--
+--   Per category:
+--     A. TRANSACTIONAL   every row PASS (all counts 0)
+--     G. OBSERVABILITY   all PRE-reset rows 0; POST-reset rows INFO/WARN
+--     B. ACCOUNTS        every row PASS; auth.users = profiles = admin count
+--     C. CONFIG          required tables PASS; optional tables INFO
+--     D. INTEGRITY       every row PASS
+--     E. QUEUE           job/archive 0; 5 project queues present
+--     F. SCHEMA          every row PASS, including the 0058 album_pdfs shape
 --
 -- ACCEPTED WARNINGS (intentional, documented development states)
---   These do NOT indicate a failed reset and do NOT block Worker V2:
+--   These do NOT indicate a failed reset and do NOT block development:
 --
 --   'preserved via admin_roles only' / 'RBAC drift'
 --       An account holds an admin_roles row while profiles.role <> 'admin'.
@@ -866,7 +1067,14 @@ ORDER BY seq;
 --
 --   'active cover templates' = 0
 --       The cover picker is empty. Non-blocking: resolveCoverImageKeys falls
---       back to cover designs, so albums still complete and print.
+--       back to cover designs, so albums still complete and print. This is the
+--       CURRENT state of the live catalog, which is why cover_templates is
+--       classified OPTIONAL rather than required.
+--
+--   'queue: cover-thumbnail' / 'queue: blueprint-thumbnail' MISSING
+--       Both queues are declared by the app but have NO processor in the
+--       worker. They appear once the app first enqueues onto them. Their
+--       absence right after a reset is normal.
 --
 --   'reset marker NOT FOUND'
 --       Only when verifying a reset performed before Section 10B existed.
@@ -877,11 +1085,31 @@ ORDER BY seq;
 --   checks. That is correct behaviour, not a regression — this script
 --   verifies a CLEAN database, so run it before seeding test data.
 --
+-- WHAT THIS SCRIPT CANNOT SEE — CLOUDFLARE R2
+--   SQL has no visibility into object storage. A PASS verdict means THE
+--   DATABASE is clean; it says nothing about the bucket, and this script never
+--   claims otherwise. After the reset the R2 objects still exist and nothing in
+--   the database points at them any more, so they are also unreachable by the
+--   orphan tooling (which proves ownership via the now-empty `photos` table).
+--
+--   Delete by hand — see development_reset.sql PART 3 for the full contract:
+--     DELETE  {userId}/albums/{albumId}/...  raw uploads, _full / _thumb
+--                                            derivatives, and the three PDFs
+--                                            preview.pdf / print-cover.pdf /
+--                                            print-content.pdf   (0058)
+--     KEEP    cover-templates/  album-products/  stickers/
+--
 -- WHAT IS DELIBERATELY *NOT* ASSERTED
 --   content_pages / published CMS pages -- the reset never touches this table,
 --     so its count measures content authoring, not reset correctness.
 --   Sequences outside public + pgboss -- provider-managed Supabase schemas
 --     (auth, storage, realtime, ...) legitimately contain bigserial/IDENTITY
 --     columns. They are NAMED as INFO, never failed on.
---   Non-application pg-boss queues -- internal to pg-boss, version-dependent.
+--   Non-application pg-boss queues -- internal to pg-boss, version-dependent
+--     ('__pgboss__send-it' is pg-boss's own and is reported as INFO).
+--   Worker HEALTH -- the presence of a queue proves configuration exists, not
+--     that a worker is running, reachable, or able to load the print route.
+--     Use the worker's own startup report and
+--     worker/apps/worker/scripts/verify-render-connectivity.ts for that.
+--   R2 contents -- see above. Never inferred from database state.
 -- ============================================================================
