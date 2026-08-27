@@ -8,7 +8,8 @@ import { CreateAlbumSchema, UpdateAlbumDetailsSchema } from '@/lib/validations';
 import { enqueueR2Cleanup } from '@/lib/queue';
 import { hasActiveOrder, isEditingLocked } from '@/lib/orders/album-lock';
 import { IN_PROGRESS_MS } from '@/lib/pdf/generate';
-import { previewPdfKey } from '@/lib/pdf/key';
+import { albumPdfKey } from '@/lib/pdf/key';
+import { toPdfKind } from '@/lib/pdf/kind';
 import { getActiveCoverTemplateConfig, getDefaultCoverTemplateConfig } from '@/lib/cover-templates/catalog';
 import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
 import { getActiveProduct, getDefaultProduct } from '@/lib/products/catalog';
@@ -307,14 +308,20 @@ export async function deleteAlbum(albumId: unknown): Promise<DeleteResult> {
     thumb_key: string | null;
   }[];
 
-  // The preview-PDF key lives on the service-only album_pdfs row.
+  // The generated-PDF keys live on the service-only album_pdfs rows — ONE PER KIND since 0058
+  // (preview + the two printer-ready exports). Read them ALL: each names its own R2 object, and an
+  // object no row can name after the CASCADE is unreclaimable.
   const admin = createServiceClient();
-  const { data: pdfRow } = await admin
+  const { data: pdfData } = await admin
     .from('album_pdfs')
-    .select('r2_key, status, requested_at')
-    .eq('album_id', id)
-    .maybeSingle();
-  const pdf = pdfRow as { r2_key: string | null; status: string | null; requested_at: string | null } | null;
+    .select('kind, r2_key, status, requested_at')
+    .eq('album_id', id);
+  const pdfRows = (pdfData ?? []) as {
+    kind: string | null;
+    r2_key: string | null;
+    status: string | null;
+    requested_at: string | null;
+  }[];
 
   // DON'T DELETE OUT FROM UNDER A RUNNING RENDER (Phase 6 Prompt 10). While a PDF is generating,
   // `r2_key` is still null — so the key collection below would find nothing to clean up, the album
@@ -326,11 +333,16 @@ export async function deleteAlbum(albumId: unknown): Promise<DeleteResult> {
   // Bounded on purpose: only a row whose `requested_at` is inside the in-flight window blocks. A
   // crashed/stuck generation ages out of that window (and the worker's sweep marks it failed), so
   // this can never trap an album permanently.
-  if (
-    pdf?.status === 'generating' &&
-    pdf.requested_at &&
-    Date.now() - new Date(pdf.requested_at).getTime() < IN_PROGRESS_MS
-  ) {
+  //
+  // Checked across EVERY kind (0058): a printer-ready export is in exactly the same race as a
+  // preview render, so any in-flight artifact blocks the delete.
+  const renderInFlight = pdfRows.some(
+    (r) =>
+      r.status === 'generating' &&
+      r.requested_at &&
+      Date.now() - new Date(r.requested_at).getTime() < IN_PROGRESS_MS,
+  );
+  if (renderInFlight) {
     return {
       ok: false,
       error: 'A preview PDF is being generated for this album. Please try again in a moment.',
@@ -342,16 +354,21 @@ export async function deleteAlbum(albumId: unknown): Promise<DeleteResult> {
   // (upload succeeds → process dies → finalize never writes r2_key). Recovery cannot help once the
   // album is gone: it looks only at `album_pdfs` rows, which the CASCADE removes with the album.
   //
-  // The key is DETERMINISTIC in (userId, albumId), so we reconstruct the one key a render could
-  // possibly have written and hand it to cleanup alongside any stored value. R2 DeleteObject is
-  // idempotent, so enqueuing a key that was never written is a harmless no-op. Gated on the row
-  // existing: no `album_pdfs` row means generation was never requested, so no preview.pdf can exist.
+  // Every key is DETERMINISTIC in (userId, albumId, kind), so we reconstruct the one key a render
+  // of that kind could possibly have written and hand it to cleanup alongside any stored value. R2
+  // DeleteObject is idempotent, so enqueuing a key that was never written is a harmless no-op.
+  // Gated per row: no `album_pdfs` row for a kind means that artifact was never requested, so no
+  // object of that kind can exist.
+  //
+  // 0058 EXTENDS THIS TO THE PRINT EXPORTS, and it must. `print-cover.pdf` and `print-content.pdf`
+  // live in the same album namespace as the preview and are excluded from the orphan scanner's
+  // raw-upload candidate set for exactly the same reason — so if they were not collected here,
+  // nothing in the system could ever name or reclaim them again.
   const keys = Array.from(
     new Set(
       [
         ...photoRows.flatMap((r) => [r.r2_key, r.sanitized_key, r.thumb_key]),
-        pdf?.r2_key ?? null,
-        pdf ? previewPdfKey(user.id, id) : null,
+        ...pdfRows.flatMap((r) => [r.r2_key, albumPdfKey(user.id, id, toPdfKind(r.kind))]),
       ].filter((k): k is string => !!k),
     ),
   );

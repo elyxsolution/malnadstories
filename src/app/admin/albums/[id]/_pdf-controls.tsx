@@ -1,14 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { InlineLoader } from '@/components/loading';
 import { FileDown, RefreshCw, FileText, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { adminGenerateAlbumPdf, adminForceGeneratePdf } from '@/lib/actions/admin/pdf';
 import { pdfStageLabel, pdfFailureLabel } from '@/lib/pdf/status';
-
-type PdfStatus = 'idle' | 'generating' | 'ready' | 'failed';
+import PrintFiles from './_print-files';
+import { usePdfStatus } from './_use-pdf-status';
 
 /**
  * Admin-only full PDF controls (Preview/Generate/Regenerate/Download). PDF generation
@@ -20,15 +20,19 @@ export default function AdminPdfControls({
   albumId,
   printReady = true,
   blockingIssues = [],
+  contentPages,
 }: {
   albumId: string;
   printReady?: boolean;
   blockingIssues?: string[];
+  /** The album's content page count — shown on the interior print row. */
+  contentPages: number;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState<PdfStatus>('idle');
-  /** The last status the poll saw — so a terminal transition is detected without an impure updater. */
-  const statusRef = useRef<PdfStatus>('idle');
+  // The PREVIEW artifact (0058). `refreshOnTerminal` keeps the server-rendered diagnostics panel
+  // in step when a render completes — see the hook for why only the preview needs it.
+  const pdf = usePdfStatus(albumId, 'preview', { refreshOnTerminal: true });
+  const { status, stage, failureCode, failReason } = pdf;
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -36,60 +40,13 @@ export default function AdminPdfControls({
   const [reason, setReason] = useState('');
   const [forcing, setForcing] = useState(false);
 
-  const [failReason, setFailReason] = useState<string | null>(null);
-  const [stage, setStage] = useState<string | null>(null);
-  const [failureCode, setFailureCode] = useState<string | null>(null);
-
-  /**
-   * THE SERVER SNAPSHOT HAS TO BE TOLD.
-   *
-   * This component polls and is always right. The rest of the admin page is NOT: the diagnostics
-   * panel is server-rendered from a single `album_pdfs` read taken when the page was requested, so
-   * once generation finishes it goes on saying "Rendering pages…" next to a working Download
-   * button — two sources of truth, one of them frozen. The worker's completion write is a single
-   * atomic statement and was never the problem.
-   *
-   * `router.refresh()` on the terminal transition re-runs the server components with the real row.
-   * It fires ONCE per completion (guarded by the previous status), not per poll.
-   */
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/admin/albums/${albumId}/pdf`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const body = (await res.json()) as { status: PdfStatus; error?: string | null; stage?: string | null; failureCode?: string | null };
-      // generating → ready/failed is the moment the rest of the page goes stale. Read the previous
-      // value from a ref rather than a state updater: an updater must stay pure (React is free to
-      // call it twice), and this is a side effect.
-      const prev = statusRef.current;
-      statusRef.current = body.status;
-      if (prev === 'generating' && body.status !== 'generating') router.refresh();
-      setStatus(body.status);
-      setStage(body.stage ?? null);
-      setFailureCode(body.status === 'failed' ? body.failureCode ?? null : null);
-      setFailReason(body.status === 'failed' ? body.error ?? null : null);
-    } catch {
-      /* transient */
-    }
-  }, [albumId, router]);
-
-  // Initial read + poll while generating.
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-  useEffect(() => {
-    if (status !== 'generating') return;
-    const id = setInterval(refresh, 3000);
-    return () => clearInterval(id);
-  }, [status, refresh]);
-
   const generate = async () => {
     setBusy(true);
     setErr(null);
     const res = await adminGenerateAlbumPdf(albumId);
     setBusy(false);
     if (res.ok) {
-      statusRef.current = 'generating';
-      setStatus('generating');
+      pdf.markGenerating();
       router.refresh(); // keep the server-rendered diagnostics panel in step from the first frame
     } else setErr(res.error);
   };
@@ -102,8 +59,7 @@ export default function AdminPdfControls({
     if (res.ok) {
       setForceOpen(false);
       setReason('');
-      statusRef.current = 'generating';
-      setStatus('generating');
+      pdf.markGenerating();
       router.refresh();
     } else {
       setErr(res.error);
@@ -114,11 +70,8 @@ export default function AdminPdfControls({
     setDownloading(true);
     setErr(null);
     try {
-      // no-store: the just-generated 'ready' status + signed URL must never be served from
-      // a stale cached poll response (that read as "not available" even when ready).
-      const res = await fetch(`/api/admin/albums/${albumId}/pdf`, { cache: 'no-store' });
-      const body = (await res.json()) as { status: PdfStatus; url: string | null };
-      if (body.status === 'ready' && body.url) window.location.href = body.url;
+      const url = await pdf.fetchDownloadUrl();
+      if (url) window.location.href = url;
       else setErr('No preview PDF available for this album yet.');
     } catch {
       setErr('Could not fetch the PDF link.');
@@ -179,6 +132,9 @@ export default function AdminPdfControls({
         )}
       </div>
       {err && <p className="text-xs text-destructive">{err}</p>}
+
+      {/* The printer-ready exports (0058) — deliberately quieter than the preview control above. */}
+      <PrintFiles albumId={albumId} contentPages={contentPages} />
 
       {forceOpen && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-foreground/50 p-4 backdrop-blur-sm" onClick={() => !forcing && setForceOpen(false)}>

@@ -49,7 +49,7 @@ export async function getStorageOverview(): Promise<StorageOverview> {
       .select({ count: sql<number>`count(*)::int`, pages: sql<number>`coalesce(sum(${albums.size}), 0)::double precision` })
       .from(albumPdfs)
       .innerJoin(albums, eq(albumPdfs.albumId, albums.id))
-      .where(and(eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key))),
+      .where(and(eq(albumPdfs.kind, 'preview'), eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key))),
     db
       .select({ count: sql<number>`count(*)::int`, bytes: PHOTO_BYTES_SQL })
       .from(photos)
@@ -58,7 +58,7 @@ export async function getStorageOverview(): Promise<StorageOverview> {
       .select({ count: sql<number>`count(*)::int`, pages: sql<number>`coalesce(sum(${albums.size}), 0)::double precision` })
       .from(albumPdfs)
       .innerJoin(albums, eq(albumPdfs.albumId, albums.id))
-      .where(and(eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key), inArray(albumPdfs.albumId, eligibleSub))),
+      .where(and(eq(albumPdfs.kind, 'preview'), eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key), inArray(albumPdfs.albumId, eligibleSub))),
   ]);
 
   const photoBytes = Number(photoAgg?.bytes ?? 0);
@@ -112,7 +112,7 @@ export async function getLargestAlbums(limit = 10): Promise<LargestAlbum[]> {
       .from(albums)
       .leftJoin(profiles, eq(albums.userId, profiles.id))
       .where(inArray(albums.id, ids)),
-    db.select({ albumId: albumPdfs.albumId }).from(albumPdfs).where(and(inArray(albumPdfs.albumId, ids), eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key))),
+    db.select({ albumId: albumPdfs.albumId }).from(albumPdfs).where(and(eq(albumPdfs.kind, 'preview'), inArray(albumPdfs.albumId, ids), eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key))),
   ]);
   const metaById = new Map(meta.map((m) => [m.id, m]));
   const pdfSet = new Set(pdfs.map((p) => p.albumId));
@@ -178,7 +178,7 @@ export async function getRetentionQueue(limit = 50): Promise<RetentionRow[]> {
       .select({ albumId: albumPdfs.albumId, size: albums.size })
       .from(albumPdfs)
       .innerJoin(albums, eq(albumPdfs.albumId, albums.id))
-      .where(and(inArray(albumPdfs.albumId, ids), eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key))),
+      .where(and(eq(albumPdfs.kind, 'preview'), inArray(albumPdfs.albumId, ids), eq(albumPdfs.status, 'ready'), isNotNull(albumPdfs.r2Key))),
     adminUserEmails(eligible.map((e) => e.userId)),
   ]);
   const photoBy = new Map(grouped.map((g) => [g.albumId, g]));

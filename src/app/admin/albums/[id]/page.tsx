@@ -70,7 +70,9 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
   const [validation, renderReadiness, pdfRes, reviewRes, worker] = await Promise.all([
     loadAlbumValidation(svcClient, album.id),
     loadRenderReadiness(svcClient, album.id),
-    svcClient.from('album_pdfs').select('status, stage, failure_code, attempts, requested_at, generated_at').eq('album_id', album.id).maybeSingle(),
+    // The PREVIEW artifact (0058) — the print exports report their own state in the Print files
+    // control, which polls per kind.
+    svcClient.from('album_pdfs').select('status, stage, failure_code, attempts, requested_at, generated_at').eq('album_id', album.id).eq('kind', 'preview').maybeSingle(),
     svcClient.from('album_reviews').select('status').eq('album_id', album.id).maybeSingle(),
     checkWorker(),
   ]);
@@ -99,9 +101,12 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
         </Link>
       </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
+      {/* Preview PDF controls + the printer-ready Print files group (0058). Block, not a flex row:
+          the print group below the preview buttons is full-width. */}
+      <div className="mt-4">
         <AdminPdfControls
           albumId={album.id}
+          contentPages={album.size}
           printReady={validation?.printReady ?? true}
           blockingIssues={validation ? [...validation.critical, ...validation.warnings].map((i) => i.title) : []}
         />

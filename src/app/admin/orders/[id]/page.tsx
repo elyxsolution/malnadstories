@@ -93,7 +93,8 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
     })
     .from(orderItems)
     .leftJoin(albums, eq(orderItems.albumId, albums.id))
-    .leftJoin(albumPdfs, eq(orderItems.albumId, albumPdfs.albumId))
+    // PREVIEW only (0058): joining on albumId alone would fan each line out into three rows.
+    .leftJoin(albumPdfs, and(eq(orderItems.albumId, albumPdfs.albumId), eq(albumPdfs.kind, 'preview')))
     .where(eq(orderItems.orderId, row.id))
     .orderBy(orderItems.createdAt);
 
@@ -168,7 +169,7 @@ export default async function AdminOrderDetail({ params }: { params: { id: strin
 
   // PDF status (album_pdfs is service-only; ownership already proven by the admin gate).
   const svc = createServiceClient();
-  const { data: pdfRow } = await svc.from('album_pdfs').select('status').eq('album_id', row.albumId).maybeSingle();
+  const { data: pdfRow } = await svc.from('album_pdfs').select('status').eq('album_id', row.albumId).eq('kind', 'preview').maybeSingle();
   const pdfStatus = ((pdfRow as { status: string } | null)?.status ?? 'idle');
 
   const fullAddress = row.addrName

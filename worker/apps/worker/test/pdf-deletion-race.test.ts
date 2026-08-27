@@ -4,9 +4,18 @@ import type { Job } from '../src/job.js';
 import type { ObjectStore, ObjectMetadata, WriteOptions } from '../src/infra/storage/object-store.js';
 import { PdfProcessor, ALBUM_PDF_TYPE } from '../src/processors/pdf/pdf-processor.js';
 import type { PageRenderer, RenderRequest, RenderResult } from '../src/processors/pdf/page-renderer.js';
-import type { AlbumOwner, AlbumPdfStore, PdfState } from '../src/processors/pdf/album-pdf-repository.js';
-import type { PdfFailureCode, PdfStage } from '../src/processors/pdf/pdf-contract.js';
-import { hashToken, previewPdfKey } from '../src/processors/pdf/pdf-contract.js';
+import type {
+  AlbumOwner,
+  AlbumPdfStore,
+  PdfState,
+  StaleGeneration,
+} from '../src/processors/pdf/album-pdf-repository.js';
+import type { PdfFailureCode, PdfKind, PdfStage } from '../src/processors/pdf/pdf-contract.js';
+import {
+  albumPdfKey,
+  hashToken,
+  previewPdfKey,
+} from '../src/processors/pdf/pdf-contract.js';
 
 /**
  * PDF GENERATION ↔ ALBUM DELETION RACE (Phase 6 Prompt 10).
@@ -16,7 +25,8 @@ import { hashToken, previewPdfKey } from '../src/processors/pdf/pdf-contract.js'
  * away with it — taking the only record of the R2 key. This suite reproduces that window
  * deterministically with a latch, and pins the required post-fix behaviour.
  *
- * THE FAKE MODELS THE REAL SQL. `markReady` is `update album_pdfs … where album_id = $1`: when the
+ * THE FAKE MODELS THE REAL SQL. `markReady` is `update album_pdfs … where album_id = $1 and kind =
+ * $2`: when the
  * row is gone the statement matches ZERO rows and raises NO error. `deleteAlbum()` here flips
  * `rowExists` to false and drops the owner, exactly as the CASCADE does.
  */
@@ -58,8 +68,8 @@ class RacePdfStore implements AlbumPdfStore {
   state: PdfState | null = null;
   /** Whether the `album_pdfs` row still exists (CASCADE removes it with the album). */
   rowExists = true;
-  ready: { albumId: string; r2Key: string } | null = null;
-  failed: { albumId: string; message: string; code: PdfFailureCode } | null = null;
+  ready: { albumId: string; kind: PdfKind; r2Key: string } | null = null;
+  failed: { albumId: string; kind: PdfKind; message: string; code: PdfFailureCode } | null = null;
   readonly stages: PdfStage[] = [];
 
   /** Simulate `deleteAlbum` + the ON DELETE CASCADE that removes the album_pdfs row. */
@@ -75,20 +85,20 @@ class RacePdfStore implements AlbumPdfStore {
   async findPdfState(): Promise<PdfState | null> {
     return this.state;
   }
-  async setStage(_albumId: string, stage: PdfStage): Promise<void> {
+  async setStage(_albumId: string, _kind: PdfKind, stage: PdfStage): Promise<void> {
     if (!this.rowExists) return; // `where … and status='generating'` matches nothing
     this.stages.push(stage);
   }
-  async markReady(albumId: string, r2Key: string): Promise<boolean> {
+  async markReady(albumId: string, kind: PdfKind, r2Key: string): Promise<boolean> {
     if (!this.rowExists) return false; // UPDATE affected 0 rows — no error raised
-    this.ready = { albumId, r2Key };
+    this.ready = { albumId, kind, r2Key };
     return true;
   }
-  async markFailed(albumId: string, message: string, code: PdfFailureCode): Promise<void> {
+  async markFailed(albumId: string, kind: PdfKind, message: string, code: PdfFailureCode): Promise<void> {
     if (!this.rowExists) return;
-    this.failed = { albumId, message, code };
+    this.failed = { albumId, kind, message, code };
   }
-  async findStaleGenerating(): Promise<readonly { albumId: string; attempts: number }[]> {
+  async findStaleGenerating(): Promise<readonly StaleGeneration[]> {
     return [];
   }
   async redrive(): Promise<void> {}
@@ -97,7 +107,10 @@ class RacePdfStore implements AlbumPdfStore {
 class RaceRenderer implements PageRenderer {
   /** Fires while rendering — the T1→T2 window. */
   onRender: (() => void | Promise<void>) | null = null;
-  async render(_request: RenderRequest): Promise<RenderResult> {
+  /** The URL the pipeline actually drove — how the kind→route mapping is asserted. */
+  lastUrl: string | null = null;
+  async render(request: RenderRequest): Promise<RenderResult> {
+    this.lastUrl = request.url;
     if (this.onRender) await this.onRender();
     return { pdf: new Uint8Array([0x25, 0x50, 0x44, 0x46]), httpStatus: 200 };
   }
@@ -109,11 +122,11 @@ const USER = 'u1';
 const KEY = previewPdfKey(USER, ALBUM);
 const FUTURE = new Date(Date.now() + 60_000).toISOString();
 
-function job(): Job<{ albumId: string; token: string }> {
+function job(kind: PdfKind = 'preview'): Job<{ albumId: string; token: string; kind: PdfKind }> {
   return {
     id: 'job-race',
     type: ALBUM_PDF_TYPE,
-    payload: { albumId: ALBUM, token: TOKEN },
+    payload: { albumId: ALBUM, token: TOKEN, kind },
     metadata: { correlationId: 'req-race', attempt: 1 },
     enqueuedAt: '2026-01-01T00:00:00.000Z',
     receivedAt: '2026-01-01T00:00:01.000Z',
@@ -154,6 +167,61 @@ describe('preview-PDF key contract', () => {
    */
   it('is the deterministic {userId}/albums/{albumId}/preview.pdf', () => {
     expect(previewPdfKey('u1', 'a1')).toBe('u1/albums/a1/preview.pdf');
+  });
+
+  /**
+   * 0058 — the printer-ready artifacts are reclaimable for exactly the same reason the preview is:
+   * their keys are DETERMINISTIC in (userId, albumId, kind), so `deleteAlbum` can name every object
+   * a render could possibly have written even while `album_pdfs.r2_key` is still null mid-render.
+   * These literals are mirrored by src/lib/pdf/key.ts; pinning them here is what makes a drift
+   * between the two workspaces fail loudly instead of silently orphaning objects.
+   */
+  it('gives every PDF kind its own deterministic key', () => {
+    expect(albumPdfKey('u1', 'a1', 'preview')).toBe('u1/albums/a1/preview.pdf');
+    expect(albumPdfKey('u1', 'a1', 'print_cover')).toBe('u1/albums/a1/print-cover.pdf');
+    expect(albumPdfKey('u1', 'a1', 'print_content')).toBe('u1/albums/a1/print-content.pdf');
+  });
+
+  it('defaults to the preview key, so a kind-less caller is unchanged', () => {
+    expect(albumPdfKey('u1', 'a1')).toBe(previewPdfKey('u1', 'a1'));
+  });
+
+  it('never collides — three kinds, three distinct objects', () => {
+    const keys = (['preview', 'print_cover', 'print_content'] as const).map((k) =>
+      albumPdfKey('u1', 'a1', k),
+    );
+    expect(new Set(keys).size).toBe(3);
+  });
+});
+
+describe('render targets are kind-scoped (0058)', () => {
+  /**
+   * The snapshot stage picks BOTH the print-route URL and the R2 key from the job's kind. If either
+   * were fixed, a print job would render the preview book into the print file's key — or overwrite
+   * the customer's preview with a printer file. One assertion per direction.
+   */
+  it('a print_cover job renders the cover route into the cover key', async () => {
+    const { processor, store, pdf, renderer } = build();
+    await processor.process(job('print_cover'));
+    expect(renderer.lastUrl).toContain('/albums/a1/print/cover?t=');
+    expect([...store.objects.keys()]).toEqual([albumPdfKey(USER, ALBUM, 'print_cover')]);
+    expect(pdf.ready).toMatchObject({ kind: 'print_cover' });
+  });
+
+  it('a print_content job renders the content route into the content key', async () => {
+    const { processor, store, pdf, renderer } = build();
+    await processor.process(job('print_content'));
+    expect(renderer.lastUrl).toContain('/albums/a1/print/content?t=');
+    expect([...store.objects.keys()]).toEqual([albumPdfKey(USER, ALBUM, 'print_content')]);
+    expect(pdf.ready).toMatchObject({ kind: 'print_content' });
+  });
+
+  it('a preview job is unchanged — same route, same key', async () => {
+    const { processor, store, renderer } = build();
+    await processor.process(job());
+    expect(renderer.lastUrl).toContain('/albums/a1/print?t=');
+    expect(renderer.lastUrl).not.toContain('/print/');
+    expect([...store.objects.keys()]).toEqual([previewPdfKey(USER, ALBUM)]);
   });
 });
 
@@ -209,7 +277,7 @@ describe('PDF ↔ album-deletion race', () => {
     await processor.process(job());
 
     // Normal success first: the DB row names the object, so deleteAlbum can collect the key.
-    expect(pdf.ready).toEqual({ albumId: ALBUM, r2Key: KEY });
+    expect(pdf.ready).toEqual({ albumId: ALBUM, kind: 'preview', r2Key: KEY });
     expect(store.objects.has(KEY)).toBe(true);
 
     // Deletion now happens with r2_key populated — the app enqueues that exact key for cleanup.
@@ -238,7 +306,7 @@ describe('PDF ↔ album-deletion race', () => {
     await processor.process(job());
 
     expect(store.writes).toEqual([KEY]);
-    expect(pdf.ready).toEqual({ albumId: ALBUM, r2Key: KEY });
+    expect(pdf.ready).toEqual({ albumId: ALBUM, kind: 'preview', r2Key: KEY });
     expect(store.deletes, 'a healthy run must never delete its own PDF').toEqual([]);
     assertNoOwnerlessObject(store, pdf);
   });

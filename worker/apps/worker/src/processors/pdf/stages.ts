@@ -1,7 +1,7 @@
 import type { RenderContext, RenderDeps, RenderStage } from './render-context.js';
 import { PermanentPdfError, SupersededError, TransientPdfError } from './errors.js';
 import { PrintRouteError, RendererCrashedError } from './page-renderer.js';
-import { PRINT_READY_FLAG, hashToken, previewPdfKey, printUrl } from './pdf-contract.js';
+import { PRINT_READY_FLAG, albumPdfKey, hashToken, printUrl } from './pdf-contract.js';
 
 /**
  * THE RENDER STAGES — a composable rendering pipeline over the print route (the source of truth). Each
@@ -22,7 +22,7 @@ export class ValidateAlbumStage implements RenderStage {
     const owner = await deps.pdf.findAlbumOwner(ctx.albumId);
     if (owner === null) throw new PermanentPdfError('album not found', 'album_missing');
 
-    const state = await deps.pdf.findPdfState(ctx.albumId);
+    const state = await deps.pdf.findPdfState(ctx.albumId, ctx.kind);
     if (state !== null && state.status === 'ready') {
       throw new SupersededError('album already rendered'); // idempotent skip on redelivery
     }
@@ -43,8 +43,8 @@ export class SnapshotStage implements RenderStage {
     const userId = required(ctx.userId, 'userId');
     return {
       ...ctx,
-      printUrl: printUrl(deps.appUrl, ctx.albumId, ctx.token),
-      r2Key: previewPdfKey(userId, ctx.albumId),
+      printUrl: printUrl(deps.appUrl, ctx.albumId, ctx.token, ctx.kind),
+      r2Key: albumPdfKey(userId, ctx.albumId, ctx.kind),
     };
   }
 }
@@ -54,7 +54,7 @@ export class SnapshotStage implements RenderStage {
 export class PrepareRenderStage implements RenderStage {
   readonly name = 'prepare' as const;
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
-    await deps.pdf.setStage(ctx.albumId, 'preparing');
+    await deps.pdf.setStage(ctx.albumId, ctx.kind, 'preparing');
     return ctx;
   }
 }
@@ -64,7 +64,7 @@ export class PrepareRenderStage implements RenderStage {
 export class RenderStep implements RenderStage {
   readonly name = 'render' as const;
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
-    await deps.pdf.setStage(ctx.albumId, 'rendering');
+    await deps.pdf.setStage(ctx.albumId, ctx.kind, 'rendering');
     const url = required(ctx.printUrl, 'printUrl');
     try {
       const result = await deps.renderer.render({
@@ -83,7 +83,7 @@ export class RenderStep implements RenderStage {
 export class UploadStage implements RenderStage {
   readonly name = 'upload' as const;
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
-    await deps.pdf.setStage(ctx.albumId, 'uploading');
+    await deps.pdf.setStage(ctx.albumId, ctx.kind, 'uploading');
     const r2Key = required(ctx.r2Key, 'r2Key');
     const pdfBytes = required(ctx.pdfBytes, 'pdfBytes');
     try {
@@ -99,11 +99,11 @@ export class UploadStage implements RenderStage {
 export class FinalizeStage implements RenderStage {
   readonly name = 'finalize' as const;
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
-    await deps.pdf.setStage(ctx.albumId, 'finalizing');
+    await deps.pdf.setStage(ctx.albumId, ctx.kind, 'finalizing');
     const r2Key = required(ctx.r2Key, 'r2Key');
     let owned: boolean;
     try {
-      owned = await deps.pdf.markReady(ctx.albumId, r2Key);
+      owned = await deps.pdf.markReady(ctx.albumId, ctx.kind, r2Key);
     } catch (error) {
       throw new TransientPdfError(message(error), 'db_update_failed');
     }

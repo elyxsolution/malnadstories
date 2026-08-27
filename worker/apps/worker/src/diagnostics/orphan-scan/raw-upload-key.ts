@@ -12,7 +12,9 @@
  *
  *   sanitized master  {userId}/albums/{albumId}/{uuid}_full.jpg    worker processors/image/keys.ts
  *   thumbnail         {userId}/albums/{albumId}/{uuid}_thumb.jpg   worker processors/image/keys.ts
- *   album preview PDF {userId}/albums/{albumId}/preview.pdf        worker processors/pdf/pdf-contract.ts
+ *   album PDFs        {userId}/albums/{albumId}/preview.pdf        worker processors/pdf/pdf-contract.ts
+ *                     {userId}/albums/{albumId}/print-cover.pdf     (ALBUM_PDF_BASENAMES — one per
+ *                     {userId}/albums/{albumId}/print-content.pdf    PdfKind, 0058)
  *   cover artwork     cover-templates/{uuid}.{ext}                 src/lib/actions/admin/covers.ts
  *   product artwork   album-products/{uuid}.{ext}                  src/lib/actions/admin/product-uploads.ts
  *   sticker artwork   stickers/{uuid}.{ext}                        src/lib/actions/admin/stickers.ts
@@ -27,6 +29,16 @@
  * upload. Anything ambiguous inside the album namespace is reported as MALFORMED and protected,
  * never quietly treated as a candidate.
  */
+
+/**
+ * The generated-PDF basenames, imported from the contract that MINTS them rather than restated.
+ * A new PDF kind therefore becomes a recognised object class here automatically; forgetting to
+ * teach the scanner about one is how an artifact ends up reported as malformed — or, far worse,
+ * treated as a deletion candidate.
+ */
+import { ALBUM_PDF_BASENAMES } from '../../processors/pdf/pdf-contract.js';
+
+const ALBUM_PDF_BASENAME_SET = new Set<string>(ALBUM_PDF_BASENAMES);
 
 /** Canonical lowercase v4-shaped UUID. Matches what `crypto.randomUUID()` emits. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -62,7 +74,7 @@ export interface RawUploadKey {
 export type RawKeyRejection =
   /** Not in the album namespace at all (admin asset, unknown prefix, wrong depth). */
   | 'not-in-namespace'
-  /** A known non-raw object class: `_full` / `_thumb` derivative, or `preview.pdf`. */
+  /** A known non-raw object class: `_full` / `_thumb` derivative, or a generated album PDF. */
   | 'other-object-class'
   /** In the album namespace, but structurally invalid — this is the MALFORMED case. */
   | 'malformed';
@@ -126,8 +138,8 @@ export function parseRawUploadKey(key: string): ParseResult {
   // A rejection below therefore means MALFORMED (worth reporting), not "some other object" —
   // except for the object classes we positively recognise.
 
-  if (basename === 'preview.pdf') {
-    return { ok: false, rejection: 'other-object-class', detail: 'album preview PDF' };
+  if (ALBUM_PDF_BASENAME_SET.has(basename)) {
+    return { ok: false, rejection: 'other-object-class', detail: `album PDF (${basename})` };
   }
 
   const dot = basename.lastIndexOf('.');

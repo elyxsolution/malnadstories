@@ -1,5 +1,6 @@
 import 'server-only';
 import PgBoss from 'pg-boss';
+import { DEFAULT_PDF_KIND, type PdfKind } from '@/lib/pdf/kind';
 
 /**
  * App-side pg-boss — ENQUEUE ONLY. The long-running /worker service consumes.
@@ -68,9 +69,14 @@ export async function enqueueImageHardening(photoId: string): Promise<void> {
  * its own job, and the worker processes only the job whose token still matches the
  * current album_pdfs row (older jobs skip). Returns the job id for diagnostics.
  */
-export async function enqueueAlbumPdf(albumId: string, token: string): Promise<string | null> {
-  const boss = await getBoss();
-  return boss.send(ALBUM_PDF_QUEUE, { albumId, token }, { retryLimit: 0 });
+export async function enqueueAlbumPdf(
+  albumId: string,
+  token: string,
+  kind: PdfKind = DEFAULT_PDF_KIND,
+): Promise<string | null> {
+  // `kind` rides in the payload (0058): one queue, one processor, three artifacts. The worker
+  // defaults an absent kind to 'preview', so a job enqueued before this deploy still runs.
+  return (await getBoss()).send(ALBUM_PDF_QUEUE, { albumId, token, kind }, { retryLimit: 0 });
 }
 
 /**

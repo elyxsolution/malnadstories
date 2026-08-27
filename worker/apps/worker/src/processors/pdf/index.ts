@@ -33,7 +33,17 @@ export { PdfRecoverableProcessor, createPdfRecoverableProcessor } from './pdf-re
 export type { PdfRecoveryDeps } from './pdf-recovery.js';
 
 export { PermanentPdfError, TransientPdfError, SupersededError } from './errors.js';
-export { PRINT_READY_FLAG, previewPdfKey, printUrl, hashToken } from './pdf-contract.js';
-export type { PdfStage, PdfFailureCode } from './pdf-contract.js';
+export {
+  PRINT_READY_FLAG,
+  PDF_KINDS,
+  DEFAULT_PDF_KIND,
+  ALBUM_PDF_BASENAMES,
+  isPdfKind,
+  albumPdfKey,
+  previewPdfKey,
+  printUrl,
+  hashToken,
+} from './pdf-contract.js';
+export type { PdfStage, PdfFailureCode, PdfKind } from './pdf-contract.js';
 
 export type { RenderContext, RenderDeps, RenderStage } from './render-context.js';

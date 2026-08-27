@@ -91,7 +91,39 @@ describe('the specific migrations Phase 9 turned on', () => {
       expect(FILES).toContain(f);
       expect(DOC).toContain(f);
     }
-    expect(DOC).toMatch(/Nothing is unapplied/i);
+    expect(DOC).toMatch(/`0001`–`0057` are APPLIED to the live database/i);
+  });
+
+  /**
+   * 0058 (album_pdfs.kind, the print exports) is WRITTEN BUT NOT RUN. This repository has no
+   * migrations table, so the document IS the record of what has been applied — and a document
+   * that says "nothing is unapplied" while a migration is pending is worse than no document at
+   * all: it is the exact failure 0052 caused, where shipped code read a column that did not
+   * exist. So the pending state must be stated, and stated where a deployer will see it.
+   */
+  it('0058 is documented as PENDING, not silently claimed as applied', () => {
+    expect(FILES).toContain('0058_album_pdf_kind.sql');
+    expect(DOC).toContain('0058_album_pdf_kind.sql');
+    expect(DOC).toMatch(/`0058` is\s*\n?WRITTEN AND PENDING/i);
+    // The run-order table row must carry a pending marker, never a ✅.
+    const row = /^\| 0058 \| `0058_album_pdf_kind\.sql` \|.*\|(.*)\|\s*$/m.exec(DOC);
+    expect(row, 'the run-order table must contain a row for 0058').not.toBeNull();
+    expect(row![1]).toMatch(/PENDING/i);
+    expect(row![1]).not.toContain('✅');
+  });
+
+  it('0058 does exactly what it claims: adds the kind column and widens the primary key', () => {
+    const sql = readFileSync(resolve(ROOT, 'drizzle/0058_album_pdf_kind.sql'), 'utf8');
+    expect(sql).toMatch(/add column if not exists kind text not null default 'preview'/i);
+    expect(sql).toMatch(/check \(kind in \('preview', 'print_cover', 'print_content'\)\)/i);
+    expect(sql).toMatch(/primary key \(album_id, kind\)/i);
+    // It must not touch any other table, drop data, or widen client access.
+    expect(sql).not.toMatch(/\bdrop\s+(table|column)\b/i);
+    expect(sql).not.toMatch(/\bdelete\s+from\b/i);
+    expect(sql).not.toMatch(/grant[^;]*\bto\s+(anon|authenticated)\b/i);
+    // album_pdfs stays service-only: RLS on, no client grants.
+    expect(sql).toMatch(/revoke all on table public\.album_pdfs from anon/i);
+    expect(sql).toMatch(/revoke all on table public\.album_pdfs from authenticated/i);
   });
 
   it('0057 actually contains the TRUNCATE revoke it claims, for both client roles', () => {

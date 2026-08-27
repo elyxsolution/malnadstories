@@ -18,8 +18,9 @@ import type {
   AlbumOwner,
   AlbumPdfStore,
   PdfState,
+  StaleGeneration,
 } from '../src/processors/pdf/album-pdf-repository.js';
-import type { PdfFailureCode, PdfStage } from '../src/processors/pdf/pdf-contract.js';
+import type { PdfFailureCode, PdfKind, PdfStage } from '../src/processors/pdf/pdf-contract.js';
 import { hashToken } from '../src/processors/pdf/pdf-contract.js';
 
 // --- Fakes ------------------------------------------------------------------------------------
@@ -53,28 +54,32 @@ class FakePdfStore implements AlbumPdfStore {
   owner: AlbumOwner | null = { userId: 'u1' };
   state: PdfState | null = null;
   readonly stages: PdfStage[] = [];
-  ready: { albumId: string; r2Key: string } | null = null;
-  failed: { albumId: string; message: string; code: PdfFailureCode } | null = null;
+  /** Every kind the pipeline asked about — proves each call is artifact-scoped (0058). */
+  readonly kinds: PdfKind[] = [];
+  ready: { albumId: string; kind: PdfKind; r2Key: string } | null = null;
+  failed: { albumId: string; kind: PdfKind; message: string; code: PdfFailureCode } | null = null;
   failMarkReady = false;
 
   async findAlbumOwner(): Promise<AlbumOwner | null> {
     return this.owner;
   }
-  async findPdfState(): Promise<PdfState | null> {
+  async findPdfState(_albumId: string, kind: PdfKind): Promise<PdfState | null> {
+    this.kinds.push(kind);
     return this.state;
   }
-  async setStage(_albumId: string, stage: PdfStage): Promise<void> {
+  async setStage(_albumId: string, kind: PdfKind, stage: PdfStage): Promise<void> {
+    this.kinds.push(kind);
     this.stages.push(stage);
   }
-  async markReady(albumId: string, r2Key: string): Promise<boolean> {
+  async markReady(albumId: string, kind: PdfKind, r2Key: string): Promise<boolean> {
     if (this.failMarkReady) throw new Error('db down');
-    this.ready = { albumId, r2Key };
+    this.ready = { albumId, kind, r2Key };
     return true; // a row was updated (the album still exists)
   }
-  async markFailed(albumId: string, message: string, code: PdfFailureCode): Promise<void> {
-    this.failed = { albumId, message, code };
+  async markFailed(albumId: string, kind: PdfKind, message: string, code: PdfFailureCode): Promise<void> {
+    this.failed = { albumId, kind, message, code };
   }
-  async findStaleGenerating(): Promise<readonly { albumId: string; attempts: number }[]> {
+  async findStaleGenerating(): Promise<readonly StaleGeneration[]> {
     return [];
   }
   async redrive(): Promise<void> {}
@@ -100,11 +105,15 @@ function generatingState(token = TOKEN, expiresAt: string | null = FUTURE): PdfS
   return { status: 'generating', tokenHash: hashToken(token), tokenExpiresAt: expiresAt };
 }
 
-function job(albumId = 'a1', token = TOKEN): Job<{ albumId: string; token: string }> {
+function job(
+  albumId = 'a1',
+  token = TOKEN,
+  kind: PdfKind = 'preview',
+): Job<{ albumId: string; token: string; kind: PdfKind }> {
   return {
     id: 'job-1',
     type: ALBUM_PDF_TYPE,
-    payload: { albumId, token },
+    payload: { albumId, token, kind },
     metadata: { correlationId: 'req-1', attempt: 1 },
     enqueuedAt: '2026-01-01T00:00:00.000Z',
     receivedAt: '2026-01-01T00:00:01.000Z',
@@ -146,7 +155,7 @@ describe('pdf pipeline — happy path', () => {
     // uploaded under the deterministic preview key
     expect(ctx.store.writes).toEqual(['u1/albums/a1/preview.pdf']);
     // finalized
-    expect(ctx.pdf.ready).toEqual({ albumId: 'a1', r2Key: 'u1/albums/a1/preview.pdf' });
+    expect(ctx.pdf.ready).toEqual({ albumId: 'a1', kind: 'preview', r2Key: 'u1/albums/a1/preview.pdf' });
     expect(ctx.pdf.failed).toBeNull();
     // progress advanced through the stages
     expect(ctx.pdf.stages).toEqual(['preparing', 'rendering', 'uploading', 'finalizing']);
@@ -250,7 +259,7 @@ describe('pdf pipeline — idempotency & guards', () => {
 
   it('drops a poison payload without failing the row', async () => {
     const ctx = build();
-    await ctx.processor.process({ ...job(), payload: {} as { albumId: string; token: string } });
+    await ctx.processor.process({ ...job(), payload: {} as { albumId: string; token: string; kind: PdfKind } });
     expect(ctx.pdf.failed).toBeNull();
     expect(
       ctx.logger.records.find((r) => r.message === 'processor.rejected')?.detail,

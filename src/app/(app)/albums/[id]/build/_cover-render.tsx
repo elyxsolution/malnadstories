@@ -9,6 +9,7 @@ import {
   coverBackgroundStyle,
   coverLayoutFraming,
   spineBackgroundStyle,
+  spinePrintBackgroundStyle,
   spineWidthFor,
   type BackCoverConfig,
   type CoverConfig,
@@ -196,6 +197,7 @@ export function SpineDesign({
   title,
   pageAspect = 0.75,
   renderElements = true,
+  print = false,
 }: {
   config: CoverConfig;
   /**
@@ -207,6 +209,13 @@ export function SpineDesign({
   title?: string;
   pageAspect?: number;
   renderElements?: boolean;
+  /**
+   * PRINT MODE — suppress the bound-edge shading so the printed spine carries only the customer's
+   * chosen background colour and their spine text. Off everywhere except the printer-ready cover
+   * export, so the builder and the preview are pixel-identical to before. See
+   * `spinePrintBackgroundStyle`.
+   */
+  print?: boolean;
 }) {
   // A SUPPLIED, NON-EMPTY album title still wins: renaming an album in Album Settings writes only
   // `albums.title`, and this load-direction sync is what carries that rename onto the cover.
@@ -224,8 +233,12 @@ export function SpineDesign({
     <div
       className="relative h-full w-full overflow-hidden"
       /* The spine's colour is its own, exactly like the front's and the back's. `null` resolves
-         to the legacy paint this used to hardcode, so an untouched cover is pixel-identical. */
-      style={{ ...spineBackgroundStyle(c.spine.background), containerType: 'size' }}
+         to the legacy paint this used to hardcode, so an untouched cover is pixel-identical.
+         In print mode the same colour is painted WITHOUT the screen-only edge shading. */
+      style={{
+        ...(print ? spinePrintBackgroundStyle(c.spine.background) : spineBackgroundStyle(c.spine.background)),
+        containerType: 'size',
+      }}
     >
       {renderElements && c.spine.texts.map((t) => <TextBox key={t.id} el={t} />)}
     </div>

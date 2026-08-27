@@ -8,6 +8,8 @@ import { captureException } from '@/lib/observability/capture';
 import { getRequestId } from '@/lib/observability/request-id';
 import { loadAlbumValidation } from '@/lib/albums/validation';
 import { loadRenderReadiness, summarizeRenderIssues } from '@/lib/albums/render-readiness';
+import { DEFAULT_PDF_KIND, PDF_KIND_LABEL, type PdfKind } from './kind';
+import { assertPrintablePageCount } from './print-preflight';
 
 /**
  * Internal album-PDF generation service (service-role; NO per-user auth here — callers
@@ -33,21 +35,46 @@ const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
  */
 export const IN_PROGRESS_MS = 90 * 1000;
 
+/**
+ * The "could not start" message.
+ *
+ * The preview wording is reproduced VERBATIM. It is the string a customer-facing surface can end
+ * up showing, and 0058 is a storage change — it is not licence to reword anything a customer
+ * reads. The print kinds name themselves, because an admin looking at three controls needs to know
+ * which one refused.
+ */
+function startFailureMessage(kind: PdfKind): string {
+  return kind === 'preview'
+    ? 'Could not start PDF generation.'
+    : `Could not start ${PDF_KIND_LABEL[kind]} generation.`;
+}
+
 
 /**
  * Drive album-PDF generation.
  *
+ * @param opts.kind       WHICH artifact to generate (0058). Defaults to 'preview', so every
+ *                        pre-existing caller — the Razorpay webhook, /api/payments/verify, the
+ *                        settlement cascade, the customer poll — keeps its exact behaviour without
+ *                        naming a kind. The two printer-ready kinds are ADMIN-ON-DEMAND ONLY and
+ *                        are never started by a payment, a checkout or an order transition.
  * @param opts.force      regenerate even if a PDF already exists / is in progress (admin Regenerate).
  * @param opts.validate   re-run the CONTENT completeness validator (default true). Payment hooks pass
  *                        false — a paid album was already content-validated at submit.
  * @param opts.override   ADMIN OVERRIDE ONLY (adminForceGeneratePdf, audited): bypass BOTH the content
  *                        validator AND the render-readiness gate. Never set on the payment path.
  * @param opts.nudge      best-effort wake of the sleeping worker after enqueue (default true).
+ *
+ * EVERY STEP BELOW IS KIND-SCOPED: the idempotency read, the status upsert, the token, the attempt
+ * counter, the queue payload and the R2 key. Two kinds of the same album are fully independent —
+ * a failed print export cannot reset a ready preview, and regenerating the preview cannot rotate a
+ * print token mid-render.
  */
 export async function startAlbumPdfGeneration(
   albumId: string,
-  opts?: { force?: boolean; validate?: boolean; override?: boolean; nudge?: boolean },
+  opts?: { kind?: PdfKind; force?: boolean; validate?: boolean; override?: boolean; nudge?: boolean },
 ): Promise<StartResult> {
+  const kind = opts?.kind ?? DEFAULT_PDF_KIND;
   const force = opts?.force ?? false;
   const override = opts?.override ?? false;
   const doValidate = opts?.validate ?? true;
@@ -79,11 +106,13 @@ export async function startAlbumPdfGeneration(
     return { ok: false, error: 'Blueprint draft albums cannot generate PDFs.' };
   }
 
-  // Idempotency: don't duplicate work for a non-forced caller.
+  // Idempotency: don't duplicate work for a non-forced caller. Scoped to THIS kind — a ready
+  // preview must never make a print export look "already done".
   const { data: existing } = await svc
     .from('album_pdfs')
     .select('status, requested_at')
     .eq('album_id', albumId)
+    .eq('kind', kind)
     .maybeSingle();
   const cur = existing as { status: string; requested_at: string | null } | null;
   if (!force && cur) {
@@ -140,6 +169,16 @@ export async function startAlbumPdfGeneration(
     }
   }
 
+  // PAGE-COUNT PRE-FLIGHT — printer-ready interior only. The file must contain exactly the
+  // album's content page count; anything else is unbindable. Refused here so the admin sees a
+  // specific reason instead of a generic render failure. The route re-checks as a backstop.
+  // The audited admin override does NOT bypass it: overriding a quality judgement is one thing,
+  // shipping a book with the wrong number of leaves to a printer is another.
+  if (kind === 'print_content') {
+    const preflight = await assertPrintablePageCount(svc, albumId);
+    if (!preflight.ok) return { ok: false, error: preflight.error };
+  }
+
   const token = randomBytes(32).toString('hex');
   const tokenHash = createHash('sha256').update(token).digest('hex');
   const now = new Date();
@@ -150,6 +189,7 @@ export async function startAlbumPdfGeneration(
   const { error: upsertErr } = await svc.from('album_pdfs').upsert(
     {
       album_id: albumId,
+      kind,
       status: 'generating',
       stage: 'queued', // worker advances: queued → preparing → rendering → uploading → finalizing
       failure_code: null,
@@ -160,40 +200,47 @@ export async function startAlbumPdfGeneration(
       requested_at: now.toISOString(),
       attempts: 1,
     },
-    { onConflict: 'album_id' },
+    // The composite key (0058). Upserting on `album_id` alone would collapse the three artifacts
+    // onto one row — a print export would overwrite the customer's preview state.
+    { onConflict: 'album_id,kind' },
   );
   if (upsertErr) {
-    console.error('[pdf] start upsert error', { albumId, error: upsertErr.message });
+    console.error('[pdf] start upsert error', { albumId, kind, error: upsertErr.message });
     void captureException(upsertErr, {
       source: 'album-pdf',
       category: 'pdf',
       severity: 'error',
       requestId: getRequestId(),
-      metadata: { albumId, stage: 'start-upsert' },
+      metadata: { albumId, kind, stage: 'start-upsert' },
     });
-    return { ok: false, error: 'Could not start PDF generation.' };
+    return { ok: false, error: startFailureMessage(kind) };
   }
 
   try {
-    const jobId = await enqueueAlbumPdf(albumId, token);
+    const jobId = await enqueueAlbumPdf(albumId, token, kind);
     console.log('[pdf] queued', {
       albumId,
+      kind,
       jobId,
       tokenHash: tokenHash.slice(0, 8),
       force,
       at: now.toISOString(),
     });
   } catch (e) {
-    console.error('[pdf] enqueue failed', { albumId, error: String(e) });
+    console.error('[pdf] enqueue failed', { albumId, kind, error: String(e) });
     void captureException(e, {
       source: 'album-pdf',
       category: 'pdf',
       severity: 'error',
       requestId: getRequestId(),
-      metadata: { albumId, stage: 'enqueue' },
+      metadata: { albumId, kind, stage: 'enqueue' },
     });
-    await svc.from('album_pdfs').update({ status: 'failed', error: 'Could not enqueue job' }).eq('album_id', albumId);
-    return { ok: false, error: 'Could not start PDF generation.' };
+    await svc
+      .from('album_pdfs')
+      .update({ status: 'failed', error: 'Could not enqueue job' })
+      .eq('album_id', albumId)
+      .eq('kind', kind);
+    return { ok: false, error: startFailureMessage(kind) };
   }
 
   // Wake the (sleepable) Render worker so it drains the queue promptly. Best-effort:

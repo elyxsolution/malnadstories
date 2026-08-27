@@ -86,11 +86,11 @@ async function collectPhotoProcessing(): Promise<ServiceHealth> {
 async function collectPdf(): Promise<ServiceHealth> {
   const t = THRESHOLDS.pdf;
   const [failed, stuck] = await Promise.all([
-    db.select({ c: count() }).from(albumPdfs).where(eq(albumPdfs.status, 'failed')).then(one),
+    db.select({ c: count() }).from(albumPdfs).where(and(eq(albumPdfs.kind, 'preview'), eq(albumPdfs.status, 'failed'))).then(one),
     db
       .select({ c: count() })
       .from(albumPdfs)
-      .where(and(eq(albumPdfs.status, 'generating'), lt(albumPdfs.requestedAt, minutesAgo(t.stuckMin))))
+      .where(and(eq(albumPdfs.kind, 'preview'), eq(albumPdfs.status, 'generating'), lt(albumPdfs.requestedAt, minutesAgo(t.stuckMin))))
       .then(one),
   ]);
   const alerts: AlertSpec[] = [];

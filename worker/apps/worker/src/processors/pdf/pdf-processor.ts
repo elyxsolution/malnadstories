@@ -15,7 +15,8 @@ import type { AlbumPdfStore } from './album-pdf-repository.js';
 import type { RenderContext, RenderDeps, RenderStage } from './render-context.js';
 import { defaultRenderStages } from './stages.js';
 import { PermanentPdfError, SupersededError, TransientPdfError } from './errors.js';
-import type { PdfFailureCode } from './pdf-contract.js';
+import { DEFAULT_PDF_KIND, isPdfKind } from './pdf-contract.js';
+import type { PdfFailureCode, PdfKind } from './pdf-contract.js';
 
 /** The album-pdf job type — matches the pg-boss queue the app enqueues onto. */
 export const ALBUM_PDF_TYPE = 'album-pdf';
@@ -23,6 +24,12 @@ export const ALBUM_PDF_TYPE = 'album-pdf';
 interface PdfPayload {
   readonly albumId: string;
   readonly token: string;
+  /**
+   * WHICH artifact to render (0058). ABSENT MEANS 'preview': a job enqueued before this deploy is
+   * still sitting in the queue with a two-field payload, and it must run as what it was — the
+   * customer's preview — not be rejected or silently rendered as something else.
+   */
+  readonly kind: PdfKind;
 }
 
 export interface PdfProcessorDeps {
@@ -78,22 +85,28 @@ export class PdfProcessor implements Processor<PdfPayload> {
     const initial: RenderContext = {
       albumId: payload.albumId,
       token: payload.token,
+      kind: payload.kind,
       correlationId,
     };
 
     try {
       await this.pipeline.run(
         initial,
-        { processor: ALBUM_PDF_TYPE, correlationId, detail: { albumId: payload.albumId } },
+        { processor: ALBUM_PDF_TYPE, correlationId, detail: { albumId: payload.albumId, kind: payload.kind } },
         cancellation,
       );
-      this.emit('processor.result', correlationId, { albumId: payload.albumId, outcome: 'ready' });
+      this.emit('processor.result', correlationId, {
+        albumId: payload.albumId,
+        kind: payload.kind,
+        outcome: 'ready',
+      });
     } catch (error) {
       if (error instanceof CancellationError) {
         // Shutdown mid-render: leave the row `generating` (the recovery sweep re-drives) — never mark failed.
         this.emit('processor.skipped', correlationId, {
           reason: 'cancelled',
           albumId: payload.albumId,
+          kind: payload.kind,
         });
         throw error;
       }
@@ -102,25 +115,28 @@ export class PdfProcessor implements Processor<PdfPayload> {
         this.emit('processor.skipped', correlationId, {
           reason: 'superseded',
           albumId: payload.albumId,
+          kind: payload.kind,
           note: error.message,
         });
         return;
       }
       const { code, message } = classify(error);
       try {
-        await this.deps.pdf.markFailed(payload.albumId, message, code);
+        await this.deps.pdf.markFailed(payload.albumId, payload.kind, message, code);
       } catch (dbError) {
         // The render already failed; failing to RECORD that is a second, separate fault worth its
         // own event — it is the case that leaves a row stuck in `generating` until the sweep heals it.
         this.emit('processor.failed', correlationId, {
           reason: 'markfailed_failed',
           albumId: payload.albumId,
+          kind: payload.kind,
           error: toMessage(dbError),
         });
       }
       this.emit('processor.rejected', correlationId, {
         reason: code,
         albumId: payload.albumId,
+        kind: payload.kind,
         error: message,
       });
       // ack — terminal 'failed' (admin regenerate; the I-3 sweep auto-redrives transient codes).
@@ -180,14 +196,16 @@ function classify(error: unknown): { code: PdfFailureCode; message: string } {
 
 function parsePayload(payload: unknown): PdfPayload | null {
   if (typeof payload !== 'object' || payload === null) return null;
-  const p = payload as { albumId?: unknown; token?: unknown };
+  const p = payload as { albumId?: unknown; token?: unknown; kind?: unknown };
   if (
     typeof p.albumId === 'string' &&
     p.albumId.length > 0 &&
     typeof p.token === 'string' &&
     p.token.length > 0
   ) {
-    return { albumId: p.albumId, token: p.token };
+    // An absent or unrecognised kind falls back to 'preview' rather than rejecting the job: that
+    // is what a pre-0058 payload means, and rejecting it would strand a customer's preview.
+    return { albumId: p.albumId, token: p.token, kind: isPdfKind(p.kind) ? p.kind : DEFAULT_PDF_KIND };
   }
   return null;
 }

@@ -5,10 +5,18 @@ import { requireCapability } from '@/lib/auth/require-admin';
 import { createServiceClient } from '@/lib/supabase/service';
 import { startAlbumPdfGeneration } from '@/lib/pdf/generate';
 import { loadAlbumValidation } from '@/lib/albums/validation';
+import { PRINT_PDF_KINDS } from '@/lib/pdf/kind';
 
 export type AdminPdfResult = { ok: true } | { ok: false; error: string };
 
 const AlbumId = z.string().uuid();
+
+/**
+ * The printer-ready exports (0058). ADMIN-ON-DEMAND ONLY — deliberately not in `PDF_KINDS`, so a
+ * caller cannot pass `'preview'` here and drive the customer artifact through the print controls.
+ */
+const PrintKind = z.enum(PRINT_PDF_KINDS);
+const PrintPdfSchema = z.object({ albumId: AlbumId, kind: PrintKind });
 
 /**
  * Admin-only: (re)generate an album's preview PDF for ANY album.
@@ -27,6 +35,39 @@ export async function adminGenerateAlbumPdf(input: unknown): Promise<AdminPdfRes
   if (!parsed.success) return { ok: false, error: 'Invalid album id' };
 
   const res = await startAlbumPdfGeneration(parsed.data, { force: true, validate: true, nudge: true });
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
+
+/**
+ * Admin-only: (re)generate one of the PRINTER-READY exports for any album (0058).
+ *
+ *   print_cover    the flat cover spread, 483 x 327 mm, one page.
+ *   print_content  the interior, N x 206 x 291 mm pages in reading order.
+ *
+ * ADMIN-ON-DEMAND, ALWAYS. Nothing else in the system starts these: not the Razorpay webhook, not
+ * `/api/payments/verify`, not the settlement cascade, not album creation or submission. A print
+ * file is produced when a book actually goes to production, and it is an administrator who decides
+ * that. The preview PDF's payment-triggered lifecycle is untouched.
+ *
+ * Same capability as the preview control (`album:manage`), same shared generator, same gates —
+ * `force: true` so an admin's click always re-renders against the album's current state, plus (for
+ * the interior) a page-count pre-flight that refuses a file with the wrong number of leaves.
+ */
+export async function adminGeneratePrintPdf(input: unknown): Promise<AdminPdfResult> {
+  try {
+    await requireCapability('album:manage');
+  } catch {
+    return { ok: false, error: 'Forbidden' };
+  }
+  const parsed = PrintPdfSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'Invalid print export request' };
+
+  const res = await startAlbumPdfGeneration(parsed.data.albumId, {
+    kind: parsed.data.kind,
+    force: true,
+    validate: true,
+    nudge: true,
+  });
   return res.ok ? { ok: true } : { ok: false, error: res.error };
 }
 

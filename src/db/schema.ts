@@ -7,6 +7,7 @@ import {
   numeric,
   jsonb,
   timestamp,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -296,22 +297,31 @@ export const orderItems = pgTable('order_items', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const albumPdfs = pgTable('album_pdfs', {
-  albumId: uuid('album_id')
-    .primaryKey()
-    .references(() => albums.id, { onDelete: 'cascade' }),
-  status: text('status').notNull().default('idle'),
-  r2Key: text('r2_key'),
-  generatedAt: timestamp('generated_at', { withTimezone: true }),
-  error: text('error'),
-  tokenHash: text('token_hash'),
-  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
-  tokenUsedAt: timestamp('token_used_at', { withTimezone: true }),
-  // Reliability/recovery (0025): when the current attempt started + how many attempts
-  // have been driven, so the worker sweep can time out + cap retries.
-  requestedAt: timestamp('requested_at', { withTimezone: true }),
-  attempts: integer('attempts').notNull().default(0),
-});
+export const albumPdfs = pgTable(
+  'album_pdfs',
+  {
+    albumId: uuid('album_id')
+      .notNull()
+      .references(() => albums.id, { onDelete: 'cascade' }),
+    // Which artifact this row describes (0058): 'preview' | 'print_cover' | 'print_content'.
+    // Defaults to 'preview', so every pre-0058 row keeps its exact meaning with no backfill.
+    kind: text('kind').notNull().default('preview'),
+    status: text('status').notNull().default('idle'),
+    r2Key: text('r2_key'),
+    generatedAt: timestamp('generated_at', { withTimezone: true }),
+    error: text('error'),
+    tokenHash: text('token_hash'),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+    tokenUsedAt: timestamp('token_used_at', { withTimezone: true }),
+    // Reliability/recovery (0025): when the current attempt started + how many attempts
+    // have been driven, so the worker sweep can time out + cap retries.
+    requestedAt: timestamp('requested_at', { withTimezone: true }),
+    attempts: integer('attempts').notNull().default(0),
+  },
+  // Composite PK (0058) — one row per (album, kind), so the three artifacts have fully
+  // independent status, token, attempts and R2 key.
+  (t) => ({ pk: primaryKey({ columns: [t.albumId, t.kind] }) }),
+);
 
 export const payments = pgTable('payments', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

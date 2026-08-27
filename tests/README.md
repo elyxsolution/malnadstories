@@ -2,7 +2,7 @@
 
 `pnpm test` — Vitest, node environment, no database, no network, no fixtures.
 
-The worker has its own suite (`cd worker && pnpm test`, 141 files / 1220 tests) and owns
+The worker has its own suite (`cd worker && pnpm test`, 141 files / 1235 tests) and owns
 everything worker-side: the PDF pipeline, the deletion race, orphan scan/cleanup safety, image
 hardening, recovery. **These tests do not duplicate it.** This suite covers app-side commerce
 domain logic that had no durable coverage before Phase 9 Prompt 4.
@@ -21,6 +21,13 @@ domain logic that had no durable coverage before Phase 9 Prompt 4.
 | `builder-page-and-cover.test.ts` | base slots are POSITIONAL (clearing the left photo never slides the right one across), the hole survives save/reload/Zod, a page is a background rather than a photo container, print-readiness counts photo FRAMES not page halves, and the front/spine/back cover colours are independently stored, migrated and applied |
 | `overlay-image-adjust.test.ts` | image adjustment inside a FIXED frame: cover-fit with no distortion in every frame shape, zoom/pan clamped so no blank edge is reachable, the pan range the drag maths converts against, and the exact crop restored from the persisted `edit_config` |
 | `builder-workspace-fit.test.ts` | the album is fitted to the measured workspace on BOTH axes (so 100% needs no scrolling) with editor zoom composing on top and album/page/overlay coordinates untouched; and a new spread's starting frames are TWO ordinary EMPTY overlays — one per page, meeting exactly at the fold with no overlap or gap, each photo-less, page ownership carried by geometry alone, a panorama still getting one full-pair frame, valid through the save schema, and reported as waiting rather than blank |
+| `print-spec.test.ts` | EVERY physical print dimension, typed from the supplied `dimensions.pdf` rather than derived from the code: 200 × 285 trim, 3 mm bleed, 206 × 291 artwork, 15 mm interior safe area (the product decision that overrides Plate 01's 10 mm), the 210/10/13/10/210 cover construction, 453 × 297 finished spread, 483 × 327 artwork, 15 mm wrap, the 12 mm cover safe area derived from Plate 02, both PDF MediaBoxes in points, the fragmentainer rounding, scale-to-fill's aspect preservation, and **13 mm spine for every page count with no formula anywhere in the range** |
+| `print-content-export.test.tsx` | the interior file is exactly the interior: 24/36/48 (and unshipped counts) → that many pages, reading order 1 → N, block order respected, and NO cover, spine, blank, filler or printer mark. Renders the real `_print-content` |
+| `print-cover-export.test.tsx` | ONE 483 × 327 page; five panels at 210/10/13/10/210 summing to 453; the spread inset by exactly one 15 mm wrap and clipped so nothing can reach the turn-in; safe areas advisory and never drawn; and a spine carrying **only** its background colour + title — screen-only edge shading and inset shadow suppressed, no photo. Renders the real `_print-cover` |
+| `print-storage.test.ts` | the kind vocabulary and its preview default; one deterministic R2 key per (user, album, kind) with no collisions; the preview key byte-identical to before; and the RECLAIMABILITY contract — `deleteAlbum` can name every object that could exist, including one whose render crashed before `r2_key` was written |
+| `print-security.test.ts` | the print-route token gate: missing/wrong/expired/absent-expiry tokens refused, the bounded reuse window anchored to first use, and both isolations — a token for another ALBUM and a token for another ARTIFACT of the same album are refused. The raw token never reaches a log line |
+| `print-preflight.test.ts` | the interior page-count invariant: a complete album passes, any mismatch is refused before a job is enqueued, rows the renderer would drop are ignored so the gate and the route agree, and both reads fail CLOSED |
+| `preview-pdf-unchanged.test.tsx` | THE regression guard for the customer preview book: its own page sequence (cover + 2 blanks + N content + 2 blanks + back + spine), the album PRODUCT dimensions rather than any print constant, and a spine that keeps its advisory page-count-dependent width AND its on-screen edge shading — the two things the print export deliberately changes |
 
 ## What is deliberately NOT here
 
@@ -46,6 +53,20 @@ domain logic that had no durable coverage before Phase 9 Prompt 4.
   database or extracting the query into a helper — a production refactor done purely for tests,
   which Phase 9 Prompt 4 was instructed not to do. Their Phase 9 P2 behaviour was proven in the
   browser against seeded fixtures and is recorded there.
+
+- **The generated PDF's actual bytes.** The print tests assert the geometry the renderer *emits* —
+  the `@page` size in exact millimetres, the fragmentainer-rounded page element, the panel
+  construction, the page count and order — and `print-spec.test.ts` asserts both MediaBoxes in
+  points. They do NOT open a produced file: that needs headless Chromium, which this suite
+  deliberately does not launch (the worker suite owns the render pipeline, with a fake renderer).
+  **So the first file of each kind must be opened in a PDF reader and checked** for page size,
+  fold positions, spine width, bleed, blank wrap and page order. See the manual prepress list in
+  the print-export section of `CLAUDE.md`.
+
+- **Colour space and total ink.** Nothing here asserts CMYK or a 300 % TAC, because nothing
+  produces them: Chromium emits DeviceRGB, and no approved ICC profile exists in this repository.
+  A test that passed would be asserting a claim the artifact does not support. The conversion is
+  a documented, unimplemented post-process — see `CLAUDE.md`.
 
 ## Fixtures
 

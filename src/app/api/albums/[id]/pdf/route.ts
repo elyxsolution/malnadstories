@@ -38,6 +38,9 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     .from('album_pdfs')
     .select('status, r2_key, generated_at, stage, failure_code')
     .eq('album_id', params.id)
+    // The PREVIEW artifact (0058). The printer-ready exports are ADMIN-ONLY and must never be
+    // reachable from a customer route, not even by status.
+    .eq('kind', 'preview')
     .maybeSingle();
 
   const row = (data ?? null) as {

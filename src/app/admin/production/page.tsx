@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { orders, orderItems, albums, albumPdfs, profiles } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
@@ -44,7 +44,8 @@ export default async function AdminProductionPage() {
     .from(orders)
     .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
     .leftJoin(albums, eq(orderItems.albumId, albums.id))
-    .leftJoin(albumPdfs, eq(orderItems.albumId, albumPdfs.albumId))
+    // PREVIEW only (0058): joining on albumId alone would fan each line out into three rows.
+    .leftJoin(albumPdfs, and(eq(orderItems.albumId, albumPdfs.albumId), eq(albumPdfs.kind, 'preview')))
     .leftJoin(profiles, eq(orders.userId, profiles.id))
     .where(inArray(orders.status, COLUMNS as unknown as string[]))
     .orderBy(asc(orders.placedAt), asc(orderItems.createdAt));

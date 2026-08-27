@@ -108,6 +108,24 @@ export function spineBackgroundStyle(bg: Background | null): CSSProperties {
 }
 
 /**
+ * THE SPINE'S BACKDROP FOR PRINT — the customer's chosen colour, and only that.
+ *
+ * `SPINE_EDGE_SHADING` is a screen affordance: it makes a flat stripe read as a folded edge in the
+ * builder and the preview, where the spine is a few pixels wide and would otherwise be ambiguous.
+ * On a real 13 mm printed spine it is not an affordance, it is INK — a dark gradient the customer
+ * never chose, permanently on the bound edge of their book. The print specification is explicit
+ * that the spine carries the selected background colour and the title, and nothing else.
+ *
+ * So the shading (and, on the flat-spread renderer, the inset spine shadow) is suppressed in the
+ * print export ONLY. `spineBackgroundStyle` above is untouched, so the builder and the preview
+ * look exactly as they always have.
+ */
+export function spinePrintBackgroundStyle(bg: Background | null): CSSProperties {
+  if (!bg) return { background: SPINE_LEGACY_COLOR };
+  return backgroundStyle(bg);
+}
+
+/**
  * The persisted custom-cover design. Top-level fields describe the FRONT cover (the book's
  * face — rendered as physical page 1); `back` describes the back cover (printed as the last
  * physical page); `spine*` describe the binding shown between them in the editor + preview.

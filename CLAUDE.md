@@ -67,7 +67,14 @@ src/
       builder.ts              saveLayout / savePhotoEdit / submitAlbum server actions
       cart.ts                 addAlbumToCart server action (ownership + eligibility gate)
       pdf.ts (REMOVED)        customer PDF action gone — generation is backend-only now
+    print/
+      spec.ts                 THE PRINT SPECIFICATION — every physical mm, pure + deterministic
     pdf/
+      kind.ts                 PdfKind vocabulary: preview | print_cover | print_content (0058)
+      key.ts                  deterministic R2 keys, one per (user, album, kind)
+      print-token.ts          THE print-route token gate (kind-scoped), shared by all 3 routes
+      print-data.ts           one album read for every print route (preview + both exports)
+      print-preflight.ts      page-count invariant for the interior export
       generate.ts             startAlbumPdfGeneration (service-role: validate→mint→enqueue→nudge)
     cart/
       queries.ts              cart_items data access (server-only; takes a client, never service role)
@@ -80,7 +87,10 @@ src/
       server.ts               createServerClient() — Server Components, Server Actions
       service.ts              createServiceClient() — service role, bypasses RLS
     validations.ts            Zod schemas
-  app/albums/[id]/print/      Token-gated print route (OUTSIDE (app); service access) → PDF
+  app/albums/[id]/print/      Token-gated print routes (OUTSIDE (app); service access) → PDF
+    print/page.tsx              PREVIEW book — cover + blanks + content + back + spine. UNCHANGED
+    print/cover/                PRINTER-READY cover: ONE 483 × 327 mm flat spread
+    print/content/              PRINTER-READY interior: N × 206 × 291 mm pages, reading order
   app/api/photos/route.ts     GET ?albumId= — status + signed sanitized URLs (builder polls)
   app/api/albums/[id]/pdf/route.ts  GET — PDF status + short-lived signed download URL
 drizzle/
@@ -120,6 +130,7 @@ drizzle/
   0052_cover_template_default.sql     cover_design_templates.is_default + partial unique index (at most ONE default across the table). The creation flow no longer asks the customer for a cover — every new album gets the admin's default, applied server-side in insertAlbumForUser through the SAME active + config-validity gates as a customer pick. No default set → blank custom cover (pre-0052 behaviour). Covers stay fully browsable/switchable/editable in the builder
   0055_cart_items.sql                 cart_items (Phase 6 cart foundation) — one row per (user, album) with a 1..10 quantity; NO parent `carts` table and NO price/product snapshot (createOrder stays the only price authority). Customer-owned RLS (`user_id = auth.uid()`, the albums/addresses shape) + admin SELECT. Both FKs CASCADE (a cart row names no R2 object, so 0054's RESTRICT reasoning does not apply). Two non-SECURITY-DEFINER SQL helpers do the writes because PostgREST cannot express `least(existing + new, 10)`: cart_add_or_increment (manual add) + cart_ensure_item (submit auto-add, DO NOTHING). ✅ EXECUTED against the live database
   0056_order_items.sql                order_items (Phase 8 multi-album order FOUNDATION) — the AUTHORITATIVE list of albums in an order, so ONE order can name several albums while staying ONE Razorpay order + ONE payment. `orders.album_id`/`copies`/product snapshot stay NOT NULL LEGACY POINTERS to the FIRST item. Money stays order-level (shipping charged ONCE per order); the per-line columns are an immutable snapshot (unit_price, line_subtotal, product, album_title). Child-of-order RLS (customer SELECT via EXISTS-through-orders, admin SELECT, restrictive client write-deny); authenticated = SELECT only, anon nothing. Adds create_order_with_items() SECURITY DEFINER (service-role EXECUTE only) = the atomic order+lines primitive used by BOTH createOrder and createCombinedOrder. Backfilled all 4 existing orders. ✅ EXECUTED against the live database
+  0058_album_pdf_kind.sql             album_pdfs.kind ('preview' | 'print_cover' | 'print_content') + PK widened to (album_id, kind). ONE ALBUM, THREE INDEPENDENT PDF ARTIFACTS: each owns its status, stage, failure_code, print token, attempt count and R2 key, so a failed printer-ready export can never reset a preview the customer can already download. `kind` defaults to 'preview', so every pre-0058 row keeps its exact meaning with no backfill. Adds a partial index on (requested_at) where status='generating' for the worker's recovery sweep. ⚠️ WRITTEN, NOT YET RUN — see the run-order table
   0039_stickers.sql                   sticker_categories + stickers (admin-managed decorative artwork for the cover + pages). Mirrors cover_templates (0023): artwork in private R2 under stickers/…; PUBLIC-READ active rows (anon/authenticated SELECT active); service-role writes only. RBAC `sticker:manage` (content role). Placed stickers store only `stickerId` in album jsonb — the print route/admin/builder resolve URLs by id so a deactivated-but-placed sticker still renders
 worker/                       Worker V2 — its OWN pnpm workspace (Worker V1 was removed; tag `worker-v1-final`)
   .env.example                Env template — copy to worker/.env, or use the repo-root .env.local
@@ -500,8 +511,8 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 12 files / 152 tests
-cd worker && pnpm test # worker suite — 141 files / 1220 tests
+pnpm test              # app suite — 19 files / 313 tests
+cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
 - **`tests/`** (repo root, added Phase 9 P4) — app-side commerce domain. Full index and rationale
@@ -559,8 +570,10 @@ columns, indexes, functions, policies, constraints and grants — there is no mi
 table, so object existence *is* the evidence). It is not a hand-maintained narrative: if it and
 the disk disagree, the disk is right and this table is stale.
 
-**Status of this repository: 57 migration files, `0001`–`0057`, no gaps, no duplicates, and
-every one of them APPLIED to the live database. Nothing is unapplied.**
+**Status of this repository: 58 migration files, `0001`–`0058`, no gaps and no duplicates.
+`0001`–`0057` are APPLIED to the live database; nothing among them is unapplied. `0058` is
+WRITTEN AND PENDING — it must be run before (or with) the deploy that ships the print exports,
+because the shipped code reads `album_pdfs.kind`.**
 
 | # | file | what it does | applied |
 |---|---|---|---|
@@ -621,6 +634,7 @@ every one of them APPLIED to the live database. Nothing is unapplied.**
 | 0055 | `0055_cart_items.sql` | cart foundation (Phase 6) | ✅ |
 | 0056 | `0056_order_items.sql` | multi-album order foundation + `create_order_with_items()` (Phase 8) | ✅ |
 | 0057 | `0057_revoke_truncate_privilege.sql` | **revokes TRUNCATE from `anon` + `authenticated`** on all 38 public tables and from the schema default privileges (Phase 9 P3) | ✅ |
+| 0058 | `0058_album_pdf_kind.sql` | `album_pdfs.kind` + PK → `(album_id, kind)` — three independent PDF artifacts per album (print exports) | ⚠️ **PENDING — run SQL FIRST** |
 
 Notes that do not fit the table:
 
@@ -637,7 +651,14 @@ Notes that do not fit the table:
 - **0055, 0056, 0057** were each verified against `pg_catalog` after execution (columns,
   constraints, indexes, RLS, policies, grants, function EXECUTE), not merely "ran without error".
   All three are idempotent and safe to re-run.
-- **On a fresh environment** run 0001→0057 in order; every file is written to be re-runnable
+- **0058 is the ONLY unapplied migration.** It is "run SQL FIRST": the shipped code reads
+  `album_pdfs.kind` (the admin Print files controls, the print routes' token gate, the generator's
+  kind-scoped upsert, and the worker's kind-scoped repository). Running it early is harmless — the
+  column is unused until the code that names it arrives. It is idempotent and safe to re-run, and
+  it changes no existing row's meaning: `kind` defaults to `'preview'`, which is exactly what
+  every pre-0058 row already was. **Verify against `pg_catalog` after running it** (the file
+  carries the queries), per the convention above.
+- **On a fresh environment** run 0001→0058 in order; every file is written to be re-runnable
   except the pre-0055 ones, which predate that convention.
 
 > **Production deployment + security runbook:** see `docs/DEPLOYMENT.md` (secret
@@ -835,6 +856,141 @@ re-implemented in the worker.
 - **Security**: customer download is ownership-checked (RLS) with a short-lived URL; admin
   generate/download is `requireAdmin`-gated; `album_pdfs` stays service-only (RLS on, no
   policies/grants); the worker uses the service role; the PDF R2 key is private.
+
+## Printer-ready print export (Admin) — built
+
+Two **printer-ready PDFs** an administrator generates on demand, built on the existing album-PDF
+infrastructure rather than beside it. The builder is untouched, the customer preview PDF is
+untouched, and no customer surface gained a control.
+
+    ALBUM BUILDER  →  album data  →  ┬→  PREVIEW PDF     (unchanged; payment-triggered)
+                                     └→  ADMIN PRINT EXPORT
+                                            ├─ Cover Page Download   483 × 327 mm, ONE page
+                                            └─ Content Download      206 × 291 mm × N pages
+
+### THE SPEC LIVES IN ONE FILE
+
+**`src/lib/print/spec.ts` is the only place a physical millimetre may appear.** Pure +
+deterministic (no `server-only`, no I/O), so the routes, their renderers, the admin UI and the
+tests all derive from it. A raw dimension in a component, a stylesheet, the worker or a fixture is
+a bug. Every value below is asserted in `tests/print-spec.test.ts` against the supplied
+`dimensions.pdf`.
+
+| | |
+|---|---|
+| interior trim | **200 × 285 mm** |
+| interior bleed | **3 mm** all round |
+| interior artwork (the PDF page) | **206 × 291 mm** → MediaBox **583.94 × 824.88 pt** |
+| interior safe area | **15 mm from every trim edge** → safe box 170 × 255 mm |
+| cover panel (front = back) | **210 × 297 mm** |
+| hinge | **10 mm** ×2 · spine **13 mm** · wrap **15 mm** all round |
+| cover finished flat spread | **453 × 297 mm** (210 + 10 + 13 + 10 + 210) |
+| cover artwork (the PDF page) | **483 × 327 mm** → MediaBox **1369.13 × 926.93 pt** |
+| cover safe area | **12 mm** inside every finished edge AND fold → 186 × 273 mm per face |
+
+- **The 15 mm interior safe area is a PRODUCT DECISION that overrides Plate 01**, which draws 10 mm
+  safe plus a separate 15 mm binding strip on the left/spine edge only. The wider value is applied
+  uniformly so a page is safe whichever edge lands in the gutter.
+- **The 12 mm cover safe area was DERIVED from Plate 02's geometry**, which states no number: the
+  drawing's guides sit at x = 79/265/322/508 and y = 55/328 in its own mm space, and the finished
+  spread occupies x 67→520, y 43→340 with folds at 277/287/300/310 — exactly 12 mm inside every
+  finished edge and every fold.
+- **Safe areas are ADVISORY.** They are reported geometry, never a crop. Clipping a customer's photo
+  at a safe boundary would silently destroy their design; the trim is the printer's job.
+- **NO printer marks of any kind** — no crop marks, registration marks, colour bars, slug, filename
+  strip or trim-line artwork. `PRINTER_MARKS_ENABLED = false` pins the intent for a test.
+
+### Spine — 13 mm, for EVERY page count
+
+`spinePrintWidthMm(pageCount)` returns **13** always, and takes the page count precisely so that
+"the page count does not affect the spine" is an assertion a test can make against a real signature.
+`spineWidthFor()` in `lib/builder/cover.ts` (a page-count-dependent 6–12 % of a page width) is
+documented there as *advisory: a faithful preview proportion, not a pre-press measurement* — it
+still drives the builder canvas and the in-app preview, and **must never reach print geometry**. A
+page-count-dependent spine would silently change the size of every cover file, since 483 = 453 + 30
+and 453 assumes 13.
+
+**The printed spine carries ONLY its background colour and its title text.** `SPINE_EDGE_SHADING`
+(a dark gradient that makes a few-pixel spine read as a folded edge on screen) and `CoverSpread`'s
+inset shadow are **suppressed in the print export only** — on a real 13 mm spine they are unrequested
+ink. `spinePrintBackgroundStyle` + `SpineDesign`'s new `print` prop do that; both default to the
+existing behaviour, so the builder and preview are pixel-identical to before. The background and the
+title come from the existing `cover_config` — there is no second source of truth.
+
+### Design → print, at export time only
+
+- **SCALE-TO-FILL.** The builder page (A4-derived, 0.7071) and the interior bleed box (206 ÷ 291 ≈
+  0.7079) are close but not equal. `scaleToFill` scales the page UNIFORMLY until it covers the bleed
+  box and centres it: never stretched, never letterboxed, never mirrored to fabricate bleed. The
+  measured crop is **under 0.5 mm per edge**.
+- **`mmToPxCeil`** reproduces the fragmentainer fix `_print-album.tsx` documents: Chromium's printed
+  sheet is `ceil(@page size → px)`, so a page element at the exact fraction leaves a hairline of bare
+  paper. The element is sized at the ceiling (779 × 1100 · 1826 × 1236); `@page size` stays in exact
+  millimetres, so the physical MediaBox is unchanged. `margin: 0`, `printBackground`,
+  `preferCSSPageSize` — as the preview route already does.
+- **THE WRAP IS BLANK BY GEOMETRY, not by a rule.** The page is white and the spread is a child inset
+  by exactly 15 mm with `overflow: hidden`; nothing is positioned in the turn-in, and a design that
+  overflows its panel is cut at the finished edge. It cannot reach the wrap.
+- **The hinge fill is the one thing the specification does not state.** `COVER_HINGE_FILL` (one
+  value, one place) continues the SPINE's background across the two 10 mm grooves so the bound edge
+  reads as one surface, introducing no cover artwork into a region the drawing does not describe.
+  **⚠️ CONFIRM WITH THE PRINT PARTNER** — the alternative (extending the adjacent cover panel) is
+  equally defensible and is a one-line change.
+
+### Routes, storage, worker
+
+- **Three token-gated routes**, all outside `(app)`, all `force-dynamic` + `force-no-store`:
+  `/albums/[id]/print` (**PREVIEW — unchanged**), `…/print/cover`, `…/print/content`.
+- **`validatePrintToken(albumId, token, kind)`** (`lib/pdf/print-token.ts`) is the ONE gate, extracted
+  verbatim from the preview route (same sha256 comparison, same bounded-reuse window anchored to
+  first use, same 404-on-everything). Its only addition is the **kind filter**: each artifact owns its
+  own row and therefore its own token, so a preview token cannot render a print file and a cover
+  token cannot render the interior. **`loadPrintAlbum`** (`lib/pdf/print-data.ts`) is the ONE album
+  read, shared by all three, so the printed book cannot disagree with the approved preview.
+- **`album_pdfs.kind` (0058)** — PK widened to `(album_id, kind)`; `kind` defaults to `'preview'`, so
+  every pre-existing row keeps its meaning with no backfill. Each artifact owns its status, stage,
+  failure code, token, attempt count and R2 key, so a failed print export can never reset a preview.
+  **Every pre-existing `album_pdfs` reader was scoped to `kind='preview'`** — a `.maybeSingle()`
+  filtered on `album_id` alone would now raise, and a Drizzle join would fan one order line into
+  three. That includes the customer poll route, the builder page, the admin diagnostics panel, the
+  order + production joins, the dashboard/monitoring/system counts and the storage metrics.
+- **R2 keys** `{user}/albums/{album}/{preview|print-cover|print-content}.pdf` — deterministic in
+  (user, album, kind), which is what makes them reclaimable. **`deleteAlbum` collects all three**
+  (stored key + reconstruction, per row) and the **orphan scanner recognises all three basenames**
+  via `ALBUM_PDF_BASENAMES`. Without both, a print object no row could name would be unreclaimable
+  forever — the scanner deliberately excludes album PDFs from its raw-upload candidate set.
+- **Worker: no new processor and no new queue.** `kind` rides in the existing `album-pdf` payload and
+  is threaded through the existing six stages; `SnapshotStage` picks the route and the key from it.
+  A payload with no kind means `preview`, so a job enqueued before the deploy still runs. Recovery is
+  per artifact: `findStaleGenerating` returns each row's kind and the recovery item id is
+  `albumId:kind` (the preview keeps the bare album id), so one stuck artifact can never mask another.
+- **ADMIN-ON-DEMAND, ALWAYS.** `adminGeneratePrintPdf` (capability `album:manage`) is the only caller
+  that passes a print kind. Nothing else starts one — not the webhook, not `/api/payments/verify`,
+  not `settleOrderFulfilment`, not submission. The preview's payment-triggered lifecycle is unchanged.
+- **Interior page count is an invariant**: `assertPrintablePageCount` refuses before enqueuing if the
+  saved layout does not account for exactly `albums.size` pages, and the route re-checks as a
+  backstop a stale token cannot bypass. A file with the wrong number of leaves is unbindable.
+- **Admin UI**: `/admin/albums/[id]` → a subordinate **Print files** group under the existing preview
+  controls, one row per export (generate / poll / download / regenerate / retry), sharing
+  `usePdfStatus` with the preview control.
+
+### ⚠️ NOT achieved: CMYK and total ink limit
+
+The specification asks for CMYK with a 300 % total ink limit. **The generated files are DeviceRGB.**
+Chromium's `page.pdf()` emits RGB only — there is no flag, no CSS and no Puppeteer option that
+changes it — and **no approved ICC profile exists in this repository or environment**. No profile was
+invented or substituted, and nothing in the code or the UI claims CMYK compliance.
+
+The architecture is ready for the conversion: it is a post-process on the finished PDF (Chromium
+render → PDF → CMYK convert), which is a step added inside the worker's `UploadStage` boundary and
+needs no renderer change. **To close it: obtain the print partner's destination ICC profile with its
+TAC, add Ghostscript (or equivalent) to the worker image, and convert between render and upload.**
+Until then the print partner performs the conversion, which is routine — but they must be told.
+
+**300 PPI** is a target, not a gate. Source photos are the sanitized full-resolution masters (the
+worker never downscales them), text and solid fills stay vector, and `_quality-model.ts` already
+computes true effective DPI per frame. Below 300 ppi is surfaced as a quality warning; generation is
+**never** blocked on it, and a low-resolution photo is **never** upscaled to manufacture the number.
 
 ## Delete album — built
 

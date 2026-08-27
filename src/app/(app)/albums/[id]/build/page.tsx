@@ -310,6 +310,8 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     .from('album_pdfs')
     .select('status')
     .eq('album_id', album.id)
+    // The PREVIEW artifact (0058) — the only PDF a customer ever sees.
+    .eq('kind', 'preview')
     .maybeSingle();
   const initialPdfStatus = ((pdfRow as { status: string } | null)?.status ?? 'idle') as
     | 'idle'

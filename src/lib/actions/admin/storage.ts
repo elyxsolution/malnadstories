@@ -79,7 +79,9 @@ export async function purgeAlbumAssets(input: unknown): Promise<PurgeResult> {
   }
 
   if (mode === 'pdf' || mode === 'all') {
-    const { data: pdf } = await svc.from('album_pdfs').select('r2_key').eq('album_id', albumId).maybeSingle();
+    // PREVIEW only (0058). Reclaiming a printer-ready export is a production decision, not a
+    // storage one, and clearing all three rows here would strand the print objects in R2.
+    const { data: pdf } = await svc.from('album_pdfs').select('r2_key').eq('album_id', albumId).eq('kind', 'preview').maybeSingle();
     const key = (pdf as { r2_key: string | null } | null)?.r2_key;
     if (key) {
       keys.push(key);
@@ -104,7 +106,7 @@ export async function purgeAlbumAssets(input: unknown): Promise<PurgeResult> {
     await svc.from('photos').update({ sanitized_key: null, thumb_key: null, r2_key: null }).eq('album_id', albumId);
   }
   if (mode === 'pdf' || mode === 'all') {
-    await svc.from('album_pdfs').update({ r2_key: null, status: 'idle' }).eq('album_id', albumId);
+    await svc.from('album_pdfs').update({ r2_key: null, status: 'idle' }).eq('album_id', albumId).eq('kind', 'preview');
   }
 
   await svc.rpc('log_audit', {

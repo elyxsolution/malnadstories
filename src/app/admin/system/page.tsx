@@ -1,4 +1,4 @@
-import { count, desc } from 'drizzle-orm';
+import { count, desc, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { albumPdfs, payments, webhookEvents, auditLog } from '@/db/schema';
 import { requireAdmin } from '@/lib/auth/require-admin';
@@ -15,7 +15,7 @@ export default async function AdminSystemPage() {
 
   const [worker, pdfRows, payRows, webhookRow, events] = await Promise.all([
     checkWorker(),
-    db.select({ status: albumPdfs.status, c: count() }).from(albumPdfs).groupBy(albumPdfs.status),
+    db.select({ status: albumPdfs.status, c: count() }).from(albumPdfs).where(eq(albumPdfs.kind, 'preview')).groupBy(albumPdfs.status),
     db.select({ status: payments.status, c: count() }).from(payments).groupBy(payments.status),
     db.select({ c: count() }).from(webhookEvents),
     db

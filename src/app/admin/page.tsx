@@ -89,11 +89,11 @@ export default async function AdminDashboard() {
   const [statusRows, rejectedRow, failedPdfRow, stuckPdfRow] = await Promise.all([
     db.select({ status: orders.status, c: count() }).from(orders).groupBy(orders.status),
     db.select({ c: count() }).from(photos).where(eq(photos.status, 'rejected')),
-    db.select({ c: count() }).from(albumPdfs).where(eq(albumPdfs.status, 'failed')),
+    db.select({ c: count() }).from(albumPdfs).where(and(eq(albumPdfs.kind, 'preview'), eq(albumPdfs.status, 'failed'))),
     db
       .select({ c: count() })
       .from(albumPdfs)
-      .where(and(eq(albumPdfs.status, 'generating'), lt(albumPdfs.requestedAt, stuckCutoff))),
+      .where(and(eq(albumPdfs.kind, 'preview'), eq(albumPdfs.status, 'generating'), lt(albumPdfs.requestedAt, stuckCutoff))),
   ]);
   const statusCount = new Map(statusRows.map((r) => [r.status, r.c]));
   const queue = QUEUE_STATES.map((s) => ({ status: s, label: adminStatusLabel(s), count: statusCount.get(s) ?? 0 }));
