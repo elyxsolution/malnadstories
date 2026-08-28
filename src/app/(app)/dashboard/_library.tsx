@@ -91,21 +91,48 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
             : `${albums.length} ${albums.length === 1 ? 'story' : 'stories'} on your shelf${draft ? ' — one still being written.' : '.'}`}
         </p>
 
-        {/* Continue where you left off */}
+        {/*
+          Continue where you left off — TWO DISTINCT CARDS, side by side.
+
+          The resume bar used to be one full-width band with the Resume button tucked inside it,
+          which read as a single object and gave "start something new" no standing at all. They
+          are two different intentions, so they are two cards: the draft keeps the accent and the
+          width, and New album sits beside it as its own smaller, quieter card. The pair is a
+          grid rather than a flex row so both cards share a height whatever the title length.
+          Below `md` they stack, which is the same reflow the rest of this page uses.
+        */}
         {draft && (
-          <div className="mt-8 flex flex-wrap items-center gap-7 bg-primary px-8 py-6 text-primary-foreground">
-            <Book title={draft.title} size="sm" thickness={9} cover={paletteFor(draft.id)} coverContent={albumCoverFace(draft.cover, draft.title)} spineContent={albumCoverSpine(draft.cover, draft.title)} />
-            <div className="min-w-[200px] flex-1">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-primary-foreground/75">Pick up where you left off</p>
-              <p className="mt-1 font-display text-[26px] leading-tight text-primary-foreground">{draft.title}</p>
-              <p className="mt-1 text-sm text-primary-foreground/80">{draft.size} pages · {KIND[kindOf(draft)].label}</p>
+          <div className="mt-8 grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] lg:grid-cols-[minmax(0,1fr)_260px]">
+            {/* Resume — the left card, unchanged in content and destination. */}
+            <div className="flex flex-wrap items-center gap-6 bg-primary px-6 py-6 text-primary-foreground sm:gap-7 sm:px-8">
+              <Book title={draft.title} size="sm" thickness={9} cover={paletteFor(draft.id)} coverContent={albumCoverFace(draft.cover, draft.title)} spineContent={albumCoverSpine(draft.cover, draft.title)} />
+              <div className="min-w-[180px] flex-1">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-primary-foreground/75">Pick up where you left off</p>
+                <p className="mt-1 font-display text-[26px] leading-tight text-primary-foreground">{draft.title}</p>
+                <p className="mt-1 text-sm text-primary-foreground/80">{draft.size} pages · {KIND[kindOf(draft)].label}</p>
+                <Button
+                  render={<Link href={`/albums/${draft.id}/build`} />}
+                  variant="secondary"
+                  className="mt-4"
+                >
+                  Resume building <ArrowRight />
+                </Button>
+              </div>
             </div>
-            <Button
-              render={<Link href={`/albums/${draft.id}/build`} />}
-              variant="secondary"
+
+            {/* New album — its own card, same New Album flow as the shelf bookend. */}
+            <Link
+              href="/albums/new"
+              className="group flex flex-col items-center justify-center gap-3 border-[1.5px] border-dashed border-input bg-card/40 px-6 py-8 text-center text-muted-foreground transition-colors duration-200 hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99]"
             >
-              Resume building <ArrowRight />
-            </Button>
+              <span className="grid h-10 w-10 place-items-center rounded-full border border-current transition-transform duration-200 group-hover:scale-105">
+                <Plus className="h-5 w-5" />
+              </span>
+              <span className="font-display text-lg leading-tight">New album</span>
+              <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
+                Begin a new chapter
+              </span>
+            </Link>
           </div>
         )}
 

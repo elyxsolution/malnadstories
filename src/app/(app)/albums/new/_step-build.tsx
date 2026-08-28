@@ -80,7 +80,20 @@ export default function StepBuild({
   const batch = uploads.activeSessions;
 
   return (
-    <div className="space-y-8">
+    /*
+      TWO COLUMNS. Photographs are the work of this screen and they need the width — a grid of
+      thumbnails in a half-width column wastes both. The automated starting points are a short
+      menu, so they move into a narrow rail on the right where they stay in view beside the
+      upload area instead of sitting below it. Design Yourself stays in the main column, as a
+      single wide row rather than a third card, because it is the option that needs no
+      configuration and no statistics: it is one button.
+
+      Below `lg` the rail drops beneath the main column and everything reads in the same order
+      it always did — photographs, then how to build.
+    */
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_340px]">
+      {/* ── MAIN COLUMN — photographs, then Design Yourself ────────────── */}
+      <div className="min-w-0 space-y-8">
       {/* ── UPLOAD — compact utility strip ─────────────────────────────── */}
       <section ref={uploadAnchorRef} className="scroll-mt-28 space-y-3" aria-labelledby="upload-heading">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -217,71 +230,11 @@ export default function StepBuild({
         )}
       </section>
 
-      {/* ── BUILD — the point of the page ──────────────────────────────── */}
-      <section className="space-y-4 border-t pt-8" aria-labelledby="build-heading">
-        <div>
-          <h2
-            id="build-heading"
-            className="font-display text-[1.6rem] font-semibold leading-tight tracking-tight sm:text-[1.9rem]"
-          >
-            How should we build it?
-          </h2>
-          <p className="mt-1.5 max-w-prose text-[14px] leading-relaxed text-muted-foreground">
-            Pick a starting point — you can change every page afterwards in the builder.
-          </p>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          <MethodCard
-            Icon={Wand2}
-            title="Auto Create"
-            badge="Fastest"
-            primary
-            desc={
-              autoTarget
-                ? `Generate a complete album from the “${autoTarget.name}” layout, with your photos placed for you.`
-                : 'Generate a complete album automatically, with your photos placed for you.'
-            }
-            meta={
-              autoTarget
-                ? [
-                    { k: 'Layout', v: autoTarget.name },
-                    { k: 'Holds', v: `${autoTarget.slotCount}` },
-                    { k: 'Will place', v: `${usableCount}` },
-                  ]
-                : [{ k: 'Will place', v: `${usableCount}` }]
-            }
-            note={
-              unusable > 0
-                ? `${unusable} can’t be placed automatically — those stay in your tray to place yourself.`
-                : null
-            }
-            cta="Auto Create"
-            onClick={onAutoCreate}
-            disabled={busy}
-          />
-
-          <MethodCard
-            Icon={LayoutTemplate}
-            title="Choose Layout"
-            desc="Browse curated album layouts and pick the style you like, then fill it while you build."
-            meta={
-              blueprints.length > 0
-                ? [
-                    { k: 'Layouts', v: `${blueprints.length}` },
-                    { k: 'Categories', v: `${categoryCount}` },
-                    { k: 'Featured', v: `${featuredCount}` },
-                  ]
-                : []
-            }
-            note={blueprints.length === 0 ? 'No layouts for this album size yet.' : null}
-            cta="Browse layouts"
-            onClick={onChooseLayouts}
-            disabled={busy || blueprints.length === 0}
-          />
-
+        {/* ── DESIGN YOURSELF — stays in the main column, as one wide row ── */}
+        <section className="border-t pt-8" aria-labelledby="design-yourself-heading">
           <MethodCard
             Icon={Palette}
+            headingId="design-yourself-heading"
             title="Design Yourself"
             desc="Start with an empty album and place every photograph exactly where you want it."
             meta={[]}
@@ -289,26 +242,92 @@ export default function StepBuild({
             cta="Open builder"
             onClick={onDesignMyself}
             disabled={busy}
+            row
           />
+        </section>
+      </div>
+
+      {/* ── RIGHT RAIL — the automated starting points ──────────────────── */}
+      <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start" aria-labelledby="build-heading">
+        <div>
+          <h2 id="build-heading" className="font-display text-lg font-semibold tracking-tight">
+            How should we build it?
+          </h2>
+          <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+            Pick a starting point — you can change every page afterwards in the builder.
+          </p>
         </div>
+
+        <MethodCard
+          Icon={Wand2}
+          title="Auto Create"
+          badge="Fastest"
+          primary
+          desc={
+            autoTarget
+              ? `Generate a complete album from the “${autoTarget.name}” layout, with your photos placed for you.`
+              : 'Generate a complete album automatically, with your photos placed for you.'
+          }
+          meta={
+            autoTarget
+              ? [
+                  { k: 'Layout', v: autoTarget.name },
+                  { k: 'Holds', v: `${autoTarget.slotCount}` },
+                  { k: 'Will place', v: `${usableCount}` },
+                ]
+              : [{ k: 'Will place', v: `${usableCount}` }]
+          }
+          note={
+            unusable > 0
+              ? `${unusable} can’t be placed automatically — those stay in your tray to place yourself.`
+              : null
+          }
+          cta="Auto Create"
+          onClick={onAutoCreate}
+          disabled={busy}
+        />
+
+        <MethodCard
+          Icon={LayoutTemplate}
+          title="Choose Layout"
+          desc="Browse curated album layouts and pick the style you like, then fill it while you build."
+          meta={
+            blueprints.length > 0
+              ? [
+                  { k: 'Layouts', v: `${blueprints.length}` },
+                  { k: 'Categories', v: `${categoryCount}` },
+                  { k: 'Featured', v: `${featuredCount}` },
+                ]
+              : []
+          }
+          note={blueprints.length === 0 ? 'No layouts for this album size yet.' : null}
+          cta="Browse layouts"
+          onClick={onChooseLayouts}
+          disabled={busy || blueprints.length === 0}
+        />
 
         {error && (
           <p role="alert" className="text-[13px] text-destructive">
             {error}
           </p>
         )}
-      </section>
+      </aside>
     </div>
   );
 }
 
 /**
- * One build option, as a large action card rather than a button with a label. The primary
- * card is the only one carrying the accent, so stacking them on mobile keeps the hierarchy.
+ * One build option, as an action card rather than a button with a label. The primary card is
+ * the only one carrying the accent, so stacking them in the rail keeps the hierarchy.
+ *
+ * `row` lays the same card out horizontally — icon, text, then the CTA on the right — for the
+ * one option that lives in the wide main column. Same component, same props, same semantics;
+ * only the arrangement differs, so there is no second card to keep in sync.
  */
 function MethodCard({
   Icon,
   title,
+  headingId,
   badge,
   desc,
   meta,
@@ -317,9 +336,11 @@ function MethodCard({
   onClick,
   disabled,
   primary = false,
+  row = false,
 }: {
   Icon: typeof ArrowRight;
   title: string;
+  headingId?: string;
   badge?: string;
   desc: string;
   meta: { k: string; v: string }[];
@@ -328,26 +349,57 @@ function MethodCard({
   onClick: () => void;
   disabled?: boolean;
   primary?: boolean;
+  row?: boolean;
 }) {
-  return (
-    <div
-      className={`flex flex-col rounded-2xl border p-5 transition-all duration-200 ease-glide sm:p-6 ${
-        disabled ? 'opacity-60' : 'hover:-translate-y-1 hover:shadow-elevated'
-      } ${primary ? 'border-primary/30 bg-primary/[0.03] ring-1 ring-primary/10' : 'bg-card'}`}
+  const shell = `rounded-2xl border p-5 transition-all duration-200 ease-glide sm:p-6 ${
+    disabled ? 'opacity-60' : 'hover:-translate-y-1 hover:shadow-elevated'
+  } ${primary ? 'border-primary/30 bg-primary/[0.03] ring-1 ring-primary/10' : 'bg-card'}`;
+
+  const iconBadge = (
+    <span
+      className={`grid h-12 w-12 flex-none place-items-center rounded-xl ring-1 ${
+        primary ? 'bg-primary text-primary-foreground ring-primary/20' : 'bg-primary/[0.07] text-primary ring-primary/15'
+      }`}
     >
-      {/* flex-1 on the content block keeps the three CTAs aligned across cards whose
+      <Icon className="h-5 w-5" />
+    </span>
+  );
+
+  const action = (
+    <Button
+      onClick={onClick}
+      disabled={disabled}
+      size="lg"
+      variant={primary ? 'default' : 'outline'}
+      className={`h-11 text-[14px] ${row ? 'w-full sm:w-auto' : 'mt-5 w-full'} ${primary ? LUX_PRIMARY : ''}`}
+    >
+      <Icon /> {cta}
+    </Button>
+  );
+
+  if (row) {
+    return (
+      <div className={`flex flex-col gap-4 sm:flex-row sm:items-center ${shell}`}>
+        {iconBadge}
+        <div className="min-w-0 flex-1">
+          <h3 id={headingId} className="font-display text-xl font-semibold tracking-tight">
+            {title}
+          </h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
+          {note && <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
+        </div>
+        <div className="flex-none">{action}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex flex-col ${shell}`}>
+      {/* flex-1 on the content block keeps the CTAs aligned across cards whose
           descriptions and stat lists differ in height. */}
       <div className="flex-1">
         <div className="flex items-start justify-between gap-3">
-          <span
-            className={`grid h-12 w-12 flex-none place-items-center rounded-xl ring-1 ${
-              primary
-                ? 'bg-primary text-primary-foreground ring-primary/20'
-                : 'bg-primary/[0.07] text-primary ring-primary/15'
-            }`}
-          >
-            <Icon className="h-5 w-5" />
-          </span>
+          {iconBadge}
           {badge && (
             <span className="rounded-full bg-primary/[0.08] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
               {badge}
@@ -355,7 +407,9 @@ function MethodCard({
           )}
         </div>
 
-        <h3 className="mt-4 font-display text-xl font-semibold tracking-tight">{title}</h3>
+        <h3 id={headingId} className="mt-4 font-display text-xl font-semibold tracking-tight">
+          {title}
+        </h3>
         <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
 
         {meta.length > 0 && (
@@ -372,15 +426,7 @@ function MethodCard({
         {note && <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
       </div>
 
-      <Button
-        onClick={onClick}
-        disabled={disabled}
-        size="lg"
-        variant={primary ? 'default' : 'outline'}
-        className={`mt-5 h-11 w-full text-[14px] ${primary ? LUX_PRIMARY : ''}`}
-      >
-        <Icon /> {cta}
-      </Button>
+      {action}
     </div>
   );
 }

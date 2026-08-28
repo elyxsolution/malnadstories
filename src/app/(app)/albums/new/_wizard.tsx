@@ -122,10 +122,27 @@ export default function CreateWizard({
   const [step, setStep] = useState(STEP_DETAILS);
 
   // ── Step 1 · Album Details ────────────────────────────────────────────────
-  const [destination, setDestination] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [description, setDescription] = useState('');
+  /*
+   * THE TRIP STORY — destination, travel dates, a few words.
+   *
+   * These no longer have a UI: step 1 was reduced to the two decisions that are FIXED at
+   * creation (the book and its page count), and the story fields moved out of the
+   * album-creation screen entirely.
+   *
+   * The VALUES are kept, and every consumer below is untouched: `createAlbumDraft` still
+   * receives `destination`, `travelDates` and `description`, so the server contract and its
+   * derived-title fallback chain are unchanged; `composePeriod` and the inverted-date rule
+   * still run; and the builder-entry veil still reads `destination`. They are plain constants
+   * rather than state because nothing on this screen can change them any more — a `useState`
+   * whose setter is never called is just a dead setter.
+   *
+   * To bring the fields back, restore the four `useState` pairs and pass them (plus their
+   * setters and `dateError`) to `StepDetails` again — nothing downstream needs to change.
+   */
+  const destination: string = '';
+  const fromDate: string = '';
+  const toDate: string = '';
+  const description: string = '';
   const [albumProductId, setAlbumProductId] = useState(
     albumProducts.find((p) => p.isDefault)?.id ?? albumProducts[0]?.id ?? '',
   );
@@ -478,22 +495,19 @@ export default function CreateWizard({
 
       <main className="flex-1 px-5 pb-16 sm:px-8">
         <div className="animate-rise mx-auto w-full max-w-6xl py-8 sm:py-10">
+          {/*
+            Step 1 collects ONLY the two decisions that are fixed at creation. The trip-story
+            fields it used to render live on below this call site — the state, the date rule,
+            `composePeriod` and the create payload are all unchanged — they simply have no UI
+            on this screen any more.
+          */}
           {step === STEP_DETAILS && (
             <StepDetails
               albumProducts={albumProducts}
               albumProductId={albumProductId}
               pageCount={pageCount}
-              destination={destination}
-              fromDate={fromDate}
-              toDate={toDate}
-              description={description}
-              dateError={dateError}
               onSelectProduct={selectProduct}
               onSelectPageCount={setPageCount}
-              onDestinationChange={setDestination}
-              onFromDateChange={setFromDate}
-              onToDateChange={setToDate}
-              onDescriptionChange={setDescription}
             />
           )}
 
