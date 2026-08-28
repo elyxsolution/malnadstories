@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { boundedFetch, getUserWithDeadline } from '@/lib/supabase/timeout';
 
 // Absolute session age enforced when "Stay logged in" is OFF. A reliable backstop
 // for browsers that restore session cookies on restart: even if the auth cookie
@@ -76,6 +77,9 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Supabase's own fetch carries no timeout, so a wedged Auth endpoint would hold this
+      // invocation open until Vercel kills it at 25s. See lib/supabase/timeout.ts.
+      global: { fetch: boundedFetch() },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -98,12 +102,25 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  // Use getUser() — not getSession() — to validate the JWT against Supabase
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Use getUser() — not getSession() — to validate the JWT against Supabase.
+  //
+  // Bounded (lib/supabase/timeout.ts): with no `sb-*` cookie this returns in ~1ms without any
+  // network call, but with one it makes a request Supabase may never answer. Unbounded, that
+  // is a 25s MIDDLEWARE_INVOCATION_TIMEOUT on every signed-in request — the 2026-08-28
+  // incident. On a timeout we fall through as "no user", which the guards below already
+  // handle by failing CLOSED: protected paths still redirect to /login, and no path that is
+  // protected today becomes reachable.
+  const { user, timedOut } = await getUserWithDeadline(supabase);
 
   const { pathname } = request.nextUrl;
+
+  if (timedOut) {
+    // Deliberately visible in the platform logs: this is a provider-availability signal, not
+    // something to swallow. One line per affected request, no token or cookie content.
+    console.warn(
+      `[middleware] supabase auth check exceeded its deadline for ${pathname} — treating request as unauthenticated`,
+    );
+  }
 
   // Absolute-age backstop: if the session is older than MAX_SESSION_MS while
   // "Stay logged in" is off, clear the auth + tracking cookies and force re-login.

@@ -5,12 +5,20 @@ import { UploadProvider } from '@/lib/uploads/upload-provider';
 import { PendingPlacementsProvider } from '@/lib/builder/pending-placements';
 import { CartProvider } from '@/lib/cart/provider';
 import { getCartCount } from '@/lib/cart/queries';
+import { getUserWithDeadline } from '@/lib/supabase/timeout';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+
+  // Bounded, for the same reason as src/middleware.ts: this is the ONE auth check shared by
+  // every route in this group (/dashboard, /cart, /orders, /reviews, /support, /account,
+  // /albums/*, /checkout/*), so an unbounded call here turns a Supabase Auth stall into a
+  // 504 on all of them at once. A timeout is treated exactly as "signed out" — fail closed.
+  const { user, timedOut } = await getUserWithDeadline(supabase);
+
+  if (timedOut) {
+    console.warn('[app-layout] supabase auth check exceeded its deadline — redirecting to /login');
+  }
 
   if (!user) redirect('/login');
 

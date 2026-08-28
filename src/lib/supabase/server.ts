@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { boundedFetch } from './timeout';
 
 export function createClient() {
   const cookieStore = cookies();
@@ -8,6 +9,12 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Supabase ships no request timeout of its own, so an unresponsive Supabase service
+      // holds the request open until the platform kills it. This bounds each call AND the
+      // total this request may spend in Supabase, both an order of magnitude above healthy
+      // latency — it never fires on a healthy call, and only converts "hangs forever" into an
+      // ordinary error the existing code paths already handle. See ./timeout.ts.
+      global: { fetch: boundedFetch() },
       cookies: {
         getAll() {
           return cookieStore.getAll();
