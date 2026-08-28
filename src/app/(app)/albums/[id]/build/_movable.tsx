@@ -290,6 +290,17 @@ export default function Movable({
 }) {
   const drag = useRef<{
     mode: 'move' | 'resize' | 'rotate';
+    /**
+     * THE POINTER THAT OWNS THIS GESTURE, and the node holding its capture.
+     *
+     * Both are recorded so every later event can be checked against the gesture that actually
+     * started — a second pointer, or an event arriving after capture was lost, is no longer
+     * indistinguishable from the real one. `node` is the element the handler is bound to
+     * (`currentTarget`), which is stable for the life of the gesture; releasing on the same node
+     * that captured is what stops capture leaking.
+     */
+    pointerId: number;
+    node: HTMLElement;
     sx: number;
     sy: number;
     start: Rect;
@@ -337,10 +348,33 @@ export default function Movable({
      * elements — two fires per click would skip every other object in the stack. Pointer-down is
      * also the moment the user expects the selection to change: it is already when the drag starts.
      */
+    // A second pointer arriving mid-gesture (a stray touch, a second button) must not restart or
+    // hijack the one in flight — it would overwrite `start` with the live rect and the element
+    // would jump.
+    if (drag.current) return;
+
     onSelect({ meta: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey });
     const box = containerRef.current?.getBoundingClientRect();
+    /**
+     * CAPTURE ON `currentTarget`, NOT `target`.
+     *
+     * `e.target` is the deepest node under the pointer — the photo `<img>`, a frame div, whatever
+     * happens to be painted there. React re-renders that subtree on every `onChange` of the drag,
+     * so it can be replaced mid-gesture; when it is, the browser drops the capture silently
+     * (`lostpointercapture`) and every following pointer event is delivered by ordinary hit
+     * testing instead. With two overlapping overlays that means the terminating `pointerup` lands
+     * on the OTHER overlay, this one never runs `end`, and `drag.current` is left set — after
+     * which a plain hover satisfies the guard in `onMove` and drags an element nobody is holding.
+     *
+     * `e.currentTarget` is the node the handler is bound to. It is the Movable's own element (or
+     * a handle), it lives for the whole gesture, and capturing on it keeps every move and the
+     * final up on this component.
+     */
+    const node = e.currentTarget as HTMLElement;
     drag.current = {
       mode,
+      pointerId: e.pointerId,
+      node,
       sx: e.clientX,
       sy: e.clientY,
       start: rect,
@@ -350,30 +384,27 @@ export default function Movable({
       ey: edges.y,
     };
     setDragging(true);
-    const target = e.target as HTMLElement;
-    target.setPointerCapture(e.pointerId);
+    const target = node;
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {
+      /* the pointer ended between the event and this call — the guards below still hold */
+    }
 
     /**
      * ARM THE PRESS — moves only, and only when the host wants one. A resize or rotate handle is
      * already an unambiguous intent, so holding one must not turn into something else.
      */
     if (mode === 'move') {
-      const pointerId = e.pointerId;
       press.arm(e, () => {
         /**
          * THE DRAG IS ABANDONED, NOT COMPLETED. The pointer is still down when the press wins, so
          * without this the next twitch would move the element behind the surface that just
-         * opened. Capture is released for the same reason: whatever the host mounts needs it.
+         * opened. Capture is released for the same reason: whatever the host mounts needs it —
+         * and `cancelGesture` releases it on the node that took it, which is the same node this
+         * used to name only by luck.
          */
-        drag.current = null;
-        setDragging(false);
-        flagLimit(false);
-        onSnap?.([]);
-        try {
-          target.releasePointerCapture(pointerId);
-        } catch {
-          /* the pointer is already gone — nothing to release */
-        }
+        cancelGesture();
       });
     }
   };
@@ -397,6 +428,25 @@ export default function Movable({
     press.track(e);
 
     const d = drag.current;
+
+    /**
+     * MOVEMENT ALONE MUST NEVER MUTATE ANYTHING. Two guards, both cheap, both unconditional:
+     *
+     *  1. WRONG POINTER — this move belongs to a different pointer than the gesture in flight
+     *     (a second finger, a stray pen). It is not this drag and must not steer it.
+     *
+     *  2. NOTHING IS HELD — `buttons === 0` means no button/contact remains down, so whatever
+     *     this is, it is a hover. A gesture whose `pointerup` was delivered elsewhere (see the
+     *     capture note in `begin`) leaves `drag.current` set, and this is what makes that state
+     *     unusable rather than merely unlikely: the first hover afterwards ENDS it instead of
+     *     resuming it. That is the concrete fix for "the overlay starts moving on its own".
+     */
+    if (d && e.pointerId !== d.pointerId) return;
+    if (d && e.buttons === 0) {
+      cancelGesture();
+      return;
+    }
+
     const box = containerRef.current?.getBoundingClientRect();
     if (!d || !box || box.width === 0 || box.height === 0) return;
     const dx = (e.clientX - d.sx) / box.width;
@@ -484,20 +534,44 @@ export default function Movable({
     }
   };
 
-  const end = (e: ReactPointerEvent) => {
-    press.cancel();
-    if (!drag.current) return;
+  /**
+   * TEAR THE GESTURE DOWN, without committing anything.
+   *
+   * The one place drag state is cleared, so "the gesture is over" can never be half true. Capture
+   * is released on the node that TOOK it (recorded at `begin`) rather than on whatever node the
+   * terminating event happens to name — releasing on the wrong node is a silent no-op and leaks
+   * the capture for the life of the pointer.
+   */
+  const cancelGesture = () => {
+    const d = drag.current;
     drag.current = null;
     setDragging(false);
     flagLimit(false);
     onSnap?.([]);
-    // A cancelled pointer (browser gesture, tab switch, the node re-keyed mid-drag) can already
-    // have lost capture; releasing it then throws and would strand `onCommit`.
+    if (!d) return;
     try {
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      if (d.node.hasPointerCapture(d.pointerId)) d.node.releasePointerCapture(d.pointerId);
     } catch {
       /* the pointer is gone — nothing to release */
     }
+  };
+
+  /**
+   * Capture ended without a pointerup reaching us — the browser took it back, or the node was
+   * disturbed. Without this the gesture would stay "in flight" with no way to finish it.
+   */
+  const onLostCapture = (e: ReactPointerEvent) => {
+    if (!drag.current || e.pointerId !== drag.current.pointerId) return;
+    press.cancel();
+    cancelGesture();
+    onCommit?.();
+  };
+
+  const end = (e: ReactPointerEvent) => {
+    press.cancel();
+    // Not this gesture's pointer — ignore it rather than tearing down a drag it does not own.
+    if (!drag.current || e.pointerId !== drag.current.pointerId) return;
+    cancelGesture();
     /**
      * BACKSTOP, NOT A SETTLE. The gesture travelled inside the commit box (see `edit-bounds`), so
      * this clamp finds nothing to correct and the element does not move on release — which is the
@@ -604,6 +678,7 @@ export default function Movable({
             onPointerMove={onMove}
             onPointerUp={end}
             onPointerCancel={end}
+                onLostPointerCapture={onLostCapture}
             className={`pointer-events-auto absolute inset-0 rounded-[2px] border border-dashed bg-studio/[0.07] ${
               dragging ? 'cursor-grabbing' : 'cursor-grab'
             } ${selected ? 'border-transparent' : 'border-studio-bright/70'}`}
@@ -653,6 +728,7 @@ export default function Movable({
                   onPointerMove={onMove}
                   onPointerUp={end}
                   onPointerCancel={end}
+                onLostPointerCapture={onLostCapture}
                   style={{ cursor: hd.cursor }}
                   className={`pointer-events-auto absolute touch-none border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 ${hd.pos} ${
                     isCorner
@@ -678,6 +754,7 @@ export default function Movable({
                   onPointerMove={onMove}
                   onPointerUp={end}
                   onPointerCancel={end}
+                onLostPointerCapture={onLostCapture}
                   className="pointer-events-auto absolute -top-1.5 left-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-4 cursor-grab touch-none rounded-full border-2 border-card bg-studio shadow-sm motion-safe:transition-transform motion-safe:duration-100 motion-safe:hover:scale-125 active:cursor-grabbing"
                 />
               </>
@@ -698,6 +775,7 @@ export default function Movable({
         onPointerMove={onMove}
         onPointerUp={end}
         onPointerCancel={end}
+                onLostPointerCapture={onLostCapture}
         onContextMenu={(ev) => {
           // A long press has already acted. Some browsers synthesise `contextmenu` from the same
           // hold, which would open the menu on top of the adjustment surface it just opened.

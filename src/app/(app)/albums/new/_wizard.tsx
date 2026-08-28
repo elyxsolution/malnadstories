@@ -506,6 +506,10 @@ export default function CreateWizard({
               albumProducts={albumProducts}
               albumProductId={albumProductId}
               pageCount={pageCount}
+              /* The gate and the action stay here; the step only renders the button. */
+              canContinue={canContinue}
+              creating={creating}
+              onContinue={createAndContinue}
               onSelectProduct={selectProduct}
               onSelectPageCount={setPageCount}
             />
@@ -543,16 +547,17 @@ export default function CreateWizard({
         action — the three build cards are the exit, and a fourth "continue" next to them
         would be exactly the extra navigation step this flow exists to remove.
       */}
+      {/*
+        Step 1's Continue moved INTO the content, centred under the choices that enable it (see
+        `StepDetails`). What is left here is the status line it always carried — "Choose a page
+        count to continue" — which is still the one place the reason for a disabled button is
+        stated. Centred now that it is the only thing in the bar.
+      */}
       {step === STEP_DETAILS && (
-        <footer className="sticky bottom-0 z-20 flex h-[72px] items-center justify-between gap-4 border-t bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
+        <footer className="sticky bottom-0 z-20 flex h-[52px] items-center justify-center gap-4 border-t bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
           <p className="min-w-0 truncate text-[13px] text-muted-foreground">
             {missing ?? 'Everything looks good.'}
           </p>
-          <Button onClick={createAndContinue} disabled={!canContinue || creating} className={`flex-none ${LUX_PRIMARY}`}>
-            {creating ? <InlineLoader /> : null}
-            {creating ? 'Creating…' : 'Continue'}
-            {!creating && <ArrowRight />}
-          </Button>
         </footer>
       )}
 

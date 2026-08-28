@@ -2845,8 +2845,29 @@ export default function Builder({
           <div
             ref={canvas.ref}
             className="ms-scroll relative min-h-0 flex-1 overflow-auto p-4 lg:p-7"
-            onPointerDown={() => {
+            /**
+             * CLICKING OFF THE BOOK DESELECTS.
+             *
+             * The pasteboard around the spread used to be inert: an overlay stayed selected, with
+             * its toolbar up, no matter where you clicked next. Deselecting is a real intention
+             * and it needs a target.
+             *
+             * The test is DOM containment against the live page element, not coordinates and not
+             * a timer: if the gesture started inside the spread it belongs to the spread, and this
+             * does nothing. Everything else on the canvas — pasteboard, padding, the empty area
+             * beside a zoomed-out page — is outside the book and clears the selection.
+             *
+             * Nothing else needs to opt out. `Movable.begin` and both toolbars already
+             * `stopPropagation` on pointerdown, so a click on an object, a handle or a bar never
+             * reaches this handler at all; and clicking blank paper INSIDE the spread already
+             * deselects through `BlockCard`'s own `onSelect({ kind: 'none' })`.
+             */
+            onPointerDown={(e) => {
               if (crop.target) crop.end();
+              const page = pageElRef.current;
+              if (page && page.contains(e.target as Node)) return;
+              setSelection(NO_SELECTION);
+              sel.clear();
             }}
           >
             {blocks.length === 0 ? (

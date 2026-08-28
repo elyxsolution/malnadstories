@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { Trash2, ChevronUp, ChevronDown } from 'lucide-react';
+import { textFontSize } from '@/lib/builder/elements';
 import type { TextElement } from '@/lib/builder/model';
 
 /**
@@ -123,7 +124,20 @@ export function InlineTextEditor({
         className="w-full bg-studio-bright/[0.06] outline-none ring-1 ring-studio-bright/60"
         style={{
           fontFamily: 'inherit',
-          fontSize: `${(el.size / 1000) * 100}cqw`,
+          /*
+           * THE SAME function the rendered text uses — not a copy of its formula.
+           *
+           * This used to hardcode `cqw`, while `textFontSize` resolves a SPINE object against
+           * `cqh`. The spine face declares `container-type: size` and is a sliver a few percent
+           * of a page wide but a whole page tall, so a spine title rendered at `20cqh` became
+           * `20cqw` the instant the editor opened — a fraction of its real size — and snapped
+           * back only when the editor unmounted on commit. That is the "text goes tiny while I
+           * type, then normalises" report: not a measurement race, a divergent duplicate.
+           *
+           * Calling the shared function means the editor cannot disagree with the renderer for
+           * this or any future role, which is the property that stops it regressing.
+           */
+          fontSize: textFontSize(el),
           fontWeight: el.weight,
           fontStyle: el.italic ? 'italic' : 'normal',
           textAlign: el.align,

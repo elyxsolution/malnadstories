@@ -42,10 +42,72 @@ import type { Anchor } from './_use-anchor-rect';
 const GAP = 10; // px between the anchor and the bar
 const EDGE = 12; // px minimum distance from any viewport edge
 
+/**
+ * The vertical band a placed bar occupies, in viewport pixels. A bar reports its own band via
+ * `onPlaced`; another bar accepts one as `avoid` and refuses to share it.
+ */
+export type BarBand = { top: number; bottom: number };
+
+/**
+ * The page/spread toolbar's own gap. Larger than `GAP` so the persistent bar sits clear of the
+ * book rather than perched on its edge, which is what leaves the object bar a lane of its own.
+ * On the 4px scale the rest of the builder uses.
+ *
+ * This is SPACING, not the collision guarantee — that is `avoid`, below. A gap alone could
+ * always be defeated by an overlay close enough to the top of the spread.
+ */
+export const PAGE_BAR_GAP = 24;
+
+/**
+ * WHERE A BAR GOES — pure, so the non-overlap rule is a property that can be asserted rather
+ * than a placement that happened to look right in one screenshot.
+ *
+ * Above the anchor by preference; below it when there is no room above; and when a reserved
+ * `avoid` band is supplied, never inside it — preferred side, then the other side, then clear
+ * beneath the band. That last fallback is what makes "never overlaps" total: there is no
+ * combination of anchor, bar height and viewport for which the result intersects `avoid`.
+ */
+export function placeBar(input: {
+  anchor: Anchor;
+  barW: number;
+  barH: number;
+  gap: number;
+  avoid: BarBand | null;
+  viewportW: number;
+  viewportH: number;
+}): { left: number; top: number; below: boolean } {
+  const { anchor, barW, barH, gap, avoid, viewportW, viewportH } = input;
+  const aboveTop = anchor.top - barH - gap;
+  const belowTop = Math.min(anchor.top + anchor.height + gap, viewportH - barH - EDGE);
+  const collides = (t: number) => !!avoid && t < avoid.bottom && t + barH > avoid.top;
+  const onScreen = (t: number) => t >= EDGE && t + barH <= viewportH - EDGE;
+
+  let below = aboveTop < EDGE;
+  let top = below ? belowTop : aboveTop;
+
+  if (collides(top)) {
+    const flipped = below ? aboveTop : belowTop;
+    if (!collides(flipped) && onScreen(flipped)) {
+      below = !below;
+      top = flipped;
+    } else {
+      top = avoid!.bottom + gap;
+      below = true;
+    }
+  }
+
+  const centred = anchor.left + anchor.width / 2 - barW / 2;
+  const left = Math.max(EDGE, Math.min(centred, viewportW - barW - EDGE));
+  return { left, top, below };
+}
+
 export function CanvasBar({
   anchor,
   label,
   onEscape,
+  gap = GAP,
+  avoid = null,
+  onPlaced,
   children,
 }: {
   anchor: Anchor | null;
@@ -53,6 +115,17 @@ export function CanvasBar({
   label: string;
   /** Escape pressed inside the bar — hosts use this to return focus to the canvas. */
   onEscape?: () => void;
+  /** Distance between the anchor and this bar. Defaults to the standard object gap. */
+  gap?: number;
+  /**
+   * A band this bar must not occupy — in practice the page toolbar's, handed to the object bar.
+   * When the preferred side lands inside it the bar flips to the other side, and if that is also
+   * unavailable it sits immediately clear of the band. Deterministic: no z-index race, no
+   * "usually fine" offset, and it holds wherever the selected object happens to be.
+   */
+  avoid?: BarBand | null;
+  /** Reports where this bar ended up, so another bar can avoid it. MUST be referentially stable. */
+  onPlaced?: (band: BarBand | null) => void;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -71,23 +144,27 @@ export function CanvasBar({
     if (!el || !anchor) {
       setPos(null);
       setSettled(false);
+      onPlaced?.(null);
       return;
     }
     const box = el.getBoundingClientRect();
-    const wantTop = anchor.top - box.height - GAP;
-    // Flip below the selection when there isn't room above it — which is exactly what happens
-    // for anything near the top of the spread.
-    const below = wantTop < EDGE;
-    const top = below ? Math.min(anchor.top + anchor.height + GAP, window.innerHeight - box.height - EDGE) : wantTop;
-    const centred = anchor.left + anchor.width / 2 - box.width / 2;
-    const left = Math.max(EDGE, Math.min(centred, window.innerWidth - box.width - EDGE));
+    const { left, top, below } = placeBar({
+      anchor,
+      barW: box.width,
+      barH: box.height,
+      gap,
+      avoid,
+      viewportW: window.innerWidth,
+      viewportH: window.innerHeight,
+    });
     setPos((prev) =>
       prev && prev.left === left && prev.top === top && prev.below === below ? prev : { left, top, below },
     );
+    onPlaced?.({ top, bottom: top + box.height });
     // One frame later, so the browser has painted this placement before transitions turn on.
     const raf = requestAnimationFrame(() => setSettled(true));
     return () => cancelAnimationFrame(raf);
-  }, [anchor, children]);
+  }, [anchor, children, gap, avoid, onPlaced]);
 
   /** Roving tabindex over whatever the caller rendered. */
   const items = useCallback(

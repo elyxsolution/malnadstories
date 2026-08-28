@@ -1,5 +1,7 @@
 'use client';
 
+import { useCallback, useState } from 'react';
+
 import {
   Replace,
   Crop,
@@ -32,7 +34,7 @@ import {
   Lock,
   LockOpen,
 } from 'lucide-react';
-import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover } from './_canvas-bar';
+import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover, PAGE_BAR_GAP, type BarBand } from './_canvas-bar';
 import LayerMenu, { type LayerSibling } from './_layer-menu';
 import FontPicker from './_font-picker';
 import { ColorField } from './_color-picker';
@@ -197,6 +199,25 @@ export function pageBarCommands(commands: CommandsApi): BarCommands {
  */
 export default function ContextBar(props: ContextBarProps) {
   const { anchor, block, selection, overlayAnchor } = props;
+
+  /*
+   * THE PAGE BAR'S OCCUPIED BAND, so the detached overlay bar can refuse to share it.
+   *
+   * The two shells are independent positioners: each one only knew its own anchor, so an overlay
+   * near the top of the spread put its bar exactly where the page bar already was. Neither could
+   * see the other. The page bar now reports where it landed and the overlay bar avoids it — the
+   * overlay bar flips below its overlay instead, wherever that overlay happens to be.
+   *
+   * Hooks run before the early return below, and the setter is identity-guarded so the layout
+   * effect that feeds it cannot loop.
+   */
+  const [pageBand, setPageBand] = useState<BarBand | null>(null);
+  const reportPageBand = useCallback((band: BarBand | null) => {
+    setPageBand((prev) =>
+      prev === band || (prev && band && prev.top === band.top && prev.bottom === band.bottom) ? prev : band,
+    );
+  }, []);
+
   if (!anchor || !block) return null;
   const bar: BarProps = { ...props, block, commands: pageBarCommands(props.commands) };
   const object = objectControls(bar);
@@ -219,7 +240,14 @@ export default function ContextBar(props: ContextBarProps) {
 
   return (
     <>
-      <CanvasBar anchor={anchor} label={`Spread ${props.index + 1} tools`} onEscape={props.onEscape}>
+      <CanvasBar
+        anchor={anchor}
+        label={`Spread ${props.index + 1} tools`}
+        onEscape={props.onEscape}
+        /* Sits clear of the book rather than on its edge, leaving the object bar its own lane. */
+        gap={PAGE_BAR_GAP}
+        onPlaced={reportPageBand}
+      >
         <BarRow tone="page">
           <PageBar {...props} block={block} />
         </BarRow>
@@ -229,7 +257,12 @@ export default function ContextBar(props: ContextBarProps) {
       </CanvasBar>
 
       {detached && object && (
-        <CanvasBar anchor={overlayAnchor} label="Overlay photo tools" onEscape={props.onEscape}>
+        <CanvasBar
+          anchor={overlayAnchor}
+          label="Overlay photo tools"
+          onEscape={props.onEscape}
+          avoid={pageBand}
+        >
           <BarRow>{object}</BarRow>
         </CanvasBar>
       )}

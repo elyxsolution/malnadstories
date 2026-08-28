@@ -1,7 +1,9 @@
 'use client';
 
-import { ImageIcon, Layers, Ruler } from 'lucide-react';
+import { ArrowRight, ImageIcon, Layers, Ruler } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
+import { InlineLoader } from '@/components/loading';
 import { photoCap } from '@/lib/builder/model';
 import type { ProductOption } from '@/lib/products/catalog';
 import ProductSelect, { PageCountSelect } from './_product-select';
@@ -40,12 +42,19 @@ export default function StepDetails({
   albumProducts,
   albumProductId,
   pageCount,
+  canContinue,
+  creating,
+  onContinue,
   onSelectProduct,
   onSelectPageCount,
 }: {
   albumProducts: ProductOption[];
   albumProductId: string;
   pageCount: number | null;
+  /** The wizard's own gate — this component only reflects it, it never re-derives it. */
+  canContinue: boolean;
+  creating: boolean;
+  onContinue: () => void;
   onSelectProduct: (id: string) => void;
   onSelectPageCount: (n: number) => void;
 }) {
@@ -147,6 +156,28 @@ export default function StepDetails({
             </div>
           </div>
         </aside>
+      </div>
+
+      {/*
+        THE COMMIT, WHERE THE DECISION IS. It used to sit in the bottom-right of a sticky footer,
+        the far corner from the page counts that enable it — so the control you were waiting for
+        was the one place you were not looking. Centred beneath the choices, it reads as the
+        conclusion of them.
+
+        Presentation only: `canContinue` and the click handler are the wizard's, unchanged, so the
+        disabled rule and the album-creation call are exactly what they were.
+      */}
+      <div className="mt-10 flex justify-center">
+        <Button
+          size="lg"
+          onClick={onContinue}
+          disabled={!canContinue || creating}
+          className="h-12 min-w-[240px] px-8 text-[15px]"
+        >
+          {creating ? <InlineLoader /> : null}
+          {creating ? 'Creating…' : 'Continue'}
+          {!creating && <ArrowRight />}
+        </Button>
       </div>
     </div>
   );
