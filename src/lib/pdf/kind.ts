@@ -7,7 +7,7 @@
  *   preview        the customer-facing preview book (cover + blanks + content + back + spine).
  *                  UNCHANGED by the print-export work: same route, same page sequence, same key,
  *                  same payment-triggered lifecycle.
- *   print_cover    the printer-ready flat cover spread (one 483 × 327 mm page). Admin-on-demand.
+ *   print_cover    the printer-ready flat cover spread (one 487 × 327 mm page). Admin-on-demand.
  *   print_content  the printer-ready interior (N × 206 × 291 mm pages). Admin-on-demand.
  *
  * PURE — no I/O, no `server-only` — so the client-side admin controls, the server actions, the API

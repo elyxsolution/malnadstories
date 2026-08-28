@@ -11,7 +11,7 @@ export const fetchCache = 'force-no-store';
 /**
  * /albums/[id]/print/cover?t=<token>  —  THE PRINTER-READY FLAT COVER SPREAD.
  *
- * One page at 483 × 327 mm: back · hinge · spine · hinge · front, inside a blank 15 mm wrap.
+ * One page at 487 × 327 mm: back · hinge · spine · hinge · front, inside a blank 15 mm wrap.
  * Token-gated exactly like the preview route but scoped to the `print_cover` kind, so a preview or
  * content token cannot render it. Any invalid/expired/superseded token → 404, leaking nothing.
  *

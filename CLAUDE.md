@@ -89,7 +89,7 @@ src/
     validations.ts            Zod schemas
   app/albums/[id]/print/      Token-gated print routes (OUTSIDE (app); service access) → PDF
     print/page.tsx              PREVIEW book — cover + blanks + content + back + spine. UNCHANGED
-    print/cover/                PRINTER-READY cover: ONE 483 × 327 mm flat spread
+    print/cover/                PRINTER-READY cover: ONE 487 × 327 mm flat spread
     print/content/              PRINTER-READY interior: N × 206 × 291 mm pages, reading order
   app/api/photos/route.ts     GET ?albumId= — status + signed sanitized URLs (builder polls)
   app/api/albums/[id]/pdf/route.ts  GET — PDF status + short-lived signed download URL
@@ -865,7 +865,7 @@ untouched, and no customer surface gained a control.
 
     ALBUM BUILDER  →  album data  →  ┬→  PREVIEW PDF     (unchanged; payment-triggered)
                                      └→  ADMIN PRINT EXPORT
-                                            ├─ Cover Page Download   483 × 327 mm, ONE page
+                                            ├─ Cover Page Download   487 × 327 mm, ONE page
                                             └─ Content Download      206 × 291 mm × N pages
 
 ### THE SPEC LIVES IN ONE FILE
@@ -883,9 +883,9 @@ a bug. Every value below is asserted in `tests/print-spec.test.ts` against the s
 | interior artwork (the PDF page) | **206 × 291 mm** → MediaBox **583.94 × 824.88 pt** |
 | interior safe area | **15 mm from every trim edge** → safe box 170 × 255 mm |
 | cover panel (front = back) | **210 × 297 mm** |
-| hinge | **10 mm** ×2 · spine **13 mm** · wrap **15 mm** all round |
-| cover finished flat spread | **453 × 297 mm** (210 + 10 + 13 + 10 + 210) |
-| cover artwork (the PDF page) | **483 × 327 mm** → MediaBox **1369.13 × 926.93 pt** |
+| hinge | **10 mm** ×2 · spine **17 mm** · wrap **15 mm** all round |
+| cover finished flat spread | **457 × 297 mm** (210 + 10 + 17 + 10 + 210) |
+| cover artwork (the PDF page) | **487 × 327 mm** → MediaBox **1380.47 × 926.93 pt** |
 | cover safe area | **12 mm** inside every finished edge AND fold → 186 × 273 mm per face |
 
 - **The 15 mm interior safe area is a PRODUCT DECISION that overrides Plate 01**, which draws 10 mm
@@ -901,19 +901,21 @@ a bug. Every value below is asserted in `tests/print-spec.test.ts` against the s
   `PRINTER_MARKS_ENABLED = false` pins the intent for a test. The cover's dotted **reference**
   lines are a separate, explicitly-requested thing — see below.
 
-### Spine — 13 mm, for EVERY page count
+### Spine — 17 mm, for EVERY page count
 
-`spinePrintWidthMm(pageCount)` returns **13** always, and takes the page count precisely so that
+`spinePrintWidthMm(pageCount)` returns **17** always, and takes the page count precisely so that
 "the page count does not affect the spine" is an assertion a test can make against a real signature.
 `spineWidthFor()` in `lib/builder/cover.ts` (a page-count-dependent 6–12 % of a page width) is
 documented there as *advisory: a faithful preview proportion, not a pre-press measurement* — it
 still drives the builder canvas and the in-app preview, and **must never reach print geometry**. A
-page-count-dependent spine would silently change the size of every cover file, since 483 = 453 + 30
-and 453 assumes 13.
+page-count-dependent spine would silently change the size of every cover file, since 487 = 457 + 30
+and 457 assumes 17. (The spine was widened 13 → 17 mm on 2026-08-29 — a deliberate deviation from
+`dimensions.pdf`. The case therefore grew 4 mm in WIDTH only: panels, hinges, wrap, every height
+and the entire interior specification are unchanged.)
 
 **The printed spine carries ONLY its background colour and its title text.** `SPINE_EDGE_SHADING`
 (a dark gradient that makes a few-pixel spine read as a folded edge on screen) and `CoverSpread`'s
-inset shadow are **suppressed in the print export only** — on a real 13 mm spine they are unrequested
+inset shadow are **suppressed in the print export only** — on a real 17 mm spine they are unrequested
 ink. `spinePrintBackgroundStyle` + `SpineDesign`'s new `print` prop do that; both default to the
 existing behaviour, so the builder and preview are pixel-identical to before. The background and the
 title come from the existing `cover_config` — there is no second source of truth.
@@ -948,16 +950,18 @@ drawing strokes them blue-grey; the exports use **black**, a product decision �
 to survive a greyscale proof.
 
 - **Cover PDF** — an SVG overlay whose `viewBox` IS the artwork in millimetres, so every coordinate
-  is the spec value. Four fold lines at **225 · 235 · 248 · 258 mm** (`COVER_FOLD_LINES_MM`, derived
-  by walking `COVER_PANELS`) plus the finished-edge rectangle at 15 → 468 / 15 → 312. **Confined to
+  is the spec value. Four fold lines at **225 · 235 · 252 · 262 mm** (`COVER_FOLD_LINES_MM`, derived
+  by walking `COVER_PANELS`) plus the finished-edge rectangle at 15 → 472 / 15 → 312. **Confined to
   the finished spread**: the drawing runs its folds through the full artwork height, but the 15 mm
   turn-in must stay blank and a reference line is not an exception to that.
   **Verified in a generated file**: Chromium converts the dashed strokes into filled VECTOR
-  subpaths — the same encoding the source drawing uses — landing at x = 225.275 / 235.275 /
-  248.275 / 258.275 (fold ± half the 0.55 mm width) and 14.75 / 468.25, in `0 0 0 rg`.
+  subpaths — the same encoding the source drawing uses — landing at fold ± half the 0.55 mm
+  width. Since 2026-08-29 the guides are stroked at **40 % opacity** (`GUIDE_STYLE.opacity`) so
+  they annotate the artwork rather than compete with it; colour, dash pattern and stroke width
+  are unchanged, so nothing dimensional moved.
 - **These are NOT printer marks**, and the distinction is deliberate: a crop mark tells a machine
   where to cut and is stripped before production; these tell a PERSON where the case creases so the
-  210/10/13/10/210 construction can be checked on the artwork. Only the cover carries them — the
+  210/10/17/10/210 construction can be checked on the artwork. Only the cover carries them — the
   interior exports nothing at all.
 - **Builder, content pages** (`_print-guides.tsx`) — the page rectangle IS the 206 × 291 bleed, so
   the dotted **trim** rectangle is inset by exactly `3/206` and `3/291`
@@ -968,7 +972,7 @@ to survive a greyscale proof.
 - **Builder, cover** — the canvas is now composed from the print specification
   (`COVER_PANEL_FRACTIONS`): back · hinge · **spine** · hinge · front at their true widths, with
   dotted fold lines and a region label on each. It used to be composed from `coverSpreadMetrics`,
-  whose spine came from the advisory `spineWidthFor` — once folds were drawn, a dotted "13 mm spine"
+  whose spine came from the advisory `spineWidthFor` — once folds were drawn, a dotted "17 mm spine"
   over a strip of a different width was two contradictory answers to one question. **Nothing stored
   changed**: each face keeps its own normalized space, so every saved position means what it did.
   `coverSpreadMetrics` still serves the timeline thumbnail and the preview PDF still uses

@@ -28,7 +28,7 @@ export type { CoverSide };
  * THE COVER CANVAS — the printed cover as three editable surfaces, and nothing else.
  *
  * BACK · hinge · SPINE · hinge · FRONT, at the printed case's true widths (210 · 10 · 13 · 10 ·
- * 210 mm of a 453 mm finished spread), with black dotted reference lines on the four folds. Every
+ * 210 mm of a 457 mm finished spread), with black dotted reference lines on the four folds. Every
  * visible thing on it is an object: the title, the subtitle, the author line and the
  * spine text as much as the stickers and QR codes, because `migrateCoverConfig` turned the old
  * structured fields into `TextElement`s before this component was handed the config.
@@ -82,7 +82,7 @@ export default function CoverCanvas({
    *
    * It used to be composed from `coverSpreadMetrics` — two product-proportioned pages either side
    * of a spine whose width came from `spineWidthFor`, an advisory proportion that thickens with
-   * page count. The printed case is not that: it is a fixed 453 mm finished spread of
+   * page count. The printed case is not that: it is a fixed 457 mm finished spread of
    * `210 · 10 · 13 · 10 · 210`, identical for every product and every page count.
    *
    * With the fold guides now drawn, that gap stopped being harmless — a dotted "spine" boundary
@@ -211,7 +211,7 @@ function Hinge({ cover }: { cover: CoverApi }) {
  *
  * A printed case is not back | spine | front — it is
  *
- *     back 210 · hinge 10 · SPINE 13 · hinge 10 · front 210   (mm, of the 453 mm finished spread)
+ *     back 210 · hinge 10 · SPINE 17 · hinge 10 · front 210   (mm, of the 457 mm finished spread)
  *
  * and until now none of that was visible while designing. These are black dotted reference lines
  * at the four folds, plus a label for each region, so "where does the back cover end?" and "how

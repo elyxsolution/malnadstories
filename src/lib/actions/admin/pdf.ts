@@ -41,7 +41,7 @@ export async function adminGenerateAlbumPdf(input: unknown): Promise<AdminPdfRes
 /**
  * Admin-only: (re)generate one of the PRINTER-READY exports for any album (0058).
  *
- *   print_cover    the flat cover spread, 483 x 327 mm, one page.
+ *   print_cover    the flat cover spread, 487 x 327 mm, one page.
  *   print_content  the interior, N x 206 x 291 mm pages in reading order.
  *
  * ADMIN-ON-DEMAND, ALWAYS. Nothing else in the system starts these: not the Razorpay webhook, not

@@ -25,8 +25,8 @@ import {
 /**
  * PRINTER-READY COVER — ONE flat spread, one PDF page.
  *
- *     483 × 327 mm   =   453 × 297 mm finished spread   +   15 mm wrap on all four sides
- *     453 mm         =   210 back + 10 hinge + 13 spine + 10 hinge + 210 front
+ *     487 × 327 mm   =   457 × 297 mm finished spread   +   15 mm wrap on all four sides
+ *     457 mm         =   210 back + 10 hinge + 17 spine + 10 hinge + 210 front
  *
  * This is the complete flat artwork a case-maker wraps around the boards — not two unrelated cover
  * PDFs, and not the preview's arrangement (which prints the front, the back and the spine as three
@@ -84,7 +84,7 @@ function buildCoverCss(): string {
     overflow: hidden;
   }
   /* Each panel is positioned in absolute millimetres from the spread's own origin, so the
-     210 / 10 / 13 / 10 / 210 construction is exact and independent of any page proportion. */
+     210 / 10 / 17 / 10 / 210 construction is exact and independent of any page proportion. */
   .cover-panel { position: absolute; top: 0; height: 100%; overflow: hidden; }
   /* The reference lines sit ABOVE the artwork so they stay readable over a dark photo, and cover
      the whole page so their millimetre viewBox maps 1:1 onto the artwork coordinates. */
@@ -115,30 +115,31 @@ function panelStyle(name: CoverPanelName): { left: string; width: string } {
  * ── WHY SVG, IN MILLIMETRES ───────────────────────────────────────────────────────────────────
  *
  * The viewBox is the artwork in millimetres, so every coordinate below IS the spec value — 225,
- * 235, 248, 258 — with no conversion to get wrong. `preserveAspectRatio="none"` maps the box onto
+ * 235, 252, 262 — with no conversion to get wrong. `preserveAspectRatio="none"` maps the box onto
  * the fragmentainer-ceilinged page exactly, so the lines land on the folds to within the same
  * sub-pixel the whole page already carries.
  *
  * VERIFIED IN THE EXPORTED FILE, not assumed: Chromium converts a dashed SVG stroke into explicit
  * filled VECTOR subpaths — one thin quad per dash — which is the same encoding `dimensions.pdf`
  * itself uses for its guides. Nothing is rasterised. In a generated cover the dash subpaths sit at
- * x = 225.275 / 235.275 / 248.275 / 258.275 (each fold ± half of the 0.55 mm width) and the
- * finished-edge rule at x = 14.75 / 468.25, in black.
+ * x = 225.275 / 235.275 / 252.275 / 262.275 (each fold ± half of the 0.55 mm width) and the
+ * finished-edge rule at x = 14.75 / 472.25, in black.
  *
  * ── THE PATTERN ───────────────────────────────────────────────────────────────────────────────
  *
  * Measured out of Plate 02 rather than invented (`GUIDE_STYLE`): the folds use the drawing's
  * dash-dot centre line (7 · 2 · 1.6 · 2 mm at 0.55 mm), the finished edge its finer 3 · 2.2 mm at
- * 0.5 mm. Black, per the product decision recorded in the spec.
+ * 0.5 mm. Black at 40 % opacity, per the product decision recorded in the spec — light enough to
+ * annotate the artwork rather than compete with it, dark enough to survive a greyscale proof.
  *
  * ── THE WRAP STAYS BLANK ──────────────────────────────────────────────────────────────────────
  *
- * Every line is confined to the finished spread (y 15 → 312, x 15 → 468). The drawing runs its
+ * Every line is confined to the finished spread (y 15 → 312, x 15 → 472). The drawing runs its
  * fold guides through the full artwork height, but the 15 mm turn-in is required to be blank and a
  * reference line is not an exception to that — it would be glued down inside the case anyway.
  */
 function CoverGuides() {
-  const { fold, trim, color } = GUIDE_STYLE;
+  const { fold, trim, color, opacity } = GUIDE_STYLE;
   const top = COVER_SPREAD_BOX.y;
   const bottom = COVER_SPREAD_BOX.y + COVER_SPREAD_BOX.h;
 
@@ -149,7 +150,7 @@ function CoverGuides() {
       preserveAspectRatio="none"
       aria-hidden
     >
-      {/* The finished edge — where the 483 × 327 artwork is trimmed back to 453 × 297. */}
+      {/* The finished edge — where the 487 × 327 artwork is trimmed back to 457 × 297. */}
       <rect
         x={COVER_SPREAD_BOX.x}
         y={COVER_SPREAD_BOX.y}
@@ -158,10 +159,11 @@ function CoverGuides() {
         fill="none"
         stroke={color}
         strokeWidth={trim.widthMm}
+        strokeOpacity={opacity}
         strokeDasharray={dashArray(trim.dashMm)}
       />
       {/* The four folds: back|hinge · hinge|spine · spine|hinge · hinge|front. The middle pair IS
-          the 13 mm spine, so its width is readable straight off the printed sheet. */}
+          the 17 mm spine, so its width is readable straight off the printed sheet. */}
       {COVER_FOLD_LINES_MM.map((x) => (
         <line
           key={x}
@@ -171,6 +173,7 @@ function CoverGuides() {
           y2={bottom}
           stroke={color}
           strokeWidth={fold.widthMm}
+          strokeOpacity={opacity}
           strokeDasharray={dashArray(fold.dashMm)}
         />
       ))}

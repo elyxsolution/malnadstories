@@ -24,7 +24,7 @@
  *
  * Every `MmRect` in this module is expressed in the ARTWORK coordinate space of its own export,
  * with a TOP-LEFT origin and millimetre units — the same convention a prepress operator reads off
- * the supplied drawing. For the interior that space is 206 × 291; for the cover it is 483 × 327.
+ * the supplied drawing. For the interior that space is 206 × 291; for the cover it is 487 × 327.
  */
 
 // ── Units ────────────────────────────────────────────────────────────────────────────────────
@@ -170,7 +170,7 @@ export const COVER_PANEL: MmSize = { w: 210, h: 297 };
 export const COVER_HINGE_MM = 10;
 
 /**
- * THE SPINE WIDTH — 13 mm, for EVERY supported page count.
+ * THE SPINE WIDTH — 17 mm, for EVERY supported page count.
  *
  * This is a fixed specification value, not a derivation. `spineWidthFor()` in
  * `lib/builder/cover.ts` returns a page-count-dependent FRACTION of a page width and is documented
@@ -178,8 +178,23 @@ export const COVER_HINGE_MM = 10;
  * builder canvas and the in-app preview and is deliberately left alone; it must never reach the
  * print geometry. See `spinePrintWidthMm()` below, which takes the page count and ignores it on
  * purpose so the intent is testable rather than implicit.
+ *
+ * ── 2026-08-29: 13 mm → 17 mm ───────────────────────────────────────────────────────────────
+ *
+ * A DELIBERATE DEVIATION FROM `dimensions.pdf`, which draws 13 mm. Every derived value below is
+ * arithmetic on this constant, so the four fold lines, the five panel rects, the finished spread,
+ * the artwork size and both PDF MediaBoxes move with it and cannot drift.
+ *
+ * THE FINISHED SPREAD AND THE ARTWORK ARE 4 MM WIDER AS A RESULT — 453 → 457 and 483 → 487 — and
+ * that is not optional. The spread IS `210 + 10 + spine + 10 + 210`; with the two panels fixed at
+ * 210 mm and the two hinges at 10 mm, a 17 mm spine cannot fit inside a 453 mm case. A thicker
+ * book needs a wider case. The alternative — holding 453 mm by narrowing the hinges to 8 mm — is
+ * a one-line change to `COVER_HINGE_MM` and is the ONLY way to keep the sheet size fixed; it
+ * would need the print partner's agreement, because it changes the groove the case folds on.
+ *
+ * Height is untouched: 297 mm finished, 327 mm artwork.
  */
-export const COVER_SPINE_MM = 13;
+export const COVER_SPINE_MM = 17;
 
 /** The wrap / turn-in on all four sides of the cover artwork. Rendered BLANK — see the cover route. */
 export const COVER_WRAP_MM = 15;
@@ -201,7 +216,7 @@ export const COVER_SAFE_INSET_MM = 12;
  * assertion a test can make against a real signature, rather than a comment nobody checks.
  */
 // The parameter is INTENTIONALLY unused — see above. Accepting and ignoring the page count is
-// what lets `print-spec.test.ts` assert "13 mm for every page count" against a real signature
+// what lets `print-spec.test.ts` assert "17 mm for every page count" against a real signature
 // instead of trusting a comment, so the lint rule is disabled here rather than the argument dropped.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function spinePrintWidthMm(_contentPageCount?: number): number {
@@ -231,14 +246,14 @@ export const COVER_SPREAD_BOX: MmRect = {
 /** The five panels of the flat spread, left to right, as printed (outside view, face up). */
 export type CoverPanelName = 'back' | 'hinge-left' | 'spine' | 'hinge-right' | 'front';
 
-/** One panel, positioned in the 483 × 327 artwork coordinate space. */
+/** One panel, positioned in the 487 × 327 artwork coordinate space. */
 export type CoverPanel = { readonly name: CoverPanelName; readonly rect: MmRect };
 
 /**
  * The five panels in printed order, positioned in ARTWORK coordinates.
  *
  * Built by walking left to right from the spread's own origin, so the construction
- * 210 + 10 + 13 + 10 + 210 = 453 is expressed once, as arithmetic, and cannot drift.
+ * 210 + 10 + 17 + 10 + 210 = 457 is expressed once, as arithmetic, and cannot drift.
  */
 export const COVER_PANELS: readonly CoverPanel[] = buildCoverPanels();
 
@@ -328,6 +343,14 @@ export const COVER_PANEL_FRACTIONS: readonly { name: CoverPanelName; start: numb
  * The drawing strokes them in a blue-grey (`.349 .502 .651`); the exported cover uses BLACK, which
  * is an explicit product decision — these are reference lines a person reads off the printed
  * artwork, and they have to survive a greyscale proof.
+ *
+ * ── OPACITY (2026-08-29) ────────────────────────────────────────────────────────────────────
+ *
+ * Black at full strength read as near-solid rule against the artwork and competed with the cover
+ * design it is supposed to annotate. `opacity` lightens the INK ONLY: the colour stays black so a
+ * greyscale proof still shows it, the dash patterns and stroke widths stay exactly as measured off
+ * `dimensions.pdf`, and — because nothing dimensional is touched — the printed geometry is
+ * unchanged. A reference line has to be findable, not loud.
  */
 export const GUIDE_STYLE = {
   /** Fold / panel divisions: the dash-dot centre line, 7 · 2 · 1.6 · 2 mm. */
@@ -336,6 +359,11 @@ export const GUIDE_STYLE = {
   trim: { dashMm: [3, 2.2] as readonly number[], widthMm: 0.5 },
   /** Black — see above. */
   color: '#000000',
+  /**
+   * Stroke opacity for every guide. Purely visual: it changes how much ink lands, never where.
+   * 0.4 keeps the line clearly legible on a proof while letting the artwork read through it.
+   */
+  opacity: 0.4,
 } as const;
 
 /** A CSS/SVG `stroke-dasharray` value in millimetres for one of the guide patterns. */

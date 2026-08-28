@@ -13,6 +13,7 @@ import {
   COVER_ARTWORK,
   COVER_BACK_SAFE_BOX,
   COVER_FINISHED_SPREAD,
+  COVER_FOLD_LINES_MM,
   COVER_FRONT_SAFE_BOX,
   COVER_HINGE_MM,
   COVER_PANEL,
@@ -22,6 +23,7 @@ import {
   COVER_SPREAD_BOX,
   COVER_WRAP_MM,
   FILL_OVERSCAN_PX,
+  GUIDE_STYLE,
   INTERIOR_ARTWORK,
   INTERIOR_BLEED_MM,
   INTERIOR_SAFE_BOX,
@@ -94,25 +96,25 @@ describe('cover (Plate 02)', () => {
     expect(COVER_WRAP_MM).toBe(15);
   });
 
-  it('the finished flat spread is 453 × 297 mm', () => {
-    expect(COVER_FINISHED_SPREAD).toEqual({ w: 453, h: 297 });
-    // 210 + 10 + 13 + 10 + 210 = 453, as arithmetic rather than a restated literal.
-    expect(COVER_PANEL.w * 2 + COVER_HINGE_MM * 2 + COVER_SPINE_MM).toBe(453);
+  it('the finished flat spread is 457 × 297 mm', () => {
+    expect(COVER_FINISHED_SPREAD).toEqual({ w: 457, h: 297 });
+    // 210 + 10 + 17 + 10 + 210 = 457, as arithmetic rather than a restated literal.
+    expect(COVER_PANEL.w * 2 + COVER_HINGE_MM * 2 + COVER_SPINE_MM).toBe(457);
   });
 
-  it('the supplied cover artwork is 483 × 327 mm', () => {
-    expect(COVER_ARTWORK).toEqual({ w: 483, h: 327 });
+  it('the supplied cover artwork is 487 × 327 mm', () => {
+    expect(COVER_ARTWORK).toEqual({ w: 487, h: 327 });
     expect(COVER_ARTWORK.w).toBe(COVER_FINISHED_SPREAD.w + COVER_WRAP_MM * 2);
     expect(COVER_ARTWORK.h).toBe(COVER_FINISHED_SPREAD.h + COVER_WRAP_MM * 2);
   });
 
   it('the finished spread sits exactly one wrap inside the artwork', () => {
-    expect(COVER_SPREAD_BOX).toEqual({ x: 15, y: 15, w: 453, h: 297 });
+    expect(COVER_SPREAD_BOX).toEqual({ x: 15, y: 15, w: 457, h: 297 });
     expect(COVER_ARTWORK.w - (COVER_SPREAD_BOX.x + COVER_SPREAD_BOX.w)).toBe(COVER_WRAP_MM);
     expect(COVER_ARTWORK.h - (COVER_SPREAD_BOX.y + COVER_SPREAD_BOX.h)).toBe(COVER_WRAP_MM);
   });
 
-  describe('width construction — 210 / 10 / 13 / 10 / 210', () => {
+  describe('width construction — 210 / 10 / 17 / 10 / 210', () => {
     it('names the five panels in printed order, left to right', () => {
       expect(COVER_PANELS.map((p) => p.name)).toEqual([
         'back',
@@ -124,7 +126,7 @@ describe('cover (Plate 02)', () => {
     });
 
     it('gives each panel its specified width', () => {
-      expect(COVER_PANELS.map((p) => p.rect.w)).toEqual([210, 10, 13, 10, 210]);
+      expect(COVER_PANELS.map((p) => p.rect.w)).toEqual([210, 10, 17, 10, 210]);
     });
 
     it('lays them out contiguously across the spread, with no gap and no overlap', () => {
@@ -146,13 +148,15 @@ describe('cover (Plate 02)', () => {
     });
 
     it('puts the panels at the artwork coordinates the drawing shows', () => {
-      // Back 15→225 · hinge 225→235 · spine 235→248 · hinge 248→258 · front 258→468.
+      // Back 15→225 · hinge 225→235 · spine 235→252 · hinge 252→262 · front 262→472.
+      // Everything left of the spine is unmoved by the 13→17 change; everything right of it
+      // shifts by exactly the +4 mm the spine gained.
       expect(coverPanel('back').rect.x).toBe(15);
       expect(coverPanel('hinge-left').rect.x).toBe(225);
       expect(coverPanel('spine').rect.x).toBe(235);
-      expect(coverPanel('hinge-right').rect.x).toBe(248);
-      expect(coverPanel('front').rect.x).toBe(258);
-      expect(coverPanel('front').rect.x + coverPanel('front').rect.w).toBe(468);
+      expect(coverPanel('hinge-right').rect.x).toBe(252);
+      expect(coverPanel('front').rect.x).toBe(262);
+      expect(coverPanel('front').rect.x + coverPanel('front').rect.w).toBe(472);
     });
   });
 
@@ -167,9 +171,9 @@ describe('cover (Plate 02)', () => {
       expect(COVER_BACK_SAFE_BOX.y + COVER_BACK_SAFE_BOX.h).toBe(300);
     });
 
-    it('gives the front cover a 186 × 273 mm safe box at x 270→456, y 27→300', () => {
-      expect(COVER_FRONT_SAFE_BOX).toEqual({ x: 270, y: 27, w: 186, h: 273 });
-      expect(COVER_FRONT_SAFE_BOX.x + COVER_FRONT_SAFE_BOX.w).toBe(456);
+    it('gives the front cover a 186 × 273 mm safe box at x 274→460, y 27→300', () => {
+      expect(COVER_FRONT_SAFE_BOX).toEqual({ x: 274, y: 27, w: 186, h: 273 });
+      expect(COVER_FRONT_SAFE_BOX.x + COVER_FRONT_SAFE_BOX.w).toBe(460);
       expect(COVER_FRONT_SAFE_BOX.y + COVER_FRONT_SAFE_BOX.h).toBe(300);
     });
 
@@ -212,24 +216,24 @@ describe('cover (Plate 02)', () => {
   });
 });
 
-describe('spine width — 13 mm for EVERY page count', () => {
-  it('is 13 mm', () => {
-    expect(COVER_SPINE_MM).toBe(13);
+describe('spine width — 17 mm for EVERY page count', () => {
+  it('is 17 mm', () => {
+    expect(COVER_SPINE_MM).toBe(17);
   });
 
-  it.each([24, 36, 48])('a %i-page album has a 13 mm spine', (pages) => {
-    expect(spinePrintWidthMm(pages)).toBe(13);
+  it.each([24, 36, 48])('a %i-page album has a 17 mm spine', (pages) => {
+    expect(spinePrintWidthMm(pages)).toBe(17);
   });
 
-  it('is 13 mm for a page count nobody has thought of yet', () => {
+  it('is 17 mm for a page count nobody has thought of yet', () => {
     for (const pages of [12, 60, 72, 96, 120]) {
-      expect(spinePrintWidthMm(pages)).toBe(13);
+      expect(spinePrintWidthMm(pages)).toBe(17);
     }
   });
 
-  it('is 13 mm with no page count at all', () => {
-    expect(spinePrintWidthMm()).toBe(13);
-    expect(spinePrintWidthMm(undefined)).toBe(13);
+  it('is 17 mm with no page count at all', () => {
+    expect(spinePrintWidthMm()).toBe(17);
+    expect(spinePrintWidthMm(undefined)).toBe(17);
   });
 
   it('USES NO PAGE-COUNT FORMULA — the result is invariant across the whole range', () => {
@@ -238,15 +242,15 @@ describe('spine width — 13 mm for EVERY page count', () => {
     // geometry ever started reading it, the values below would spread out. They must not.
     const widths = new Set(Array.from({ length: 200 }, (_, i) => spinePrintWidthMm(i + 1)));
     expect(widths.size, 'spine width must not vary with page count').toBe(1);
-    expect(Array.from(widths)).toEqual([13]);
+    expect(Array.from(widths)).toEqual([17]);
   });
 
-  it('holds the cover artwork at 483 × 327 mm regardless of page count', () => {
-    // The artwork width is 453 + 30, and 453 assumes a 13 mm spine — so a page-count-dependent
+  it('holds the cover artwork at 487 × 327 mm regardless of page count', () => {
+    // The artwork width is 457 + 30, and 457 assumes a 17 mm spine — so a page-count-dependent
     // spine would silently change the size of every cover file. It does not.
     for (const pages of [24, 36, 48]) {
       const spread = COVER_PANEL.w * 2 + COVER_HINGE_MM * 2 + spinePrintWidthMm(pages);
-      expect(spread).toBe(453);
+      expect(spread).toBe(457);
       expect(spread + COVER_WRAP_MM * 2).toBe(COVER_ARTWORK.w);
     }
   });
@@ -271,8 +275,8 @@ describe('units and the physical MediaBox', () => {
     expect(toPt(INTERIOR_ARTWORK)).toEqual({ w: 583.94, h: 824.88 });
   });
 
-  it('the cover page MediaBox is 1369.13 × 926.93 pt', () => {
-    expect(toPt(COVER_ARTWORK)).toEqual({ w: 1369.13, h: 926.93 });
+  it('the cover page MediaBox is 1380.47 × 926.93 pt', () => {
+    expect(toPt(COVER_ARTWORK)).toEqual({ w: 1380.47, h: 926.93 });
   });
 
   it('rounds a page axis UP to Chromium’s print fragmentainer', () => {
@@ -281,12 +285,12 @@ describe('units and the physical MediaBox', () => {
     expect(mmToPx(206)).toBeCloseTo(778.583, 3);
     expect(mmToPxCeil(206)).toBe(779);
     expect(mmToPxCeil(291)).toBe(1100);
-    expect(mmToPxCeil(483)).toBe(1826);
+    expect(mmToPxCeil(487)).toBe(1841);
     expect(mmToPxCeil(327)).toBe(1236);
   });
 
   it('never rounds a page axis DOWN', () => {
-    for (const mm of [206, 291, 483, 327, 200, 285, 210, 297, 13, 10, 15]) {
+    for (const mm of [206, 291, 487, 327, 200, 285, 210, 297, 17, 10, 15]) {
       expect(mmToPxCeil(mm)).toBeGreaterThanOrEqual(mmToPx(mm));
       expect(mmToPxCeil(mm) - mmToPx(mm)).toBeLessThan(1);
     }
@@ -369,5 +373,80 @@ describe('printer marks', () => {
     // No crop marks, registration marks, colour bars, slug or trim-line artwork. The renderers
     // draw nothing of the sort; this pins the intent so a future addition is a deliberate act.
     expect(PRINTER_MARKS_ENABLED).toBe(false);
+  });
+});
+
+/**
+ * SPINE 13 mm → 17 mm (2026-08-29).
+ *
+ * A deliberate deviation from `dimensions.pdf`, which draws 13 mm. It is a single constant with
+ * every other cover value derived from it, so the risk is not that the change is wrong — it is
+ * that a later "restore the drawing's value" edit silently reverts it, or that someone absorbs
+ * the 4 mm by quietly shrinking a panel or a hinge instead of widening the case.
+ *
+ * This block pins BOTH halves: the new spine, and the fact that nothing else moved.
+ */
+describe('spine 13 → 17 mm — the change, and everything it must NOT have changed', () => {
+  it('is 17 mm, and 13 mm can never come back', () => {
+    expect(COVER_SPINE_MM).toBe(17);
+    expect(COVER_SPINE_MM).not.toBe(13);
+    expect(spinePrintWidthMm()).not.toBe(13);
+    expect(coverPanel('spine').rect.w).toBe(17);
+  });
+
+  it('is exactly +4 mm — the delta, stated as arithmetic', () => {
+    const PREVIOUS_SPINE_MM = 13;
+    expect(COVER_SPINE_MM - PREVIOUS_SPINE_MM).toBe(4);
+    // The case got wider by the same 4 mm, on the width axis only.
+    expect(COVER_FINISHED_SPREAD.w - (210 * 2 + 10 * 2 + PREVIOUS_SPINE_MM)).toBe(4);
+    expect(COVER_ARTWORK.w - (210 * 2 + 10 * 2 + PREVIOUS_SPINE_MM + 15 * 2)).toBe(4);
+  });
+
+  it('leaves the panels, hinges, wrap and safe inset untouched', () => {
+    expect(COVER_PANEL).toEqual({ w: 210, h: 297 });
+    expect(COVER_HINGE_MM).toBe(10);
+    expect(COVER_WRAP_MM).toBe(15);
+    expect(COVER_SAFE_INSET_MM).toBe(12);
+    // The 4 mm was absorbed by the SPINE, not taken out of a neighbour.
+    expect(coverPanel('back').rect.w).toBe(210);
+    expect(coverPanel('front').rect.w).toBe(210);
+    expect(coverPanel('hinge-left').rect.w).toBe(10);
+    expect(coverPanel('hinge-right').rect.w).toBe(10);
+  });
+
+  it('leaves every HEIGHT untouched', () => {
+    expect(COVER_FINISHED_SPREAD.h).toBe(297);
+    expect(COVER_ARTWORK.h).toBe(327);
+    expect(COVER_SPREAD_BOX.h).toBe(297);
+    expect(toPt(COVER_ARTWORK).h).toBe(926.93);
+  });
+
+  it('leaves the ENTIRE interior specification untouched', () => {
+    expect(INTERIOR_TRIM).toEqual({ w: 200, h: 285 });
+    expect(INTERIOR_BLEED_MM).toBe(3);
+    expect(INTERIOR_SAFE_INSET_MM).toBe(15);
+    expect(INTERIOR_ARTWORK).toEqual({ w: 206, h: 291 });
+    expect(toPt(INTERIOR_ARTWORK)).toEqual({ w: 583.94, h: 824.88 });
+  });
+
+  it('moves ONLY the two folds to the right of the spine', () => {
+    // Back|hinge and hinge|spine are upstream of the spine and cannot move.
+    expect(COVER_FOLD_LINES_MM[0]).toBe(225);
+    expect(COVER_FOLD_LINES_MM[1]).toBe(235);
+    // spine|hinge and hinge|front each shift by exactly the 4 mm the spine gained.
+    expect(COVER_FOLD_LINES_MM[2]).toBe(248 + 4);
+    expect(COVER_FOLD_LINES_MM[3]).toBe(258 + 4);
+  });
+
+  it('keeps the guide lines dashed and measured, but lighter ink', () => {
+    // Dimensional values are untouched — the styling change must not move anything.
+    expect(GUIDE_STYLE.fold.dashMm).toEqual([7, 2, 1.6, 2]);
+    expect(GUIDE_STYLE.fold.widthMm).toBe(0.55);
+    expect(GUIDE_STYLE.trim.dashMm).toEqual([3, 2.2]);
+    expect(GUIDE_STYLE.trim.widthMm).toBe(0.5);
+    // Black, so a greyscale proof still shows it — but no longer at full strength.
+    expect(GUIDE_STYLE.color).toBe('#000000');
+    expect(GUIDE_STYLE.opacity).toBeGreaterThan(0);
+    expect(GUIDE_STYLE.opacity).toBeLessThan(1);
   });
 });

@@ -155,22 +155,22 @@ describe('cover PDF — dotted partition lines', () => {
 
   it('draws the guides in a millimetre viewBox, so coordinates ARE the specification', () => {
     expect(html).toContain(`viewBox="0 0 ${COVER_ARTWORK.w} ${COVER_ARTWORK.h}"`);
-    expect(html).toContain('viewBox="0 0 483 327"');
+    expect(html).toContain('viewBox="0 0 487 327"');
   });
 
-  it('draws exactly four fold lines, at 225 / 235 / 248 / 258 mm', () => {
-    expect(COVER_FOLD_LINES_MM).toEqual([225, 235, 248, 258]);
+  it('draws exactly four fold lines, at 225 / 235 / 252 / 262 mm', () => {
+    expect(COVER_FOLD_LINES_MM).toEqual([225, 235, 252, 262]);
     const xs = Array.from(html.matchAll(/<line x1="([\d.]+)"/g)).map((m) => Number(m[1]));
-    expect(xs).toEqual([225, 235, 248, 258]);
+    expect(xs).toEqual([225, 235, 252, 262]);
   });
 
   it('derives the spine boundaries rather than hardcoding them', () => {
     // spine left  = wrap + back + hinge = 15 + 210 + 10 = 235
-    // spine right = spine left + 13     = 248
+    // spine right = spine left + 17     = 252
     const [, spineLeft, spineRight] = COVER_FOLD_LINES_MM;
     expect(spineLeft).toBe(COVER_SPREAD_BOX.x + 210 + 10);
     expect(spineRight).toBe(spineLeft + spinePrintWidthMm());
-    expect(spineRight - spineLeft).toBe(13);
+    expect(spineRight - spineLeft).toBe(17);
   });
 
   it('uses the drawing’s dash-dot pattern for the folds, in millimetres', () => {
@@ -184,7 +184,7 @@ describe('cover PDF — dotted partition lines', () => {
   it('marks the finished edge with the drawing’s finer pattern', () => {
     expect(GUIDE_STYLE.trim.dashMm).toEqual([3, 2.2]);
     expect(html).toContain('stroke-dasharray="3 2.2"');
-    expect(html).toContain(`<rect x="${COVER_SPREAD_BOX.x}" y="${COVER_SPREAD_BOX.y}" width="453" height="297"`);
+    expect(html).toContain(`<rect x="${COVER_SPREAD_BOX.x}" y="${COVER_SPREAD_BOX.y}" width="457" height="297"`);
   });
 
   it('is BLACK, thin, and dashed — never a solid border', () => {
@@ -211,11 +211,11 @@ describe('cover PDF — dotted partition lines', () => {
 
   it('does not change the artwork underneath', () => {
     // The panel construction and page size are exactly what they were before the guides existed.
-    expect(html).toContain('@page { size: 483mm 327mm; margin: 0; }');
+    expect(html).toContain('@page { size: 487mm 327mm; margin: 0; }');
     const widths = Array.from(html.matchAll(/class="cover-panel" style="[^"]*width:([\d.]+)mm/g)).map(
       (m) => Number(m[1]),
     );
-    expect(widths).toEqual([210, 10, 13, 10, 210]);
+    expect(widths).toEqual([210, 10, 17, 10, 210]);
   });
 
   it('still keeps the spine to background + title, with no shading or shadow', () => {
@@ -316,12 +316,12 @@ describe('builder chrome never reaches an exported PDF', () => {
 });
 
 describe('builder cover guide — fold fractions', () => {
-  it('places the four folds at 210 / 220 / 233 / 243 of the 453 mm spread', () => {
-    expect(COVER_FOLD_FRACTIONS.map((f) => +(f * 453).toFixed(6))).toEqual([210, 220, 233, 243]);
+  it('places the four folds at 210 / 220 / 237 / 247 of the 457 mm spread', () => {
+    expect(COVER_FOLD_FRACTIONS.map((f) => +(f * 457).toFixed(6))).toEqual([210, 220, 237, 247]);
   });
 
   it('gives the five regions their specified widths', () => {
-    expect(COVER_PANEL_FRACTIONS.map((p) => +(p.width * 453).toFixed(6))).toEqual([210, 10, 13, 10, 210]);
+    expect(COVER_PANEL_FRACTIONS.map((p) => +(p.width * 457).toFixed(6))).toEqual([210, 10, 17, 10, 210]);
     expect(COVER_PANEL_FRACTIONS.map((p) => p.name)).toEqual([
       'back',
       'hinge-left',
@@ -340,15 +340,15 @@ describe('builder cover guide — fold fractions', () => {
   it('keeps the spine fraction at 13 mm for every supported page count', () => {
     const spine = COVER_PANEL_FRACTIONS.find((p) => p.name === 'spine')!;
     for (const pages of [24, 36, 48]) {
-      expect(spinePrintWidthMm(pages)).toBe(13);
-      expect(spine.width * 453).toBeCloseTo(13, 9);
+      expect(spinePrintWidthMm(pages)).toBe(17);
+      expect(spine.width * 457).toBeCloseTo(17, 9);
     }
   });
 
   it('describes the FINISHED spread, so the wrap is outside it by construction', () => {
-    // Fractions are of the 453 mm finished spread, not the 483 mm artwork — the builder never
+    // Fractions are of the 457 mm finished spread, not the 487 mm artwork — the builder never
     // draws the wrap, so a fraction of the artwork would put every fold in the wrong place.
-    expect(COVER_SPREAD_BOX.w).toBe(453);
+    expect(COVER_SPREAD_BOX.w).toBe(457);
     expect(COVER_ARTWORK.w - COVER_SPREAD_BOX.w).toBe(30);
     for (const f of COVER_FOLD_FRACTIONS) {
       expect(f).toBeGreaterThan(0);

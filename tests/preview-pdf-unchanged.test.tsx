@@ -118,7 +118,7 @@ describe('the preview book keeps the PRODUCT’s dimensions, never the print spe
 
   it('never adopts the cover artwork size', () => {
     const html = render(24);
-    expect(html).not.toContain('483mm');
+    expect(html).not.toContain('487mm');
     expect(html).not.toContain('327mm');
   });
 
