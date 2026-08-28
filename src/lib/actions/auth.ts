@@ -4,9 +4,11 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createHash } from 'crypto';
 import { z } from 'zod';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { LoginSchema } from '@/lib/validations';
 import { checkLimit, clientIp } from '@/lib/security/guard';
+import { captureException } from '@/lib/observability/capture';
 
 const REMEMBER_MAX_AGE = 400 * 24 * 60 * 60; // ~400 days (browser cap)
 const cookieDefaults = {
@@ -67,6 +69,38 @@ export async function signIn(
   });
 
   if (error) {
+    /*
+     * A TRANSPORT failure is not a credentials failure, and must not be reported as one.
+     *
+     * This branch used to collapse EVERY error into "Invalid email or password". Collapsing
+     * "no such user" and "wrong password" together is deliberate and stays — it is what stops
+     * this form being an account-enumeration oracle. But collapsing "we could not reach
+     * Supabase Auth" into it tells the customer their password is wrong when it is not: during
+     * the 2026-08-28 Supabase Auth outage, `POST /auth/v1/token?grant_type=password` never
+     * responded (verified: no reply at 5s, 12s or 90s, while PostgREST answered in ~600ms), so
+     * every correct password was rejected with "Invalid email or password" and customers were
+     * sent to retype passwords and request resets against a service that was simply down.
+     *
+     * `isAuthRetryableFetchError` is auth-js's own classification: a thrown fetch (network
+     * failure, or our own deadline abort — see lib/supabase/timeout.ts) and the infrastructure
+     * status codes 502/503/504/520-524/530. It is never true for a rejected credential, so the
+     * anti-enumeration guarantee is untouched: bad email and bad password still return the same
+     * message as each other.
+     */
+    if (isAuthRetryableFetchError(error)) {
+      // Invisible until now: the action returned a plausible-looking string and nothing was
+      // recorded, so an availability outage looked exactly like customers mistyping passwords.
+      void captureException(error, {
+        source: 'auth',
+        category: 'system',
+        severity: 'critical',
+        metadata: { operation: 'signInWithPassword', status: error.status ?? 0 },
+      });
+      return {
+        error: 'We couldn’t reach the sign-in service. This is on our side — please try again in a moment.',
+      };
+    }
+
     return { error: 'Invalid email or password' };
   }
 
