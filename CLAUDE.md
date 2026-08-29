@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 27 files / 512 tests
+pnpm test              # app suite — 28 files / 543 tests
 cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
@@ -1478,6 +1478,26 @@ the container was, not where the ink was.
   `Movable` for text — a larger resize minimum would make the first pixel of a corner drag jump a
   tightly-fitted element out to it.
 
+### CTRL + WHEEL ZOOMS THE BOOK, AND ONLY THE BOOK
+
+`useCtrlWheelZoom` (`_use-zoom-wheel.ts`) binds ONE native `{ passive: false }` wheel listener **to
+the canvas element itself** — the spread canvas and the cover canvas both, via `onCanvasEl`. There
+is no global listener, so ctrl+wheel over a sidebar, a toolbar, the page strip or a dialog is still
+the browser's own zoom, which is an accessibility control rather than a nuisance. Scoping by
+ATTACHMENT rather than by a coordinate test means it cannot drift out of step with the layout.
+
+- `{ passive: false }` is required: React registers `wheel` passively at its root, so
+  `preventDefault()` in an `onWheel` prop is ignored — the same reason `useCropWheel` uses a native
+  listener. Propagation is NOT stopped, and `useCropWheel` sits deeper and stops the event itself,
+  so image adjustment keeps the wheel.
+- A wheel with no ctrl/meta returns immediately: ordinary scrolling is untouched, nothing is
+  prevented, and no scroll position is adjusted, so the canvas cannot jump.
+- **One zoom.** `zoomBy(direction)` holds the step and the bounds (`ZOOM_MIN_PCT` 50 /
+  `ZOOM_MAX_PCT` 200 / `ZOOM_STEP_PCT` 15); the +/− buttons, the keyboard shortcuts and the wheel
+  are three INPUTS to it. **No focal point** — the existing zoom sets the spread's width and lets
+  the canvas scroll, with no transform origin to aim, and the buttons have always behaved that way;
+  cursor-anchored zooming for the wheel alone would make one command behave two ways.
+
 ### THE BACK COVER TAKES PHOTO OVERLAYS
 
 `back.photoId` is the face's BACKDROP — one image, edge to edge. There was no way to place a
@@ -1497,9 +1517,27 @@ picture *on* the back cover. `BackCoverConfig.overlays: Overlay[]` (additive to 
   ordinary album photo picker for it — the same two steps the page canvas takes. Move, resize,
   select, layer, duplicate and delete all run through the existing cover command paths, and the
   shared `PhotoBar` reaches it through `useCover`'s `block` adapter with no cover-specific branch.
-- **An overlay's crop/rotate go to the `photos` row**, not `cover_config.imageEdit` — that field
-  describes the face's backdrop. `useCover` gained `onPhotoEdit`/`onPhotoRotate` so the shared
-  toolbar cannot silently rotate the backdrop while an overlay is selected.
+- **THE BACKGROUND IS NOT THE OVERLAY, and one resolved target enforces it.** `useCover.photoTarget`
+  answers "what is a photo action acting on?" ONCE — `{kind:'backdrop'}` or
+  `{kind:'overlay', overlayId, photoId}` — and Replace, crop, rotate, the transforms and the photo
+  the toolbar *describes* all read it. Before that, every photo action assumed the backdrop:
+  `PhotoBar` already passed the overlay id to `onReplace`, the cover's adapter (`onReplace:
+  p.onPickPhoto`) threw it away and opened the BACKDROP picker, and `setPhoto` clears `background`
+  when it stores a photo — so "replace this overlay" became "make this the whole back cover and
+  erase the colour behind it", and deleting the overlay afterwards revealed the null background as
+  the default colour. One cause, both reported symptoms. An overlay's crop/rotate now go to the
+  `photos` row (`onPhotoEdit`/`onPhotoRotate`), and its Crop opens the ordinary photo editor rather
+  than the face's image editor.
+- **The three overlay writes are pure functions** — `addCoverOverlay`, `replaceCoverOverlayPhoto`,
+  `removeCoverOverlay` in `cover-objects.ts`. Each is a single immutable patch through
+  `withCoverSideElements`, so the face's background, backdrop photo and edits, texts, stickers, QR
+  codes, studio mark and sibling overlays survive by construction rather than by remembering to
+  copy them — and "everything else is preserved" becomes something a test can assert.
+- **Drop-to-replace** works exactly as it does on a page, through the shared `photo-dnd` contract
+  (`acceptPhotoDrag`/`readPhotoDrag`/`leftDropTarget`), replacing one `photoId` and leaving the
+  rect, order, identity and the whole face alone. Cover overlays deliberately do NOT `stripPhoto`:
+  placed-once is a `saveLayout` invariant across `album_pages`, and the cover has never
+  participated in it (the face backdrop does not either).
 - **It reaches both PDFs.** The preview book passes its existing `photoFor`; the printer-ready
   cover export (which deliberately does not load the album's photo set) resolves exactly the
   overlay photos through `loadPrintAlbum`'s new `coverPhotos`, and both readiness gates count only

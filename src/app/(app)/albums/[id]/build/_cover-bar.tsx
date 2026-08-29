@@ -51,8 +51,11 @@ export type CoverBarProps = {
   selectedPhoto: Photo | undefined;
   photoMap: Map<string, Photo>;
   pageAspect: number;
-  /** Open the existing album-photo picker to set this face's image. */
-  onPickPhoto: () => void;
+  /**
+   * Open the existing album-photo picker. With no argument it fills the FACE's backdrop; with an
+   * `overlayId` it fills that overlay and nothing else. One picker, one call site, two subjects.
+   */
+  onPickPhoto: (target?: { overlayId: string }) => void;
   /** Open the cover-artwork gallery (the admin template catalog) in the rail. */
   onOpenArtwork: () => void;
   /** Create a photo overlay on the focused face and open the picker to fill it. */
@@ -85,7 +88,13 @@ export default function CoverContextBar(p: CoverBarProps) {
     photoMap: p.photoMap,
     selectedPhoto: p.selectedPhoto,
     pairAspect: p.pageAspect,
-    onReplace: p.onPickPhoto,
+    /**
+     * REPLACE ACTS ON WHAT IS SELECTED. `PhotoBar` already says which overlay it means; this used
+     * to discard that and open the BACKDROP picker, which — because storing a face photo clears
+     * the face's background — turned "replace this overlay" into "replace the whole back cover".
+     * The target is passed through untouched, exactly as the page canvas passes it through.
+     */
+    onReplace: (t) => p.onPickPhoto(t.overlayId ? { overlayId: t.overlayId } : undefined),
     onCrop: p.onCrop,
     cropping: p.cropping,
     onEndCrop: p.onEndCrop,
@@ -191,7 +200,7 @@ function BackgroundBar(p: CoverBarProps) {
         onClick={() => cover.setLinkBackgrounds(!linked)}
       />
 
-      {side !== 'spine' && <BarBtn label="Use one of your photos" icon={<Images />} text="Photo" onClick={p.onPickPhoto} />}
+      {side !== 'spine' && <BarBtn label="Use one of your photos" icon={<Images />} text="Photo" onClick={() => p.onPickPhoto()} />}
       {side === 'front' && <BarBtn label="Choose cover artwork" icon={<ImageIcon />} text="Artwork" onClick={p.onOpenArtwork} />}
       <BarSep />
 
@@ -294,7 +303,7 @@ function CoverBar(p: CoverBarProps) {
       />
       {cover.side !== 'spine' && (
         <>
-          <BarBtn label="Use one of your photos" icon={<Images />} onClick={p.onPickPhoto} />
+          <BarBtn label="Use one of your photos" icon={<Images />} onClick={() => p.onPickPhoto()} />
           {cover.side === 'front' && <BarBtn label="Choose cover artwork" icon={<ImageIcon />} onClick={p.onOpenArtwork} />}
         </>
       )}

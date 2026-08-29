@@ -24,9 +24,14 @@ import {
   normalizeCoverConfig,
   DEFAULT_COVER_CONFIG,
   type BackCoverConfig,
+  type CoverConfig,
 } from '@/lib/builder/cover';
+import type { Background } from '@/lib/builder/model';
 import {
+  addCoverOverlay,
   coverSideElements,
+  removeCoverOverlay,
+  replaceCoverOverlayPhoto,
   withCoverOverlayIds,
   withCoverSideElements,
   COVER_SIDES,
@@ -122,7 +127,7 @@ describe('a new overlay lands somewhere sensible, from the one shared rule', () 
     const src = readFileSync(resolve(__dirname, '../src/app/(app)/albums/[id]/build/_use-builder.ts'), 'utf8');
     expect(src).toContain('nextOverlayGeom(b.overlays.length, at)');
     const cover = readFileSync(resolve(__dirname, '../src/app/(app)/albums/[id]/build/_use-cover.ts'), 'utf8');
-    expect(cover).toContain('nextOverlayGeom(existing.length, at)');
+    expect(cover).toContain('nextOverlayGeom(coverSideElements(prev, side).overlays.length, at)');
   });
 });
 
@@ -174,6 +179,131 @@ describe('an overlay survives the round trip', () => {
     expect(isCustomCover(cfg)).toBe(true);
     expect(hasBackCover({ config: cfg } as Parameters<typeof hasBackCover>[0])).toBe(true);
     expect(isCustomCover(DEFAULT_COVER_CONFIG)).toBe(false);
+  });
+});
+
+// ===============================================================================================
+// C2. THE BACKGROUND SURVIVES EVERY OVERLAY OPERATION
+// ===============================================================================================
+
+describe('a back-cover background is not a back-cover overlay', () => {
+  /**
+   * THE REGRESSION THIS EXISTS FOR. Replace on a selected overlay used to open the FACE picker,
+   * and storing a face photo clears `background` — so replacing an overlay erased the customer's
+   * colour, and deleting the overlay afterwards revealed a null background, which the renderer
+   * draws as the default. One cause, two reports. These are the brief's Cases A–D, run against the
+   * real state transitions the hook calls.
+   */
+  const RED: Background = { kind: 'color', value: '#cc2200' };
+  const A = '00000000-0000-4000-8000-0000000000a1';
+  const B = '00000000-0000-4000-8000-0000000000b2';
+  const C = '00000000-0000-4000-8000-0000000000c3';
+
+  const withRed = (over: Partial<BackCoverConfig> = {}): CoverConfig => ({
+    ...DEFAULT_COVER_CONFIG,
+    back: back({ background: RED, ...over }),
+  });
+
+  /** Everything about the face EXCEPT its overlays — the part every operation must preserve. */
+  const faceExceptOverlays = (c: CoverConfig) => {
+    const rest = { ...c.back } as Partial<BackCoverConfig>;
+    delete rest.overlays;
+    return rest;
+  };
+
+  it('Case A — ADD keeps the background', () => {
+    const before = withRed();
+    const after = addCoverOverlay(before, 'back', overlay({ id: 'o1', photoId: A }));
+    expect(after.back.background).toEqual(RED);
+    expect(after.back.overlays).toHaveLength(1);
+    expect(after.back.overlays[0].photoId).toBe(A);
+    expect(faceExceptOverlays(after)).toEqual(faceExceptOverlays(before));
+  });
+
+  it('Case B — REPLACE keeps the background and changes only that overlay', () => {
+    const before = addCoverOverlay(withRed(), 'back', overlay({ id: 'o1', photoId: A, x: 0.2, y: 0.3, w: 0.4, h: 0.3 }));
+    const after = replaceCoverOverlayPhoto(before, 'back', 'o1', B);
+    expect(after.back.background).toEqual(RED);
+    expect(after.back.overlays[0].photoId).toBe(B);
+    // Geometry, order and identity are untouched — a replacement is not a re-placement.
+    expect(after.back.overlays[0]).toMatchObject({ id: 'o1', x: 0.2, y: 0.3, w: 0.4, h: 0.3 });
+    expect(faceExceptOverlays(after)).toEqual(faceExceptOverlays(before));
+    // And the BACKDROP is untouched: this is the bug, in two assertions.
+    expect(after.back.photoId).toBeNull();
+    expect(after.back.imageEdit).toBeNull();
+  });
+
+  it('Case C — DROP-TO-REPLACE is the same transition, so it keeps the background too', () => {
+    // The drop target calls `replaceOverlay`, which is `replaceCoverOverlayPhoto`. Same path.
+    const before = addCoverOverlay(withRed(), 'back', overlay({ id: 'o1', photoId: B }));
+    const after = replaceCoverOverlayPhoto(before, 'back', 'o1', C);
+    expect(after.back.background).toEqual(RED);
+    expect(after.back.overlays[0].photoId).toBe(C);
+    expect(after.back.photoId).toBeNull();
+  });
+
+  it('Case D — DELETE keeps the background', () => {
+    const before = addCoverOverlay(withRed(), 'back', overlay({ id: 'o1', photoId: C }));
+    const after = removeCoverOverlay(before, 'back', 'o1');
+    expect(after.back.background).toEqual(RED);
+    expect(after.back.overlays).toEqual([]);
+    expect(faceExceptOverlays(after)).toEqual(faceExceptOverlays(before));
+  });
+
+  it('the full A to D sequence never loses the exact colour', () => {
+    let c = withRed();
+    c = addCoverOverlay(c, 'back', overlay({ id: 'o1', photoId: A }));
+    c = replaceCoverOverlayPhoto(c, 'back', 'o1', B);
+    c = replaceCoverOverlayPhoto(c, 'back', 'o1', C);
+    c = removeCoverOverlay(c, 'back', 'o1');
+    expect(c.back.background).toEqual(RED);
+    expect(c.back.overlays).toEqual([]);
+  });
+
+  it('works for a background IMAGE too, not just a colour', () => {
+    const shot: CoverConfig = {
+      ...DEFAULT_COVER_CONFIG,
+      back: back({ photoId: 'aaaaaaaa-0000-4000-8000-00000000aaaa', imageEdit: { zoom: 1.4 } }),
+    };
+    let c = addCoverOverlay(shot, 'back', overlay({ id: 'o1', photoId: A }));
+    c = replaceCoverOverlayPhoto(c, 'back', 'o1', B);
+    c = removeCoverOverlay(c, 'back', 'o1');
+    expect(c.back.photoId).toBe('aaaaaaaa-0000-4000-8000-00000000aaaa');
+    expect(c.back.imageEdit).toEqual({ zoom: 1.4 });
+  });
+
+  it('preserves every OTHER face property and every SIBLING overlay', () => {
+    const caption = makeText('subtitle', { id: 'tx1', text: 'KEEP ME' });
+    const before: CoverConfig = {
+      ...DEFAULT_COVER_CONFIG,
+      back: back({ background: RED, texts: [caption], showLogo: true }),
+    };
+    let c = addCoverOverlay(before, 'back', overlay({ id: 'o1', photoId: A }));
+    c = addCoverOverlay(c, 'back', overlay({ id: 'o2', photoId: B, x: 0.5 }));
+    const after = removeCoverOverlay(replaceCoverOverlayPhoto(c, 'back', 'o1', C), 'back', 'o2');
+    expect(after.back.background).toEqual(RED);
+    expect(after.back.texts).toEqual([caption]);
+    expect(after.back.showLogo).toBe(true);
+    expect(after.back.overlays.map((o) => o.id)).toEqual(['o1']);
+    expect(after.back.overlays[0].photoId).toBe(C);
+  });
+
+  it('overlay operations never touch the FRONT or the SPINE', () => {
+    const before = withRed();
+    const after = removeCoverOverlay(addCoverOverlay(before, 'back', overlay()), 'back', 'o1');
+    expect(after.background).toBe(before.background);
+    expect(after.photoId).toBe(before.photoId);
+    expect(after.spine).toEqual(before.spine);
+    expect(after.texts).toBe(before.texts);
+  });
+
+  it('CONTRAST: setting the face BACKDROP does clear the background — which is why the two must not be confused', () => {
+    // Documented, deliberate, and precisely why an overlay action must never reach that path.
+    const c = withRed();
+    const backdrop = { ...c, back: { ...c.back, photoId: A, background: null } };
+    expect(backdrop.back.background).toBeNull();
+    // …whereas the overlay path leaves it exactly as it was.
+    expect(addCoverOverlay(c, 'back', overlay()).back.background).toEqual(RED);
   });
 });
 
@@ -301,12 +431,44 @@ describe('editing a back-cover overlay reuses what already exists', () => {
     expect(canvas).not.toContain('shadow-md');
   });
 
+  it('resolves ONE photo target before any command runs, instead of branching per action', () => {
+    // `Back cover background ≠ back cover overlay`, as a value. Every photo command reads it.
+    expect(hook).toContain('CoverPhotoTarget');
+    expect(hook).toContain("kind: 'overlay', overlayId: selection.id, photoId: o.photoId");
+    expect(hook).toContain("kind: 'backdrop', photoId: image.photoId");
+  });
+
   it('routes an overlay photo edit to the PHOTOS row, not the face backdrop', () => {
     // The backdrop's crop lives in cover_config.imageEdit; a placed photo's lives on the photo,
     // exactly as it does for a page overlay. Without this the toolbar would edit the wrong thing.
-    expect(hook).toContain('overlayPhotoId');
+    expect(hook).toContain("photoTarget?.kind === 'overlay'");
     expect(hook).toContain('onPhotoEdit');
     expect(builder).toContain('applyPhotoEditRef.current = cmd.applyPhotoEdit');
+  });
+
+  it('describes the SELECTED overlay in the toolbar, not the backdrop', () => {
+    // `selectedPhoto` drives the crop/zoom/rotate state the bar displays AND the id it writes to.
+    expect(builder).toContain('cover.photoTarget?.photoId');
+    expect(builder).not.toContain('const id = cover.image.photoId;');
+  });
+
+  it('REPLACE opens the picker for the selected overlay, never for the backdrop', () => {
+    // THE BUG: `onReplace: p.onPickPhoto` threw away the overlay id PhotoBar had already supplied,
+    // so Replace opened the FACE picker — and storing a face photo clears the face's background.
+    expect(bar).toContain('onReplace: (t) => p.onPickPhoto(t.overlayId ? { overlayId: t.overlayId } : undefined)');
+    expect(bar).not.toContain('onReplace: p.onPickPhoto,');
+  });
+
+  it('CROP opens the overlay photo in the ordinary editor, not the face image editor', () => {
+    expect(builder).toContain("if (t?.kind === 'overlay')");
+    expect(builder).toContain('openEditor(t.photoId)');
+  });
+
+  it('supports DROP-TO-REPLACE through the shared drag contract', () => {
+    expect(canvas).toContain('CoverOverlayDrop');
+    expect(canvas).toContain('acceptPhotoDrag');
+    expect(canvas).toContain('readPhotoDrag');
+    expect(canvas).toContain('cover.replaceOverlay(key, oid, id)');
   });
 
   it('the shared PhotoBar reaches it through the cover block adapter, unmodified', () => {

@@ -18,6 +18,7 @@ import { TextContent, StickerContent, QrContent } from './_elements-render';
 import PhotoFrame from './_photo-frame';
 import { ImagePlus } from 'lucide-react';
 import type { PairPhoto } from './_pair-frame';
+import { acceptPhotoDrag, leftDropTarget, readPhotoDrag } from '@/lib/builder/photo-dnd';
 import { InlineTextEditor } from './_element-bits';
 import { useBuilderDimensions } from './_dimensions';
 import { fitBlockWidth, useMeasuredBox } from './_use-fit-scale';
@@ -79,10 +80,68 @@ export type CoverCanvasProps = {
   onPickOverlayPhoto?: (overlayId: string) => void;
   /** Publishes the focused face's element upward so the floating toolbar can anchor to it. */
   onFaceEl?: (el: HTMLDivElement | null) => void;
+  /**
+   * Publishes the canvas (scroll) element upward. The host attaches its ctrl+wheel zoom listener
+   * to it, which is what scopes zoom to the book — the cover is as much "the book area" as a
+   * spread is, and the two must not behave differently.
+   */
+  onCanvasEl?: (el: HTMLDivElement | null) => void;
 };
 
 /** The caption under the book, plus the flex gap above it. Vertical furniture the fit must clear. */
 const COVER_CAPTION_PX = 36;
+
+/**
+ * DROP A PHOTO ONTO A COVER OVERLAY TO REPLACE ITS PICTURE.
+ *
+ * The page canvas's `OverlayContent` does the same job; what is shared is the part that must not
+ * diverge — the drag CONTRACT (`lib/builder/photo-dnd`), where a mismatched `effectAllowed` /
+ * `dropEffect` pair makes the browser cancel the drop silently. An occupied frame is exactly as
+ * valid a target as an empty one, because dropping on it is a replacement.
+ *
+ * It replaces ONE overlay's `photoId`. The face's backdrop, its background colour, this overlay's
+ * rect and every sibling object are untouched — a drop is not a request to re-skin the cover.
+ */
+function CoverOverlayDrop({
+  onDropPhoto,
+  filled,
+  children,
+}: {
+  onDropPhoto: (photoId: string) => void;
+  filled: boolean;
+  children: React.ReactNode;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      className="relative h-full w-full"
+      onDragOver={(e) => {
+        acceptPhotoDrag(e);
+        if (!over) setOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (leftDropTarget(e)) setOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        // The face beneath is a drop target too (it deselects); this drop is answered here.
+        e.stopPropagation();
+        setOver(false);
+        const id = readPhotoDrag(e);
+        if (id) onDropPhoto(id);
+      }}
+    >
+      {children}
+      {over && (
+        <div className="pointer-events-none absolute inset-0 z-[6] grid place-items-center bg-studio/25 ring-2 ring-inset ring-studio-bright">
+          <span className="rounded-md bg-card/90 px-1.5 py-0.5 text-[10px] font-semibold text-studio shadow-xs">
+            {filled ? 'Replace' : 'Drop photo'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CoverCanvas({
   cover,
@@ -93,6 +152,7 @@ export default function CoverCanvas({
   photoFor,
   onPickOverlayPhoto,
   onFaceEl,
+  onCanvasEl,
 }: CoverCanvasProps) {
   /**
    * THE CANVAS IS COMPOSED FROM THE PRINT SPECIFICATION.
@@ -129,7 +189,10 @@ export default function CoverCanvas({
 
   return (
     <div
-      ref={canvas.ref}
+      ref={(el) => {
+        canvas.ref(el);
+        onCanvasEl?.(el);
+      }}
       className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10"
       /* The pasteboard around the book: a click out here means "nothing selected", which is the
          cover-level toolbar — the same rule the page canvas follows. */
@@ -434,6 +497,12 @@ function Face({
                  `overflow-hidden` clips it; the selection outline comes from the chrome layer. */
               className="overflow-hidden"
             >
+              {/* DROP TO REPLACE — the same interaction a page overlay has, through the same
+                  shared contract (`acceptPhotoDrag` / `readPhotoDrag`), so the drag negotiation
+                  cannot disagree with the tray's. It replaces THIS overlay's photo and nothing
+                  else: the face's backdrop, its background colour, this overlay's rect and every
+                  other object are untouched, because `replaceOverlay` patches one `photoId`. */}
+              <CoverOverlayDrop onDropPhoto={(id) => cover.replaceOverlay(key, oid, id)} filled={!!photo}>
               {photo ? (
                 <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" />
               ) : (
@@ -449,6 +518,7 @@ function Face({
                   <span className="px-1 text-[10px] font-medium leading-tight text-studio/80">Choose a photo</span>
                 </button>
               )}
+              </CoverOverlayDrop>
             </Movable>
           );
         })}

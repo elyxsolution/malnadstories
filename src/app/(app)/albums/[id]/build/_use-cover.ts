@@ -12,6 +12,7 @@ import {
 } from '@/lib/builder/elements';
 import {
   COVER_SIDE_LABEL,
+  addCoverOverlay,
   applyTitleLayout,
   coverSideBackground,
   coverSideElements,
@@ -19,6 +20,8 @@ import {
   isPermanentRole,
   metadataFromCoverObjects,
   migrateCoverConfig,
+  removeCoverOverlay,
+  replaceCoverOverlayPhoto,
   withAllCoverBackgrounds,
   withCoverOverlayIds,
   withCoverSideElements,
@@ -68,6 +71,17 @@ import type { Selection } from './_use-builder';
  * Persistence is UNCHANGED: every mutation lands in `onChange`, which the builder debounces into
  * the existing `saveCoverDesign`. No new server action, no new table, no new column.
  */
+
+/**
+ * THE RESOLVED SUBJECT of a photo action on the cover.
+ *
+ * `Back cover background ≠ back cover overlay`, stated as a type. Every photo command reads this
+ * instead of assuming the face's backdrop, which is what stopped Replace/crop/rotate from reaching
+ * past a selected overlay and rewriting the face.
+ */
+export type CoverPhotoTarget =
+  | { kind: 'backdrop'; photoId: string | null }
+  | { kind: 'overlay'; overlayId: string; photoId: string | null };
 
 export type CoverHostDeps = {
   initialConfig: CoverConfig;
@@ -350,11 +364,13 @@ export function useCover({
   const addOverlay = useCallback(
     (photoId: string | null = null, at?: { x: number; y: number } | 'center') => {
       const id = makeOverlayId();
-      write((prev) => {
-        const existing = coverSideElements(prev, side).overlays;
-        const overlay: Overlay = { id, photoId, ...nextOverlayGeom(existing.length, at) };
-        return withCoverSideElements(prev, side, { overlays: [...existing, overlay] });
-      });
+      write((prev) =>
+        addCoverOverlay(prev, side, {
+          id,
+          photoId,
+          ...nextOverlayGeom(coverSideElements(prev, side).overlays.length, at),
+        }),
+      );
       setSelection({ kind: 'overlay', id });
       return id;
     },
@@ -373,15 +389,18 @@ export function useCover({
     [write, sideOfKey],
   );
 
-  /** Point one overlay at a photo — what the picker calls once the customer has chosen. */
+  /**
+   * Point one overlay at a photo — the picker's callback, and the drop target's.
+   *
+   * It patches ONE `photoId` and nothing else. In particular it does NOT touch the face's
+   * backdrop: `setPhoto` clears `background` when it stores a photo, so an overlay replacement
+   * that reached it would erase the customer's background colour, which is exactly the bug this
+   * routing was fixed to prevent.
+   */
   const replaceOverlay = useCallback(
     (key: string, overlayId: string, photoId: string) => {
       const target = sideOfKey(key);
-      write((prev) =>
-        withCoverSideElements(prev, target, {
-          overlays: coverSideElements(prev, target).overlays.map((o) => (o.id === overlayId ? { ...o, photoId } : o)),
-        }),
-      );
+      write((prev) => replaceCoverOverlayPhoto(prev, target, overlayId, photoId));
     },
     [write, sideOfKey],
   );
@@ -389,11 +408,7 @@ export function useCover({
   const removeOverlay = useCallback(
     (key: string, overlayId: string) => {
       const target = sideOfKey(key);
-      write((prev) =>
-        withCoverSideElements(prev, target, {
-          overlays: coverSideElements(prev, target).overlays.filter((o) => o.id !== overlayId),
-        }),
-      );
+      write((prev) => removeCoverOverlay(prev, target, overlayId));
     },
     [write, sideOfKey],
   );
@@ -648,24 +663,50 @@ export function useCover({
   );
 
   /**
-   * WHICH PHOTO IS THE TOOLBAR ACTING ON? The face's backdrop, or a selected overlay.
+   * WHAT IS THE PHOTO TOOLBAR ACTING ON? — resolved ONCE, before any command runs.
    *
-   * The backdrop's edits live on the cover config; an overlay's live on the `photos` row, like
-   * every other placed photo in the album. One branch, resolved here, so `PhotoBar` stays a pure
-   * renderer over `barCommands` and needs to know nothing about covers.
+   * THE BUG THIS EXISTS TO KILL. Every photo action on the cover used to be pointed at the face's
+   * BACKDROP, because that is the only photo a cover used to have. With overlays that became
+   * actively destructive rather than merely wrong: `PhotoBar`'s Replace already tells the host
+   * which overlay it means, the cover's adapter threw that argument away and opened the BACKDROP
+   * picker, and `setPhoto` clears `background` when it stores a photo — so "replace this overlay"
+   * silently became "make this the whole back cover and erase the colour behind it". Deleting the
+   * overlay afterwards then revealed a null background, which the renderer draws as the default
+   * colour: the "my background reset itself" report, same single cause.
+   *
+   * So the target is a value, not a branch repeated per action. Everything downstream — the
+   * selected photo the toolbar describes, the crop it opens, the edits it applies, the rotation,
+   * the picker Replace opens — reads THIS.
+   *
+   *   selection 'base'    → the face's backdrop (edits live in `cover_config.imageEdit`)
+   *   selection 'overlay' → that overlay (edits live on the `photos` row, like a page overlay)
    */
-  const overlayPhotoId =
-    selection.kind === 'overlay' ? (elements.overlays.find((o) => o.id === selection.id)?.photoId ?? null) : null;
+  const photoTarget = useMemo<CoverPhotoTarget | null>(() => {
+    if (selection.kind === 'overlay') {
+      const o = elements.overlays.find((ov) => ov.id === selection.id);
+      return o ? { kind: 'overlay', overlayId: selection.id, photoId: o.photoId } : null;
+    }
+    if (selection.kind === 'base') return { kind: 'backdrop', photoId: image.photoId };
+    return null;
+  }, [selection, elements.overlays, image.photoId]);
 
   const barCommands = useMemo(
     () => ({
+      /**
+       * The photo id is IGNORED in favour of the resolved target. `PhotoBar` passes the id of the
+       * photo it is describing, which is correct — but the destination of the write is decided by
+       * WHAT is selected, and only the target knows that.
+       */
       applyPhotoEdit: (photoId: string, patch: Partial<EditConfig>) => {
-        if (overlayPhotoId && onPhotoEdit) onPhotoEdit(photoId, patch);
-        else patchImageEdit(patch);
+        if (photoTarget?.kind === 'overlay') {
+          if (photoTarget.photoId && onPhotoEdit) onPhotoEdit(photoTarget.photoId, patch);
+          return;
+        }
+        patchImageEdit(patch);
       },
       rotateBy: (dir: 1 | -1) => {
-        if (overlayPhotoId && onPhotoRotate) {
-          onPhotoRotate(overlayPhotoId, dir);
+        if (photoTarget?.kind === 'overlay') {
+          if (photoTarget.photoId && onPhotoRotate) onPhotoRotate(photoTarget.photoId, dir);
           return;
         }
         const cur = image.edit?.rotate ?? 0;
@@ -674,7 +715,7 @@ export function useCover({
       moveLayer,
       deleteSelection: { label: deleteLabel, enabled: deletable, run: deleteSelection },
     }),
-    [patchImageEdit, image.edit?.rotate, overlayPhotoId, onPhotoEdit, onPhotoRotate, moveLayer, deleteLabel, deletable, deleteSelection],
+    [patchImageEdit, image.edit?.rotate, photoTarget, onPhotoEdit, onPhotoRotate, moveLayer, deleteLabel, deletable, deleteSelection],
   );
 
   return {
@@ -687,6 +728,8 @@ export function useCover({
     elements,
     background,
     image,
+    /** WHAT a photo action acts on — see above. The host resolves the toolbar's photo from it. */
+    photoTarget,
     block,
     barApi,
     barCommands,

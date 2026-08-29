@@ -66,6 +66,7 @@ import PropertiesPanel from './_properties-panel';
 // context bar's page toolbar. Nothing it did was dropped; everything it did moved.
 import { useBlocks, NO_SELECTION, type Selection, type BaseSlot } from './_use-builder';
 import { fitBlockWidth, useMeasuredBox } from './_use-fit-scale';
+import { useCtrlWheelZoom } from './_use-zoom-wheel';
 import { useEditHistory } from './_use-edit-history';
 import { usePhotoEditHistory } from './_use-photo-edits';
 import { useSelection } from './_use-selection';
@@ -147,6 +148,16 @@ const Flipbook = dynamic(() => import('./_flipbook'), { ssr: false });
 const ReviewMode = dynamic(() => import('./_review-mode'), { ssr: false });
 
 /** Custom-mode auto-fill kinds (Fill Empty / Replace All / Randomize). Replaces the old AssistKind. */
+/**
+ * WORKSPACE ZOOM BOUNDS AND STEP — one place, so every input agrees.
+ *
+ * 100% is "the whole spread, fitted" (see `_use-fit-scale`); below it the book shrinks inside the
+ * canvas, above it the canvas scrolls. The values are the ones the +/− buttons have always used.
+ */
+const ZOOM_MIN_PCT = 50;
+const ZOOM_MAX_PCT = 200;
+const ZOOM_STEP_PCT = 15;
+
 type LayoutKind = 'build' | 'fill' | 'suggest';
 
 type RailTab = 'images' | 'layouts' | 'templates' | 'text' | 'stickers' | 'backgrounds' | 'qr' | 'quality';
@@ -1242,11 +1253,17 @@ export default function Builder({
   }, [coverFocused, editLayout, block, selection]);
   const overlayAnchor = useAnchorRect(pageElRef, overlayRect);
 
-  /** The photo backing the focused cover face's image, when it has one. */
+  /**
+   * THE PHOTO THE COVER TOOLBAR IS DESCRIBING — the backdrop, or the selected overlay's picture.
+   *
+   * It used to be `cover.image.photoId` unconditionally, so selecting an overlay showed the
+   * BACKDROP's crop, zoom and rotation, and every transform button wrote to the backdrop. The
+   * subject is resolved once by `useCover` (`photoTarget`) and read here.
+   */
   const coverSelectedPhoto = useMemo(() => {
-    const id = cover.image.photoId;
+    const id = cover.photoTarget?.photoId;
     return id ? photoMap.get(id) : undefined;
-  }, [cover.image.photoId, photoMap]);
+  }, [cover.photoTarget, photoMap]);
 
   /** The photo in the selected frame, if the selection is a photo frame. */
   const selectedFramePhoto = useMemo(() => {
@@ -2232,9 +2249,26 @@ export default function Builder({
     [canvas.box, pairA],
   );
 
-  const zoomIn = () => setZoomPct((z) => Math.min(200, z + 15));
-  const zoomOut = () => setZoomPct((z) => Math.max(50, z - 15));
-  const resetZoom = () => setZoomPct(100);
+  /**
+   * THE ONE ZOOM. `zoomBy` holds the step and the bounds; the +/− buttons, the keyboard and
+   * ctrl+wheel are three INPUTS to it, not three implementations of it. Wheel zoom therefore
+   * inherits the existing bounds and the existing scale maths for free, and there is no second
+   * zoom state for the two to disagree about.
+   *
+   * There is deliberately no focal point: the existing zoom sets the spread's WIDTH and lets the
+   * canvas scroll, with no transform origin to aim, and the +/− buttons have always behaved this
+   * way. Adding cursor-anchored zooming for the wheel alone would make the same command behave
+   * differently depending on which control invoked it.
+   */
+  const zoomBy = useCallback((direction: 1 | -1) => {
+    setZoomPct((z) => Math.max(ZOOM_MIN_PCT, Math.min(ZOOM_MAX_PCT, z + direction * ZOOM_STEP_PCT)));
+  }, []);
+  const zoomIn = useCallback(() => zoomBy(1), [zoomBy]);
+  const zoomOut = useCallback(() => zoomBy(-1), [zoomBy]);
+  const resetZoom = useCallback(() => setZoomPct(100), []);
+
+  /** Attached to the canvas element itself, so ctrl+wheel anywhere else is the browser's. */
+  const zoomAreaRef = useCtrlWheelZoom(zoomBy);
 
   /**
    * ── KEYBOARD SHORTCUTS ──────────────────────────────────────────────────────
@@ -2387,7 +2421,7 @@ export default function Builder({
         },
       ]),
     ],
-    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused, undoEdits, redoEdits],
+    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused, undoEdits, redoEdits, zoomIn, zoomOut, resetZoom],
   );
   /**
    * Review mode owns the keyboard while it is open (it binds its own capture-phase listener), so
@@ -2863,6 +2897,8 @@ export default function Builder({
                  one set of edits, wherever it is placed. */
               photoFor={photoForOverview}
               onPickOverlayPhoto={(overlayId) => setCoverPhotoPicker({ side: cover.side, target: 'overlay', overlayId })}
+              /* The cover canvas is the book area too — ctrl+wheel zooms it the same way. */
+              onCanvasEl={zoomAreaRef}
               onFaceEl={(el) => {
                 pageElRef.current = el;
               }}
@@ -2878,7 +2914,13 @@ export default function Builder({
            * finish" with no modal, no confirm, no Done button required.
            */
           <div
-            ref={canvas.ref}
+            /* Two consumers of the same node: the fit measurement, and the ctrl+wheel zoom
+               listener. Attaching the listener to THIS element is what scopes it — outside the
+               canvas the browser's own zoom is untouched. */
+            ref={(el) => {
+              canvas.ref(el);
+              zoomAreaRef(el);
+            }}
             className="ms-scroll relative min-h-0 flex-1 overflow-auto p-4 lg:p-7"
             /**
              * CLICKING OFF THE BOOK DESELECTS.
@@ -3087,7 +3129,13 @@ export default function Builder({
               selectedPhoto={coverSelectedPhoto}
               photoMap={photoMap}
               pageAspect={pageA}
-              onPickPhoto={() => setCoverPhotoPicker({ side: cover.side, target: 'image' })}
+              onPickPhoto={(t) =>
+                setCoverPhotoPicker(
+                  t?.overlayId
+                    ? { side: cover.side, target: 'overlay', overlayId: t.overlayId }
+                    : { side: cover.side, target: 'image' },
+                )
+              }
               onOpenArtwork={() => setRailTab('templates')}
               onAddOverlay={() => {
                 // Create the CONTAINER, then open the picker for it — the same two steps the page
@@ -3096,7 +3144,21 @@ export default function Builder({
                 setCoverPhotoPicker({ side: cover.side, target: 'overlay', overlayId: id });
               }}
               onOpenRail={setRailTab}
-              onCrop={() => setCoverImageEditor(cover.side)}
+              /**
+               * CROP ACTS ON WHAT IS SELECTED TOO. The face's image editor edits
+               * `cover_config.imageEdit`; an overlay's picture is an ordinary album photo, so it
+               * opens the SAME modal editor a page overlay's photo opens and writes to the same
+               * `photos` row. Without this split, cropping a selected overlay re-cropped the
+               * backdrop behind it.
+               */
+              onCrop={() => {
+                const t = cover.photoTarget;
+                if (t?.kind === 'overlay') {
+                  if (t.photoId) openEditor(t.photoId);
+                  return;
+                }
+                setCoverImageEditor(cover.side);
+              }}
               cropping={false}
               onEndCrop={() => setCoverImageEditor(null)}
               onOpenProperties={() => setPropsPanelOpen((v) => !v)}

@@ -126,6 +126,46 @@ export function withCoverOverlayIds(c: CoverConfig): CoverConfig {
   return { ...c, back: { ...c.back, overlays: c.back.overlays.map((o) => (o.id ? o : { ...o, id: makeOverlayId() })) } };
 }
 
+// ── overlay operations (pure; the hook's `write` calls these) ───────────────────────────────
+/**
+ * THE THREE OVERLAY WRITES, as pure transitions on a `CoverConfig`.
+ *
+ * They exist as functions rather than inline updaters for one reason: **"everything else is
+ * preserved" has to be checkable.** Each is a single immutable patch through
+ * `withCoverSideElements`, which spreads the existing face (`{ ...c.back, ...patch }`), so the
+ * face's background colour, its backdrop photo and edits, its texts, stickers, QR codes, the studio
+ * mark and every sibling overlay come through untouched by construction — not by remembering to
+ * copy them.
+ *
+ * **A BACK-COVER BACKGROUND IS NOT A BACK-COVER OVERLAY.** Nothing here reads or writes
+ * `background`, `photoId` or `imageEdit`. That is the whole distinction, and it is enforced by
+ * these functions being the only overlay writes there are. (`setPhoto`, which sets the face's
+ * BACKDROP, does clear the background — one backdrop at a time — which is exactly why an overlay
+ * action must never be allowed to reach it.)
+ */
+export function addCoverOverlay(c: CoverConfig, side: CoverSide, overlay: Overlay): CoverConfig {
+  return withCoverSideElements(c, side, { overlays: [...coverSideElements(c, side).overlays, overlay] });
+}
+
+/** Point ONE overlay at a different photo. Its rect, order and identity are untouched. */
+export function replaceCoverOverlayPhoto(
+  c: CoverConfig,
+  side: CoverSide,
+  overlayId: string,
+  photoId: string,
+): CoverConfig {
+  return withCoverSideElements(c, side, {
+    overlays: coverSideElements(c, side).overlays.map((o) => (o.id === overlayId ? { ...o, photoId } : o)),
+  });
+}
+
+/** Remove ONE overlay. Nothing about the face itself changes — least of all its background. */
+export function removeCoverOverlay(c: CoverConfig, side: CoverSide, overlayId: string): CoverConfig {
+  return withCoverSideElements(c, side, {
+    overlays: coverSideElements(c, side).overlays.filter((o) => o.id !== overlayId),
+  });
+}
+
 export function coverSideBackground(c: CoverConfig, side: CoverSide): Background | null {
   if (side === 'front') return c.background;
   if (side === 'back') return c.back.background;
