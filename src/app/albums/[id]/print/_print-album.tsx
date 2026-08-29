@@ -5,7 +5,7 @@ import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
 import { CoverDesignFromConfig, BackCoverDesign, SpineDesign } from '@/app/(app)/albums/[id]/build/_cover-render';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import { spineWidthFor, type CoverConfig } from '@/lib/builder/cover';
-import { cmToIn, pageAspect, printPageCss, type ProductDimensions } from '@/lib/products/model';
+import { cmToIn, pageAspect, printPageCss, usableDimensions, type ProductDimensions } from '@/lib/products/model';
 
 export type PrintPhoto = { id: string; url: string; edit: EditConfig | null };
 /**
@@ -141,7 +141,7 @@ export default function PrintAlbum({
   blocks,
   photos,
   cover,
-  dimensions,
+  dimensions: dimensionsInput,
   stickerUrls = {},
 }: {
   blocks: Block[];
@@ -151,6 +151,22 @@ export default function PrintAlbum({
   dimensions: ProductDimensions;
   stickerUrls?: Record<string, string>;
 }) {
+  /**
+   * THE PAGE SIZE IS RESOLVED ONCE, AT THE DOOR — every derived length below reads THIS.
+   *
+   * A product row with a blank or non-numeric dimension column resolves to 0 (`Number(v ?? 0)`),
+   * which is not "missing" — so a caller's `?? FALLBACK_DIMENSIONS` never fires — but is fatal to
+   * the print CSS: `@page { size: 0cm 0cm }` is INVALID, so Chromium silently substitutes its
+   * DEFAULT sheet (US Letter), `.pdf-page` collapses to 0 × 0, and every absolutely-positioned
+   * element lands in the TOP-LEFT CORNER of a blank Letter page. Measured in real headless
+   * Chromium: MediaBox 612 × 792 pt instead of the album's page.
+   *
+   * Normalising here rather than inside `buildPrintCss` matters, because the spine's own `@page`
+   * width is derived from `printWidthCm` OUTSIDE that function — guarding only the CSS builder
+   * left `@page spine { size: 0.000cm … }` behind, and that one page still fell back to Letter.
+   * One resolution, at the boundary, and nothing downstream can see an unusable value.
+   */
+  const dimensions = usableDimensions(dimensionsInput);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const photoFor = useCallback(
     (id: string | null | undefined) => {

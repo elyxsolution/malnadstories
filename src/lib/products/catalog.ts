@@ -3,7 +3,13 @@ import { unstable_cache } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/service';
 import { presignGet } from '@/lib/r2';
 import { CACHE_TAGS, CACHE_TTL } from '@/lib/cache';
-import { FALLBACK_DIMENSIONS, type AlbumProductCore, type ProductDimensions } from './model';
+import {
+  FALLBACK_DIMENSIONS,
+  isUsableDimensions,
+  usableDimensions,
+  type AlbumProductCore,
+  type ProductDimensions,
+} from './model';
 
 /**
  * Album Product catalog reads (0047). The active catalog is a GLOBAL, non-user-owned list
@@ -177,13 +183,22 @@ export async function getProductDimensions(productId: string | null): Promise<Pr
     .maybeSingle();
   const r = data as Record<string, unknown> | null;
   if (!r) return null;
-  return {
+  const d: ProductDimensions = {
     widthCm: num(r.width_cm),
     heightCm: num(r.height_cm),
     printWidthCm: num(r.print_width_cm),
     printHeightCm: num(r.print_height_cm),
     builderAspectRatio: num(r.builder_aspect_ratio),
   };
+  /**
+   * A ROW THAT EXISTS BUT DOES NOT DESCRIBE A PAGE IS A MISS, NOT A RESULT.
+   *
+   * `num` maps a NULL / empty / non-numeric column to 0, so a partially-populated product used to
+   * resolve to a zero-sized page — which is not missing, so every caller's `?? FALLBACK_DIMENSIONS`
+   * was skipped, and the zero travelled all the way into `@page { size: 0cm 0cm }`. Returning null
+   * here hands those callers their fallback, which is what they already expect for "no product".
+   */
+  return isUsableDimensions(d) ? d : null;
 }
 
 export type AlbumProductSnapshot = {
@@ -210,12 +225,14 @@ export async function getAlbumProductSnapshot(productId: string | null): Promise
   return {
     productId: r.id as string,
     productName: r.name as string,
-    dimensions: {
+    // Same guard as `getProductDimensions`: an unusable row degrades to the documented legacy page
+    // rather than snapshotting a zero-sized one onto the album for the rest of its life (0049).
+    dimensions: usableDimensions({
       widthCm: num(r.width_cm),
       heightCm: num(r.height_cm),
       printWidthCm: num(r.print_width_cm),
       printHeightCm: num(r.print_height_cm),
       builderAspectRatio: num(r.builder_aspect_ratio),
-    },
+    }),
   };
 }

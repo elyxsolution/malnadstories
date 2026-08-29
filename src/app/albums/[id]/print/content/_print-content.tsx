@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import PairContent from '@/app/(app)/albums/[id]/build/_pair-frame';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { ProductDimensions } from '@/lib/products/model';
-import { pageAspect } from '@/lib/products/model';
+import { pageAspect, usableDimensions } from '@/lib/products/model';
 import {
   FILL_OVERSCAN_PX,
   INTERIOR_ARTWORK,
@@ -92,7 +92,7 @@ declare global {
 export default function PrintContent({
   blocks,
   photos,
-  dimensions,
+  dimensions: dimensionsInput,
   stickerUrls = {},
 }: {
   blocks: Block[];
@@ -101,6 +101,13 @@ export default function PrintContent({
   dimensions: ProductDimensions;
   stickerUrls?: Record<string, string>;
 }) {
+  /**
+   * Resolved ONCE, at the door, exactly as the preview renderer does. The interior sheet is fixed
+   * by the print specification, but the SOURCE aspect the design is scaled from still comes from
+   * the product — and `scaleToFill` throws on a non-positive one, so a product row with a blank
+   * column would fail the whole export rather than degrade to the documented fallback page.
+   */
+  const dimensions = usableDimensions(dimensionsInput);
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const photoFor = useCallback(
     (id: string | null | undefined) => {

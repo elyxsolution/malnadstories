@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 28 files / 543 tests
+pnpm test              # app suite — 29 files / 555 tests
 cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
@@ -1011,6 +1011,39 @@ bleed, scale-to-fill or the photo's aspect changed.
 loaded, the page is 779 × 1100 px, the fill box is 780 × 1103.14 at (−0.5, −1.56), the overlay and
 its `<img>` occupy that same box with `object-fit: cover`, and computed `border-width` is `0px`.
 Every corner and edge-midpoint pixel of the printed page is artwork; none is white.
+
+### THE PDF PAGE SIZE — a zero-sized product collapses the whole export
+
+**Symptom:** a generated album PDF with its content squeezed into the upper-left corner of a mostly
+blank sheet. **Not** a CSS bug and **not** a coordinate mismatch — the page SIZE was zero.
+
+`album_products` dimensions are read with `Number(v ?? 0)` (`lib/products/catalog.ts`), so a NULL,
+empty or non-numeric column resolves to **0**. Zero is not *missing*, so every caller's
+`?? FALLBACK_DIMENSIONS` was skipped, and it travelled intact into the print CSS:
+
+    @page { size: 0cm 0cm }             INVALID → Chromium substitutes its DEFAULT sheet
+                                        (US Letter, 612 × 792 pt — measured, not inferred)
+    .pdf-page { width: 0; height: 0 }   every page element collapses
+
+The absolutely-positioned artwork inside those collapsed pages then paints at the top-left of a
+Letter sheet. **The builder looks perfectly correct throughout**: it reads `builderAspectRatio` and
+`widthCm` and never touches `printWidthCm`/`printHeightCm`, so a product whose PRINT columns alone
+are broken renders beautifully on screen and prints as a corner of a blank page.
+
+**The fix is one canonical resolution.** `isUsableDimensions` / `usableDimensions`
+(`lib/products/model.ts`) require every field to be a FINITE POSITIVE number and otherwise degrade
+to `FALLBACK_DIMENSIONS` (the documented 15.24 × 20.32 cm legacy page). Applied at every boundary
+the page size crosses: `getProductDimensions` now reports an unusable row as a MISS (`null`) so the
+existing `?? FALLBACK_DIMENSIONS` fires, `getAlbumProductSnapshot` cannot snapshot an unusable page
+onto an album (0049), and **both print renderers resolve once at their COMPONENT boundary** — not
+inside the CSS builder, because the spine's own `@page` width is derived from `printWidthCm`
+outside it, and guarding only the builder left `@page spine { size: 0.000cm … }` behind, which
+still fell back to Letter.
+
+**Verified in real headless Chromium against real PDF bytes**, before and after: a broken product
+went from MediaBox 612 × 792 pt (Letter) with 0 × 0 page elements to 432 × 576 pt with pages at
+576 × 768 px and artwork filling them; a healthy product is byte-for-byte unchanged (interior
+583.92 × 824.88 pt = 206 × 291 mm; preview 594.96 × 841.92 pt = A4, plus its spine page).
 
 ### Routes, storage, worker
 

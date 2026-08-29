@@ -49,6 +49,46 @@ export const FALLBACK_DIMENSIONS: ProductDimensions = {
   builderAspectRatio: 0.75, // 6/8 — the legacy fixed aspect
 };
 
+/**
+ * IS THIS GEOMETRY USABLE FOR LAYOUT AND FOR PRINT?
+ *
+ * ── THE FAILURE THIS EXISTS TO STOP ────────────────────────────────────────────────────────
+ *
+ * Dimensions are read out of `album_products` with `Number(v ?? 0)`, so a column that is NULL,
+ * empty or non-numeric resolves to **0** — a value that is not missing (so the `?? FALLBACK`
+ * never fires) but is not printable either. Zero then reaches the print CSS, and the failure is
+ * silent and total:
+ *
+ *     @page { size: 0cm 0cm }        →  INVALID, so Chromium falls back to its DEFAULT sheet
+ *                                       (US Letter, 612 × 792 pt — not the album's page at all)
+ *     .pdf-page { width: 0; height: 0 }  →  every page element collapses
+ *
+ * and the absolutely-positioned artwork inside those collapsed pages lands in the TOP-LEFT CORNER
+ * of a Letter sheet with the rest blank. Measured in real headless Chromium, not inferred.
+ *
+ * The builder shows nothing wrong, because it reads `builderAspectRatio` and `widthCm` and never
+ * touches `printWidthCm`/`printHeightCm` — so a product with only its PRINT columns broken looks
+ * perfect on screen and prints as a corner of a blank page. That asymmetry is exactly why the
+ * guard belongs here, in the one place a product's geometry becomes a `ProductDimensions`, rather
+ * than in whichever renderer notices first.
+ *
+ * Every field must be a FINITE POSITIVE number. Zero is not a small page; it is a missing one.
+ */
+export function isUsableDimensions(d: ProductDimensions | null | undefined): d is ProductDimensions {
+  if (!d) return false;
+  const ok = (v: number) => Number.isFinite(v) && v > 0;
+  return ok(d.widthCm) && ok(d.heightCm) && ok(d.printWidthCm) && ok(d.printHeightCm) && ok(d.builderAspectRatio);
+}
+
+/**
+ * THE CANONICAL RESOLUTION. Unusable geometry degrades to the documented legacy page rather than
+ * reaching a renderer — a book printed at the fallback size is a visible, explicable problem; a
+ * book printed on a blank Letter sheet with the artwork in the corner is not.
+ */
+export function usableDimensions(d: ProductDimensions | null | undefined): ProductDimensions {
+  return isUsableDimensions(d) ? d : FALLBACK_DIMENSIONS;
+}
+
 /** One page's aspect (width / height). */
 export function pageAspect(d: ProductDimensions): number {
   return d.builderAspectRatio;
