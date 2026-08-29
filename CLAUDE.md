@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 29 files / 555 tests
+pnpm test              # app suite — 30 files / 579 tests
 cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
@@ -1014,8 +1014,16 @@ Every corner and edge-midpoint pixel of the printed page is artwork; none is whi
 
 ### THE PDF PAGE SIZE — a zero-sized product collapses the whole export
 
-**Symptom:** a generated album PDF with its content squeezed into the upper-left corner of a mostly
-blank sheet. **Not** a CSS bug and **not** a coordinate mismatch — the page SIZE was zero.
+**⚠️ STATUS: this is DEFENCE IN DEPTH, not a diagnosed production incident.** A generated album
+PDF was reported with its content squeezed into the upper-left of a mostly blank sheet. A zero page
+size reproduces that symptom exactly (proven below) — but a follow-up read of the live catalog
+showed **the condition cannot currently occur**: `0047` declares `not null check (> 0)` on all five
+dimension columns (verified present in `pg_constraint`), all three products carry valid values, no
+album has a null `product_id`, and the album's real generated PDFs have correct MediaBoxes. So the
+guard below is a genuine hole that was closed, **not** the explanation for that screenshot, which
+remains undiagnosed. Do not cite it as the root cause.
+
+**The hole:** the page SIZE could reach the renderer as zero.
 
 `album_products` dimensions are read with `Number(v ?? 0)` (`lib/products/catalog.ts`), so a NULL,
 empty or non-numeric column resolves to **0**. Zero is not *missing*, so every caller's
@@ -1044,6 +1052,37 @@ still fell back to Letter.
 went from MediaBox 612 × 792 pt (Letter) with 0 × 0 page elements to 432 × 576 pt with pages at
 576 × 768 px and artwork filling them; a healthy product is byte-for-byte unchanged (interior
 583.92 × 824.88 pt = 206 × 291 mm; preview 594.96 × 841.92 pt = A4, plus its spine page).
+
+**Also verified against the ALREADY-GENERATED production files** (downloaded from R2 for a real
+submitted album): `print-content` = 24 pages, every MediaBox 583.92 × 824.88 pt, 131 embedded
+images; `print-cover` = 1 page at 1380 × 926.88 pt; `preview` = 31 pages at A4 + a 36 pt spine.
+No Letter fallback and no zero-sized page anywhere in the real output.
+
+### PRINT READINESS WAITS FOR THE FRAME TO BE MEASURED
+
+`PhotoFrame` needs TWO independent facts to draw the picture the customer composed: the image's
+natural size (the `load` event) and its own box (a `ResizeObserver`). Until both exist,
+`computeFrameLayout` returns null and the renderer falls back to a plain `object-fit: cover` image
+— which fills the frame, so it looks fine, and is the wrong picture whenever the photo was cropped,
+zoomed, panned, rotated or straightened.
+
+**Readiness used to be signalled from `load` alone**, so a frame could report itself finished while
+still showing the fallback. **Measured in real Chromium: `img.onload` fires BEFORE the
+ResizeObserver's first delivery** — so the gate was routinely satisfied at the exact moment the
+layout did not yet exist. What saved real PDFs was incidental: `settle()` awaits `document.fonts.ready`
+plus `img.decode()`, which yields long enough for the observer to land. That is timing, not a guarantee.
+
+`lib/builder/print-readiness.ts` states the rule as a pure predicate: ready when the layout has
+resolved, OR the image failed (a broken URL must never hang generation), OR it has both loaded AND
+been measured yet still has no layout (a degenerate box — waiting longer changes nothing, which is
+what makes deadlock impossible). **No timers of any kind**; every input is an event. `measured` is
+an explicit flag because a box measured as zero and a box not yet measured are identical in the
+numbers and only one of them is finished.
+
+**Print-only by construction**: the effect returns immediately when no `onReady` is supplied, and
+the builder canvas, tray and preview surfaces supply none. The two new state flags are set inside
+callbacks that already call `setState`, so they are batched into the same render and the editor
+pays nothing.
 
 ### Routes, storage, worker
 

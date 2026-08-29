@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { computeFrameLayout, cssFilter, frameFinish, sharpenKernel, type EditConfig } from '@/lib/builder/model';
+import { isFrameReadyForCapture } from '@/lib/builder/print-readiness';
 import { now, record } from '@/lib/perf/metrics';
 
 /**
@@ -103,16 +104,32 @@ export default function PhotoFrame({
     decodeStartRef.current = now();
   }, [url]);
 
+  /**
+   * THE TWO INPUTS A DESIGNED RENDER NEEDS, tracked so readiness can wait for BOTH.
+   *
+   * `loaded` is the image's natural size; `measured` is the frame's box. They arrive from
+   * independent sources (the `load` event and a ResizeObserver) and readiness used to be
+   * signalled from the first alone — see `lib/builder/print-readiness`. Both are set alongside
+   * state React already updates in the same callback, so they cost no extra render.
+   */
+  const [loaded, setLoaded] = useState(false);
+  const [measured, setMeasured] = useState(false);
+
   const handleLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     record('image.decode', now() - decodeStartRef.current);
     setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
     setFadedIn(true);
-    fireReady();
+    // NOT `fireReady()`. A decoded image is not a finished frame: until the frame has been
+    // measured the renderer is still showing the `object-fit: cover` fallback, and capturing a
+    // PDF at that instant prints a photo the customer never framed.
+    setLoaded(true);
   };
   const handleError = () => {
     // A broken incoming image must not leave the frame blank behind a half-finished fade.
     setFadedIn(true);
     setPrevUrl(null);
+    // Still IMMEDIATE: nothing better is coming, and a broken or expired URL must never be able
+    // to hang PDF generation.
     fireReady();
     onLoadError?.();
   };
@@ -123,12 +140,30 @@ export default function PhotoFrame({
     const ro = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
       setFrame({ w: width, h: height });
+      // Batched with `setFrame` in the same callback — one render, not two. A ZERO observation
+      // still counts as measured: a degenerate box is an answer, and readiness must not wait on
+      // a number that will never change.
+      setMeasured(true);
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const layout = computeFrameLayout(frame.w, frame.h, nat.w, nat.h, edit);
+
+  /**
+   * THE READINESS SIGNAL — fired when the frame is showing what it will finally show.
+   *
+   * Only surfaces that ask for it (the print routes, via `onReady`) pay anything here; the
+   * editor passes no `onReady`, so this effect is inert for the builder canvas, the tray and
+   * every other interactive surface. Print-only by construction, not by a flag.
+   */
+  useEffect(() => {
+    if (!onReady) return;
+    if (isFrameReadyForCapture({ hasLayout: layout !== null, loaded, measured, errored: false })) fireReady();
+    // `fireReady` is idempotent (a ref latch) and reads the latest `onReady` through the closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, loaded, measured, onReady]);
   const sharpness = edit?.sharpness ?? 0;
   // Container finish (opacity / rounded corners / soft shadow). Border-radius uses the
   // measured short edge for crisp, uniform px corners on any aspect.
