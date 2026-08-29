@@ -511,8 +511,8 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 30 files / 579 tests
-cd worker && pnpm test # worker suite — 141 files / 1235 tests
+pnpm test              # app suite — 31 files / 610 tests
+cd worker && pnpm test # worker suite — 143 files / 1296 tests
 ```
 
 - **`tests/`** (repo root, added Phase 9 P4) — app-side commerce domain. Full index and rationale
@@ -524,7 +524,10 @@ cd worker && pnpm test # worker suite — 141 files / 1235 tests
   cart eligibility + the two deliberately-separate add helpers, the absolute blueprint-draft PDF
   block, derived album titles, and migration-inventory/documentation consistency.
 - **`worker/`** — owns everything worker-side and is NOT duplicated by the app suite: the PDF
-  pipeline and deletion race, `previewPdfKey` determinism, orphan scan/cleanup safety
+  pipeline and deletion race, the **PDF geometry safety net** (`pdf-geometry.test.ts` — a correct
+  file accepted, an enlarged sheet / wrong width / wrong height / malformed geometry rejected, and
+  the case every cheaper check misses: 24 correct MediaBoxes with ONE page on the wrong sheet),
+  `previewPdfKey` determinism, orphan scan/cleanup safety
   (`VerifiedOrphan`, the 24h floor, dry-run default, ownership + ETag rechecks, "admin assets can
   never be verified"), image hardening, recovery.
 
@@ -1083,6 +1086,70 @@ numbers and only one of them is finished.
 the builder canvas, tray and preview surfaces supply none. The two new state flags are set inside
 callbacks that already call `setState`, so they are batched into the same render and the editor
 pays nothing.
+
+### THE PAGE IS A CONTAINMENT BOUNDARY — or Chromium prints it at 70%
+
+**Symptom:** every page's artwork compressed into the top-left ~70% of the sheet, the rest blank,
+with a perfectly correct MediaBox. Read straight out of page 1's content stream, before and after:
+
+    enlarged: q 2.1857769 0 0 2.1857769 0 0 cm ... 0 0 1113 1572 re f   0.24 x 2.1858 = 0.5246
+    correct:  q 3.125     0 0 3.125     0 0 cm ... 0 0  779 1100 re f   0.24 x 3.125  = 0.7500
+
+Chromium's PRINT SHEET was 1113 x 1572 CSS px while the page elements stayed 779 x 1100.
+
+**Cause: the page's SCROLLABLE OVERFLOW.** A physical page is a clip window onto a two-page-wide
+open pair, so `.pair-clip` is `width: 200%` and every page reports `scrollWidth` 1560 against
+`offsetWidth` 779; an overlay dragged off the page (which the editor allows) adds more.
+`overflow: hidden` clips what is PAINTED but leaves that region, and past roughly ten pages
+Chromium folds it into the sheet.
+
+**Fix: `contain: strict` on the page element** in all three print routes. Size containment says the
+element's size is computed without reference to its contents, so their overflow cannot reach the
+page-size computation. The explicit width/height mean nothing else changes — children still
+overflow, and are still clipped exactly as before.
+
+**What the experiments ruled out** (all measured, on the real album): decoded image memory — it
+reproduces with 2x2 px data-URI images in under a second; overlay overflow specifically — clamping
+every overlay inside the page made it WORSE; viewport size; `deviceScaleFactor`; and explicit paper
+size instead of `preferCSSPageSize`. Across the full `contain` matrix, every value including `size`
+was correct and every value without it (`layout`, `paint`, `style`, `layout paint`, `content`) was
+not. The threshold on this album sits between 8 and 10 pages, which is why it looked intermittent
+and why a 2-page reproduction always passed.
+
+**Validated**: 10/10 consecutive 24-page renders correct; all 24 pages at 583.92 x 824.88 pt with
+content covering >= 100% of the page on both axes.
+
+### THE GEOMETRY SAFETY NET — a wrong file is never published
+
+`contain: strict` is the root-cause fix; this is the net underneath it, because the failure was
+SILENT (right page count, right MediaBox, ruined artwork) and would otherwise reach a printer.
+
+- **`worker/apps/worker/src/processors/pdf/pdf-geometry.ts`** is pure and reads the PDF itself: for
+  EVERY page, its `/MediaBox` and the CSS-pixel sheet Chromium painted, recovered from that page's
+  own content stream (`0 0 W H re f`). Two checks per page:
+  1. **The unit invariant** — `sheetPx === ceil(mediaPt × 96/72)`. Derived entirely from the file, so
+     it states no page size of its own, and it holds for every kind, every product, and the preview
+     book's narrow spine page alike. This is the check that catches the enlarged sheet.
+  2. **The expected artwork size**, for the two printer-ready kinds only — their MediaBox must be
+     the specified 206 × 291 / 487 × 327 mm. Catches a file that is internally consistent but on the
+     wrong paper (a Letter fallback passes check 1 perfectly). The preview is deliberately exempt:
+     its size follows the album's product, so no single expected value exists.
+- **No second page-size definition.** `PRINT_ARTWORK_MM` in `pdf-contract.ts` is a mirror of
+  `src/lib/print/spec.ts` under that file's existing mirroring rule, and `tests/print-spec.test.ts`
+  asserts the two are equal, so they cannot drift. Tolerances: ±2 px on the sheet, ±1 pt on the
+  MediaBox — Chromium emits 583.92 pt where the exact conversion is 583.94, while the nearest wrong
+  paper (A4) is 11 pt away.
+- **`VerifyGeometryStage` runs between `RenderStep` and `UploadStage`**, so a rejected render is
+  never written to R2, never replaces the good PDF at the same deterministic key, is never marked
+  `ready`, and is never handed to a customer or a printer — the bytes simply go out of scope.
+- **Failure is TRANSIENT** (`render_geometry_invalid`), because the fault was intermittent and a
+  fresh render is a real remedy: the existing recovery sweep re-drives with a new token, counts the
+  attempt, and at the cap abandons the row as `failed` carrying this code — loud, not a quiet
+  infinite retry. No new queue, no new recovery path, no migration (`failure_code` is plain text).
+- **Proven against real files, not only fixtures**: it accepts all 39 real headless-Chromium renders
+  from the re-validation sweep, and rejects both historical broken exports —
+  `outputpdf/print-content_incorrect.pdf` ("page 1: laid out on a 1107x1564 px sheet … would print
+  at 70.4% of the page") and the reproduction — while passing both good ones.
 
 ### Routes, storage, worker
 

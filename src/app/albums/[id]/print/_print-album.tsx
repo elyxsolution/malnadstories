@@ -121,6 +121,17 @@ function buildPrintCss(dimensions: ProductDimensions, spineCm: number | null): s
     /* The fragmentainer's own dimensions — an exact fit, so no strip of sheet is left bare. */
     width: ${w}px; height: ${h}px;
     overflow: hidden; background: #fff;
+    /*
+     * THE PAGE IS A HARD BOUNDARY — see the same declaration, and the measurements behind it, in
+     * the printer-ready interior ("print/content/_print-content"). This renderer has the identical
+     * structure: ".pair-clip" below is 200% wide, so every page carries scrollable overflow far
+     * wider than the sheet, and "overflow: hidden" clips the PAINT without removing that region.
+     * Past roughly ten pages Chromium folds it into the print sheet and every page's artwork
+     * collapses into the top-left ~70% with a correct MediaBox. The preview book is 31 pages, so
+     * it is squarely in that range. Size containment fixes the page's size independently of its
+     * contents; the explicit width/height above mean it changes nothing else.
+     */
+    contain: strict;
   }
   .pdf-page + .pdf-page { break-before: page; page-break-before: always; }
   /* The open pair is 2 pages wide (200%); each physical page is a clip window onto it. The

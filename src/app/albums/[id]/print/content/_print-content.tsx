@@ -67,6 +67,34 @@ function buildContentCss(dimensions: ProductDimensions): string {
     /* The fragmentainer's own dimensions — an exact fit, so no strip of sheet is left bare. */
     width: ${pageW}px; height: ${pageH}px;
     overflow: hidden; background: #fff;
+    /*
+     * THE PAGE IS A HARD BOUNDARY: its size is fixed, and NOTHING inside it may influence that.
+     *
+     * "overflow: hidden" clips what is PAINTED, but it does not remove the element's scrollable
+     * overflow region. This page legitimately has one: ".pair-clip" below is 200% wide, because a
+     * physical page is a clip window onto a two-page-wide open pair. So every page reports a
+     * scrollWidth of 1560 against an offsetWidth of 779, and an overlay pushed off the page — which
+     * the editor allows — adds more. Past roughly ten pages Chromium folds that region into its
+     * PRINT SHEET. Measured on the real album, page 1's content stream, before and after:
+     *
+     *   enlarged: q 2.1857769 0 0 2.1857769 0 0 cm ... 0 0 1113 1572 re f   (0.24 x 2.1858 = 0.52)
+     *   correct:  q 3.125     0 0 3.125     0 0 cm ... 0 0  779 1100 re f   (0.24 x 3.125  = 0.75)
+     *
+     * The sheet became 1113 x 1572 CSS px while this element stayed 779 x 1100, so every page's
+     * artwork covered the top-left ~70% and the rest printed blank — with a correct MediaBox, which
+     * is why it read as a scaling bug rather than an overflow bug.
+     *
+     * SIZE CONTAINMENT is the fix, and the minimal one: it declares that this element's size is
+     * computed without reference to its contents, so their overflow can no longer reach the
+     * page-size computation. Across the whole "contain" matrix on the real 24-page album, every
+     * value including "size" produced the correct sheet and every value without it ("layout",
+     * "paint", "style", "layout paint", "content") did not. "strict" is "size layout style paint" —
+     * the whole statement we mean: this page is an independent box.
+     *
+     * It changes nothing else: the width and height above are explicit, so a size that ignores its
+     * contents is the size it already had, and children still overflow and are still clipped.
+     */
+    contain: strict;
   }
   /* break-BEFORE on every page after the first: it cannot produce a trailing blank sheet, and it
      does not depend on where a page sits among its siblings (see the preview renderer's note). */

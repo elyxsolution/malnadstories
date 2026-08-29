@@ -24,6 +24,7 @@ import type {
 } from '../src/processors/pdf/album-pdf-repository.js';
 import type { PdfFailureCode, PdfKind, PdfStage } from '../src/processors/pdf/pdf-contract.js';
 import { hashToken, redactToken } from '../src/processors/pdf/pdf-contract.js';
+import { validPdf } from './support/pdf-fixture.js';
 
 // --- Fakes ------------------------------------------------------------------------------------
 
@@ -90,7 +91,8 @@ class FakePdfStore implements AlbumPdfStore {
 class FakeRenderer implements PageRenderer {
   readonly calls: RenderRequest[] = [];
   mode: 'ok' | 'print-error' | 'crash' | 'empty' | 'refused' | 'dns' = 'ok';
-  pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
+  /** A geometrically valid render — the pipeline verifies the bytes before uploading them. */
+  pdf = validPdf();
   async render(request: RenderRequest): Promise<RenderResult> {
     this.calls.push(request);
     if (this.mode === 'print-error') throw new PrintRouteError(500);

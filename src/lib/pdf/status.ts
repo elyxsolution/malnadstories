@@ -40,6 +40,9 @@ export type PdfFailureCode =
   | 'render_dns_failed' // the configured app URL's hostname does not resolve
   | 'print_route_error' // the print route returned a non-OK HTTP status
   | 'render_empty' // page.pdf produced 0 bytes
+  // The file rendered, but a page's printed sheet disagreed with its own MediaBox, so the artwork
+  // would print undersized in a corner. The bytes were discarded, never uploaded.
+  | 'render_geometry_invalid'
   | 'upload_failed' // R2 putObject failed
   | 'upload_timeout' // R2 putObject exceeded its watchdog
   | 'db_update_failed' // the final status write failed
@@ -60,6 +63,7 @@ const FAILURE_LABEL: Record<PdfFailureCode, string> = {
   render_dns_failed: 'Rendering service could not resolve the site address',
   print_route_error: 'Print page failed to load',
   render_empty: 'Renderer produced an empty file',
+  render_geometry_invalid: 'Rendered file had the wrong page geometry',
   upload_failed: 'Storage upload failed',
   upload_timeout: 'Storage upload timed out',
   db_update_failed: 'Database update failed',
@@ -116,6 +120,8 @@ export function pdfFailureRecommendation(code: string | null | undefined): strin
       return 'Chromium failed to start on the worker. Check the worker service health/memory.';
     case 'print_route_error':
       return 'The print route returned a non-OK status. Check APP_URL and the print route logs.';
+    case 'render_geometry_invalid':
+      return 'The render was rejected before upload because a page was laid out on the wrong sheet. Nothing was published. It re-drives automatically; if it persists, the print page has regained a content-driven page size.';
     case 'upload_failed':
     case 'upload_timeout':
     case 'storage_failure':

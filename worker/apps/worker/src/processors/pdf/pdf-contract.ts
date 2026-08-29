@@ -50,11 +50,40 @@ export type PdfFailureCode =
   | 'render_dns_failed'
   | 'print_route_error'
   | 'render_empty'
+  /**
+   * The file rendered, but its printed geometry is wrong — Chromium laid a page out on a sheet
+   * that does not match that page's own MediaBox, so the artwork would print undersized in a
+   * corner of the paper. TRANSIENT: the recovery sweep re-drives it, and the bytes are discarded.
+   */
+  | 'render_geometry_invalid'
   | 'upload_failed'
   | 'db_update_failed'
   | 'token_expired'
   | 'album_missing'
   | 'render_failed';
+
+/**
+ * THE ARTWORK SIZE, IN MILLIMETRES, of each printer-ready artifact — a MIRROR of the print
+ * specification, which lives in ONE place: the app's src/lib/print/spec.ts (INTERIOR_ARTWORK and
+ * COVER_ARTWORK). Worker V2 is a separate deployable workspace with no path into the app's source,
+ * so it is copied here under the same rule as everything else in this file, and
+ * tests/print-spec.test.ts asserts the two agree so they cannot drift apart silently.
+ *
+ * These are the sizes a PRINTER is expecting, so they are fixed and knowable ahead of the render.
+ * The preview book is deliberately null: its page size follows the album's product and it also
+ * carries a narrow spine page, so no single expected size exists for it — the unit invariant in
+ * pdf-geometry.ts checks every one of its pages against that page's own MediaBox instead.
+ */
+export const PRINT_ARTWORK_MM: Record<PdfKind, { readonly w: number; readonly h: number } | null> = {
+  preview: null,
+  print_cover: { w: 487, h: 327 },
+  print_content: { w: 206, h: 291 },
+};
+
+/** Millimetres to PDF points — the fixed unit conversion, not a page size. */
+export function mmToPt(mm: number): number {
+  return (mm / 25.4) * 72;
+}
 
 /** The object basename each kind is written under, inside the album's own R2 namespace. */
 const BASENAME: Record<PdfKind, string> = {

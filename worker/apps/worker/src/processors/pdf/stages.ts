@@ -6,6 +6,7 @@ import {
   RenderTargetUnreachableError,
 } from './page-renderer.js';
 import { PRINT_READY_FLAG, albumPdfKey, hashToken, printUrl, redactToken } from './pdf-contract.js';
+import { verifyPdfGeometry } from './pdf-geometry.js';
 
 /**
  * THE RENDER STAGES — a composable rendering pipeline over the print route (the source of truth). Each
@@ -85,7 +86,45 @@ export class RenderStep implements RenderStage {
   }
 }
 
-// --- 5. Upload: store the PDF under the deterministic key (overwrite-safe = idempotent). ---
+// --- 5. Verify geometry: the rendered bytes are only a candidate until their printed geometry is
+//        checked. NOTHING is uploaded, marked ready, or shown to anyone before this passes. ---
+export class VerifyGeometryStage implements RenderStage {
+  readonly name = 'verify' as const;
+  async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
+    const pdfBytes = required(ctx.pdfBytes, 'pdfBytes');
+    const verdict = verifyPdfGeometry(pdfBytes, ctx.kind);
+    if (!verdict.ok) {
+      /**
+       * TRANSIENT, deliberately. The enlarged-sheet failure was intermittent — the same album and
+       * the same code produced a correct file on one run and a broken one on the next — so a fresh
+       * render is a genuine remedy, and the recovery sweep is the mechanism that already exists to
+       * try it. It re-drives with a new token, counts the attempt, and gives up at the cap, which
+       * leaves the row `failed` with this code for an admin: loud, not silent.
+       *
+       * Throwing here also means the bytes simply go out of scope. They are never written to R2, so
+       * a bad render can neither be persisted, replace a good PDF at the same deterministic key,
+       * be marked ready, nor be handed to a customer or a printer.
+       */
+      deps.logger.log({
+        level: 'warning',
+        message: 'pdf.geometry_rejected',
+        detail: {
+          albumId: ctx.albumId,
+          kind: ctx.kind,
+          pages: verdict.pages.length,
+          reason: verdict.reason,
+        },
+      });
+      throw new TransientPdfError(
+        `rendered PDF failed geometry verification — ${verdict.reason}`,
+        'render_geometry_invalid',
+      );
+    }
+    return ctx;
+  }
+}
+
+// --- 6. Upload: store the PDF under the deterministic key (overwrite-safe = idempotent). ---
 export class UploadStage implements RenderStage {
   readonly name = 'upload' as const;
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
@@ -101,7 +140,7 @@ export class UploadStage implements RenderStage {
   }
 }
 
-// --- 6. Finalize: point album_pdfs at the uploaded PDF (status ready). ---
+// --- 7. Finalize: point album_pdfs at the uploaded PDF (status ready). ---
 export class FinalizeStage implements RenderStage {
   readonly name = 'finalize' as const;
   async run(ctx: RenderContext, deps: RenderDeps): Promise<RenderContext> {
@@ -149,6 +188,7 @@ export function defaultRenderStages(): readonly RenderStage[] {
     new SnapshotStage(),
     new PrepareRenderStage(),
     new RenderStep(),
+    new VerifyGeometryStage(),
     new UploadStage(),
     new FinalizeStage(),
   ];

@@ -16,6 +16,7 @@ import {
   hashToken,
   previewPdfKey,
 } from '../src/processors/pdf/pdf-contract.js';
+import { validPdfForUrl } from './support/pdf-fixture.js';
 
 /**
  * PDF GENERATION ↔ ALBUM DELETION RACE (Phase 6 Prompt 10).
@@ -112,7 +113,7 @@ class RaceRenderer implements PageRenderer {
   async render(request: RenderRequest): Promise<RenderResult> {
     this.lastUrl = request.url;
     if (this.onRender) await this.onRender();
-    return { pdf: new Uint8Array([0x25, 0x50, 0x44, 0x46]), httpStatus: 200 };
+    return { pdf: validPdfForUrl(request.url), httpStatus: 200 };
   }
 }
 

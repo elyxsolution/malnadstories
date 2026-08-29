@@ -9,6 +9,8 @@
  * A prepress error is not a bug you find in staging. It is a bug you find after the paper is cut.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   COVER_ARTWORK,
   COVER_BACK_SAFE_BOX,
@@ -448,5 +450,38 @@ describe('spine 13 → 17 mm — the change, and everything it must NOT have cha
     expect(GUIDE_STYLE.color).toBe('#000000');
     expect(GUIDE_STYLE.opacity).toBeGreaterThan(0);
     expect(GUIDE_STYLE.opacity).toBeLessThan(1);
+  });
+});
+
+/**
+ * THE WORKER'S MIRROR OF THE ARTWORK SIZES.
+ *
+ * The PDF geometry safety net rejects a render whose pages are not the size a printer is expecting.
+ * Worker V2 is a separate deployable workspace with no path into `src/`, so it holds a copy of those
+ * two sizes in `pdf-contract.ts`, under the same rule as everything else in that file. A copy that
+ * nothing checks is a second source of truth waiting to disagree — so this asserts they are equal,
+ * and the file above stays the only place a millimetre is DECIDED.
+ */
+describe('the worker mirrors the artwork sizes, and cannot drift from them', () => {
+  const src = readFileSync(
+    resolve(__dirname, '..', 'worker/apps/worker/src/processors/pdf/pdf-contract.ts'),
+    'utf8',
+  );
+  const mirror = (kind: string) => {
+    const m = new RegExp(kind + ':\\s*\\{\\s*w:\\s*([\\d.]+),\\s*h:\\s*([\\d.]+)\\s*\\}').exec(src);
+    return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+  };
+
+  it('mirrors the interior artwork', () => {
+    expect(mirror('print_content')).toEqual(INTERIOR_ARTWORK);
+  });
+
+  it('mirrors the cover artwork', () => {
+    expect(mirror('print_cover')).toEqual(COVER_ARTWORK);
+  });
+
+  it('leaves the preview book WITHOUT an expected size — it has no single one', () => {
+    // Its page size follows the album's product, and the book carries a narrower spine page.
+    expect(src).toMatch(/preview:\s*null/);
   });
 });

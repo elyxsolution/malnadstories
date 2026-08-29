@@ -77,6 +77,14 @@ function buildCoverCss(): string {
        left bare along an edge. The @page size stays in exact mm — see lib/print/spec. */
     width: ${pageW}px; height: ${pageH}px;
     overflow: hidden; background: #fff;
+    /*
+     * THE PAGE IS A HARD BOUNDARY — the same declaration the other two print routes carry, for the
+     * same reason (see "print/content/_print-content" for the measurements). This export is a
+     * single page, so it sits below the page count where Chromium starts folding a page's
+     * scrollable overflow into the print sheet; the containment is here so a cover that overflows
+     * its panels can never start doing so, rather than because it is failing today.
+     */
+    contain: strict;
   }
   .cover-spread {
     position: absolute;
