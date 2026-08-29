@@ -37,9 +37,11 @@ import {
 import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover, PAGE_BAR_GAP, type BarBand } from './_canvas-bar';
 import LayerMenu, { type LayerSibling } from './_layer-menu';
 import FontPicker from './_font-picker';
+import FontSizeField from './_font-size-field';
 import { ColorField } from './_color-picker';
 import { MAX_ZOOM, type Block, type EditConfig, type Overlay, type TextElement } from '@/lib/builder/model';
 import type { LayerAction } from '@/lib/builder/elements';
+import { textSizePatch } from '@/lib/builder/text-size';
 import type { Photo } from '@/lib/builder/photo';
 import type { Anchor } from './_use-anchor-rect';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -460,33 +462,6 @@ const ALIGN_ICON: Record<TextElement['align'], React.ReactNode> = {
   right: <AlignRight />,
 };
 
-/**
- * Editable font size — type a number, press ↑/↓, or use the native spinner. Clamped to the
- * same 10–160 range the inspector slider uses; writes through the same `patchText` callback.
- */
-function SizeInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  return (
-    <input
-      type="number"
-      data-bar-item
-      min={10}
-      max={160}
-      step={1}
-      value={Math.round(value)}
-      aria-label="Font size"
-      title="Font size"
-      onChange={(e) => {
-        const v = Math.round(Number(e.target.value));
-        if (Number.isFinite(v)) onChange(Math.max(10, Math.min(160, v)));
-      }}
-      onKeyDown={(e) => {
-        // The bar's roving focus uses ←/→ — keep them for the caret inside the field.
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.stopPropagation();
-      }}
-      className="h-7 w-12 rounded-lg bg-transparent px-1.5 text-center text-[12px] tabular-nums text-foreground outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-studio-bright [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-    />
-  );
-}
 
 /**
  * THE TEXT TOOLBAR (Pass 3) — everyday typography without leaving the canvas.
@@ -506,7 +481,7 @@ function TextBar(p: BarProps) {
   return (
     <>
       <FontPicker compact value={el.font} onChange={(v) => set({ font: v })} />
-      <SizeInput value={el.size} onChange={(v) => set({ size: v })} />
+      <FontSizeField compact barItem value={el.size} onChange={(v) => set(textSizePatch(el, v))} />
       <BarSep />
       <BarBtn label="Bold" icon={<Bold />} active={el.weight >= 700} onClick={() => set({ weight: el.weight >= 700 ? 400 : 700 })} />
       <BarBtn label="Italic" icon={<Italic />} active={el.italic} onClick={() => set({ italic: !el.italic })} />

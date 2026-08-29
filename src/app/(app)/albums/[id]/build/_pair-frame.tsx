@@ -72,7 +72,6 @@ export default function PairContent({
   half = 'full',
   showPlaceholders = false,
   badge = 'none',
-  print = false,
 }: {
   block: Block;
   photoFor: (id: string | null | undefined) => PairPhoto | undefined;
@@ -93,13 +92,6 @@ export default function PairContent({
    * customer PDF/print/preview leaves it false, so unfilled placeholders never print.
    */
   showPlaceholders?: boolean;
-  /**
-   * PRINTER-READY MODE — drop the overlay's screen chrome (the white photo border and its drop
-   * shadow) so the artwork reaches the trimmed page edge with nothing between. Set ONLY by the
-   * printer-ready interior export; every other surface, including the customer preview PDF,
-   * leaves it false. See the overlay branch below for why this is the fix.
-   */
-  print?: boolean;
 }) {
   const isDouble = block.template === 'double-spread';
   const left = photoFor(block.photoIds[0]);
@@ -162,27 +154,23 @@ export default function PairContent({
           <div
             key={i}
             /**
-             * THE WHITE HAIRLINE (printer-ready export).
+             * AN OVERLAY IS A PLAIN IMAGE — no border, no outline, no shadow, no radius.
              *
-             * `border-2 border-white shadow` is SCREEN CHROME: it makes an overlay read as a
-             * grabbable photo card on the canvas, and it is hardcoded here — the customer never
-             * chose it, cannot change it, and it exists nowhere in the album model.
+             * This used to carry `border-2 border-white shadow`, which was SCREEN CHROME: it made
+             * an overlay read as a grabbable photo card. It was hardcoded here, the customer never
+             * chose it, could not change it, and it existed nowhere in the album model.
              *
              * On a printed page it is ink. Because a page created today starts as ONE FULL-PAGE
-             * overlay per side (`newUnitOverlayGeoms`, see model.ts), that 2 px white ring lands
-             * exactly between the artwork and the trimmed page edge — the thin white line the
-             * printer-ready interior must not have — and the drop shadow prints as grey haze
-             * along the same edge.
+             * overlay per side (`newUnitOverlayGeoms`, see model.ts), that 2 px white ring landed
+             * exactly between the artwork and the trimmed page edge — the white hairline — and the
+             * drop shadow printed as grey haze along the same edge. The printer-ready interior
+             * suppressed it through a `print` flag; the flag is gone because the chrome is gone.
              *
-             * So it is suppressed in `print` mode ONLY. The builder canvas, the in-app preview,
-             * the flipbook, the navigator and the customer PREVIEW PDF all pass `print` false and
-             * are pixel-identical to before.
+             * `overflow-hidden` STAYS: it is what clips the photo to its container, not decoration.
+             * Selection outlines and resize handles are unaffected — they are drawn by `Movable`
+             * in the chrome layer, never by this element.
              */
-            className={
-              print
-                ? 'absolute overflow-hidden'
-                : 'absolute overflow-hidden border-2 border-white shadow'
-            }
+            className="absolute overflow-hidden"
             style={style}
           >
             <Framed photo={photo} badge={badge} onFrameReady={onFrameReady} />

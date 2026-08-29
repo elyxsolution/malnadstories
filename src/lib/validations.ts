@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { nameSchema, passwordSchema } from '@/lib/auth/policy';
 import { FONT_KEYS } from '@/lib/builder/fonts-catalog';
 import { COVER_TEXT_ROLES } from '@/lib/builder/model';
+import { MAX_TEXT_SIZE, MIN_TEXT_SIZE } from '@/lib/builder/text-size';
 
 export const SignupSchema = z.object({
   // Password (8–25) + display-name (2–60, normalised) policy lives in one place
@@ -190,7 +191,12 @@ const TextElementSchema = z.object({
   h: z.number().gt(0).max(1),
   variant: z.enum(['heading', 'subtitle', 'paragraph']),
   font: z.enum(FONT_KEYS),
-  size: z.number().min(6).max(220),
+  /**
+   * THE SAME bounds the editor enforces — imported, never restated. A schema maximum below the
+   * UI's is a size the customer can be shown and then silently refused on save; they disagreed
+   * (UI 10–160, schema 6–220) until `text-size.ts` became the single authority.
+   */
+  size: z.number().min(MIN_TEXT_SIZE).max(MAX_TEXT_SIZE),
   weight: z.number().int().min(100).max(900),
   italic: z.boolean(),
   underline: z.boolean(),

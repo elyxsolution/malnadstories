@@ -23,6 +23,20 @@ import { clampRect, isFullyOffPage, type Bounds } from '@/lib/builder/edit-bound
  */
 export type SnapLine = { axis: 'x' | 'y'; pos: number; kind?: 'center' | 'edge' | 'spacing' };
 
+/**
+ * WHAT THE GESTURE WAS, handed to `onChange` alongside the rect it produced.
+ *
+ * A rect on its own cannot say whether it came from a drag, a corner handle or a side handle —
+ * and some elements need to know. Text does: a corner resize scales the type with the box, a
+ * side resize only changes where the words wrap. `start` is the rect the gesture BEGAN from, so
+ * a host can derive a total scale factor from a stable source instead of compounding per-frame
+ * ratios (which is how repeated resizes drift).
+ *
+ * Optional, and absent for anything that is not a live gesture (the settle clamp on release),
+ * so every existing caller — which ignores the second argument — behaves exactly as before.
+ */
+export type GestureContext = { mode: 'move' | 'resize'; ex: -1 | 0 | 1; ey: -1 | 0 | 1; start: Rect };
+
 /** Another element's box, in pair-normalized coordinates — the input for peer alignment. */
 export type PeerRect = { x: number; y: number; w: number; h: number };
 
@@ -244,7 +258,7 @@ export default function Movable({
    */
   onSelect: (mods?: SelectMods) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
-  onChange: (rect: Rect) => void;
+  onChange: (rect: Rect, ctx?: GestureContext) => void;
   onCommit?: () => void;
   onRotate?: (deg: number) => void;
   onSnap?: (lines: SnapLine[]) => void;
@@ -524,7 +538,7 @@ export default function Movable({
         h = Math.min(bottom - y, 1);
       }
 
-      onChange({ x, y, w, h });
+      onChange({ x, y, w, h }, { mode: 'resize', ex: d.ex, ey: d.ey, start: d.start });
     } else if (d.mode === 'rotate' && onRotate) {
       const angle = (Math.atan2(e.clientY - d.cy, e.clientX - d.cx) * 180) / Math.PI + 90;
       const snapped = Math.abs(((angle % 90) + 90) % 90) < 4 || Math.abs((((angle % 90) + 90) % 90) - 90) < 4

@@ -156,13 +156,16 @@ describe('the preview spine keeps its ADVISORY, page-count-dependent width', () 
   });
 });
 
-describe('the preview book KEEPS the overlay chrome the print export drops', () => {
+describe('the preview book draws overlays as plain images, like every other surface', () => {
   /**
-   * The converse of the white-hairline fix, and the reason it is safe.
+   * THE OVERLAY FRAME IS GONE EVERYWHERE, and this is where that is pinned for the preview book.
    *
-   * `PairContent`'s `print` prop defaults to false, so the preview still draws the white photo
-   * border and its drop shadow exactly as it always did. If a future change made the suppression
-   * unconditional, the customer's preview would silently change appearance — this fails first.
+   * `border-2 border-white shadow` was screen chrome: hardcoded in the renderer, absent from the
+   * album model, never chosen by the customer and impossible for them to remove. The printer-ready
+   * interior used to suppress it through a `print` flag while the preview kept it — so the same
+   * album was two different pictures depending on which file you opened. The chrome was removed
+   * outright instead, and the flag with it; these assertions are what stop a frame reappearing on
+   * one surface and not the others.
    */
   const withOverlay: Block = {
     key: '0',
@@ -189,12 +192,19 @@ describe('the preview book KEEPS the overlay chrome the print export drops', () 
     }),
   );
 
-  it('still draws the white photo border', () => {
-    expect(html).toContain('border-2 border-white');
+  it('draws NO white photo border', () => {
+    expect(html).not.toContain('border-white');
+    expect(html).not.toContain('border-2');
   });
 
-  it('still draws the drop shadow', () => {
-    expect(html).toMatch(/class="[^"]*\bshadow\b/);
+  it('still CLIPS each overlay to its container', () => {
+    // The one thing that class ever did that was not decoration. Removing it too would let a
+    // zoomed photo spill out of its frame and across the page.
+    expect(html).toContain('class="absolute overflow-hidden"');
+  });
+
+  it('draws NO drop shadow', () => {
+    expect(html).not.toMatch(/class="[^"]*\bshadow\b/);
   });
 
   it('carries none of the printer-ready guide geometry', () => {

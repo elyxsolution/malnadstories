@@ -201,9 +201,9 @@ function PhysicalPage({
     <div className="print-page">
       <div className="page-fill">
         <div className="pair-clip" style={{ left: side === 'left' ? '0' : '-100%' }}>
-          {/* `print` drops the overlay's white border + drop shadow — the screen chrome that
-              otherwise prints as a hairline between the artwork and the trimmed page edge. */}
-          <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} half={side} print />
+          {/* Overlays carry no border or shadow on ANY surface now, so there is nothing left for
+              this route to suppress — the white hairline cannot come back through a missed flag. */}
+          <PairContent block={block} photoFor={photoFor} stickerUrlFor={stickerUrlFor} onFrameReady={onFrameReady} half={side} />
         </div>
       </div>
     </div>

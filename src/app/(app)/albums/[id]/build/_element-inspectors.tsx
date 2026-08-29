@@ -23,8 +23,10 @@ import {
 } from 'lucide-react';
 import { Section, Row, Slider, Toggle } from './_controls';
 import FontPicker from './_font-picker';
+import FontSizeField from './_font-size-field';
 import { ColorField } from './_color-picker';
 import type { EditConfig, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
+import { textSizePatch } from '@/lib/builder/text-size';
 
 /**
  * Generic, callback-driven element inspectors — NOT bound to the page (`BuilderApi`) or the
@@ -127,8 +129,11 @@ export function TextInspector({
       {!advanced && (
         <Section title="Font">
           <FontPicker value={el.font} onChange={(v) => set({ font: v })} />
-          <Row label="Size" hint={`${Math.round(el.size)}`}>
-            <Slider value={el.size} min={10} max={160} step={1} ariaLabel="Font size" onChange={(v) => set({ size: v })} />
+          {/* The SAME control the floating text toolbar uses. It replaced a 10–160 slider whose
+              range was narrower than the model's own — so a size the slider could not reach was
+              nonetheless storable, and the two disagreed about what the maximum was. */}
+          <Row label="Size" hint="px">
+            <FontSizeField value={el.size} onChange={(v) => set(textSizePatch(el, v))} />
           </Row>
           <div className="flex items-center gap-1.5">
             <IconToggle active={el.weight >= 700} label="Bold" onClick={() => set({ weight: el.weight >= 700 ? 400 : 700 })}>

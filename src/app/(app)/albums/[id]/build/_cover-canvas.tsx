@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import CoverDesign, { BackCoverDesign, SpineDesign } from './_cover-render';
 import {
   COVER_FINISHED_SPREAD,
@@ -11,6 +11,7 @@ import {
   type CoverPanelName,
 } from '@/lib/print/spec';
 import Movable, { SnapGuides, type SnapLine } from './_movable';
+import { useTextResize } from './_use-text-resize';
 import { TextContent, StickerContent, QrContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
 import { useBuilderDimensions } from './_dimensions';
@@ -20,6 +21,7 @@ import { squareQrHeight } from '@/lib/builder/elements';
 import { coverSideElements, coverSideImage, roleLabel, type CoverSide } from '@/lib/builder/cover-objects';
 import { spinePrintBackgroundStyle, type CoverConfig } from '@/lib/builder/cover';
 import type { Selection } from './_use-builder';
+import type { TextElement } from '@/lib/builder/model';
 import type { CoverApi } from './_use-cover';
 
 export type { CoverSide };
@@ -337,6 +339,15 @@ function Face({
   const peersExcept = (id: string) => peerBoxes.filter((p) => p.id !== id);
 
   const key = `cover:${side}`;
+
+  /**
+   * The SAME drag-resize→font-size behaviour a caption on page 7 has. Cover text is ordinary text
+   * (Cover Editor 2.0), and this is the seam where that has to stay true: a corner handle on the
+   * title scales it exactly as it scales any other text element.
+   */
+  const textResize = useTextResize(
+    useCallback((id: string, patch: Partial<TextElement>) => cover.patchText(key, id, patch), [cover, key]),
+  );
   const backdropSelected = focused && (cover.selection.kind === 'background' || cover.selection.kind === 'base');
 
   return (
@@ -389,7 +400,8 @@ function Face({
             ariaLabel={roleLabel(t.role) ?? 'Text'}
             peers={peersExcept(t.id)}
             onSelect={() => pick({ kind: 'text', id: t.id })}
-            onChange={(r) => cover.patchText(key, t.id, r)}
+            onChange={(r, ctx) => textResize.onChange(t, r, ctx)}
+            onCommit={textResize.end}
             onRotate={(deg) => cover.patchText(key, t.id, { rotation: deg })}
             onSnap={setSnap}
             onDoubleClick={() => setEditingText(t.id)}

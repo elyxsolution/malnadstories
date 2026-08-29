@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 21 files / 367 tests
+pnpm test              # app suite — 25 files / 446 tests
 cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
@@ -993,10 +993,19 @@ edge, and `overflow-hidden` on the same element clipped the photo to the box INS
 The drop shadow printed as grey haze along the same edge. It was never a geometry bug: the fill box
 already overscanned the fragmentainer on both axes.
 
-**Fix: a `print` prop on `PairContent`,** set only by the printer-ready interior. The builder, the
-in-app preview, the flipbook, the navigator and the **customer preview PDF** all leave it false and
-are pixel-identical to before. Nothing about the page size, the bleed, scale-to-fill or the
-photo's aspect changed.
+**Fix (first pass): a `print` prop on `PairContent`,** set only by the printer-ready interior, so
+only that file lost the chrome.
+
+**Fix (final): THE CHROME IS GONE FROM EVERY SURFACE, and the `print` prop with it.** An overlay is
+now `absolute overflow-hidden` and nothing else — a plain image — in `_pair-frame.tsx` (preview,
+flipbook, navigator, review, BOTH PDFs) and in the canvas overlay in `_block.tsx`, whose
+`rounded-md border-2 border-white shadow-md` was the same decoration on the editing side. Keeping
+them different meant the same album was two pictures depending on which file you opened, and a flag
+is a thing a future surface can forget to pass. **`overflow-hidden` stays on both** — it clips the
+photo to its container and is not decoration. **Selection outlines and resize handles are
+unaffected**: `Movable` portals its chrome into a separate unclipped layer and never styles the
+element itself, so editing looks and behaves exactly as before. Nothing about the page size, the
+bleed, scale-to-fill or the photo's aspect changed.
 
 **Measured in a real headless-Chromium render** (not inferred): with the album's compiled CSS
 loaded, the page is 779 × 1100 px, the fill box is 780 × 1103.14 at (−0.5, −1.56), the overlay and

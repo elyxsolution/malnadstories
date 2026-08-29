@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Crop, SlidersHorizontal, ImagePlus, Move } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
 import Movable, { SnapGuides, type SnapLine, type SelectMods } from './_movable';
+import { useTextResize } from './_use-text-resize';
 import { PrintGutter } from './_pair-frame';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
@@ -14,7 +15,7 @@ import { photoUiState } from './_photo-state';
 import UploadBadge, { stateOpacityClass } from './_upload-badge';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
-import { PAGE_COST, physicalStart, type Block, type EditConfig } from '@/lib/builder/model';
+import { PAGE_COST, physicalStart, type Block, type EditConfig, type TextElement } from '@/lib/builder/model';
 import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { TrimGuides, SafeAreaGuides, TRIM_GUIDE_CAPTION } from './_print-guides';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
@@ -155,6 +156,14 @@ export default function BlockCard({
    * the chrome would silently not mount until something else caused a re-render.
    */
   const [chromeEl, setChromeEl] = useState<HTMLDivElement | null>(null);
+
+  /**
+   * Text drag-resize → font size. Bound to this block's `patchText` so the gesture produces an
+   * ordinary text patch and nothing about persistence, history or rendering learns a new path.
+   */
+  const textResize = useTextResize(
+    useCallback((id: string, patch: Partial<TextElement>) => api.patchText(block.key, id, patch), [api, block.key]),
+  );
 
   // Which frame on THIS spread is being cropped — resolved once rather than per frame.
   const cropOnThisBlock = cropTarget && cropTarget.blockKey === block.key ? cropTarget : null;
@@ -585,7 +594,13 @@ export default function BlockCard({
                 onChange={(r) => api.patchOverlays(block.key, block.overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
                 onSnap={setSnap}
                 peers={peersExcept(oid)}
-                className="overflow-hidden rounded-md border-2 border-white shadow-md"
+                /* NO FRAME. An overlay is the photo itself — the white border, rounded corners
+                   and drop shadow that used to live here were canvas decoration the customer never
+                   asked for, and they printed. `overflow-hidden` stays because it is what clips the
+                   image to the container; selection outline and handles come from `Movable`'s
+                   chrome layer, so editing is untouched. Matches `_pair-frame` exactly, which is
+                   what keeps the canvas and the PDF the same picture. */
+                className="overflow-hidden"
                 /**
                  * NO INLINE CONTROL BAR (Pass 2). Replace / edit / duplicate / layer / delete all
                  * live in the floating context bar now, which has room for the full photo toolset
@@ -634,7 +649,11 @@ export default function BlockCard({
                * never wired. A plain click replaces, so the two stores now agree by construction.
                */
               onSelect={(mods) => selectResolved({ kind: 'text', blockKey: block.key, id: t.id }, mods ?? NO_MODS)}
-              onChange={(r) => api.patchText(block.key, t.id, r)}
+              /* A CORNER drag scales the type with the box; a side handle reflows the words.
+                 Either way the result is ONE ordinary patch, so the toolbar's size field, the
+                 up/down steppers and this gesture all write the same property. */
+              onChange={(r, ctx) => textResize.onChange(t, r, ctx)}
+              onCommit={textResize.end}
               onRotate={(deg) => api.patchText(block.key, t.id, { rotation: deg })}
               onSnap={setSnap}
               peers={peersExcept(t.id)}
