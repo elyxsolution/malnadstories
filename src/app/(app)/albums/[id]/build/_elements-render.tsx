@@ -24,6 +24,36 @@ import type { QrElement, StickerElement, TextElement } from '@/lib/builder/model
  * small. `textFontSize` makes that decision from the role, so canvas, preview and PDF cannot
  * disagree about it.
  */
+/**
+ * A PLACED PHOTO — the positioned, clipped box an overlay is, and nothing more.
+ *
+ * THE ONE PLACE an overlay's container styling exists, shared by the content spread
+ * (`_pair-frame`) and the cover faces (`_cover-render`). It used to be a class string written out
+ * per surface, which is how the canvas came to carry `rounded-md border-2 border-white shadow-md`
+ * while the printer-ready export carried none of it — the same album, two pictures.
+ *
+ * `absolute overflow-hidden` is the whole style. No border, no outline, no shadow, no radius: an
+ * overlay is the photograph. `overflow-hidden` is not decoration — it is what clips the image to
+ * its frame — and it is the only reason this element has a class at all. Selection outlines and
+ * resize handles are drawn by `Movable` into a separate chrome layer and are unaffected.
+ */
+export function OverlayBox({
+  el,
+  children,
+}: {
+  el: { x: number; y: number; w: number; h: number };
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="absolute overflow-hidden"
+      style={{ left: `${el.x * 100}%`, top: `${el.y * 100}%`, width: `${el.w * 100}%`, height: `${el.h * 100}%` }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function TextContent({ el }: { el: TextElement }) {
   const spine = el.role === 'spine';
   const items = el.align === 'left' ? 'flex-start' : el.align === 'right' ? 'flex-end' : 'center';

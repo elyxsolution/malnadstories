@@ -205,7 +205,7 @@ export default function Flipbook({
     pages.push(
       <FlipPage key="back-cover" hard>
         <div className="relative h-full w-full">
-          <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
+          <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
           {/* Spine-edge depth on the binding side (left). */}
           <div className="pointer-events-none absolute inset-y-0 left-0 z-[2] w-[8%]" style={{ background: 'linear-gradient(to right, rgba(18,28,22,0.32), transparent)' }} />
         </div>
@@ -385,7 +385,7 @@ function StaticSpreads({
       ))}
       {cover && (
         <div className="overflow-hidden shadow-elevated" style={{ width, aspectRatio: pageRatio }}>
-          <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
+          <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
         </div>
       )}
     </div>

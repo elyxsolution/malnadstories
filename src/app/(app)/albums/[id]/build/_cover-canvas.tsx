@@ -12,7 +12,12 @@ import {
 } from '@/lib/print/spec';
 import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { useTextResize } from './_use-text-resize';
+import TextAutoFit from './_text-autofit';
+import { MIN_TEXT_BOX } from '@/lib/builder/text-fit';
 import { TextContent, StickerContent, QrContent } from './_elements-render';
+import PhotoFrame from './_photo-frame';
+import { ImagePlus } from 'lucide-react';
+import type { PairPhoto } from './_pair-frame';
 import { InlineTextEditor } from './_element-bits';
 import { useBuilderDimensions } from './_dimensions';
 import { fitBlockWidth, useMeasuredBox } from './_use-fit-scale';
@@ -64,6 +69,14 @@ export type CoverCanvasProps = {
   size?: number;
   zoomPct?: number;
   stickerUrlFor?: (stickerId: string) => string | undefined;
+  /**
+   * Resolve a placed overlay's photo id → its URL and edits. The SAME resolver the page canvas
+   * uses for its overlays, so a cover overlay and a page overlay show the same picture with the
+   * same crop. Absent (the admin cover-template designer, which has no album) ⇒ no overlays.
+   */
+  photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
+  /** Open the album photo picker to fill an empty overlay frame on the focused face. */
+  onPickOverlayPhoto?: (overlayId: string) => void;
   /** Publishes the focused face's element upward so the floating toolbar can anchor to it. */
   onFaceEl?: (el: HTMLDivElement | null) => void;
 };
@@ -77,6 +90,8 @@ export default function CoverCanvas({
   backImageUrl,
   zoomPct = 100,
   stickerUrlFor,
+  photoFor,
+  onPickOverlayPhoto,
   onFaceEl,
 }: CoverCanvasProps) {
   /**
@@ -143,6 +158,8 @@ export default function CoverCanvas({
               cover={cover}
               imageUrl={backImageUrl}
               stickerUrlFor={stickerUrlFor}
+              photoFor={photoFor}
+              onPickOverlayPhoto={onPickOverlayPhoto}
               onFaceEl={onFaceEl}
             />
             <Hinge cover={cover} />
@@ -152,6 +169,8 @@ export default function CoverCanvas({
               cover={cover}
               imageUrl={null}
               stickerUrlFor={stickerUrlFor}
+              photoFor={photoFor}
+              onPickOverlayPhoto={onPickOverlayPhoto}
               onFaceEl={onFaceEl}
             />
             <Hinge cover={cover} />
@@ -161,6 +180,8 @@ export default function CoverCanvas({
               cover={cover}
               imageUrl={frontImageUrl}
               stickerUrlFor={stickerUrlFor}
+              photoFor={photoFor}
+              onPickOverlayPhoto={onPickOverlayPhoto}
               onFaceEl={onFaceEl}
             />
           </div>
@@ -290,6 +311,8 @@ function Face({
   cover,
   imageUrl,
   stickerUrlFor,
+  photoFor,
+  onPickOverlayPhoto,
   onFaceEl,
 }: {
   side: CoverSide;
@@ -297,6 +320,8 @@ function Face({
   cover: CoverApi;
   imageUrl: string | null;
   stickerUrlFor?: (stickerId: string) => string | undefined;
+  photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
+  onPickOverlayPhoto?: (overlayId: string) => void;
   onFaceEl?: (el: HTMLDivElement | null) => void;
 }) {
   const { page } = useBuilderDimensions();
@@ -306,7 +331,7 @@ function Face({
   const [editingText, setEditingText] = useState<string | null>(null);
 
   const config: CoverConfig = cover.config;
-  const { texts, stickers, qrs } = coverSideElements(config, side);
+  const { texts, stickers, qrs, overlays } = coverSideElements(config, side);
   const image = coverSideImage(config, side);
   const focused = cover.side === side;
   const sel = (s: Selection) => focused && cover.selection.kind === s.kind && JSON.stringify(cover.selection) === JSON.stringify(s);
@@ -335,6 +360,7 @@ function Face({
     ...texts.map((t) => ({ id: t.id, x: t.x, y: t.y, w: t.w, h: t.h })),
     ...stickers.map((s) => ({ id: s.id, x: s.x, y: s.y, w: s.w, h: s.h })),
     ...qrs.map((q) => ({ id: q.id, x: q.x, y: q.y, w: q.w, h: q.h })),
+    ...overlays.map((o) => ({ id: o.id as string, x: o.x, y: o.y, w: o.w, h: o.h })),
   ];
   const peersExcept = (id: string) => peerBoxes.filter((p) => p.id !== id);
 
@@ -382,6 +408,51 @@ function Face({
           <BackCoverDesign back={config.back} imageUrl={imageUrl} renderElements={false} />
         )}
 
+        {/* PHOTO OVERLAYS — placed pictures, moved and resized through the SAME `Movable` engine a
+            page overlay uses, with the same borderless rendering. Drawn beneath text/stickers/QR so
+            the canvas stacking order matches every renderer. */}
+        {overlays.map((o) => {
+          const oid = o.id as string;
+          const photo = o.photoId ? photoFor?.(o.photoId) : undefined;
+          return (
+            <Movable
+              key={oid}
+              rect={o}
+              minW={0.04}
+              minH={0.04}
+              selected={sel({ kind: 'overlay', id: oid })}
+              containerRef={ref}
+              chromeContainer={chromeEl}
+              pageSpan={1}
+              escape={PASTEBOARD_ESCAPE}
+              ariaLabel="Photo overlay"
+              peers={peersExcept(oid)}
+              onSelect={() => pick({ kind: 'overlay', id: oid })}
+              onChange={(r) => cover.patchOverlays(key, overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
+              onSnap={setSnap}
+              /* NO FRAME — matches `OverlayBox` and `_block` exactly: an overlay is the picture.
+                 `overflow-hidden` clips it; the selection outline comes from the chrome layer. */
+              className="overflow-hidden"
+            >
+              {photo ? (
+                <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" />
+              ) : (
+                /* An unfilled container. It draws an affordance ONLY on the editing canvas —
+                   every renderer skips a photo-less overlay, so this never reaches a preview or
+                   a PDF. Same contract as a page's empty overlay. */
+                <button
+                  type="button"
+                  onClick={() => onPickOverlayPhoto?.(oid)}
+                  className="flex h-full w-full flex-col items-center justify-center gap-1 border border-dashed border-studio/40 bg-studio-soft/60 text-center transition-colors hover:bg-studio-soft"
+                >
+                  <ImagePlus className="h-4 w-4 text-studio/70" />
+                  <span className="px-1 text-[10px] font-medium leading-tight text-studio/80">Choose a photo</span>
+                </button>
+              )}
+            </Movable>
+          );
+        })}
+
         {/* Text objects — including the title / subtitle / author metadata views, which are
             dragged, resized and rotated exactly like any other text. */}
         {texts.map((t) => (
@@ -390,8 +461,9 @@ function Face({
             rect={t}
             rotation={t.rotation}
             rotatable
-            minW={0.06}
-            minH={0.03}
+            /* The same floor auto-fit can reach — see MIN_TEXT_BOX. */
+            minW={MIN_TEXT_BOX}
+            minH={MIN_TEXT_BOX}
             selected={sel({ kind: 'text', id: t.id })}
             containerRef={ref}
             chromeContainer={chromeEl}
@@ -420,6 +492,13 @@ function Face({
             ) : (
               <TextContent el={t} />
             )}
+            {/* The SAME auto-fit a caption on page 7 gets — cover text is ordinary text. */}
+            <TextAutoFit
+              el={t}
+              containerRef={ref}
+              enabled={editingText !== t.id && textResize.resizingId !== t.id}
+              onFit={(box) => cover.amendText(key, t.id, box)}
+            />
           </Movable>
         ))}
 

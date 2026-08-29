@@ -266,8 +266,14 @@ export default function Builder({
   const [coverFocused, setCoverFocused] = useState(false);
   // Open the photo editor on the front/back cover image (crop/zoom/rotate stored in cover_config).
   const [coverImageEditor, setCoverImageEditor] = useState<CoverSide | null>(null);
-  /** Which cover face a photo picked from the modal should land on. */
-  const [coverPhotoPicker, setCoverPhotoPicker] = useState<CoverSide | null>(null);
+  /**
+   * What a photo picked from the modal should fill on the cover: the FACE's backdrop, or a
+   * specific overlay frame on it. One piece of state for both, because it is one picker and one
+   * decision — "which cover thing am I choosing a picture for?".
+   */
+  const [coverPhotoPicker, setCoverPhotoPicker] = useState<
+    { side: CoverSide; target: 'image' } | { side: CoverSide; target: 'overlay'; overlayId: string } | null
+  >(null);
   const [current, setCurrent] = useState(0);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   const [editLayout, setEditLayout] = useState<'focus' | 'grid'>('focus');
@@ -831,10 +837,28 @@ export default function Builder({
   const coverIdRef = useRef(coverId);
   coverIdRef.current = coverId;
 
+  /**
+   * `commands.applyPhotoEdit` reached through a ref, because `useCover` is constructed BEFORE the
+   * command layer (the cover's own state is one of the command layer's inputs). The functions
+   * below are called from user events, long after both exist.
+   *
+   * Why the cover needs it at all: a cover OVERLAY is an ordinary album photo in a frame, so its
+   * crop and rotation belong on the `photos` row exactly as a page overlay's do — not in
+   * `cover_config.imageEdit`, which describes the face's backdrop.
+   */
+  const applyPhotoEditRef = useRef<((photoId: string, patch: Partial<EditConfig>) => void) | null>(null);
+
   const cover = useCover({
     initialConfig: initialCoverConfig,
     title,
     pageAspect: pageA,
+    onPhotoEdit: useCallback((photoId: string, patch: Partial<EditConfig>) => {
+      applyPhotoEditRef.current?.(photoId, patch);
+    }, []),
+    onPhotoRotate: useCallback((photoId: string, dir: 1 | -1) => {
+      const cur = photosRef.current.find((p) => p.id === photoId)?.edit?.rotate ?? 0;
+      applyPhotoEditRef.current?.(photoId, { rotate: (((cur + dir * 90 + 360) % 360) as 0 | 90 | 180 | 270) });
+    }, []),
     onChange: useCallback(
       ({ config, title: nextTitle }: { config: CoverConfig; title: string }) =>
         persistCover({ title: nextTitle, coverId: coverIdRef.current, config }),
@@ -1129,6 +1153,12 @@ export default function Builder({
      */
     focus: deleteFocus,
   });
+
+  /* Publish the photo-edit command to the cover, which was constructed before this layer. */
+  useEffect(() => {
+    applyPhotoEditRef.current = cmd.applyPhotoEdit;
+  }, [cmd.applyPhotoEdit]);
+
   const contextMenu = useContextMenu();
 
   /**
@@ -1652,7 +1682,8 @@ export default function Builder({
     !!coverConfig.back.photoId ||
     !!coverConfig.back.background ||
     coverConfig.back.texts.length > 0 ||
-    coverConfig.back.stickers.length > 0;
+    coverConfig.back.stickers.length > 0 ||
+    coverConfig.back.overlays.length > 0;
   const focusCoverForEditing = () => {
     cover.setSide('front');
     setCoverFocused(true);
@@ -2828,6 +2859,10 @@ export default function Builder({
               size={size}
               zoomPct={zoomPct}
               stickerUrlFor={stickerUrlFor}
+              /* The SAME resolver the page canvas uses for its overlays — one photo, one URL,
+                 one set of edits, wherever it is placed. */
+              photoFor={photoForOverview}
+              onPickOverlayPhoto={(overlayId) => setCoverPhotoPicker({ side: cover.side, target: 'overlay', overlayId })}
               onFaceEl={(el) => {
                 pageElRef.current = el;
               }}
@@ -3052,8 +3087,14 @@ export default function Builder({
               selectedPhoto={coverSelectedPhoto}
               photoMap={photoMap}
               pageAspect={pageA}
-              onPickPhoto={() => setCoverPhotoPicker(cover.side)}
+              onPickPhoto={() => setCoverPhotoPicker({ side: cover.side, target: 'image' })}
               onOpenArtwork={() => setRailTab('templates')}
+              onAddOverlay={() => {
+                // Create the CONTAINER, then open the picker for it — the same two steps the page
+                // canvas takes, so an empty frame is a real, selectable object either way.
+                const id = cover.addOverlay(null, 'center');
+                setCoverPhotoPicker({ side: cover.side, target: 'overlay', overlayId: id });
+              }}
               onOpenRail={setRailTab}
               onCrop={() => setCoverImageEditor(cover.side)}
               cropping={false}
@@ -3306,13 +3347,25 @@ export default function Builder({
           only processed photos are offered (the worker's sanitized master is the print source). */}
       {coverPhotoPicker && (
         <PhotoPicker
-          title={coverPhotoPicker === 'front' ? 'Choose the front cover photo' : 'Choose the back cover photo'}
+          title={
+            coverPhotoPicker.target === 'overlay'
+              ? 'Choose a photo for this overlay'
+              : coverPhotoPicker.side === 'front'
+                ? 'Choose the front cover photo'
+                : 'Choose the back cover photo'
+          }
           available={photos.filter((p) => p.status === 'ready')}
           onClose={() => setCoverPhotoPicker(null)}
           onPick={(id) => {
-            cover.setPhoto(id, coverPhotoPicker);
-            cover.setSide(coverPhotoPicker);
-            cover.setSelection({ kind: 'base', slot: 'image' });
+            if (coverPhotoPicker.target === 'overlay') {
+              cover.replaceOverlay(`cover:${coverPhotoPicker.side}`, coverPhotoPicker.overlayId, id);
+              cover.setSide(coverPhotoPicker.side);
+              cover.setSelection({ kind: 'overlay', id: coverPhotoPicker.overlayId });
+            } else {
+              cover.setPhoto(id, coverPhotoPicker.side);
+              cover.setSide(coverPhotoPicker.side);
+              cover.setSelection({ kind: 'base', slot: 'image' });
+            }
             setCoverPhotoPicker(null);
           }}
         />

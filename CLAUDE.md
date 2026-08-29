@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 25 files / 446 tests
+pnpm test              # app suite — 27 files / 512 tests
 cd worker && pnpm test # worker suite — 141 files / 1235 tests
 ```
 
@@ -1436,6 +1436,77 @@ cover and pages. Refactor-not-duplicate: the cover and pages share the same elem
 - **No payment/PDF/schema-shape risk:** `album_pages.layout_config` just gains an additive
   `stickers` key (0006 CHECK only constrains `overlays`); the cover stays in `cover_config`; the
   submit gate + checkout are unchanged.
+
+## Text auto-fit + back-cover photo overlays — built
+
+Two additions on top of the text-size work, both built out of what already existed rather than
+beside it.
+
+### THE TEXT BOX FITS THE TEXT
+
+A text element's rect is its CONTAINER, and `makeText` handed every new one a fixed starting box
+(a heading is 50% of the pair wide and 14% tall) that nothing ever narrowed. `TextContent` centres
+the words inside it, so the slack was real: the selection outline and the resize handles sat where
+the container was, not where the ink was.
+
+- **`lib/builder/text-fit.ts`** is the pure half — what a measured size MEANS as a normalized box,
+  which anchor is held, and when a fit is worth writing. **`_text-autofit.tsx`** is the DOM half: it
+  mounts an off-screen mirror **inside the page/face element** (the builder fonts are CSS variables
+  on a wrapper, so a mirror on `document.body` would be measured in the wrong typeface), measures
+  it, and removes it synchronously.
+- **THE LOOP IS CLOSED STRUCTURALLY, NOT THROTTLED. There is no `ResizeObserver`.** A fit is
+  triggered only by a change in TYPOGRAPHY (`textFitSignature`: words, size, font, weight, style,
+  spacing, line height, alignment) and writes only GEOMETRY (x/y/w/h). The two sets are disjoint,
+  so a fit cannot cause a fit — and a SIDE-handle drag, which changes only w/h, is left completely
+  alone, which is what keeps "drag the edge to change where the words wrap" working.
+- **The measurement is taken at the box's CURRENT width** (`width: max-content; max-width: <box>`),
+  so one line reports its natural width and wrapped text reports its widest line — *without moving
+  a line break*, because greedy breaking at the widest line's width reproduces the same lines. When
+  the size changes, `textSizePatch` has already scaled the box proportionally, so the wrap survives
+  the size change too.
+- **The anchor is whatever the renderer holds still**: the vertical centre always, and the left
+  edge / right edge / horizontal centre according to `align`. Text does not walk when it resizes.
+- **A fit is a CORRECTION, not an action.** `useHistoryState.amend` (new) rewrites the present
+  without pushing an undo entry, so one ⌘Z reverses the size change *and* the box that followed it
+  rather than appearing to do nothing on the first press. It still marks the album dirty and saves.
+- **Suppressed while something else owns the element**: a live resize gesture (`useTextResize`
+  publishes `resizingId`) or the open inline editor. Flipping back on re-runs the fit once, which is
+  how a corner drag ends with a tight box. **Exempt**: `role: 'spine'` (vertical text in a sliver —
+  horizontal measurement would report the wrong axis for both dimensions) and EMPTY text (nothing
+  to fit, and a sliver would be unclickable).
+- `MIN_TEXT_BOX` is both the smallest fittable box and the `minW`/`minH` the canvases hand
+  `Movable` for text — a larger resize minimum would make the first pixel of a corner drag jump a
+  tightly-fitted element out to it.
+
+### THE BACK COVER TAKES PHOTO OVERLAYS
+
+`back.photoId` is the face's BACKDROP — one image, edge to edge. There was no way to place a
+picture *on* the back cover. `BackCoverConfig.overlays: Overlay[]` (additive to the existing
+`cover_config` jsonb — **no migration**) is that, using the page's own type.
+
+- **Nothing was invented.** Same `Overlay`, same `OverlaySchema` bounds and cap on save, same
+  `Movable` engine, same `PhotoPicker`, same `photos` pipeline and presigned URLs, same shared
+  `OverlayBox` renderer, same client-only ids (`withCoverOverlayIds`, mirroring `withOverlayIds`).
+  Placement comes from **`nextOverlayGeom`**, extracted out of `useBlocks.addOverlay` so the page
+  canvas and the cover draw a new frame from ONE rule instead of two sets of constants.
+- **Per FACE, not per back cover.** `coverSideElements` / `withCoverSideElements` carry `overlays`
+  like any other element family; the front and spine report none and ignore writes (the front is an
+  artwork surface with its own template pipeline; a spine has nowhere to put one). Giving the front
+  overlays later is a one-line change in those two functions plus the schema.
+- **`Add overlay`** sits in the back face's Cover toolbar: it creates the container, then opens the
+  ordinary album photo picker for it — the same two steps the page canvas takes. Move, resize,
+  select, layer, duplicate and delete all run through the existing cover command paths, and the
+  shared `PhotoBar` reaches it through `useCover`'s `block` adapter with no cover-specific branch.
+- **An overlay's crop/rotate go to the `photos` row**, not `cover_config.imageEdit` — that field
+  describes the face's backdrop. `useCover` gained `onPhotoEdit`/`onPhotoRotate` so the shared
+  toolbar cannot silently rotate the backdrop while an overlay is selected.
+- **It reaches both PDFs.** The preview book passes its existing `photoFor`; the printer-ready
+  cover export (which deliberately does not load the album's photo set) resolves exactly the
+  overlay photos through `loadPrintAlbum`'s new `coverPhotos`, and both readiness gates count only
+  the overlays that RESOLVE, so a deleted photo can never hang a render.
+- **No border**, on every surface: the overlay container is the shared `OverlayBox`
+  (`absolute overflow-hidden` and nothing else). Selection outlines and handles are unaffected —
+  `Movable` portals its chrome into a separate layer and never styles the element.
 
 ## Admin console + fulfillment (Phase 1) — built
 

@@ -66,6 +66,15 @@ export type PrintAlbumData = {
   readonly photos: readonly PrintPhotoData[];
   readonly blocks: readonly Block[];
   readonly stickerUrls: Record<string, string>;
+  /**
+   * Photos placed as OVERLAYS on a cover face, by id.
+   *
+   * Separate from `photos` because the cover-only export deliberately does not load the album's
+   * photo set (up to 128 presigns for images the cover never shows). A cover overlay is a specific,
+   * named handful, so it is resolved on its own — but through the SAME sanitized-master rule:
+   * only `ready` photos, never the raw original.
+   */
+  readonly coverPhotos: Record<string, PrintPhotoData>;
 };
 
 export type PrintLoadOptions = {
@@ -138,6 +147,7 @@ export async function loadPrintAlbum(
 
   let photos: PrintPhotoData[] = [];
   let blocks: Block[] = [];
+  const coverPhotos: Record<string, PrintPhotoData> = {};
 
   if (wantContent) {
     // Only 'ready' photos have a sanitized key; presign the full-res master. Never the raw original.
@@ -188,6 +198,24 @@ export async function loadPrintAlbum(
       }));
   }
 
+  // Cover overlays: presign exactly the photos the cover faces place, and no others. Runs for the
+  // cover-only export too, which is the whole reason it is not folded into the `wantContent` read.
+  if (wantCover) {
+    const ids = Array.from(new Set(coverConfig.back.overlays.map((o) => o.photoId).filter((id): id is string => !!id)));
+    if (ids.length > 0) {
+      const { data: coverPhotoData } = await supabase
+        .from('photos')
+        .select('id, edit_config, sanitized_key, status')
+        .eq('album_id', albumId)
+        .eq('status', 'ready')
+        .in('id', ids);
+      for (const r of (coverPhotoData ?? []) as PhotoRow[]) {
+        if (!r.sanitized_key) continue;
+        coverPhotos[r.id] = { id: r.id, url: await presignGet(r.sanitized_key, PRESIGN_TTL_S), edit: r.edit_config };
+      }
+    }
+  }
+
   // Resolve presigned URLs for every sticker the album references (pages + cover) — by id, via the
   // service role, so a deactivated-but-placed sticker still prints. PDF == builder preview.
   const stickerUrls = await resolveStickerUrls([
@@ -209,5 +237,6 @@ export async function loadPrintAlbum(
     photos,
     blocks,
     stickerUrls,
+    coverPhotos,
   };
 }

@@ -122,7 +122,7 @@ export default function Preview({
         <div className="mx-auto flex w-full max-w-2xl flex-wrap items-start justify-center gap-6">
           <figure className="w-full max-w-md">
             <div className="relative w-full overflow-hidden border bg-muted shadow-sm" style={{ aspectRatio: page }}>
-              <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
+              <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
             </div>
             <figcaption className="mt-2 text-xs text-muted-foreground">Back cover</figcaption>
           </figure>

@@ -98,6 +98,7 @@ export function hasBackCover(r: CoverResolution): boolean {
     b.texts.length > 0 ||
     b.stickers.length > 0 ||
     b.qrs.length > 0 ||
+    b.overlays.length > 0 ||
     b.showLogo
   );
 }

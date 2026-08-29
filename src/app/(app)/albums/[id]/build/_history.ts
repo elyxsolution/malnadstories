@@ -69,6 +69,28 @@ export function useHistoryState<T>(initial: T | (() => T)) {
     }
   }, []);
 
+  /**
+   * CORRECT THE PRESENT WITHOUT CREATING AN UNDO STEP.
+   *
+   * `set` records a user action. `amend` records a CONSEQUENCE of one — a derived correction the
+   * editor makes on the user's behalf, which has no meaning as a separate thing to undo.
+   *
+   * Its one caller today is text auto-fit: changing a font size is the action, and tightening the
+   * bounding box around the newly-measured text is the consequence. Pushing that as its own entry
+   * would make ⌘Z undo the box and leave the size, so the first press would appear to do nothing.
+   *
+   * It differs from `rewrite` in exactly the way it has to: `rewrite` also transforms the PAST
+   * (correct for an id remap, wrong here — a past snapshot's box was right for its own font size),
+   * and it does not clear `future`. `amend` touches only `present`, and leaves `future` intact so
+   * a correction that lands after an undo cannot destroy the redo stack.
+   */
+  const amend = useCallback((updater: (prev: T) => T) => {
+    setH((s) => {
+      const next = updater(s.present);
+      return Object.is(next, s.present) ? s : { past: s.past, present: next, future: s.future };
+    });
+  }, []);
+
   const undo = useCallback(() => {
     setH((s) => {
       if (s.past.length === 0) return s;
@@ -111,5 +133,5 @@ export function useHistoryState<T>(initial: T | (() => T)) {
     });
   }, []);
 
-  return { value: h.present, set, batch, rewrite, undo, redo, canUndo: h.past.length > 0, canRedo: h.future.length > 0 };
+  return { value: h.present, set, amend, batch, rewrite, undo, redo, canUndo: h.past.length > 0, canRedo: h.future.length > 0 };
 }

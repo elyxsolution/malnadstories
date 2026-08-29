@@ -152,6 +152,36 @@ export function stripOverlayIds(overlays: Overlay[]): Overlay[] {
 export const DEFAULT_OVERLAY_GEOM = { x: 0.55, y: 0.08, w: 0.34, h: 0.34 };
 
 /**
+ * WHERE A NEW IMAGE OVERLAY LANDS — the ONE placement rule, for every surface that has overlays.
+ *
+ * It used to live inside `useBlocks.addOverlay`, which is bound to `Block[]`. The back cover has
+ * overlays now and no blocks, and re-deriving "a sensible starting frame" there would have meant a
+ * second set of geometry constants that drift apart. So the decision is pure and shared, and both
+ * callers apply the result with their own primitives.
+ *
+ * `at` is where the customer asked for it — a drop point, or `'center'` for a menu action; `count`
+ * is how many overlays the surface already has, which drives a gentle cascade so a second frame is
+ * visibly a second frame rather than an invisible one exactly beneath the first. Without `at` the
+ * frame cascades from `DEFAULT_OVERLAY_GEOM`, kept fully on the surface.
+ */
+export function nextOverlayGeom(count: number, at?: { x: number; y: number } | 'center'): Rect {
+  const { w, h } = DEFAULT_OVERLAY_GEOM;
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  if (at) {
+    const drift = ((count % 5) - 2) * 0.035; // a gentle cascade around the anchor, both axes
+    const cx = at === 'center' ? 0.5 + drift : at.x;
+    const cy = at === 'center' ? 0.5 + drift : at.y;
+    return { x: clamp01(cx - w / 2), y: clamp01(cy - h / 2), w, h };
+  }
+  return {
+    x: clamp01(Math.min(DEFAULT_OVERLAY_GEOM.x + (count % 5) * 0.04, 1 - w)),
+    y: clamp01(Math.min(DEFAULT_OVERLAY_GEOM.y + (count % 5) * 0.04, 1 - h)),
+    w,
+    h,
+  };
+}
+
+/**
  * THE FRAMES A NEW SPREAD STARTS WITH.
  *
  * A page is a background, and photos live in overlay frames — so a page that starts with nothing

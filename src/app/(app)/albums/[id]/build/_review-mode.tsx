@@ -335,7 +335,7 @@ export default function ReviewMode({
                   stickerUrlFor={stickerUrlFor}
                 />
               ) : current?.kind === 'back' ? (
-                <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} />
+                <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} photoFor={photoFor} stickerUrlFor={stickerUrlFor} />
               ) : current?.kind === 'spine' ? (
                 <SpineDesign config={cover.config} title={cover.title} pageAspect={pageRatio} />
               ) : current ? (

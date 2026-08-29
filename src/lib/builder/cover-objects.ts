@@ -46,8 +46,10 @@ import { COVER_SCHEMA_VERSION, type CoverConfig, type CoverLayout } from './cove
 import {
   cryptoId,
   freeTexts,
+  makeOverlayId,
   type Background,
   type CoverTextRole,
+  type Overlay,
   type QrElement,
   type StickerElement,
   type TextElement,
@@ -70,22 +72,36 @@ export const COVER_SIDE_LABEL: Record<CoverSide, string> = {
   back: 'Back cover',
 };
 
-/** Objects on one face. The spine carries text only — there is no room for anything else. */
+/**
+ * Objects on one face. The spine carries text only — there is no room for anything else, and the
+ * FRONT stores no photo overlays today (see `BackCoverConfig.overlays` for why). A face that does
+ * not store a family reports it as empty and silently ignores a write to it, which is what lets
+ * every consumer above this line be written once, per face, instead of once per face KIND.
+ */
 type CoverSideElements = {
   texts: TextElement[];
   stickers: StickerElement[];
   qrs: QrElement[];
+  overlays: Overlay[];
 };
 
+const NO_OVERLAYS: Overlay[] = [];
+
 export function coverSideElements(c: CoverConfig, side: CoverSide): CoverSideElements {
-  if (side === 'front') return { texts: c.texts, stickers: c.stickers, qrs: c.qrs };
-  if (side === 'back') return { texts: c.back.texts, stickers: c.back.stickers, qrs: c.back.qrs };
-  return { texts: c.spine.texts, stickers: [], qrs: [] };
+  if (side === 'front') return { texts: c.texts, stickers: c.stickers, qrs: c.qrs, overlays: NO_OVERLAYS };
+  if (side === 'back') return { texts: c.back.texts, stickers: c.back.stickers, qrs: c.back.qrs, overlays: c.back.overlays };
+  return { texts: c.spine.texts, stickers: [], qrs: [], overlays: NO_OVERLAYS };
 }
 
 /** Write one face's element arrays back into the config, leaving the other two untouched. */
 export function withCoverSideElements(c: CoverConfig, side: CoverSide, patch: Partial<CoverSideElements>): CoverConfig {
-  if (side === 'front') return { ...c, ...patch };
+  // The front stores no overlays: drop the key rather than spreading it onto the config root,
+  // where it would become a field nothing reads and the save schema strips.
+  if (side === 'front') {
+    const rest = { ...patch };
+    delete rest.overlays;
+    return { ...c, ...rest };
+  }
   if (side === 'back') return { ...c, back: { ...c.back, ...patch } };
   // Spread the spine rather than rebuilding it: it carries a `background` now, and a literal
   // `{ texts }` here would silently erase the customer's spine colour on every text edit.
@@ -97,6 +113,19 @@ export function withCoverSideElements(c: CoverConfig, side: CoverSide, patch: Pa
  * renderer, which is exactly why it could not be changed. `null` on the spine means "the legacy
  * paint"; `spineBackgroundStyle` is what turns that into CSS.
  */
+/**
+ * Give every back-cover overlay a client id, exactly as `withOverlayIds` does for pages.
+ *
+ * Overlay ids are NOT persisted — `OverlaySchema` has no `id`, and page overlays have always
+ * regained one on load. They exist so selection, layering and "patch THIS overlay" survive a
+ * sibling being deleted or reordered. Stable by identity: nothing to do returns the SAME reference,
+ * so calling it on every state entry cannot churn a memo or a history snapshot.
+ */
+export function withCoverOverlayIds(c: CoverConfig): CoverConfig {
+  if (c.back.overlays.every((o) => !!o.id)) return c;
+  return { ...c, back: { ...c.back, overlays: c.back.overlays.map((o) => (o.id ? o : { ...o, id: makeOverlayId() })) } };
+}
+
 export function coverSideBackground(c: CoverConfig, side: CoverSide): Background | null {
   if (side === 'front') return c.background;
   if (side === 'back') return c.back.background;

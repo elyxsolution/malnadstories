@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Sprig } from '@/components/brand';
 import { fontStack } from '@/lib/builder/elements';
 import PhotoFrame from './_photo-frame';
-import { TextBox, StickerBox, QrBox } from './_elements-render';
+import { TextBox, StickerBox, QrBox, OverlayBox } from './_elements-render';
+import type { PairPhoto } from './_pair-frame';
 import {
   coverBackgroundStyle,
   coverLayoutFraming,
@@ -16,7 +17,7 @@ import {
   type CoverLayout,
 } from '@/lib/builder/cover';
 import { findRole, migrateCoverConfig } from '@/lib/builder/cover-objects';
-import type { Background, EditConfig, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
+import type { Background, EditConfig, Overlay, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
 /**
  * The cover renderers — shared by the builder canvas, the flipbook preview, review mode, the admin
@@ -73,6 +74,8 @@ export default function CoverDesign({
   texts = [],
   stickers = [],
   qrs = [],
+  overlays = [],
+  photoFor,
   stickerUrlFor,
   renderElements = true,
   onReady,
@@ -86,6 +89,15 @@ export default function CoverDesign({
   texts?: TextElement[];
   stickers?: StickerElement[];
   qrs?: QrElement[];
+  /**
+   * PLACED PHOTOS on this face — the same `Overlay` a content page carries. `imageUrl` above is
+   * the face's BACKDROP (one image, edge to edge); these sit on top of it in their own frames.
+   * Rendered through the shared `OverlayBox`, so a cover overlay and a page overlay are the same
+   * plain, borderless, clipped picture.
+   */
+  overlays?: Overlay[];
+  /** Resolve an overlay's photo id → its URL + edits. Absent ⇒ overlays render nothing. */
+  photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
   /** Resolve a sticker id → presigned URL (parallel to photoFor on pages). */
   stickerUrlFor?: (stickerId: string) => string | undefined;
   /** When false, the host (the editing cover canvas) renders interactive elements itself. */
@@ -119,6 +131,21 @@ export default function CoverDesign({
 
       {framing.scrim && <div className="pointer-events-none absolute inset-0" style={framing.scrim} />}
 
+      {/* Overlays sit ABOVE the backdrop and its scrim, BELOW text/QR/stickers — the same stacking
+          order a content page uses, so an element that is on top in the builder is on top in the
+          PDF. An unfilled frame (no photo yet, or one that has since been deleted) renders nothing
+          rather than an empty box: a placeholder must never print. */}
+      {renderElements &&
+        overlays.map((o, i) => {
+          const photo = photoFor?.(o.photoId);
+          if (!photo) return null;
+          return (
+            <OverlayBox key={o.id ?? i} el={o}>
+              <PhotoFrame url={photo.url} edit={photo.edit} onReady={onReady} />
+            </OverlayBox>
+          );
+        })}
+
       {renderElements && texts.map((t) => <TextBox key={t.id} el={t} />)}
       {renderElements && qrs.map((q) => <QrBox key={q.id} el={q} />)}
       {renderElements &&
@@ -134,12 +161,15 @@ export default function CoverDesign({
 export function BackCoverDesign({
   back,
   imageUrl,
+  photoFor,
   stickerUrlFor,
   renderElements = true,
   onReady,
 }: {
   back: BackCoverConfig;
   imageUrl: string | null;
+  /** Resolve a placed overlay's photo. Absent ⇒ the face's overlays render nothing. */
+  photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
   stickerUrlFor?: (stickerId: string) => string | undefined;
   renderElements?: boolean;
   onReady?: () => void;
@@ -153,6 +183,8 @@ export function BackCoverDesign({
         texts={back.texts}
         stickers={back.stickers}
         qrs={back.qrs}
+        overlays={back.overlays}
+        photoFor={photoFor}
         stickerUrlFor={stickerUrlFor}
         renderElements={renderElements}
         onReady={onReady}

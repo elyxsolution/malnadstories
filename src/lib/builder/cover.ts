@@ -13,7 +13,7 @@
 import type { CSSProperties } from 'react';
 import { backgroundStyle } from './elements';
 import { freeTexts } from './model';
-import type { Background, EditConfig, QrElement, StickerElement, TextAlign, TextElement, TextFontKey } from './model';
+import type { Background, EditConfig, Overlay, QrElement, StickerElement, TextAlign, TextElement, TextFontKey } from './model';
 
 /** Premium cover layouts — each is a tasteful default placement + framing of the title. */
 export const COVER_LAYOUTS = ['classic', 'spotlight', 'banner', 'minimal'] as const;
@@ -39,6 +39,21 @@ export type BackCoverConfig = {
   background: Background | null; // CSS backdrop (used when no photo)
   photoId: string | null; // uploaded album photo used as the back image
   imageEdit: EditConfig | null; // crop/zoom/rotate for the back image (independent of page placement)
+  /**
+   * PHOTO OVERLAYS — the same `Overlay` a content page uses, not a back-cover invention.
+   *
+   * `photoId` above is the face's BACKDROP: one image, edge to edge, behind everything. An overlay
+   * is a placed photo with its own rect that can be moved, resized, layered and deleted — which is
+   * what "add a picture to the back cover" actually means, and what the face had no way to express.
+   * Same type, same geometry contract, same renderer, same `OverlaySchema` on save.
+   *
+   * The FRONT face and the SPINE do not store overlays today (the front is an artwork surface with
+   * its own template pipeline; a spine a few millimetres wide has nowhere to put one). Everything
+   * downstream — `coverSideElements`, `useCover`, the canvas, the renderers — is written per FACE
+   * rather than per back cover, so giving the front overlays later is a one-line change here and in
+   * `coverSideElements`, not a new feature.
+   */
+  overlays: Overlay[];
   texts: TextElement[];
   stickers: StickerElement[];
   qrs: QrElement[];
@@ -52,6 +67,7 @@ export const DEFAULT_BACK_COVER: BackCoverConfig = {
   texts: [],
   stickers: [],
   qrs: [],
+  overlays: [],
   showLogo: false,
 };
 
@@ -223,6 +239,8 @@ export function normalizeBackCover(b: Partial<BackCoverConfig> | null | undefine
     texts: Array.isArray(b.texts) ? b.texts : [],
     stickers: Array.isArray(b.stickers) ? b.stickers : [],
     qrs: Array.isArray(b.qrs) ? b.qrs : [],
+    // Absent on every cover saved before overlays existed — reads as "none", never as broken.
+    overlays: Array.isArray(b.overlays) ? b.overlays : [],
     showLogo: b.showLogo === true,
   };
 }
@@ -292,6 +310,7 @@ export function isCustomCover(c: CoverConfig): boolean {
     c.back.texts.length > 0 ||
     c.back.stickers.length > 0 ||
     c.back.qrs.length > 0 ||
+    c.back.overlays.length > 0 ||
     c.back.showLogo ||
     c.spine.background !== null
   );

@@ -11,7 +11,7 @@ import {
   withOverlayIds,
   stripOverlayIds,
   trimBaseIds,
-  DEFAULT_OVERLAY_GEOM,
+  nextOverlayGeom,
   newUnitOverlayGeoms,
   type Background,
   type Block,
@@ -25,7 +25,6 @@ import {
 import { makeQr, makeSticker, makeText, offsetDuplicate, PAIR_ASPECT, type LayoutPreset } from '@/lib/builder/elements';
 
 /** Only for a NEW overlay's default placement, which should always start on the page. */
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /** A base slot within a block: left/right pages (single-pair) or the spread image. */
 export type BaseSlot = 'left' | 'right' | 'image';
@@ -265,30 +264,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
       // An empty container displaces nothing — there is no photo to take from anywhere else.
       (photoId ? stripPhoto(prev, photoId) : prev).map((b) => {
         if (b.key !== key) return b;
-        const n = b.overlays.length;
-        const { w, h } = DEFAULT_OVERLAY_GEOM;
-        if (at) {
-          const drift = ((n % 5) - 2) * 0.035; // a gentle cascade around the anchor, both axes
-          const cx = at === 'center' ? 0.5 + drift : at.x;
-          const cy = at === 'center' ? 0.5 + drift : at.y;
-          const overlay: Overlay = {
-            id,
-            photoId,
-            x: clamp01(cx - w / 2),
-            y: clamp01(cy - h / 2),
-            w,
-            h,
-          };
-          return { ...b, overlays: [...b.overlays, overlay] };
-        }
-        const overlay: Overlay = {
-          id,
-          photoId,
-          x: clamp01(Math.min(DEFAULT_OVERLAY_GEOM.x + (n % 5) * 0.04, 1 - w)),
-          y: clamp01(Math.min(DEFAULT_OVERLAY_GEOM.y + (n % 5) * 0.04, 1 - h)),
-          w,
-          h,
-        };
+        // `nextOverlayGeom` is shared with the cover's add-overlay, so a new frame starts in the
+        // same place and at the same size whichever surface asked for it.
+        const overlay: Overlay = { id, photoId, ...nextOverlayGeom(b.overlays.length, at) };
         return { ...b, overlays: [...b.overlays, overlay] };
       }),
     );
@@ -361,6 +339,22 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
         b.key === key ? { ...b, texts: b.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) } : b,
       ),
     );
+
+  /**
+   * The SAME write as `patchText`, but as a CORRECTION rather than an action: it amends the
+   * present without pushing an undo entry (see `useHistoryState.amend`). Auto-fit is its caller —
+   * the box tightening around freshly-measured text is a consequence of the size change the user
+   * made, not a second edit for them to undo. It still marks the album dirty, so the corrected
+   * geometry is saved like any other.
+   */
+  const amendText = (key: string, id: string, patch: Partial<TextElement>) => {
+    hist.amend((prev) =>
+      prev.map((b) =>
+        b.key === key ? { ...b, texts: b.texts.map((t) => (t.id === id ? { ...t, ...patch } : t)) } : b,
+      ),
+    );
+    setDirty(true);
+  };
 
   const removeText = (key: string, id: string) =>
     mutate((prev) => prev.map((b) => (b.key === key ? { ...b, texts: b.texts.filter((t) => t.id !== id) } : b)));
@@ -647,6 +641,7 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     duplicateOverlay,
     addText,
     patchText,
+    amendText,
     removeText,
     duplicateText,
     reorderText,

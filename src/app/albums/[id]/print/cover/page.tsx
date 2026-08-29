@@ -48,6 +48,7 @@ export default async function PrintCoverPage({
         frontImageUrl={data.coverImageUrl}
         backImageUrl={data.backCoverImageUrl}
         stickerUrls={data.stickerUrls}
+        coverPhotos={data.coverPhotos}
       />
     </div>
   );

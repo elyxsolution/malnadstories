@@ -86,6 +86,19 @@ export function textFontSize(el: TextElement): string {
   return `${(el.size / REF_PAIR_W) * 100}${el.role === 'spine' ? 'cqh' : 'cqw'}`;
 }
 
+/**
+ * THE SAME font size as `textFontSize`, resolved to PIXELS against a known container.
+ *
+ * `cqw`/`cqh` is what the browser resolves at paint time; measuring text off-screen needs the
+ * number the browser will arrive at. Deriving it here — one function beside the other, from the
+ * same `el.size / REF_PAIR_W` ratio and the same spine axis rule — is what stops the measured box
+ * and the painted text disagreeing. A second formula would be the whole bug.
+ */
+export function textFontPx(el: TextElement, containerW: number, containerH: number): number {
+  const basis = el.role === 'spine' ? containerH : containerW;
+  return (el.size / REF_PAIR_W) * basis;
+}
+
 /** Non-size text CSS (fontSize comes from textFontSize via container queries). */
 export function textStyle(el: TextElement): CSSProperties {
   return {

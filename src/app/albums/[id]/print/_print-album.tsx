@@ -185,10 +185,14 @@ export default function PrintAlbum({
     // renders its stickers once. The back cover is the final page (its own base + stickers).
     const coverStickers = cover ? cover.config.stickers.filter((s) => stickerUrls[s.stickerId]).length : 0;
     const backStickers = cover ? cover.config.back.stickers.filter((s) => stickerUrls[s.stickerId]).length : 0;
+    // Back-cover photo overlays load one image each — but only the ones that RESOLVE, matching
+    // exactly what the renderer draws, so a deleted photo cannot leave the gate waiting forever.
+    const backOverlays = cover ? cover.config.back.overlays.filter((o) => !!o.photoId && photoMap.has(o.photoId)).length : 0;
     return (
       (cover ? 2 : 0) + // front cover base + back cover base
       coverStickers +
       backStickers +
+      backOverlays +
       blocks.reduce(
         (s, b) =>
           s + framesOnHalf(b, 'left') + framesOnHalf(b, 'right') + b.stickers.filter((st) => stickerUrls[st.stickerId]).length * 2,
@@ -274,7 +278,13 @@ export default function PrintAlbum({
           <div className="pdf-page" />
           <div className="pdf-page" />
           <div className="pdf-page">
-            <BackCoverDesign back={cover.config.back} imageUrl={cover.backImageUrl} stickerUrlFor={stickerUrlFor} onReady={onFrameReady} />
+            <BackCoverDesign
+              back={cover.config.back}
+              imageUrl={cover.backImageUrl}
+              photoFor={photoFor}
+              stickerUrlFor={stickerUrlFor}
+              onReady={onFrameReady}
+            />
           </div>
 
           {/*

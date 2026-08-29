@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { Rect, TextElement } from '@/lib/builder/model';
 import { resizedTextSize } from '@/lib/builder/text-size';
 import type { GestureContext } from './_movable';
@@ -28,6 +28,12 @@ import type { GestureContext } from './_movable';
  */
 export function useTextResize(patch: (id: string, patch: Partial<TextElement>) => void) {
   const base = useRef<{ id: string; size: number; start: Rect } | null>(null);
+  /**
+   * WHICH ELEMENT IS BEING RESIZED RIGHT NOW — state, not a ref, because the canvas renders from
+   * it: auto-fit is suppressed for the element under the pointer, and re-runs once when this
+   * clears. It changes twice per gesture (start and end), never per frame.
+   */
+  const [resizingId, setResizingId] = useState<string | null>(null);
 
   const sameGesture = (id: string, start: Rect) => {
     const b = base.current;
@@ -43,7 +49,10 @@ export function useTextResize(patch: (id: string, patch: Partial<TextElement>) =
         patch(el.id, rect);
         return;
       }
-      if (!sameGesture(el.id, ctx.start)) base.current = { id: el.id, size: el.size, start: ctx.start };
+      if (!sameGesture(el.id, ctx.start)) {
+        base.current = { id: el.id, size: el.size, start: ctx.start };
+        setResizingId(el.id);
+      }
       const size = resizedTextSize(base.current!.size, ctx.start, rect, ctx);
       patch(el.id, size === null ? rect : { ...rect, size });
     },
@@ -53,7 +62,8 @@ export function useTextResize(patch: (id: string, patch: Partial<TextElement>) =
   /** The gesture is over — drop the captured start size so the next one captures its own. */
   const end = useCallback(() => {
     base.current = null;
+    setResizingId(null);
   }, []);
 
-  return { onChange, end };
+  return { onChange, end, resizingId };
 }

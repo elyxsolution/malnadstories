@@ -7,6 +7,7 @@ import {
   SpineDesign,
 } from '@/app/(app)/albums/[id]/build/_cover-render';
 import { spinePrintBackgroundStyle, type CoverConfig } from '@/lib/builder/cover';
+import type { EditConfig } from '@/lib/builder/model';
 import {
   COVER_ARTWORK,
   COVER_FOLD_LINES_MM,
@@ -187,6 +188,7 @@ export default function PrintCover({
   frontImageUrl,
   backImageUrl,
   stickerUrls = {},
+  coverPhotos = {},
 }: {
   config: CoverConfig;
   /** The album title — the fallback a v1 cover's spine and title objects migrate from. */
@@ -194,8 +196,17 @@ export default function PrintCover({
   frontImageUrl: string | null;
   backImageUrl: string | null;
   stickerUrls?: Record<string, string>;
+  /** Photos placed as overlays on a cover face, by id — resolved by `loadPrintAlbum`. */
+  coverPhotos?: Record<string, { url: string; edit: EditConfig | null }>;
 }) {
   const stickerUrlFor = useCallback((id: string) => stickerUrls[id], [stickerUrls]);
+  const photoFor = useCallback(
+    (id: string | null | undefined) => {
+      const p = id ? coverPhotos[id] : undefined;
+      return p ? { url: p.url, edit: p.edit } : undefined;
+    },
+    [coverPhotos],
+  );
 
   /**
    * The migration entry points (`CoverDesignFromConfig` / `BackCoverDesign` / `SpineDesign`) need
@@ -212,10 +223,14 @@ export default function PrintCover({
     const faceStickers =
       config.stickers.filter((s) => stickerUrls[s.stickerId]).length +
       config.back.stickers.filter((s) => stickerUrls[s.stickerId]).length;
+    // Each RESOLVABLE cover overlay loads one more remote image, and the renderer skips the ones
+    // it cannot resolve — so the count and what actually renders agree, and a deleted photo can
+    // never leave the gate waiting for a frame that will never arrive.
+    const faceOverlays = config.back.overlays.filter((o) => o.photoId && coverPhotos[o.photoId]).length;
     // Both face renderers signal readiness once whether or not they carry an image (an
     // image-less face fires on mount), so both always count.
-    return 2 + faceStickers;
-  }, [config, stickerUrls]);
+    return 2 + faceStickers + faceOverlays;
+  }, [config, stickerUrls, coverPhotos]);
 
   const [, setLoaded] = useState(0);
   const loadedRef = useRef(0);
@@ -259,6 +274,7 @@ export default function PrintCover({
             <BackCoverDesign
               back={config.back}
               imageUrl={backImageUrl}
+              photoFor={photoFor}
               stickerUrlFor={stickerUrlFor}
               onReady={onFrameReady}
             />

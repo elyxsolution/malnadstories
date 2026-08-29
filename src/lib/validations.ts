@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { nameSchema, passwordSchema } from '@/lib/auth/policy';
 import { FONT_KEYS } from '@/lib/builder/fonts-catalog';
-import { COVER_TEXT_ROLES } from '@/lib/builder/model';
+import { COVER_TEXT_ROLES, MAX_OVERLAYS_PER_BLOCK } from '@/lib/builder/model';
 import { MAX_TEXT_SIZE, MIN_TEXT_SIZE } from '@/lib/builder/text-size';
 
 export const SignupSchema = z.object({
@@ -305,6 +305,12 @@ const BackCoverConfigSchema = z.object({
   texts: z.array(TextElementSchema).max(30).optional().default([]),
   stickers: z.array(StickerElementSchema).max(30).optional().default([]),
   qrs: z.array(QrElementSchema).max(10).optional().default([]),
+  /**
+   * PHOTO OVERLAYS on the back face — the SAME `OverlaySchema` a content page uses, so an overlay
+   * is bounded, off-page-clamped and photo-id-validated identically wherever it lives. Absent on
+   * every cover saved before overlays existed. Capped at the page limit for the same reason.
+   */
+  overlays: z.array(OverlaySchema).max(MAX_OVERLAYS_PER_BLOCK).optional().default([]),
   showLogo: z.boolean().optional().default(false),
 });
 
@@ -358,6 +364,7 @@ export const CoverConfigSchema = z.object({
     texts: [],
     stickers: [],
     qrs: [],
+    overlays: [],
     showLogo: false,
   }),
 });

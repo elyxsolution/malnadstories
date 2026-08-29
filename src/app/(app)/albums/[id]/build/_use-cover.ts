@@ -20,11 +20,24 @@ import {
   metadataFromCoverObjects,
   migrateCoverConfig,
   withAllCoverBackgrounds,
+  withCoverOverlayIds,
   withCoverSideElements,
   type CoverSide,
 } from '@/lib/builder/cover-objects';
 import type { CoverConfig, CoverLayout } from '@/lib/builder/cover';
-import { cryptoId, type Background, type Block, type EditConfig, type QrElement, type StickerElement, type TextElement, type TextVariant } from '@/lib/builder/model';
+import {
+  cryptoId,
+  makeOverlayId,
+  nextOverlayGeom,
+  type Background,
+  type Block,
+  type EditConfig,
+  type Overlay,
+  type QrElement,
+  type StickerElement,
+  type TextElement,
+  type TextVariant,
+} from '@/lib/builder/model';
 import type { Selection } from './_use-builder';
 
 /**
@@ -69,16 +82,44 @@ export type CoverHostDeps = {
   onChange: (next: { config: CoverConfig; title: string }) => void;
   /** The canvas renamed the album (the title object's words changed). Keeps the header in step. */
   onTitleChange: (title: string) => void;
+  /**
+   * Edit ONE ALBUM PHOTO's `edit_config` — the builder's own `commands.applyPhotoEdit`.
+   *
+   * A face's backdrop image keeps its edits in `cover_config.imageEdit`, deliberately independent
+   * of wherever that photo also sits on a page. A cover OVERLAY is not that: it is an ordinary
+   * album photo placed in a frame, so its crop/rotate belongs on the `photos` row exactly as a
+   * page overlay's does. Without this the shared `PhotoBar` would silently rotate the face's
+   * backdrop while an overlay was selected.
+   */
+  onPhotoEdit?: (photoId: string, patch: Partial<EditConfig>) => void;
+  /**
+   * Rotate ONE ALBUM PHOTO by a quarter turn. Separate from `onPhotoEdit` because the next
+   * rotation depends on the photo's CURRENT one, and the host is what holds the photos — this hook
+   * deliberately knows nothing about them.
+   */
+  onPhotoRotate?: (photoId: string, dir: 1 | -1) => void;
 };
 
-export function useCover({ initialConfig, title, pageAspect, onChange, onTitleChange }: CoverHostDeps) {
+export function useCover({
+  initialConfig,
+  title,
+  pageAspect,
+  onChange,
+  onTitleChange,
+  onPhotoEdit,
+  onPhotoRotate,
+}: CoverHostDeps) {
   /**
    * MIGRATION RUNS ONCE, AT THE DOOR. Everything downstream — the canvas, the toolbars, the
    * renderers — may assume objects exist. `useState`'s initializer form means a legacy config is
    * converted on mount and never re-converted, which also makes the conversion undoable-past:
    * the first history entry is already the object model, so ⌘Z can't rewind into a v1 shape.
    */
-  const hist = useHistoryState<CoverConfig>(() => migrateCoverConfig(initialConfig, { title }, pageAspect));
+  const hist = useHistoryState<CoverConfig>(() =>
+    // Overlay ids are client-only and never persisted (`OverlaySchema` has none), so they are
+    // minted at the door here for the same reason `withOverlayIds` mints a page's on load.
+    withCoverOverlayIds(migrateCoverConfig(initialConfig, { title }, pageAspect)),
+  );
   const config = hist.value;
 
   const [side, setSide] = useState<CoverSide>('front');
@@ -204,6 +245,22 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
     [write, sideOfKey],
   );
 
+  /**
+   * `patchText` as a CORRECTION rather than an action — no undo entry (see `amend`). Auto-fit's
+   * write, identical on both surfaces so a tightened box behaves the same on a cover as on a page.
+   */
+  const amendText = useCallback(
+    (key: string, id: string, patch: Partial<TextElement>) => {
+      const target = sideOfKey(key);
+      hist.amend((prev) =>
+        withCoverSideElements(prev, target, {
+          texts: coverSideElements(prev, target).texts.map((t) => (t.id === id ? { ...t, ...patch, role: t.role } : t)),
+        }),
+      );
+    },
+    [hist, sideOfKey],
+  );
+
   const removeText = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
@@ -273,6 +330,86 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
       const clone: StickerElement = offsetDuplicate({ ...src, id: cryptoId() });
       write((prev) => withCoverSideElements(prev, target, { stickers: [...coverSideElements(prev, target).stickers, clone] }));
       setSelection({ kind: 'sticker', id: clone.id });
+      return clone.id;
+    },
+    [write, sideOfKey, config],
+  );
+
+  // ── photo overlays ──────────────────────────────────────────────────────────────
+  /**
+   * ADD A PHOTO OVERLAY to the focused face — the cover's half of the page canvas's `addOverlay`.
+   *
+   * It creates the CONTAINER and nothing else, exactly as the page action does: the caller then
+   * opens the ordinary `PhotoPicker` and fills it through `replaceOverlay`. Geometry comes from
+   * the shared `nextOverlayGeom`, so a new frame lands in the same place, at the same size, with
+   * the same cascade as one added to a spread.
+   *
+   * A face that does not store overlays (front, spine) writes nothing — `withCoverSideElements`
+   * drops the key — so there is no face-specific branch here to keep in step.
+   */
+  const addOverlay = useCallback(
+    (photoId: string | null = null, at?: { x: number; y: number } | 'center') => {
+      const id = makeOverlayId();
+      write((prev) => {
+        const existing = coverSideElements(prev, side).overlays;
+        const overlay: Overlay = { id, photoId, ...nextOverlayGeom(existing.length, at) };
+        return withCoverSideElements(prev, side, { overlays: [...existing, overlay] });
+      });
+      setSelection({ kind: 'overlay', id });
+      return id;
+    },
+    [write, side],
+  );
+
+  /**
+   * Replace the whole overlay array for a face. The shape `Movable` and the shared `PhotoBar`
+   * already speak (`api.patchOverlays`), so the cover needs no toolbar of its own.
+   */
+  const patchOverlays = useCallback(
+    (key: string, overlays: Overlay[]) => {
+      const target = sideOfKey(key);
+      write((prev) => withCoverSideElements(prev, target, { overlays }));
+    },
+    [write, sideOfKey],
+  );
+
+  /** Point one overlay at a photo — what the picker calls once the customer has chosen. */
+  const replaceOverlay = useCallback(
+    (key: string, overlayId: string, photoId: string) => {
+      const target = sideOfKey(key);
+      write((prev) =>
+        withCoverSideElements(prev, target, {
+          overlays: coverSideElements(prev, target).overlays.map((o) => (o.id === overlayId ? { ...o, photoId } : o)),
+        }),
+      );
+    },
+    [write, sideOfKey],
+  );
+
+  const removeOverlay = useCallback(
+    (key: string, overlayId: string) => {
+      const target = sideOfKey(key);
+      write((prev) =>
+        withCoverSideElements(prev, target, {
+          overlays: coverSideElements(prev, target).overlays.filter((o) => o.id !== overlayId),
+        }),
+      );
+    },
+    [write, sideOfKey],
+  );
+
+  const duplicateOverlay = useCallback(
+    (key: string, overlayId: string) => {
+      const target = sideOfKey(key);
+      const src = coverSideElements(config, target).overlays.find((o) => o.id === overlayId);
+      if (!src) return undefined;
+      // A page overlay may legitimately reuse a photo (it is decorative, and edits are per-photo);
+      // the cover follows the same rule, so the clone keeps its picture.
+      const clone: Overlay = offsetDuplicate({ ...src, id: makeOverlayId() });
+      write((prev) =>
+        withCoverSideElements(prev, target, { overlays: [...coverSideElements(prev, target).overlays, clone] }),
+      );
+      setSelection({ kind: 'overlay', id: clone.id as string });
       return clone.id;
     },
     [write, sideOfKey, config],
@@ -424,6 +561,10 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
           const next = reorderById(e.qrs, target.id, action);
           return next ? withCoverSideElements(prev, s, { qrs: next }) : prev;
         }
+        if (target.kind === 'overlay') {
+          const next = reorderById(e.overlays, target.id, action);
+          return next ? withCoverSideElements(prev, s, { overlays: next }) : prev;
+        }
         return prev;
       });
     },
@@ -435,12 +576,15 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
   const deletable =
     selection.kind === 'sticker' ||
     selection.kind === 'qr' ||
+    selection.kind === 'overlay' ||
     (selection.kind === 'text' && !isPermanentRole(selectedText?.role)) ||
     (selection.kind === 'base' && !!image.photoId);
 
   const deleteLabel =
     selection.kind === 'sticker'
       ? 'Delete sticker'
+      : selection.kind === 'overlay'
+        ? 'Delete photo overlay'
       : selection.kind === 'qr'
         ? 'Delete QR code'
         : selection.kind === 'text'
@@ -454,12 +598,13 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
   const deleteSelection = useCallback(() => {
     const key = `cover:${side}`;
     if (selection.kind === 'sticker') removeSticker(key, selection.id);
+    else if (selection.kind === 'overlay') removeOverlay(key, selection.id);
     else if (selection.kind === 'qr') removeQr(key, selection.id);
     else if (selection.kind === 'text') removeText(key, selection.id);
     else if (selection.kind === 'base') setPhoto(null);
     else return;
     setSelection({ kind: 'none' });
-  }, [selection, side, removeSticker, removeQr, removeText, setPhoto]);
+  }, [selection, side, removeSticker, removeOverlay, removeQr, removeText, setPhoto]);
 
   // ── adapters: the focused surface, in the shapes the shared toolbars consume ────
   /**
@@ -477,7 +622,9 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
       template: 'double-spread',
       photoIds: image.photoId ? [image.photoId] : [],
       caption: '',
-      overlays: [],
+      // Real overlays now, on a face that stores them — which is what makes the SHARED `PhotoBar`
+      // work on a cover overlay with no cover-specific branch anywhere in the toolbar.
+      overlays: elements.overlays,
       texts: elements.texts,
       qrs: elements.qrs,
       stickers: elements.stickers,
@@ -493,24 +640,41 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
       patchQr,
       duplicateText,
       duplicateSticker,
-      duplicateOverlay: () => undefined,
-      patchOverlays: () => {},
+      duplicateOverlay,
+      patchOverlays,
       batch,
     }),
-    [patchText, patchSticker, patchQr, duplicateText, duplicateSticker, batch],
+    [patchText, patchSticker, patchQr, duplicateText, duplicateSticker, duplicateOverlay, patchOverlays, batch],
   );
+
+  /**
+   * WHICH PHOTO IS THE TOOLBAR ACTING ON? The face's backdrop, or a selected overlay.
+   *
+   * The backdrop's edits live on the cover config; an overlay's live on the `photos` row, like
+   * every other placed photo in the album. One branch, resolved here, so `PhotoBar` stays a pure
+   * renderer over `barCommands` and needs to know nothing about covers.
+   */
+  const overlayPhotoId =
+    selection.kind === 'overlay' ? (elements.overlays.find((o) => o.id === selection.id)?.photoId ?? null) : null;
 
   const barCommands = useMemo(
     () => ({
-      applyPhotoEdit: (_photoId: string, patch: Partial<EditConfig>) => patchImageEdit(patch),
+      applyPhotoEdit: (photoId: string, patch: Partial<EditConfig>) => {
+        if (overlayPhotoId && onPhotoEdit) onPhotoEdit(photoId, patch);
+        else patchImageEdit(patch);
+      },
       rotateBy: (dir: 1 | -1) => {
+        if (overlayPhotoId && onPhotoRotate) {
+          onPhotoRotate(overlayPhotoId, dir);
+          return;
+        }
         const cur = image.edit?.rotate ?? 0;
         patchImageEdit({ rotate: (((cur + dir * 90 + 360) % 360) as 0 | 90 | 180 | 270) });
       },
       moveLayer,
       deleteSelection: { label: deleteLabel, enabled: deletable, run: deleteSelection },
     }),
-    [patchImageEdit, image.edit?.rotate, moveLayer, deleteLabel, deletable, deleteSelection],
+    [patchImageEdit, image.edit?.rotate, overlayPhotoId, onPhotoEdit, onPhotoRotate, moveLayer, deleteLabel, deletable, deleteSelection],
   );
 
   return {
@@ -535,8 +699,14 @@ export function useCover({ initialConfig, title, pageAspect, onChange, onTitleCh
     // mutations
     addText,
     patchText,
+    amendText,
     removeText,
     duplicateText,
+    addOverlay,
+    patchOverlays,
+    replaceOverlay,
+    removeOverlay,
+    duplicateOverlay,
     addSticker,
     patchSticker,
     removeSticker,

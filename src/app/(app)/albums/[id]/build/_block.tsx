@@ -5,6 +5,8 @@ import { X, Crop, SlidersHorizontal, ImagePlus, Move } from 'lucide-react';
 import PhotoFrame from './_photo-frame';
 import Movable, { SnapGuides, type SnapLine, type SelectMods } from './_movable';
 import { useTextResize } from './_use-text-resize';
+import TextAutoFit from './_text-autofit';
+import { MIN_TEXT_BOX } from '@/lib/builder/text-fit';
 import { PrintGutter } from './_pair-frame';
 import { TextContent, QrContent, StickerContent } from './_elements-render';
 import { InlineTextEditor } from './_element-bits';
@@ -634,8 +636,10 @@ export default function BlockCard({
               rect={t}
               rotation={t.rotation}
               rotatable
-              minW={0.06}
-              minH={0.03}
+              /* Matches what auto-fit can produce: a larger minimum would make the first pixel of
+                 a corner drag jump a tightly-fitted box out to it. See MIN_TEXT_BOX. */
+              minW={MIN_TEXT_BOX}
+              minH={MIN_TEXT_BOX}
               selected={sel({ kind: 'text', id: t.id })}
               containerRef={pageRef}
               chromeContainer={chromeEl}
@@ -673,6 +677,14 @@ export default function BlockCard({
               ) : (
                 <TextContent el={t} />
               )}
+              {/* Renders nothing: it measures the words and tightens the box around them. Held off
+                  while the pointer owns the geometry, or while the words are still being typed. */}
+              <TextAutoFit
+                el={t}
+                containerRef={pageRef}
+                enabled={editingText !== t.id && textResize.resizingId !== t.id}
+                onFit={(box) => api.amendText(block.key, t.id, box)}
+              />
             </Movable>
           ))}
 

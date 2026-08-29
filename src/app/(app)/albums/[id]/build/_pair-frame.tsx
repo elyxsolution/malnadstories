@@ -1,7 +1,7 @@
 'use client';
 
 import PhotoFrame from './_photo-frame';
-import { TextBox, QrBox, StickerBox } from './_elements-render';
+import { TextBox, QrBox, StickerBox, OverlayBox } from './_elements-render';
 import UploadBadge, { stateOpacityClass, type BadgeSize } from './_upload-badge';
 import type { PhotoUiState } from './_photo-state';
 import { backgroundStyle } from '@/lib/builder/elements';
@@ -150,31 +150,15 @@ export default function PairContent({
           if (!showPlaceholders) return null;
           return <OverlayPlaceholder key={i} style={style} />;
         }
+        // `OverlayBox` (in `_elements-render`) is the ONE definition of an overlay's container:
+        // positioned, clipped, and carrying no border, outline, shadow or radius. It used to be
+        // `border-2 border-white shadow` written out here, which printed as the white hairline
+        // between the artwork and the trimmed page edge. The cover faces render overlays through
+        // the same component, so no surface can grow a frame the others do not have.
         return (
-          <div
-            key={i}
-            /**
-             * AN OVERLAY IS A PLAIN IMAGE — no border, no outline, no shadow, no radius.
-             *
-             * This used to carry `border-2 border-white shadow`, which was SCREEN CHROME: it made
-             * an overlay read as a grabbable photo card. It was hardcoded here, the customer never
-             * chose it, could not change it, and it existed nowhere in the album model.
-             *
-             * On a printed page it is ink. Because a page created today starts as ONE FULL-PAGE
-             * overlay per side (`newUnitOverlayGeoms`, see model.ts), that 2 px white ring landed
-             * exactly between the artwork and the trimmed page edge — the white hairline — and the
-             * drop shadow printed as grey haze along the same edge. The printer-ready interior
-             * suppressed it through a `print` flag; the flag is gone because the chrome is gone.
-             *
-             * `overflow-hidden` STAYS: it is what clips the photo to its container, not decoration.
-             * Selection outlines and resize handles are unaffected — they are drawn by `Movable`
-             * in the chrome layer, never by this element.
-             */
-            className="absolute overflow-hidden"
-            style={style}
-          >
+          <OverlayBox key={i} el={o}>
             <Framed photo={photo} badge={badge} onFrameReady={onFrameReady} />
-          </div>
+          </OverlayBox>
         );
       })}
 

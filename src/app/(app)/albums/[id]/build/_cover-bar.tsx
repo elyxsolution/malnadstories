@@ -7,6 +7,7 @@ import {
   Type as TypeIcon,
   QrCode,
   Sticker as StickerIcon,
+  ImagePlus,
   Trash2,
   LayoutGrid,
   BookOpen,
@@ -54,6 +55,8 @@ export type CoverBarProps = {
   onPickPhoto: () => void;
   /** Open the cover-artwork gallery (the admin template catalog) in the rail. */
   onOpenArtwork: () => void;
+  /** Create a photo overlay on the focused face and open the picker to fill it. */
+  onAddOverlay: () => void;
   /** Open the rail on a given tool — the cover's add-object actions reuse the existing panels. */
   onOpenRail: (tab: 'text' | 'stickers' | 'qr' | 'backgrounds') => void;
   onCrop: () => void;
@@ -328,6 +331,11 @@ function CoverBar(p: CoverBarProps) {
       {cover.side === 'back' && (
         <>
           <BarSep />
+          {/* ADD OVERLAY. `Photo` above sets the face's BACKDROP — one image, edge to edge. This
+              places a picture in its own movable, resizable frame on top of it, which is what the
+              back cover had no way to express. It creates the container and opens the album photo
+              picker, exactly as the page canvas's Add-photo does. */}
+          <BarBtn label="Add a photo overlay" icon={<ImagePlus />} text="Add overlay" onClick={p.onAddOverlay} />
           <BarBtn
             label={cover.config.back.showLogo ? 'Hide the Malnad Stories mark' : 'Print the Malnad Stories mark'}
             icon={<BookOpen />}
