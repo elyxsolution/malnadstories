@@ -124,21 +124,32 @@ describe('the hole survives save and validation', () => {
     expect(blocks[0].photoIds).toEqual([null, B]);
   });
 
-  it('SaveLayoutSchema accepts a hole and still rejects a photo placed twice', () => {
+  it('SaveLayoutSchema accepts a hole', () => {
     const ok = SaveLayoutSchema.safeParse({
       albumId: '44444444-4444-4444-8444-444444444444',
       blocks: [{ template: 'single-pair', photoIds: [null, B], overlays: [] }],
     });
     expect(ok.success).toBe(true);
+  });
 
+  /**
+   * THE PLACED-ONCE REFINEMENT IS GONE, DELIBERATELY.
+   *
+   * This assertion used to read `expect(dup.success).toBe(false)`. A photo is a REUSABLE SOURCE
+   * ASSET now — the same image legitimately appears on page 1, page 5 and the back cover — so a
+   * repeated id is the feature, not a forged payload. Every other gate is unchanged and is
+   * asserted elsewhere: album ownership + the album_id pin on every referenced photo (inside
+   * `saveLayout`), the 50-overlay and 100-block caps, and the page-count overflow check.
+   */
+  it('SaveLayoutSchema ACCEPTS the same photo placed in several frames', () => {
     const dup = SaveLayoutSchema.safeParse({
       albumId: '44444444-4444-4444-8444-444444444444',
       blocks: [
         { template: 'single-pair', photoIds: [null, B], overlays: [] },
-        { template: 'single-pair', photoIds: [B], overlays: [] },
+        { template: 'single-pair', photoIds: [B], overlays: [{ photoId: B, x: 0.1, y: 0.1, w: 0.3, h: 0.3 }] },
       ],
     });
-    expect(dup.success).toBe(false);
+    expect(dup.success).toBe(true);
   });
 });
 

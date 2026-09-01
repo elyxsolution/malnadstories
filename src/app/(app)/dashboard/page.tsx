@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { resolveCoverFrontKeys } from '@/lib/albums/cover';
+import { resolveStickerUrls } from '@/lib/stickers';
+import { presignGet } from '@/lib/r2';
 import { PAID_STATES } from '@/lib/orders/album-lock';
 import { recordTiming } from '@/lib/observability/log';
 import { PERF_THRESHOLDS } from '@/lib/observability/model';
@@ -14,7 +17,11 @@ type AlbumRow = {
   status: string;
   updated_at: string;
   cover_config: unknown;
+  cover_template_id: string | null;
 };
+
+/** Signed-URL lifetime for a shelf thumbnail. Long enough to browse, short enough to be worthless. */
+const COVER_URL_TTL_S = 900;
 
 export default async function DashboardPage() {
   // RLS scopes every read to the owner (user_id = auth.uid()).
@@ -33,13 +40,13 @@ export default async function DashboardPage() {
   // each; nothing else was added.
   let albumRes = await supabase
     .from('albums')
-    .select('id, title, size, status, updated_at, cover_config')
+    .select('id, title, size, status, updated_at, cover_config, cover_template_id')
     .is('blueprint_draft_of', null)
     .order('updated_at', { ascending: false });
   if (albumRes.error) {
     albumRes = await supabase
       .from('albums')
-      .select('id, title, size, status, updated_at, cover_config')
+      .select('id, title, size, status, updated_at, cover_config, cover_template_id')
       .order('updated_at', { ascending: false });
   }
   if (albumRes.error) throw albumRes.error;
@@ -67,6 +74,39 @@ export default async function DashboardPage() {
     metadata: { albums: userAlbums.length },
   });
 
+  /**
+   * THE SHELF SHOWS THE REAL FRONT COVER.
+   *
+   * The book on the dashboard is drawn by the SAME `CoverDesignFromConfig` the builder, the
+   * preview, review mode and the PDF draw — there is deliberately no second representation that
+   * could drift. What it was missing was the artwork: `albumCoverFace` used to hardcode
+   * `imageUrl={null}`, so a photo cover rendered as its background colour and title alone.
+   *
+   * Resolved here, server-side, through the canonical priority chain (photo → template → none) in
+   * a fixed THREE queries for the whole shelf plus one for the placed stickers — not per card. The
+   * config itself already rides along on the album read above, so nothing about this page's shape
+   * changed, and `cover_config` is always the album's CURRENT saved state: re-opening the builder,
+   * editing the cover and saving updates the same row this reads, so the thumbnail cannot go stale.
+   */
+  const coverKeys = await resolveCoverFrontKeys(supabase, userAlbums);
+  const coverConfigs = new Map(
+    userAlbums.map((a) => [a.id, a.cover_config ? normalizeCoverConfig(a.cover_config as Parameters<typeof normalizeCoverConfig>[0]) : null] as const),
+  );
+  // Presign each distinct key ONCE — two albums can legitimately share one cover template.
+  const coverUrls = new Map<string, string>();
+  await Promise.all(
+    Array.from(new Set(Array.from(coverKeys.values()).map((v) => v.key).filter((k): k is string => !!k))).map(
+      async (key) => {
+        coverUrls.set(key, await presignGet(key, COVER_URL_TTL_S));
+      },
+    ),
+  );
+  // Stickers placed on a FRONT cover — resolved by id (service role) so a since-deactivated but
+  // still-placed sticker renders here exactly as it does in the builder and the PDF.
+  const stickerUrls = await resolveStickerUrls(
+    Array.from(coverConfigs.values()).flatMap((c) => (c ? c.stickers.map((s) => s.stickerId) : [])),
+  );
+
   const albums: LibraryAlbum[] = userAlbums.map((a) => ({
     id: a.id,
     title: a.title,
@@ -78,14 +118,19 @@ export default async function DashboardPage() {
     // which would make an album that has never been designed look like it has a cover — so the
     // absence is preserved here and the shelf falls back to the bound-book artwork instead.
     // Normalising server-side means the client receives an already-valid, plain-JSON CoverConfig.
-    cover: a.cover_config ? normalizeCoverConfig(a.cover_config as Parameters<typeof normalizeCoverConfig>[0]) : null,
+    cover: coverConfigs.get(a.id) ?? null,
+    /** The front artwork actually resolved for this album, or null when the cover is CSS-only. */
+    coverImageUrl: (() => {
+      const key = coverKeys.get(a.id)?.key ?? null;
+      return key ? (coverUrls.get(key) ?? null) : null;
+    })(),
   }));
 
   return (
     <CustomerShell email={user?.email ?? ''}>
       {/* Opportunistic worker pre-warm (≤ once / 10 min). */}
       <WorkerPrewarm />
-      <Library albums={albums} />
+      <Library albums={albums} stickerUrls={stickerUrls} />
     </CustomerShell>
   );
 }

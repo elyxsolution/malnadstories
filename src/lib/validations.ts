@@ -169,6 +169,15 @@ const OverlaySchema = z.object({
   y: offPageCoord(),
   w: z.number().gt(0).max(1),
   h: z.number().gt(0).max(1),
+  /**
+   * THIS PLACEMENT'S OWN EDIT (see PLACEMENT EDITS in `lib/builder/model`).
+   *
+   * Additive + optional, so every overlay saved before placements could be edited independently
+   * parses exactly as before and keeps meaning "inherit the photo's `edit_config`". It reuses
+   * `EditConfigSchema` verbatim — the same bounds `savePhotoEdit` enforces — so a forged client
+   * cannot store a crop, zoom or tone through a frame that it could not store through the photo.
+   */
+  edit: EditConfigSchema.nullable().optional(),
 });
 
 // Rich page elements (text · QR · background) — stored in layout_config jsonb alongside
@@ -254,6 +263,12 @@ const BlockSchema = z.object({
    * emptied unit still arrives as `[]`.
    */
   photoIds: z.array(z.string().uuid().nullable()).max(2),
+  /**
+   * PER-BASE-SLOT EDITS, positional and parallel to `photoIds` (see `Block.baseEdits`). Optional
+   * and absent for every pre-existing block; `.max(2)` mirrors `photoIds` so it can never
+   * describe a slot the unit does not have.
+   */
+  baseEdits: z.array(EditConfigSchema.nullable()).max(2).optional(),
   caption: z.string().max(200).optional().default(''),
   overlays: z.array(OverlaySchema).max(50).optional().default([]),
   texts: z.array(TextElementSchema).max(30).optional().default([]),
@@ -264,26 +279,22 @@ const BlockSchema = z.object({
   preset: z.string().max(40).optional(),
 });
 
-export const SaveLayoutSchema = z
-  .object({
-    albumId: z.string().uuid('Invalid album'),
-    blocks: z.array(BlockSchema).max(100),
-  })
-  .superRefine((data, ctx) => {
-    // A photo may be placed at most once across the whole album — base OR overlay.
-    // Empty overlay placeholders (photoId=null) carry no photo, so they never collide.
-    const seen = new Set<string>();
-    for (const b of data.blocks) {
-      for (const id of [...b.photoIds, ...b.overlays.map((o) => o.photoId)]) {
-        if (id == null) continue;
-        if (seen.has(id)) {
-          ctx.addIssue({ code: 'custom', message: 'A photo cannot be placed more than once' });
-          return;
-        }
-        seen.add(id);
-      }
-    }
-  });
+/**
+ * ONE IMAGE, MANY PLACEMENTS.
+ *
+ * This schema used to carry a `superRefine` rejecting any photo id that appeared twice across the
+ * album — the server half of the placed-once invariant. It is GONE, deliberately: a photo is a
+ * reusable source asset, and the same file legitimately appears on page 1, page 5 and the back
+ * cover. Nothing was weakened by removing it. Every id in the payload is still proved to belong
+ * to THIS album inside `saveLayout` (an `in`-list re-read through the RLS-scoped client), the
+ * overlay cap (50/block), the block cap (100) and the page-accounting overflow check are all
+ * unchanged, and each placement's edit is bounded by `EditConfigSchema`. The only thing that
+ * stopped being rejected is repetition, which is now the feature.
+ */
+export const SaveLayoutSchema = z.object({
+  albumId: z.string().uuid('Invalid album'),
+  blocks: z.array(BlockSchema).max(100),
+});
 
 export const PhotoEditSchema = z.object({
   photoId: z.string().uuid('Invalid photo'),

@@ -39,6 +39,7 @@ export default function CanvasToolbar({
   saving,
   onSubmit,
   submitting,
+  adminEditing = false,
   albumId,
   onOpenSettings,
   reviewMode = false,
@@ -76,6 +77,14 @@ export default function CanvasToolbar({
   saving: boolean;
   onSubmit: () => void;
   submitting: boolean;
+  /**
+   * An ADMINISTRATOR is editing a customer's album. Hides the two CUSTOMER terminal actions —
+   * Submit (which is a customer's own RLS-scoped action and would simply fail for an admin) and
+   * Checkout (buying someone else's book). Save stays, because saving is the point.
+   *
+   * Not a permission: the server refuses both regardless of what this renders.
+   */
+  adminEditing?: boolean;
   albumId: string;
   /** Open the Album Settings hub (General / Format / Photos / Builder). Customer mode only. */
   onOpenSettings?: () => void;
@@ -268,7 +277,11 @@ export default function CanvasToolbar({
             <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
               {saving ? <InlineLoader /> : <Save />} <span className="hidden sm:inline">Save</span>
             </Button>
-            {reviewMode ? (
+            {adminEditing ? (
+              /* An admin's terminal action is Save, then Generate PDF / Approve back in the admin
+                 console — neither Submit nor Checkout belongs to them. */
+              null
+            ) : reviewMode ? (
               /* Review Revision Mode (CHANGE 2/3/7): the album is already paid — NO Checkout.
                  Resubmit is the primary action; it runs the SAME central validation + dialog as Submit. */
               <Button size="sm" onClick={onSubmit} disabled={submitting} className={STUDIO_PRIMARY}>

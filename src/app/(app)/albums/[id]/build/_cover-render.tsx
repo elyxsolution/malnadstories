@@ -17,6 +17,7 @@ import {
   type CoverLayout,
 } from '@/lib/builder/cover';
 import { findRole, migrateCoverConfig } from '@/lib/builder/cover-objects';
+import { resolveFrameEdit } from '@/lib/builder/model';
 import type { Background, EditConfig, Overlay, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
 /**
@@ -141,7 +142,10 @@ export default function CoverDesign({
           if (!photo) return null;
           return (
             <OverlayBox key={o.id ?? i} el={o}>
-              <PhotoFrame url={photo.url} edit={photo.edit} onReady={onReady} />
+              {/* THIS PLACEMENT'S edit wins over the source photo's — the same rule `_pair-frame`
+                  applies to a page overlay, so a photo cropped one way on a page and another way
+                  on the back cover really is two independent pictures. */}
+              <PhotoFrame url={photo.url} edit={resolveFrameEdit(o.edit, photo.edit)} onReady={onReady} />
             </OverlayBox>
           );
         })}

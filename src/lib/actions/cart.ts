@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import { AddToCartSchema, RemoveFromCartSchema, UpdateCartQuantitySchema } from '@/lib/validations';
 import {
   addOrIncrementCartItem,
+  ensureCartItem,
   getCartCount,
   removeCartItem,
   setCartQuantity,
@@ -90,6 +91,53 @@ export async function addAlbumToCart(input: unknown): Promise<CartActionResult> 
   // The badge is rendered from the app layout's server-side count, so the layout has to be
   // re-read for it to move. `layout` scope keeps this to the chrome rather than blowing away
   // every cached customer page.
+  revalidateCartSurfaces();
+  return { ok: true, count: await getCartCount(supabase) };
+}
+
+/**
+ * MAKE SURE an album is in the cart — without changing the quantity if it already is.
+ *
+ * The post-submission dialog's "Add to cart & create one more album" needs exactly this. It cannot
+ * use `addAlbumToCart`: `submitAlbum` has ALREADY called `ensureCartItem` for this album moments
+ * earlier, so incrementing here would leave the customer at quantity 2 for an album they asked to
+ * buy once. It also cannot silently do nothing, because the submit-time auto-add is best-effort
+ * (it is wrapped in a try/catch so a cart failure can never fail a submission) — so the album may
+ * genuinely not be there.
+ *
+ * "Ensure" and "increment" are two deliberately separate helpers in this codebase (see
+ * `lib/cart/queries`); this is the action-level door to the first of them, and it reuses the same
+ * ownership, blueprint and `submitted` gates `addAlbumToCart` applies rather than inventing a
+ * second eligibility rule.
+ */
+export async function ensureAlbumInCart(input: unknown): Promise<CartActionResult> {
+  const parsed = AddToCartSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const { albumId } = parsed.data;
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  // Same three gates as `addAlbumToCart`, read through the RLS-scoped client: a foreign album
+  // resolves to null and returns the ordinary "not found" rather than acting as an existence oracle.
+  const { data: albumRow } = await supabase
+    .from('albums')
+    .select('id, status, blueprint_draft_of')
+    .eq('id', albumId)
+    .maybeSingle();
+  const album = albumRow as { id: string; status: string; blueprint_draft_of: string | null } | null;
+  if (!album) return { ok: false, error: 'Album not found' };
+  if (album.blueprint_draft_of !== null) return { ok: false, error: 'This album cannot be added to the cart.' };
+  if (album.status !== 'submitted') {
+    return { ok: false, error: 'Finish and submit the album before adding it to your cart.' };
+  }
+
+  const result = await ensureCartItem(supabase, albumId);
+  if (!result.ok) return result;
+
   revalidateCartSurfaces();
   return { ok: true, count: await getCartCount(supabase) };
 }

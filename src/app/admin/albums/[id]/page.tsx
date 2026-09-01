@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { albums, profiles, orders } from '@/db/schema';
-import { requireAdmin } from '@/lib/auth/require-admin';
+import { getAdminContext, requireAdmin } from '@/lib/auth/require-admin';
+import { roleHasCapability } from '@/lib/auth/capabilities';
 import { createServiceClient } from '@/lib/supabase/service';
 import { adminUserEmail } from '@/lib/admin/users';
 import { loadAlbumForAdmin } from '@/lib/admin/album-view';
@@ -33,6 +34,15 @@ export const fetchCache = 'force-no-store';
 
 export default async function AdminAlbumDetail({ params }: { params: { id: string } }) {
   await requireAdmin();
+  /**
+   * May THIS administrator open the customer's builder on this album?
+   *
+   * The same `album:manage` capability the PDF controls on this page already require, and the
+   * same one `resolveAlbumWriteAccess` enforces on the route itself and on every save. Hiding the
+   * button for a role without it is a courtesy, NOT the boundary — a support-role admin who typed
+   * the URL is refused server-side and gets the ordinary 404.
+   */
+  const canEditAlbum = roleHasCapability((await getAdminContext()).role, 'album:manage');
 
   const [album] = await db
     .select({
@@ -100,6 +110,32 @@ export default async function AdminAlbumDetail({ params }: { params: { id: strin
           {album.customerName ?? email}
         </Link>
       </p>
+
+      {/*
+        EDIT THE ALBUM ITSELF — the customer's own builder, on this album.
+
+        Deliberately a link to `/albums/[id]/build` and not an admin editor: a second editor would
+        be a second thing to keep in step with the renderer, the layout schema and the print export.
+        The admin edits the same saved state, and the PDF buttons below then render from exactly
+        what was saved — which is why "generate after editing" needs no separate path.
+      */}
+      {canEditAlbum && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3">
+          <div className="min-w-[220px] flex-1">
+            <p className="text-sm font-semibold">Correct this album yourself</p>
+            <p className="text-xs text-muted-foreground">
+              Opens the customer&rsquo;s album builder. Your changes are saved to their album, and the PDF is
+              generated from that saved state — no need to send it back for a small fix.
+            </p>
+          </div>
+          <Link
+            href={`/albums/${album.id}/build`}
+            className="shrink-0 rounded-lg border bg-background px-3 py-1.5 text-sm font-medium shadow-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]"
+          >
+            Open in builder
+          </Link>
+        </div>
+      )}
 
       {/* Preview PDF controls + the printer-ready Print files group (0058). Block, not a flex row:
           the print group below the preview buttons is full-width. */}

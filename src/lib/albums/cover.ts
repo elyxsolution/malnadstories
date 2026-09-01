@@ -183,3 +183,79 @@ export async function resolveCoverImageKeys(
   const backKey = config.back.photoId ? await readyPhotoKey(config.back.photoId) : null;
   return { front, back: { key: backKey } };
 }
+
+/**
+ * THE SAME PRIORITY CHAIN, FOR MANY ALBUMS AT ONCE — the shelf's resolver.
+ *
+ * `resolveCoverImageKeys` is per-album and issues up to two queries each, which is correct for the
+ * builder, checkout and the print route (one album, richest possible data) and wrong for a
+ * dashboard listing every album a customer owns: that is an N+1 on a page that already makes its
+ * reads in two round trips.
+ *
+ * So this answers the identical question in THREE queries total, whatever the album count: one
+ * `photos` read for every album that names a cover photo, one `cover_templates` read for every
+ * album that falls through to artwork, and nothing at all for the rest. **The decision itself is
+ * not re-implemented** — the chain below is the same photo → template → none written above, and
+ * `tests/dashboard-cover.test.ts` pins the two against each other so they cannot drift.
+ *
+ * It resolves the FRONT only, and prefers `thumb_key`: a shelf book is ~150 px wide, so presigning
+ * the full-resolution print master would download several megabytes to draw a thumbnail. A photo
+ * with no thumbnail yet falls back to its sanitized master rather than showing nothing.
+ */
+export async function resolveCoverFrontKeys(
+  client: SupabaseClient,
+  albums: readonly { id: string; cover_template_id: string | null; cover_config: unknown }[],
+): Promise<Map<string, { kind: CoverKind; key: string | null }>> {
+  const out = new Map<string, { kind: CoverKind; key: string | null }>();
+  const configs = new Map(
+    albums.map((a) => [a.id, normalizeCoverConfig(a.cover_config as Parameters<typeof normalizeCoverConfig>[0])] as const),
+  );
+
+  // Pass 1 — the photo covers. One read, scoped to the caller's own albums by RLS AND by the
+  // explicit album_id list, so a forged photo id from another album can never resolve.
+  const photoIds = albums.map((a) => configs.get(a.id)?.photoId).filter((id): id is string => !!id);
+  const photoKeys = new Map<string, string>();
+  if (photoIds.length > 0) {
+    const { data } = await client
+      .from('photos')
+      .select('id, album_id, thumb_key, sanitized_key')
+      .in('album_id', albums.map((a) => a.id))
+      .in('id', photoIds)
+      .eq('status', 'ready');
+    for (const r of (data ?? []) as { id: string; album_id: string; thumb_key: string | null; sanitized_key: string | null }[]) {
+      const key = r.thumb_key ?? r.sanitized_key;
+      // Keyed by (album, photo) so a cover photo only ever resolves for the album that owns it.
+      if (key) photoKeys.set(`${r.album_id}:${r.id}`, key);
+    }
+  }
+
+  // Pass 2 — the artwork templates, for the albums that fall through. Same fall-through rule as
+  // the single-album resolver: a chosen CSS background outranks a leftover template id.
+  const templateIds = albums
+    .filter((a) => {
+      const c = configs.get(a.id);
+      return c && !c.photoId && !c.background && !!a.cover_template_id;
+    })
+    .map((a) => a.cover_template_id as string);
+  const templateKeys = new Map<string, string>();
+  if (templateIds.length > 0) {
+    const { data } = await client.from('cover_templates').select('id, image_key').in('id', templateIds);
+    for (const r of (data ?? []) as { id: string; image_key: string | null }[]) {
+      if (r.image_key) templateKeys.set(r.id, r.image_key);
+    }
+  }
+
+  for (const a of albums) {
+    const c = configs.get(a.id);
+    if (!c) continue;
+    if (c.photoId) {
+      out.set(a.id, { kind: 'photo', key: photoKeys.get(`${a.id}:${c.photoId}`) ?? null });
+    } else if (!c.background && a.cover_template_id) {
+      const key = templateKeys.get(a.cover_template_id) ?? null;
+      out.set(a.id, { kind: key ? 'template' : 'default', key });
+    } else {
+      out.set(a.id, { kind: c.background ? 'design' : 'default', key: null });
+    }
+  }
+  return out;
+}

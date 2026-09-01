@@ -9,6 +9,7 @@ import { applyBlueprint, shuffleIds } from '@/lib/builder/blueprint';
 import { selectAutoBlueprint } from '@/lib/builder/blueprint-select';
 import { getActiveBlueprint, listActiveBlueprints } from '@/lib/templates/catalog';
 import { isEditingLocked } from '@/lib/orders/album-lock';
+import { auditAdminAlbumEdit, resolveAlbumWriteAccess } from '@/lib/albums/access';
 import { sendReviewStatusEmail, sendReviewAdminSubmittedEmail } from '@/lib/email/review-events';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -19,27 +20,32 @@ const LOCKED_MSG = 'This album is part of a paid order and can no longer be chan
 /**
  * Persist the whole layout for one album.
  *
- * All access is through the AUTHENTICATED Supabase client: RLS scopes every read
- * and write to the album's owner, so a forged albumId or photoId simply resolves
- * to nothing. We replace the album's blocks wholesale (delete + insert) — simplest
- * correct model for a "save the current canvas" action.
+ * ACCESS is resolved by `resolveAlbumWriteAccess`: the AUTHENTICATED client for the owner (RLS
+ * scopes every read and write, so a forged albumId or photoId resolves to nothing — unchanged),
+ * or, for an administrator holding `album:manage`, the service-role client so a submitted album
+ * can be corrected in place before approval. Every other gate below is identical on both paths —
+ * the edit lock, the overflow check, the album_id pin on every referenced photo — and each
+ * statement stays pinned to `albumId`, which is what keeps the admin branch scoped to the one
+ * album the administrator opened.
+ *
+ * We replace the album's blocks wholesale (delete + insert) — simplest correct model for a
+ * "save the current canvas" action.
  *
  * Draft saves may be incomplete; we only reject layouts that OVERFLOW the album
  * size or reference photos that aren't in this album. Completeness is gated at
  * submit, not here.
  */
 export async function saveLayout(input: unknown): Promise<ActionResult> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Not signed in' };
-
   const parsed = SaveLayoutSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const { albumId, blocks } = parsed.data;
 
-  // Ownership gate (RLS): a foreign/nonexistent album returns null.
+  // Ownership OR admin capability. A signed-out caller, a foreign album and an unauthorised
+  // admin are all indistinguishable here, deliberately: they all return null.
+  const access = await resolveAlbumWriteAccess(albumId);
+  if (!access) return { ok: false, error: 'Album not found' };
+  const supabase = access.client;
+
   const { data: album } = await supabase
     .from('albums')
     .select('id, size')
@@ -92,11 +98,17 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
       // layout_config holds overlays + the rich elements (texts / qrs / background).
       // The DB CHECK (0006) requires `overlays` to be an array whenever the object is
       // non-null, so we always include it when storing ANY element; otherwise store null.
+      // `baseEdits` (per-base-slot placement edits) rides in the same jsonb. It is written ONLY
+      // when a base slot has actually forked, so a block that has never been adjusted stores the
+      // exact object it always did. It also makes `layout_config` non-null on its own: a page
+      // whose only state is "the left half is cropped like this" must still persist that.
+      const baseEdits = (b.baseEdits ?? []).some((e) => e != null) ? b.baseEdits : undefined;
       const hasContent =
-        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background || !!b.preset;
+        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background || !!b.preset || !!baseEdits;
       const layoutConfig = hasContent
         ? {
             overlays: b.overlays,
+            ...(baseEdits ? { baseEdits } : {}),
             ...(b.texts.length > 0 ? { texts: b.texts } : {}),
             ...(b.qrs.length > 0 ? { qrs: b.qrs } : {}),
             ...(b.stickers.length > 0 ? { stickers: b.stickers } : {}),
@@ -120,30 +132,58 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
     }
   }
 
+  // An administrator changing a customer's book is a thing the record should carry. Owner saves
+  // are not audited — they always were the customer's own writes (see `auditAdminAlbumEdit`).
+  await auditAdminAlbumEdit(access, albumId, 'album.layout_edited');
+
   return { ok: true };
 }
 
-/** Save a single photo's non-destructive edit config. RLS scopes to the owner. */
+/**
+ * Save a single photo's SOURCE edit config — the default every placement of that photo inherits
+ * until it is adjusted on its own (see PLACEMENT EDITS in `lib/builder/model`). A PLACEMENT's own
+ * crop lives in the layout and is written by `saveLayout`; this is the uploaded image's default,
+ * which is what the tray's Edit and Rotate mean.
+ *
+ * The owner writes through RLS. An administrator holding `album:manage` may write it too, resolved
+ * through the SAME `resolveAlbumWriteAccess` gate as the layout, so there is one answer to "who may
+ * change this album" rather than one per action.
+ */
 export async function savePhotoEdit(input: unknown): Promise<ActionResult> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Not signed in' };
-
   const parsed = PhotoEditSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const { photoId, edit } = parsed.data;
 
-  // Resolve the photo's album (RLS scopes to the owner) so we can enforce the edit
-  // lock: a paid album's photo edits must not change under a placed order.
-  const { data: photoRow } = await supabase
-    .from('photos')
-    .select('album_id')
-    .eq('id', photoId)
-    .maybeSingle();
-  const albumId = (photoRow as { album_id: string | null } | null)?.album_id ?? null;
-  if (!photoRow) return { ok: false, error: 'Photo not found' };
+  // The photo's album, through the caller's OWN RLS view first. An owner resolves it here and
+  // never touches the admin branch below; a non-owner sees nothing, exactly as before.
+  const rls = createClient();
+  const {
+    data: { user },
+  } = await rls.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const { data: ownRow } = await rls.from('photos').select('album_id').eq('id', photoId).maybeSingle();
+  let albumId = (ownRow as { album_id: string | null } | null)?.album_id ?? null;
+
+  // Not the caller's photo — it may still be an album an administrator is authorised to edit. The
+  // album id is read with the service role ONLY to ask the capability question about it; access is
+  // then decided by resolveAlbumWriteAccess, which is the sole authority.
+  if (!ownRow) {
+    const { data: anyRow } = await createServiceClient()
+      .from('photos')
+      .select('album_id')
+      .eq('id', photoId)
+      .maybeSingle();
+    albumId = (anyRow as { album_id: string | null } | null)?.album_id ?? null;
+    if (!albumId) return { ok: false, error: 'Photo not found' };
+  }
+
+  const access = albumId ? await resolveAlbumWriteAccess(albumId) : null;
+  // A photo detached from every album (album_id is ON DELETE SET NULL) is only ever the owner's
+  // to touch, and RLS already proved that above.
+  if (albumId && !access) return { ok: false, error: 'Photo not found' };
+  const supabase = access?.client ?? rls;
+
   if (albumId && (await isEditingLocked(supabase, albumId))) {
     return { ok: false, error: LOCKED_MSG };
   }
@@ -160,6 +200,7 @@ export async function savePhotoEdit(input: unknown): Promise<ActionResult> {
     return { ok: false, error: 'Could not save edit.' };
   }
   if (!updated) return { ok: false, error: 'Photo not found' };
+  if (access && albumId) await auditAdminAlbumEdit(access, albumId, 'album.photo_edited');
   return { ok: true };
 }
 
@@ -299,19 +340,14 @@ export async function selectCover(input: unknown): Promise<ActionResult> {
  * `albums.cover_config` (0038) — until that migration runs this single write fails cleanly.
  */
 export async function saveCoverDesign(input: unknown): Promise<ActionResult> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Not signed in' };
-
   const parsed = CoverDesignSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const { albumId, title, coverTemplateId, config } = parsed.data;
 
-  // Ownership gate (RLS).
-  const { data: album } = await supabase.from('albums').select('id').eq('id', albumId).maybeSingle();
-  if (!album) return { ok: false, error: 'Album not found' };
+  // Ownership OR `album:manage` — the same single gate the layout save uses.
+  const access = await resolveAlbumWriteAccess(albumId);
+  if (!access) return { ok: false, error: 'Album not found' };
+  const supabase = access.client;
   if (await isEditingLocked(supabase, albumId)) return { ok: false, error: LOCKED_MSG };
 
   // A chosen base template must be a real, active cover.
@@ -353,6 +389,7 @@ export async function saveCoverDesign(input: unknown): Promise<ActionResult> {
     console.error('saveCoverDesign error:', error);
     return { ok: false, error: 'Could not save the cover design.' };
   }
+  await auditAdminAlbumEdit(access, albumId, 'album.cover_edited');
   return { ok: true };
 }
 

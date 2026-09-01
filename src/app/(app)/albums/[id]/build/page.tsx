@@ -5,6 +5,8 @@ import { presignGet } from '@/lib/r2';
 import { getPaidOrder } from '@/lib/orders/album-lock';
 import { loadRenderReadiness } from '@/lib/albums/render-readiness';
 import { getAdminContext } from '@/lib/auth/require-admin';
+import { resolveAlbumWriteAccess } from '@/lib/albums/access';
+import { adminUserEmail } from '@/lib/admin/users';
 import { roleHasCapability } from '@/lib/auth/capabilities';
 import Builder from './_builder';
 import PurchasedAlbum from './_purchased';
@@ -63,6 +65,8 @@ type PageRow = {
   photo_ids: string[] | null;
   layout_config: {
     overlays?: Overlay[];
+    /** Per-base-slot placement edits (see `Block.baseEdits`). Absent on every pre-existing row. */
+    baseEdits?: (EditConfig | null)[];
     texts?: TextElement[];
     qrs?: QrElement[];
     stickers?: StickerElement[];
@@ -73,20 +77,62 @@ type PageRow = {
 
 export default async function BuildPage({ params }: { params: { id: string } }) {
   // Supabase server client: RLS "user_id = auth.uid()" scopes the SELECT. A foreign
-  // or missing album → null → 404. No explicit AND(id, userId) needed.
-  const supabase = createClient();
+  // or missing album → null. No explicit AND(id, userId) needed.
+  const userClient = createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await userClient.auth.getUser();
 
-  const { data } = await supabase
-    .from('albums')
-    .select('id, title, size, status, cover_template_id, product_id, product_name, destination, travel_dates, description')
-    .eq('id', params.id)
-    .maybeSingle();
+  const ALBUM_COLUMNS =
+    'id, title, size, status, cover_template_id, product_id, product_name, destination, travel_dates, description';
 
-  const album = data as AlbumRow | null;
+  const { data } = await userClient.from('albums').select(ALBUM_COLUMNS).eq('id', params.id).maybeSingle();
+  let album = data as AlbumRow | null;
+
+  /**
+   * ── ADMIN EDITING: THE SAME BUILDER, NOT A SECOND ONE ──────────────────────────────────────
+   *
+   * An administrator reviewing a submitted album could see it and approve it, but not fix a
+   * crooked photo in it — the workflow for a two-second correction was "send it back to the
+   * customer". So an authorised admin opens THIS route, on the customer's album, and gets the
+   * real builder: same state model, same canvas, same save actions, same PDF pipeline. There is
+   * deliberately no admin album editor, because a second editor is a second thing to keep in step
+   * with the renderer and the print export.
+   *
+   * AUTHORIZATION IS SERVER-SIDE AND IS THE EXISTING GATE. The customer path is completely
+   * untouched: RLS answers first, and for an owner this branch never runs. Only a null result
+   * asks the second question, of `resolveAlbumWriteAccess` — `profiles.role = 'admin'` (locked by
+   * 0019, resolved through the Drizzle superuser) plus the `album:manage` capability, exactly the
+   * gate that already authorises the admin album console and admin PDF generation. Anyone else,
+   * including a signed-in customer who guesses the URL, gets the same 404 they always did. Hiding
+   * the entry button would not be a boundary; this is.
+   *
+   * The album's SAVED STATE is the source of truth throughout: the admin's edits go through the
+   * same `saveLayout` / `savePhotoEdit` / `saveCoverDesign` (which resolve the same access), and
+   * the PDF is rendered by the worker from the database rows those actions wrote — never from a
+   * client snapshot. So "generate the PDF after editing" needs no special admin path at all.
+   */
+  const adminAccess = album ? null : await resolveAlbumWriteAccess(params.id);
+  if (!album && adminAccess?.actor === 'admin') {
+    const { data: adminRow } = await adminAccess.client
+      .from('albums')
+      .select(ALBUM_COLUMNS)
+      .eq('id', params.id)
+      .maybeSingle();
+    album = adminRow as AlbumRow | null;
+  }
   if (!album) notFound();
+
+  /**
+   * EVERY READ ON THIS PAGE goes through this client. For a customer it is the RLS-scoped one and
+   * nothing changes; for an authorised admin it is the service-role client, because the album,
+   * photos and pages being loaded belong to someone else. Every query below is already pinned to
+   * `album.id`, which is what keeps the admin session scoped to the one album they opened.
+   */
+  const supabase = adminAccess?.actor === 'admin' ? adminAccess.client : userClient;
+  const adminEditing = adminAccess?.actor === 'admin';
+  // Whose album this is, for the admin banner. Read only in the admin branch, and only to display.
+  const ownerLabel = adminEditing && adminAccess?.ownerId ? await adminUserEmail(adminAccess.ownerId) : null;
 
   // Physical dimensions of the album's product (Phase B) — the single geometry source for the
   // whole builder tree. Null/legacy albums fall back to the legacy 6×8in, unchanged. Provided
@@ -145,6 +191,11 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       // Vacate the slot of a photo that no longer exists — never compact the row, or the right
       // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
       photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
+      // A slot's edit belongs to the PLACEMENT, so it comes back positionally with the slot. It is
+      // deliberately NOT vacated when the photo is gone: the slot itself is vacated above, and an
+      // edit at an empty index is inert (nothing renders it) — clearing it would throw away the
+      // customer's framing if the same photo were dropped back in.
+      baseEdits: r.layout_config?.baseEdits,
       caption: r.caption ?? '',
       // Keep every overlay CONTAINER; only its photo assignment is provisional. A slot that is
       // an intentional placeholder (photoId=null) OR whose photo was since deleted hydrates as an
@@ -435,6 +486,9 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         blueprintMeta={blueprintMeta}
         stickerCatalog={stickerCatalog}
         stickerUrls={stickerUrls}
+        /* Presentational only — the authorization is the server-side gate above and in each action. */
+        adminEditing={adminEditing}
+        ownerName={adminEditing ? ownerLabel : null}
       />
       </DimensionsProvider>
     </div>

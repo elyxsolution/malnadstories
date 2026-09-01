@@ -13,7 +13,9 @@ import {
   trimBaseIds,
   nextOverlayGeom,
   newUnitOverlayGeoms,
+  trimBaseEdits,
   type Background,
+  type EditConfig,
   type Block,
   type LayoutTemplate,
   type Overlay,
@@ -52,21 +54,52 @@ export type Selection =
 export const NO_SELECTION: Selection = { kind: 'none' };
 
 /**
- * Remove a photo from every base slot + overlay across all blocks (placed-once invariant).
+ * Remove a photo from every base slot + overlay across all blocks.
+ *
+ * THIS IS NO LONGER A PLACEMENT RULE — it is the DELETION path. A photo is a reusable source
+ * asset now, so putting it in a frame no longer takes it out of the frame it was already in; the
+ * only thing that still has to reach every placement at once is the photo ceasing to exist
+ * (deleted from the tray, or a failed upload cancelled). Assignment does its own local write.
  *
  * The base half VACATES the slot rather than removing it. Filtering the id out used to compact
  * the array, so taking a photo off the LEFT page slid the right page's photo onto the left —
  * an edit to one page silently moving a different page's picture. The hole stays; trailing ones
- * are trimmed so an emptied unit still persists as `[]`.
+ * are trimmed so an emptied unit still persists as `[]`. A vacated slot also drops its placement
+ * edit: the frame is empty, and the crop described a photo that no longer exists.
  */
 function stripPhoto(list: Block[], id: string): Block[] {
   return list.map((b) => {
     const inBase = b.photoIds.includes(id);
     const overlays = b.overlays.filter((o) => o.photoId !== id);
     if (!inBase && overlays.length === b.overlays.length) return b;
-    return { ...b, photoIds: trimBaseIds(b.photoIds.map((pid) => (pid === id ? null : pid))), overlays };
+    const baseEdits = inBase
+      ? trimBaseEdits((b.baseEdits ?? []).map((e, i) => (b.photoIds[i] === id ? null : e)))
+      : b.baseEdits;
+    return {
+      ...b,
+      photoIds: trimBaseIds(b.photoIds.map((pid) => (pid === id ? null : pid))),
+      baseEdits,
+      overlays,
+    };
   });
 }
+
+/**
+ * Write one positional base-slot edit, keeping the array parallel to `photoIds`.
+ *
+ * Positional for exactly the reason `photoIds` is: index 0 is the left page and 1 the right, and
+ * a compacting array would make clearing the left page's crop apply the right page's crop to it.
+ * Trailing nulls are trimmed, so a unit that has never forked stores nothing at all.
+ */
+function withBaseEdit(b: Block, index: number, edit: EditConfig | null): Block {
+  const next = [...(b.baseEdits ?? [])];
+  while (next.length <= index) next.push(null);
+  next[index] = edit;
+  return { ...b, baseEdits: trimBaseEdits(next) };
+}
+
+/** Index of a named base slot. `'image'` (double-spread) and `'left'` are both slot 0. */
+const slotIndex = (slot: BaseSlot): number => (slot === 'right' ? 1 : 0);
 
 /**
  * The builder's editable layout state — history-backed (undo/redo), with every block- and
@@ -172,9 +205,15 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
   };
 
   /**
-   * Duplicate a page's LAYOUT (template, background, text, QR — with fresh ids) directly
-   * after it. Photos are NOT copied: a photo is placed at most once across the album, so a
-   * duplicate starts with empty photo slots (the user fills them with other photos).
+   * Duplicate a page's LAYOUT (template, background, text, QR — with fresh ids) directly after it.
+   *
+   * Photos are NOT copied, and the duplicate's frames start empty.
+   *
+   * That used to be forced: a photo could be placed at most once, so a copy was impossible. It is
+   * possible now — a duplicated frame would simply be a second placement with its own edit — and
+   * this is DELIBERATELY left as it was, because "duplicate this page" is a layout command and
+   * silently doubling every photo in the book is not what it has ever meant. Changing it is a
+   * product decision, not a consequence of the placement model.
    */
   const duplicateBlock = (key: string, size: number) => {
     const src = blocks.find((b) => b.key === key);
@@ -182,10 +221,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     const clone: Block = {
       ...makeBlock(src.template),
       background: src.background,
-      // Photo FRAMES are layout and are copied (emptied); the photos in them are not, because a
-      // photo is placed at most once. Dropping them would make "duplicate this page" return a
-      // blank sheet now that a page's photos live in overlays rather than in base slots.
-      overlays: src.overlays.map((o) => ({ ...o, id: makeOverlayId(), photoId: null })),
+      // Photo FRAMES are layout and are copied; the photos in them are not (see above). The
+      // frame's own edit goes with its photo — a crop describes a picture, and there is none here.
+      overlays: src.overlays.map((o) => ({ ...o, id: makeOverlayId(), photoId: null, edit: null })),
       texts: src.texts.map((t) => ({ ...t, id: cryptoId() })),
       qrs: src.qrs.map((q) => ({ ...q, id: cryptoId() })),
       stickers: src.stickers.map((s) => ({ ...s, id: cryptoId() })),
@@ -207,12 +245,25 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
    */
   const assignBaseSlot = (key: string, slot: BaseSlot, photoId: string) =>
     mutate((prev) =>
-      stripPhoto(prev, photoId).map((b) => {
+      // NO `stripPhoto`. Placing a photo used to take it out of wherever it already was, because
+      // a photo could be placed only once. It is a reusable source asset now, so this writes ONE
+      // frame and leaves every other placement of the same image exactly as it is.
+      prev.map((b) => {
         if (b.key !== key) return b;
-        if (slot === 'image') return { ...b, photoIds: [photoId] };
-        const ids: (string | null)[] = [b.photoIds[0] ?? null, b.photoIds[1] ?? null];
-        ids[slot === 'left' ? 0 : 1] = photoId;
-        return { ...b, photoIds: trimBaseIds(ids) };
+        const i = slotIndex(slot);
+        // A DIFFERENT photo arriving in the frame resets the frame's own edit: the crop, zoom and
+        // pan described the picture that was here, and carrying them onto a new one would frame it
+        // by numbers chosen for something else. Re-placing the SAME photo changes nothing.
+        const changed = (b.photoIds[i] ?? null) !== photoId;
+        const withPhoto =
+          slot === 'image'
+            ? { ...b, photoIds: [photoId] }
+            : (() => {
+                const ids: (string | null)[] = [b.photoIds[0] ?? null, b.photoIds[1] ?? null];
+                ids[i] = photoId;
+                return { ...b, photoIds: trimBaseIds(ids) };
+              })();
+        return changed ? withBaseEdit(withPhoto, i, null) : withPhoto;
       }),
     );
 
@@ -229,10 +280,18 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     mutate((prev) =>
       prev.map((b) => {
         if (b.key !== key) return b;
-        if (slot === 'image') return { ...b, photoIds: [] };
-        const ids: (string | null)[] = [b.photoIds[0] ?? null, b.photoIds[1] ?? null];
-        ids[slot === 'left' ? 0 : 1] = null;
-        return { ...b, photoIds: trimBaseIds(ids) };
+        const i = slotIndex(slot);
+        const emptied =
+          slot === 'image'
+            ? { ...b, photoIds: [] }
+            : (() => {
+                const ids: (string | null)[] = [b.photoIds[0] ?? null, b.photoIds[1] ?? null];
+                ids[i] = null;
+                return { ...b, photoIds: trimBaseIds(ids) };
+              })();
+        // The placement is gone, so its edit goes with it — an edit at an empty index describes
+        // nothing, and leaving it would silently re-frame whatever is dropped in next.
+        return withBaseEdit(emptied, i, null);
       }),
     );
 
@@ -261,8 +320,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
   const addOverlay = (key: string, photoId: string | null, at?: { x: number; y: number } | 'center') => {
     const id = makeOverlayId();
     mutate((prev) =>
-      // An empty container displaces nothing — there is no photo to take from anywhere else.
-      (photoId ? stripPhoto(prev, photoId) : prev).map((b) => {
+      // NOTHING IS DISPLACED. A new container takes a REFERENCE to the source photo; every frame
+      // already showing that photo keeps showing it, each with its own edit.
+      prev.map((b) => {
         if (b.key !== key) return b;
         // `nextOverlayGeom` is shared with the cover's add-overlay, so a new frame starts in the
         // same place and at the same size whichever surface asked for it.
@@ -275,8 +335,19 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
 
   const replaceOverlay = (key: string, overlayId: string, photoId: string) =>
     mutate((prev) =>
-      stripPhoto(prev, photoId).map((b) =>
-        b.key === key ? { ...b, overlays: b.overlays.map((o) => (o.id === overlayId ? { ...o, photoId } : o)) } : b,
+      prev.map((b) =>
+        b.key === key
+          ? {
+              ...b,
+              overlays: b.overlays.map((o) =>
+                o.id === overlayId
+                  ? // A different photo resets this frame's own edit, for the same reason a base
+                    // slot's does; re-picking the same photo leaves the framing alone.
+                    { ...o, photoId, ...(o.photoId === photoId ? {} : { edit: null }) }
+                  : o,
+              ),
+            }
+          : b,
       ),
     );
 
@@ -306,10 +377,14 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     );
 
   /**
-   * Duplicate an overlay — copies its frame AND photo, offset slightly, appended on top.
-   * Unlike base slots, an overlay may legitimately reuse a photo (it's purely decorative;
-   * `saveLayout` has no uniqueness constraint and edits are per-photo), so we deliberately
-   * do NOT stripPhoto here. Returns the new overlay's ID (previously its index).
+   * Duplicate an overlay — copies its frame, its photo AND its placement edit, offset slightly,
+   * appended on top. Returns the new overlay's id.
+   *
+   * This always intended to produce a SECOND PLACEMENT of the same photo, and it was the one
+   * operation that already did. It was also, until placements existed, unsaveable: the copy made
+   * the id appear twice and `SaveLayoutSchema`'s placed-once refinement rejected the next save.
+   * With one image reusable it is an ordinary second instance — it starts out identical (the edit
+   * is copied) and diverges the moment either copy is adjusted.
    */
   const duplicateOverlay = (key: string, overlayId: string) => {
     let newId: string | undefined;
@@ -324,6 +399,71 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
       }),
     );
     return newId;
+  };
+
+  // ── placement edits ────────────────────────────────────────────────────────────
+  /**
+   * WRITE ONE FRAME'S OWN EDIT — the single mutation behind every image adjustment on a page.
+   *
+   * It is addressed by FRAME (block + slot | overlay), not by photo, and that is the whole point:
+   * the same photo can be in four frames, and adjusting one of them must leave the other three
+   * untouched. The old path wrote `photos.edit_config`, which is shared by construction, so it
+   * could not express this at all.
+   *
+   * Passing `null` un-forks the frame, returning it to inheriting the source photo's edit — which
+   * is what "reset this placement" means and what clearing a slot does.
+   */
+  const patchFrameEdit = (
+    key: string,
+    ref: { slot?: BaseSlot; overlayId?: string },
+    edit: EditConfig | null,
+  ) =>
+    mutate((prev) =>
+      prev.map((b) => {
+        if (b.key !== key) return b;
+        if (ref.slot) return withBaseEdit(b, slotIndex(ref.slot), edit);
+        if (ref.overlayId) {
+          return { ...b, overlays: b.overlays.map((o) => (o.id === ref.overlayId ? { ...o, edit } : o)) };
+        }
+        return b;
+      }),
+    );
+
+  /**
+   * The same write as `patchFrameEdit`, but as a CORRECTION rather than an action — it amends the
+   * present without pushing a layout undo entry (see `useHistoryState.amend` and `amendText`).
+   *
+   * Image adjustments have their OWN undo lane (`usePhotoEditHistory`), which is what orders a
+   * crop against a page move in the shared timeline. Now that an adjustment lands in `Block[]`
+   * rather than on the `photos` row, going through `mutate` would push a SECOND entry for the
+   * same gesture and one ⌘Z would appear to do nothing. So the geometry lane records it and the
+   * layout lane merely carries the value.
+   */
+  const amendFrameEdit = (
+    key: string,
+    ref: { slot?: BaseSlot; overlayId?: string },
+    edit: EditConfig | null,
+  ) => {
+    hist.amend((prev) =>
+      prev.map((b) => {
+        if (b.key !== key) return b;
+        if (ref.slot) return withBaseEdit(b, slotIndex(ref.slot), edit);
+        if (ref.overlayId) {
+          return { ...b, overlays: b.overlays.map((o) => (o.id === ref.overlayId ? { ...o, edit } : o)) };
+        }
+        return b;
+      }),
+    );
+    setDirty(true);
+  };
+
+  /** Read a frame's own (possibly absent) edit — the `before` half of an adjustment gesture. */
+  const frameEdit = (key: string, ref: { slot?: BaseSlot; overlayId?: string }): EditConfig | null | undefined => {
+    const b = blocks.find((x) => x.key === key);
+    if (!b) return undefined;
+    if (ref.slot) return (b.baseEdits ?? [])[slotIndex(ref.slot)];
+    if (ref.overlayId) return b.overlays.find((o) => o.id === ref.overlayId)?.edit;
+    return undefined;
   };
 
   // ── text ─────────────────────────────────────────────────────────────────────
@@ -497,7 +637,17 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     }));
 
     // Stamp the preset id so blueprint breakdowns are accurate + the choice survives round-trips.
-    patchBlock(key, { template: preset.base, photoIds: keptBase, overlays: newOverlays, preset: preset.key });
+    // `baseEdits` is dropped: `keptBase` COMPACTS the base row (it filters holes before slicing),
+    // so an index that meant "the right page" before the preset may mean "the left page" after it.
+    // Positional edits that no longer describe their slot are worse than none, and the frames are
+    // being rebuilt anyway — every slot goes back to inheriting its photo's own edit.
+    patchBlock(key, {
+      template: preset.base,
+      photoIds: keptBase,
+      baseEdits: undefined,
+      overlays: newOverlays,
+      preset: preset.key,
+    });
   };
 
   /**
@@ -541,23 +691,26 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
         if (mine.length === 0) return b;
         let photoIds = b.photoIds;
         let overlays = b.overlays;
+        let baseEdits = b.baseEdits;
         for (const f of mine) {
           if (f.slot) {
             // Vacate the named slot and leave the other page untouched — the same positional
             // rule `clearBaseSlot` uses. Slicing used to shift the survivor onto the wrong page.
+            const i = slotIndex(f.slot);
             if (f.slot === 'image') photoIds = [];
             else {
               const ids: (string | null)[] = [photoIds[0] ?? null, photoIds[1] ?? null];
-              ids[f.slot === 'left' ? 0 : 1] = null;
+              ids[i] = null;
               photoIds = trimBaseIds(ids);
             }
+            baseEdits = trimBaseEdits((baseEdits ?? []).map((e, j) => (j === i ? null : e)));
           } else if (f.overlayId) {
-            // An overlay keeps its CONTAINER (geometry is the user's layout work); only the
-            // photo reference is cleared — same rule the serialization boundary uses.
-            overlays = overlays.map((o) => (o.id === f.overlayId ? { ...o, photoId: null } : o));
+            // An overlay keeps its CONTAINER (geometry is the user's layout work); the photo
+            // reference AND the framing chosen for that photo are what get cleared.
+            overlays = overlays.map((o) => (o.id === f.overlayId ? { ...o, photoId: null, edit: null } : o));
           }
         }
-        return { ...b, photoIds, overlays };
+        return { ...b, photoIds, baseEdits, overlays };
       }),
     );
 
@@ -603,6 +756,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
       // Trailing holes only — an interior `null` IS the layout ("right page filled, left empty")
       // and compacting it here would re-introduce the page-to-page slide on the next reload.
       photoIds: trimBaseIds(b.photoIds),
+      // Positional per-slot edits, trimmed away entirely when nothing has forked — so a block that
+      // has never been adjusted serializes exactly the object it always did.
+      baseEdits: trimBaseEdits(b.baseEdits),
       caption: b.caption,
       // Overlay ids are CLIENT-ONLY identity (like `Block.key`) — stripped here so the payload
       // reaching `saveLayout` is byte-identical to what it was before overlays gained ids.
@@ -633,6 +789,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     duplicateBlock,
     assignBaseSlot,
     clearBaseSlot,
+    patchFrameEdit,
+    amendFrameEdit,
+    frameEdit,
     addOverlay,
     replaceOverlay,
     patchOverlays,

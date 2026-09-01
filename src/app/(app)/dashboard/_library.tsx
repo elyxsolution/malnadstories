@@ -22,6 +22,12 @@ export type LibraryAlbum = {
   purchase: { orderId: string; status: string; placedAt: string } | null;
   /** The album's persisted cover, already normalized server-side. `null` = never designed one. */
   cover: CoverConfig | null;
+  /**
+   * The front cover's ARTWORK — a short-lived signed URL for the customer's cover photo, or the
+   * chosen template's image, resolved server-side through the canonical priority chain. `null`
+   * means the cover is CSS-only (a background, or the default), which the renderer draws itself.
+   */
+  coverImageUrl: string | null;
 };
 
 type Kind = 'draft' | 'ready' | 'ordered' | 'delivered';
@@ -48,7 +54,15 @@ const CHIPS: { key: 'all' | Kind; label: string }[] = [
   { key: 'delivered', label: 'Delivered' },
 ];
 
-export default function Library({ albums }: { albums: LibraryAlbum[] }) {
+export default function Library({
+  albums,
+  stickerUrls = {},
+}: {
+  albums: LibraryAlbum[];
+  /** Presigned URLs for stickers placed on any front cover, by sticker id (resolved server-side). */
+  stickerUrls?: Record<string, string>;
+}) {
+  const stickerUrlFor = (id: string) => stickerUrls[id];
   const [greeting, setGreeting] = useState('Welcome back');
   const [search, setSearch] = useState('');
   const [year, setYear] = useState('all');
@@ -105,7 +119,14 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
           <div className="mt-8 grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] lg:grid-cols-[minmax(0,1fr)_260px]">
             {/* Resume — the left card, unchanged in content and destination. */}
             <div className="flex flex-wrap items-center gap-6 bg-primary px-6 py-6 text-primary-foreground sm:gap-7 sm:px-8">
-              <Book title={draft.title} size="sm" thickness={9} cover={paletteFor(draft.id)} coverContent={albumCoverFace(draft.cover, draft.title)} spineContent={albumCoverSpine(draft.cover, draft.title)} />
+              <Book
+                title={draft.title}
+                size="sm"
+                thickness={9}
+                cover={paletteFor(draft.id)}
+                coverContent={albumCoverFace(draft.cover, draft.title, draft.coverImageUrl, stickerUrlFor)}
+                spineContent={albumCoverSpine(draft.cover, draft.title)}
+              />
               <div className="min-w-[180px] flex-1">
                 <p className="text-[11px] uppercase tracking-[0.16em] text-primary-foreground/75">Pick up where you left off</p>
                 <p className="mt-1 font-display text-[26px] leading-tight text-primary-foreground">{draft.title}</p>
@@ -203,7 +224,7 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
         ) : (
           <div className="mt-9 flex flex-wrap items-end gap-x-10 gap-y-10">
             {filtered.map((a) => (
-              <ShelfBook key={a.id} album={a} />
+              <ShelfBook key={a.id} album={a} stickerUrlFor={stickerUrlFor} />
             ))}
             {/* New Story bookend */}
             <Link href="/albums/new" className="group w-[150px] text-center">
@@ -222,7 +243,13 @@ export default function Library({ albums }: { albums: LibraryAlbum[] }) {
   );
 }
 
-function ShelfBook({ album }: { album: LibraryAlbum }) {
+function ShelfBook({
+  album,
+  stickerUrlFor,
+}: {
+  album: LibraryAlbum;
+  stickerUrlFor?: (stickerId: string) => string | undefined;
+}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -263,7 +290,9 @@ function ShelfBook({ album }: { album: LibraryAlbum }) {
             size="sm"
             thickness={album.size >= 100 ? 12 : 9}
             cover={paletteFor(album.id)}
-            coverContent={albumCoverFace(album.cover, album.title)}
+            /* THE ALBUM'S ACTUAL FRONT COVER — same renderer as the builder, the preview and the
+               PDF, now with its artwork resolved. Not a second representation that can drift. */
+            coverContent={albumCoverFace(album.cover, album.title, album.coverImageUrl, stickerUrlFor)}
             spineContent={albumCoverSpine(album.cover, album.title)}
           />
         </div>

@@ -438,12 +438,31 @@ describe('editing a back-cover overlay reuses what already exists', () => {
     expect(hook).toContain("kind: 'backdrop', photoId: image.photoId");
   });
 
-  it('routes an overlay photo edit to the PHOTOS row, not the face backdrop', () => {
-    // The backdrop's crop lives in cover_config.imageEdit; a placed photo's lives on the photo,
-    // exactly as it does for a page overlay. Without this the toolbar would edit the wrong thing.
+  /**
+   * UPDATED WITH THE PLACEMENT MODEL.
+   *
+   * This used to assert that a cover overlay's crop went to the `photos` ROW ("exactly as it does
+   * for a page overlay"). Both halves of that changed at once, and in the same direction: a page
+   * overlay's crop no longer goes to the photos row either. A photo is a reusable source asset, so
+   * an adjustment belongs to the CONTAINER — `overlay.edit` — or adjusting the back cover would
+   * re-crop every page showing the same image.
+   *
+   * The distinction the original test was really protecting is untouched and still asserted: a
+   * back-cover BACKGROUND is not a back-cover OVERLAY. The backdrop keeps `cover_config.imageEdit`.
+   */
+  it('routes an overlay photo edit to THAT OVERLAY, not the face backdrop and not the photos row', () => {
     expect(hook).toContain("photoTarget?.kind === 'overlay'");
-    expect(hook).toContain('onPhotoEdit');
-    expect(builder).toContain('applyPhotoEditRef.current = cmd.applyPhotoEdit');
+    // Written to the overlay through the pure, single-patch cover write.
+    expect(hook).toContain('patchCoverOverlayEdit');
+    expect(hook).toContain('patchOverlayEdit(');
+    // Forked from whatever the frame currently shows — its own edit, or the inherited source.
+    expect(hook).toContain('forkFrameEdit');
+    expect(hook).toContain('sourceEditFor');
+    // The backdrop still writes cover_config.imageEdit, and only when the backdrop is the target.
+    expect(hook).toContain('patchImageEdit(patch)');
+    // The old shared-photo-row route is gone.
+    expect(hook).not.toContain('onPhotoRotate');
+    expect(builder).not.toContain('applyPhotoEditRef');
   });
 
   it('describes the SELECTED overlay in the toolbar, not the backdrop', () => {
@@ -459,9 +478,52 @@ describe('editing a back-cover overlay reuses what already exists', () => {
     expect(bar).not.toContain('onReplace: p.onPickPhoto,');
   });
 
-  it('CROP opens the overlay photo in the ordinary editor, not the face image editor', () => {
+  it('CROP opens the overlay AS A PLACEMENT, not the face image editor and not the shared photo', () => {
     expect(builder).toContain("if (t?.kind === 'overlay')");
-    expect(builder).toContain('openEditor(t.photoId)');
+    // The frame reference is what makes the modal edit THIS placement rather than the photo.
+    expect(builder).toContain('openEditor(t.photoId, coverFrameRef)');
+    expect(builder).toContain('coverFrameRef');
+  });
+
+  /**
+   * THE BACK COVER IS NOT A SIMPLIFIED OVERLAY.
+   *
+   * A page overlay could be press-and-held to adjust the picture inside its frame, showed a centre
+   * adjust handle, captured pan/zoom in place and drew the "what am I choosing from" ghost. A cover
+   * overlay had none of it — not by decision, but because that chrome lived inside `_block.tsx`.
+   * It now lives in `_crop-chrome` and BOTH canvases import the same implementation, so the two
+   * cannot drift.
+   */
+  it('gives a cover overlay the SAME adjustment interactions as a page overlay', () => {
+    const chrome = readFileSync(resolve(__dirname, '../src/app/(app)/albums/[id]/build/_crop-chrome.tsx'), 'utf8');
+    const block = readFileSync(resolve(__dirname, '../src/app/(app)/albums/[id]/build/_block.tsx'), 'utf8');
+
+    // ONE implementation, imported by both canvases — not copied into either.
+    for (const fn of ['AdjustHandle', 'CropLayer', 'CropBleed', 'useCropWheel']) {
+      expect(chrome).toContain(`export function ${fn}`);
+      expect(block).not.toContain(`function ${fn}(`);
+      expect(canvas).not.toContain(`function ${fn}(`);
+    }
+    expect(block).toContain("from './_crop-chrome'");
+    expect(canvas).toContain("from './_crop-chrome'");
+
+    // The cover overlay wires every one of them.
+    expect(canvas).toContain('onLongPress=');
+    expect(canvas).toContain('<AdjustHandle');
+    expect(canvas).toContain('<CropLayer handlers={cropHandlers} />');
+    expect(canvas).toContain('<CropBleed');
+    expect(canvas).toContain('useCropWheel(ref, !!cropOverlay, cropHandlers)');
+
+    // And it renders THIS placement's edit, like every other surface.
+    expect(canvas).toContain('resolveFrameEdit(o.edit, photo.edit)');
+  });
+
+  it('drives the cover overlay through the builder\'s ONE crop state, not a second one', () => {
+    // Same useCanvasCrop instance; the face addresses itself with the key useCover already
+    // mints, so there is one adjustment state, one renderer and one commit path.
+    expect(builder).toContain('crop.begin({ blockKey: `cover:${cover.side}`, overlayId, photoId })');
+    expect(builder).toContain('cropHandlers={crop.handlers}');
+    expect(builder).toContain('cropOverlayId=');
   });
 
   it('supports DROP-TO-REPLACE through the shared drag contract', () => {

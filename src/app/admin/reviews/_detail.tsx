@@ -14,6 +14,8 @@ import {
   auditLog,
 } from '@/db/schema';
 import { adminUserEmail, adminUserEmails } from '@/lib/admin/users';
+import { getAdminContext } from '@/lib/auth/require-admin';
+import { roleHasCapability } from '@/lib/auth/capabilities';
 import { fmtDateTime, shortId } from '@/lib/admin/format';
 import { getAlbumReadiness } from '@/lib/admin/readiness';
 import {
@@ -36,6 +38,8 @@ const AUDIT_LABEL: Record<string, string> = {
 };
 
 export default async function ReviewDetail({ id }: { id: string }) {
+  /** Display gate only — `/albums/[id]/build` enforces `album:manage` itself, server-side. */
+  const canEditAlbum = roleHasCapability((await getAdminContext()).role, 'album:manage');
   const [review] = await db
     .select({
       id: albumReviews.id,
@@ -177,10 +181,21 @@ export default async function ReviewDetail({ id }: { id: string }) {
             <Row label="Title" value={review.albumTitle ?? '—'} />
             <Row label="Size" value={`${review.albumSize ?? '—'} pages`} />
             <Row label="Album status" value={review.albumStatus ?? '—'} />
-            <div className="pt-2">
+            <div className="flex flex-wrap gap-2 pt-2">
               <Link href={`/admin/albums/${review.albumId}`} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-muted">
                 Open album in admin
               </Link>
+              {/* Straight into the customer's builder from the review itself — the point of the
+                  whole change is that a small correction should not need a round trip to the
+                  customer. Capability-gated for display; enforced server-side on the route. */}
+              {canEditAlbum && (
+                <Link
+                  href={`/albums/${review.albumId}/build`}
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/[0.08] px-3 py-1.5 text-sm font-medium transition-colors hover:bg-amber-500/[0.14]"
+                >
+                  Edit in builder
+                </Link>
+              )}
             </div>
           </Section>
 

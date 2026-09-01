@@ -1,7 +1,7 @@
 'use client';
 
 import { cmToIn } from '@/lib/products/model';
-import { isBlockComplete, type Block, type EditConfig } from '@/lib/builder/model';
+import { isBlockComplete, resolveFrameEdit, type Block, type EditConfig } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
 import type { CoverConfig } from '@/lib/builder/cover';
 import { orientedSize, type PhotoUiState } from './_photo-state';
@@ -102,6 +102,24 @@ export function framePhotoId(block: Block, f: FrameRef): string | null {
   return block.overlays.find((o) => o.id === f.id)?.photoId ?? null;
 }
 
+/**
+ * THE EDIT THIS FRAME IS ACTUALLY SHOWING — its own if it has forked, otherwise the source
+ * photo's (see PLACEMENT EDITS in `lib/builder/model`).
+ *
+ * The quality engine's one piece of real maths is effective DPI, and `zoom` and `crop` are its
+ * two biggest inputs. With per-placement edits, reading them off the `photos` row would report
+ * the SOURCE's numbers for every frame — so a heavily zoomed placement of a photo would be
+ * scored as if it were untouched, and the "only 30 % of this photo reaches the page" warning
+ * would appear on the wrong frame. It resolves exactly as every renderer does.
+ */
+export function frameEditOf(block: Block, f: FrameRef, photo: Photo): EditConfig | null {
+  const own =
+    f.kind === 'base'
+      ? (block.baseEdits ?? [])[f.slot === 'right' ? 1 : 0]
+      : block.overlays.find((o) => o.id === f.id)?.edit;
+  return resolveFrameEdit(own, photo.edit);
+}
+
 /** Every frame in the album, in page order. */
 export function enumerateFrames(blocks: Block[]): FrameRef[] {
   const out: FrameRef[] = [];
@@ -153,11 +171,16 @@ export function frameMetrics(
   photo: Photo,
   geom: { widthFrac: number; aspect: number },
   pairWidthIn: number,
+  /**
+   * The edit THIS FRAME renders. Omitted ⇒ the source photo's, which is what every caller meant
+   * while a photo could be placed once and is still the right answer for a lone placement.
+   */
+  frameEdit?: EditConfig | null,
 ): FrameMetrics {
   const size = orientedSize(photo);
   if (!size || pairWidthIn <= 0 || geom.aspect <= 0) return { dpi: null, retained: null, source: null };
 
-  const edit: EditConfig = photo.edit ?? {};
+  const edit: EditConfig = frameEdit ?? photo.edit ?? {};
   const quarter = edit.rotate === 90 || edit.rotate === 270;
   const imgW = quarter ? size.height : size.width;
   const imgH = quarter ? size.width : size.height;
@@ -349,7 +372,9 @@ export function inspectAlbum(input: QualityInput): QualityReport {
     const photo = photoId ? photoById.get(photoId) : undefined;
     const state = photoId ? photoState(photoId) : undefined;
     const geom = frameGeometry(block, frame, pairAspect);
-    const metrics = photo ? frameMetrics(photo, geom, pairWidthIn) : null;
+    // The FRAME's edit, not the photo's: two placements of one image zoomed differently really do
+    // print at different densities, and each frame's badge has to describe its own frame.
+    const metrics = photo ? frameMetrics(photo, geom, pairWidthIn, frameEditOf(block, frame, photo)) : null;
     const r = frameReadiness(photo, state, metrics);
 
     readiness.set(frameKey(frame), r);

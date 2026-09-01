@@ -47,6 +47,8 @@ type PageRow = {
   photo_ids: string[] | null;
   layout_config: {
     overlays?: Overlay[];
+    /** Per-base-slot placement edits (see `Block.baseEdits`). Absent on every pre-existing row. */
+    baseEdits?: (EditConfig | null)[];
     texts?: TextElement[];
     qrs?: QrElement[];
     stickers?: StickerElement[];
@@ -145,6 +147,9 @@ export async function loadAlbumForAdmin(
       // Vacate the slot of a photo that no longer exists — never compact the row, or the right
       // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
       photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
+      // Per-placement base-slot edits ride through positionally — the admin preview must show the
+      // same framing the customer designed and the PDF will print.
+      baseEdits: r.layout_config?.baseEdits,
       caption: r.caption ?? '',
       // Preserve overlay containers; an unassigned/deleted-photo overlay becomes an empty
       // placeholder (photoId=null) — it renders nothing in the admin preview/PDF but the slot

@@ -6,8 +6,11 @@
  * 'server-only' / 'use client' — safe to import anywhere, and the future PDF
  * worker can reuse the render helpers verbatim.
  *
- * Placement model: each uploaded photo is placed AT MOST ONCE — as a base OR as an
- * overlay — so per-photo edits live on `photos.edit_config`, not per-slot.
+ * PLACEMENT MODEL: an uploaded photo is a REUSABLE SOURCE ASSET. It may be placed any number of
+ * times — several base slots, several overlays, the back cover — and each placement is its own
+ * instance with its own crop/zoom/pan/rotation/tone. `photos.edit_config` is the source default a
+ * placement inherits until it is adjusted; see PLACEMENT EDITS below for the resolution + fork
+ * rules that make one image editable independently in every frame it appears in.
  */
 import type { FontKey } from './fonts-catalog';
 
@@ -117,7 +120,75 @@ export const FULL_CROP: Rect = { x: 0, y: 0, w: 1, h: 1 };
  * builder state always has an id, and `serialize()` strips it again so the saved payload is
  * byte-identical to before.
  */
-export type Overlay = { id?: string; photoId: string | null; x: number; y: number; w: number; h: number };
+export type Overlay = {
+  id?: string;
+  photoId: string | null;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /**
+   * THIS PLACEMENT'S OWN EDIT — see PLACEMENT EDITS below.
+   *
+   * Absent (the legacy case, and the untouched case) means "inherit the source photo's
+   * `photos.edit_config`", so every overlay saved before placements could be edited independently
+   * renders byte-for-byte as it always did. The first placement-level adjustment FORKS it: the
+   * inherited edit is snapshotted here, and from then on this frame owns its crop, zoom, pan,
+   * rotation, straighten, flip and tone — and no other placement of the same photo is affected.
+   */
+  edit?: EditConfig | null;
+};
+
+/**
+ * ── PLACEMENT EDITS: THE SOURCE PHOTO IS AN ASSET, A PLACEMENT IS AN INSTANCE ───────────────
+ *
+ * A photo used to be placeable exactly once, which is why its crop/zoom/rotation lived on the
+ * `photos` row: with one placement, "the photo's edit" and "this frame's edit" were the same
+ * sentence. Once one image can appear on page 1, page 5 AND the back cover they stop being the
+ * same sentence — adjusting the back cover would silently re-crop page 1, because all three
+ * frames read one mutable object.
+ *
+ * So a photo CONTAINER may now carry its own `EditConfig`, and `photos.edit_config` becomes the
+ * SOURCE DEFAULT it inherits until it is adjusted. This is not a new idea here: the cover
+ * backdrop has always stored its edit on the container (`cover_config.imageEdit`, documented
+ * there as "independent of page placement"). This generalises that rule to EVERY container —
+ * page overlays, base slots and cover overlays alike.
+ *
+ *   source photo (photos.edit_config)   the reusable asset's default
+ *        ├── overlay.edit               this frame's crop / zoom / pan / rotate / tone
+ *        ├── block.baseEdits[i]         that page half's own edit
+ *        └── cover_config.imageEdit     the face backdrop's own edit (pre-existing)
+ *
+ * `resolveFrameEdit` is the ONE resolution rule and `forkFrameEdit` the ONE fork rule. Every
+ * renderer and every write path goes through them, so the canvas, the preview, the flipbook and
+ * both PDFs cannot disagree about which edit a frame is showing.
+ *
+ * Storage is additive jsonb (`album_pages.layout_config`, `albums.cover_config`) — NO migration:
+ * an absent `edit` is exactly the pre-existing meaning.
+ */
+
+/** The edit a frame actually renders: its own if it has forked, otherwise the source photo's. */
+export function resolveFrameEdit(
+  own: EditConfig | null | undefined,
+  source: EditConfig | null | undefined,
+): EditConfig | null {
+  return own !== undefined && own !== null ? own : (source ?? null);
+}
+
+/**
+ * The edit to WRITE when a frame is adjusted: whatever it renders today, patched.
+ *
+ * Forking on first WRITE (rather than at placement time) is what keeps existing albums identical:
+ * a frame that is never adjusted keeps inheriting, so no album gains a redundant copy of an edit
+ * it never changed and nothing has to be backfilled.
+ */
+export function forkFrameEdit(
+  own: EditConfig | null | undefined,
+  source: EditConfig | null | undefined,
+  patch: Partial<EditConfig>,
+): EditConfig {
+  return { ...(resolveFrameEdit(own, source) ?? {}), ...patch };
+}
 
 /** Fresh client-side overlay identity. Mirrors how `Block.key` is minted. */
 export function makeOverlayId(): string {
@@ -357,6 +428,16 @@ export type Block = {
    * same stored value, and an emptied unit persists as `[]`.
    */
   photoIds: (string | null)[];
+  /**
+   * PER-BASE-SLOT EDITS, positional and parallel to `photoIds` — the base-slot half of the
+   * placement-edit rule (see PLACEMENT EDITS above).
+   *
+   * `null`/absent at an index means that slot inherits its photo's `photos.edit_config`, which is
+   * exactly what every album saved before this did — so it is additive and needs no migration.
+   * Stored in `album_pages.layout_config.baseEdits`, NOT in `photo_ids` (a `uuid[]` cannot carry
+   * an edit), and trimmed on the way out so a unit that has never forked persists nothing.
+   */
+  baseEdits?: (EditConfig | null)[];
   caption: string;
   overlays: Overlay[]; // normalized 0..1 across the OPEN PAIR (both pages)
   texts: TextElement[]; // free text elements (default [])
@@ -380,6 +461,20 @@ export function trimBaseIds(ids: readonly (string | null | undefined)[]): (strin
   return out;
 }
 
+/**
+ * Normalize a per-slot edit array for storage: coerce `undefined` holes to `null`, drop trailing
+ * ones, and return `undefined` when nothing has forked — so a block whose slots all inherit
+ * stores no `baseEdits` key at all and its `layout_config` is byte-identical to before.
+ */
+export function trimBaseEdits(
+  edits: readonly (EditConfig | null | undefined)[] | undefined,
+): (EditConfig | null)[] | undefined {
+  if (!edits) return undefined;
+  const out = edits.map((e) => e ?? null);
+  while (out.length > 0 && out[out.length - 1] === null) out.pop();
+  return out.length > 0 ? out : undefined;
+}
+
 /** Build a fresh, empty block with all rich-element fields initialized. */
 export function makeBlock(template: LayoutTemplate, key?: string): Block {
   return {
@@ -401,6 +496,7 @@ export function normalizeBlock(b: Partial<Block> & { template: LayoutTemplate; k
     key: b.key ?? cryptoId(),
     template: b.template,
     photoIds: b.photoIds ?? [],
+    baseEdits: b.baseEdits,
     caption: b.caption ?? '',
     overlays: b.overlays ?? [],
     texts: b.texts ?? [],
@@ -481,7 +577,14 @@ export function isAlbumComplete(blocks: Block[], size: number): boolean {
 // PAGE_COST, requiredBaseCount, isBlockComplete, LAYOUT_TEMPLATES). There must be exactly one
 // validator; do not re-add a parallel one here.
 
-/** Every placed photo id — base slots ∪ overlays (a photo appears at most once). */
+/**
+ * The DISTINCT photo ids that appear anywhere in the layout — base slots ∪ overlays.
+ *
+ * A photo may now appear MORE THAN ONCE (one source asset, many placements), so this answers
+ * "is this photo used at all?" and nothing more. When the question is "how many times?" use
+ * `placementCounts` — a Set cannot answer it, and silently reporting 1 for a photo placed four
+ * times is exactly the class of bug the placement model exists to remove.
+ */
 export function placedPhotoIds(blocks: Block[]): Set<string> {
   const set = new Set<string>();
   for (const b of blocks) {
@@ -489,6 +592,38 @@ export function placedPhotoIds(blocks: Block[]): Set<string> {
     for (const o of b.overlays) if (o.photoId) set.add(o.photoId);
   }
   return set;
+}
+
+/**
+ * HOW MANY TIMES each photo is placed — DERIVED, never stored.
+ *
+ * A stored counter is a second source of truth that goes stale the moment an overlay is deleted,
+ * a page is removed, an undo runs, or a save round-trips through the database. Counting the
+ * containers that actually reference the photo cannot go stale, because the containers ARE the
+ * album: a deleted or orphaned placement is simply not in `blocks` to be counted.
+ *
+ * It counts PLACEMENTS, not photos — the same id in two overlays contributes 2. Empty containers
+ * (`photoId: null`) and base-slot holes contribute nothing.
+ *
+ * `extra` carries placements that live OUTSIDE `Block[]` — the cover's faces (see
+ * `coverPlacementIds`), which belong to the same album and the same tray. Passing them in rather
+ * than reaching into the cover from here keeps this function pure and `Block`-shaped.
+ */
+export function placementCounts(
+  blocks: Block[],
+  extra: readonly (string | null | undefined)[] = [],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  const bump = (id: string | null | undefined) => {
+    if (!id) return;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  };
+  for (const b of blocks) {
+    for (const id of b.photoIds) bump(id);
+    for (const o of b.overlays) bump(o.photoId);
+  }
+  for (const id of extra) bump(id);
+  return counts;
 }
 
 /**

@@ -5,7 +5,7 @@ import { TextBox, QrBox, StickerBox, OverlayBox } from './_elements-render';
 import UploadBadge, { stateOpacityClass, type BadgeSize } from './_upload-badge';
 import type { PhotoUiState } from './_photo-state';
 import { backgroundStyle } from '@/lib/builder/elements';
-import type { Block, EditConfig, Overlay } from '@/lib/builder/model';
+import { resolveFrameEdit, type Block, type EditConfig, type Overlay } from '@/lib/builder/model';
 
 /**
  * Shared, read-only renderer for ONE content pair (two physical pages) in the OPEN-BOOK
@@ -41,6 +41,20 @@ export type PairHalf = 'full' | 'left' | 'right';
 
 const overlapsHalf = (o: Overlay, half: PairHalf) =>
   half === 'full' || (half === 'left' ? o.x < 0.5 : o.x + o.w > 0.5);
+
+/**
+ * THE PLACEMENT'S PICTURE — the source photo, showing THIS frame's edit.
+ *
+ * `photoFor` answers "what does this photo id look like by default", which is the source asset:
+ * its URL and its `photos.edit_config`. A frame that has forked its edit (see PLACEMENT EDITS in
+ * `lib/builder/model`) overrides only that field, so the same image placed three times renders
+ * three different crops from one download. A frame that has not forked passes `undefined` and
+ * inherits, which is why every album saved before placements existed renders byte-for-byte the
+ * same. Applied HERE, in the shared renderer, so the canvas, the preview, the flipbook, the
+ * navigator and both PDFs cannot disagree.
+ */
+const framed = (photo: PairPhoto | undefined, own: EditConfig | null | undefined): PairPhoto | undefined =>
+  photo && { ...photo, edit: resolveFrameEdit(own, photo.edit) };
 
 /** Wraps a frame so an unprocessed photo carries the same badge it has everywhere else. */
 function Framed({
@@ -94,8 +108,11 @@ export default function PairContent({
   showPlaceholders?: boolean;
 }) {
   const isDouble = block.template === 'double-spread';
-  const left = photoFor(block.photoIds[0]);
-  const right = photoFor(block.photoIds[1]);
+  // Positional, exactly like `photoIds` — index 0 is the left page (or the spread image), 1 the
+  // right. An absent entry means that slot inherits its photo's own edit.
+  const baseEdits = block.baseEdits ?? [];
+  const left = framed(photoFor(block.photoIds[0]), baseEdits[0]);
+  const right = framed(photoFor(block.photoIds[1]), baseEdits[1]);
   const showLeft = half === 'full' || half === 'left';
   const showRight = half === 'full' || half === 'right';
 
@@ -142,7 +159,7 @@ export default function PairContent({
 
       {block.overlays.map((o, i) => {
         if (!overlapsHalf(o, half)) return null;
-        const photo = photoFor(o.photoId);
+        const photo = framed(photoFor(o.photoId), o.edit);
         const style = { left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.w * 100}%`, height: `${o.h * 100}%` };
         // Empty (placeholder) overlay: draw the slot outline only when explicitly previewing a
         // template; otherwise render nothing (real albums never print an unfilled container).

@@ -20,6 +20,7 @@ import {
   isPermanentRole,
   metadataFromCoverObjects,
   migrateCoverConfig,
+  patchCoverOverlayEdit,
   removeCoverOverlay,
   replaceCoverOverlayPhoto,
   withAllCoverBackgrounds,
@@ -30,8 +31,10 @@ import {
 import type { CoverConfig, CoverLayout } from '@/lib/builder/cover';
 import {
   cryptoId,
+  forkFrameEdit,
   makeOverlayId,
   nextOverlayGeom,
+  resolveFrameEdit,
   type Background,
   type Block,
   type EditConfig,
@@ -81,7 +84,13 @@ import type { Selection } from './_use-builder';
  */
 export type CoverPhotoTarget =
   | { kind: 'backdrop'; photoId: string | null }
-  | { kind: 'overlay'; overlayId: string; photoId: string | null };
+  | {
+      kind: 'overlay';
+      overlayId: string;
+      photoId: string | null;
+      /** This PLACEMENT's own edit, or absent when the frame still inherits the source photo's. */
+      edit?: EditConfig | null;
+    };
 
 export type CoverHostDeps = {
   initialConfig: CoverConfig;
@@ -97,21 +106,14 @@ export type CoverHostDeps = {
   /** The canvas renamed the album (the title object's words changed). Keeps the header in step. */
   onTitleChange: (title: string) => void;
   /**
-   * Edit ONE ALBUM PHOTO's `edit_config` — the builder's own `commands.applyPhotoEdit`.
+   * The source photo's own `edit_config`, for a photo this hook does not hold.
    *
-   * A face's backdrop image keeps its edits in `cover_config.imageEdit`, deliberately independent
-   * of wherever that photo also sits on a page. A cover OVERLAY is not that: it is an ordinary
-   * album photo placed in a frame, so its crop/rotate belongs on the `photos` row exactly as a
-   * page overlay's does. Without this the shared `PhotoBar` would silently rotate the face's
-   * backdrop while an overlay was selected.
+   * A cover overlay's adjustments are written to the OVERLAY (`overlay.edit`), like a page
+   * overlay's — it is a placement, not the photo. But a frame that has never been adjusted
+   * INHERITS the source photo's edit, so the first adjustment has to know what it is inheriting
+   * from in order to fork it. The host owns the photos; this hook asks.
    */
-  onPhotoEdit?: (photoId: string, patch: Partial<EditConfig>) => void;
-  /**
-   * Rotate ONE ALBUM PHOTO by a quarter turn. Separate from `onPhotoEdit` because the next
-   * rotation depends on the photo's CURRENT one, and the host is what holds the photos — this hook
-   * deliberately knows nothing about them.
-   */
-  onPhotoRotate?: (photoId: string, dir: 1 | -1) => void;
+  sourceEditFor?: (photoId: string) => EditConfig | null | undefined;
 };
 
 export function useCover({
@@ -120,8 +122,7 @@ export function useCover({
   pageAspect,
   onChange,
   onTitleChange,
-  onPhotoEdit,
-  onPhotoRotate,
+  sourceEditFor,
 }: CoverHostDeps) {
   /**
    * MIGRATION RUNS ONCE, AT THE DOOR. Everything downstream — the canvas, the toolbars, the
@@ -405,6 +406,31 @@ export function useCover({
     [write, sideOfKey],
   );
 
+  /**
+   * WRITE ONE COVER OVERLAY'S OWN EDIT — the cover's half of `useBlocks.patchFrameEdit`.
+   *
+   * Same shape, same meaning, same storage idea: the crop belongs to the FRAME, so adjusting the
+   * back cover's copy of a photo cannot reach the copies on page 1 and page 5. It writes into
+   * `cover_config.back.overlays[].edit` (additive jsonb, no migration) through the pure
+   * `patchCoverOverlayEdit`, so nothing else on the face can be touched by it.
+   */
+  const patchOverlayEdit = useCallback(
+    (key: string, overlayId: string, edit: EditConfig | null) => {
+      const target = sideOfKey(key);
+      write((prev) => patchCoverOverlayEdit(prev, target, overlayId, edit));
+    },
+    [write, sideOfKey],
+  );
+
+  /** The same write as a CORRECTION — no cover undo entry (the geometry lane records it). */
+  const amendOverlayEdit = useCallback(
+    (key: string, overlayId: string, edit: EditConfig | null) => {
+      const target = sideOfKey(key);
+      hist.amend((prev) => patchCoverOverlayEdit(prev, target, overlayId, edit));
+    },
+    [hist, sideOfKey],
+  );
+
   const removeOverlay = useCallback(
     (key: string, overlayId: string) => {
       const target = sideOfKey(key);
@@ -684,7 +710,7 @@ export function useCover({
   const photoTarget = useMemo<CoverPhotoTarget | null>(() => {
     if (selection.kind === 'overlay') {
       const o = elements.overlays.find((ov) => ov.id === selection.id);
-      return o ? { kind: 'overlay', overlayId: selection.id, photoId: o.photoId } : null;
+      return o ? { kind: 'overlay', overlayId: selection.id, photoId: o.photoId, edit: o.edit } : null;
     }
     if (selection.kind === 'base') return { kind: 'backdrop', photoId: image.photoId };
     return null;
@@ -699,14 +725,30 @@ export function useCover({
        */
       applyPhotoEdit: (photoId: string, patch: Partial<EditConfig>) => {
         if (photoTarget?.kind === 'overlay') {
-          if (photoTarget.photoId && onPhotoEdit) onPhotoEdit(photoTarget.photoId, patch);
+          if (!photoTarget.photoId) return;
+          // THE FRAME, NOT THE PHOTO. `forkFrameEdit` reads whatever this frame currently renders
+          // — its own edit, or the source photo's if it has never been adjusted — and patches
+          // that, so the first adjustment forks cleanly and no other placement is touched.
+          patchOverlayEdit(
+            `cover:${side}`,
+            photoTarget.overlayId,
+            forkFrameEdit(photoTarget.edit, sourceEditFor?.(photoTarget.photoId), patch),
+          );
           return;
         }
         patchImageEdit(patch);
       },
       rotateBy: (dir: 1 | -1) => {
         if (photoTarget?.kind === 'overlay') {
-          if (photoTarget.photoId && onPhotoRotate) onPhotoRotate(photoTarget.photoId, dir);
+          if (!photoTarget.photoId) return;
+          const cur = resolveFrameEdit(photoTarget.edit, sourceEditFor?.(photoTarget.photoId));
+          patchOverlayEdit(
+            `cover:${side}`,
+            photoTarget.overlayId,
+            forkFrameEdit(photoTarget.edit, sourceEditFor?.(photoTarget.photoId), {
+              rotate: (((cur?.rotate ?? 0) + dir * 90 + 360) % 360) as 0 | 90 | 180 | 270,
+            }),
+          );
           return;
         }
         const cur = image.edit?.rotate ?? 0;
@@ -715,7 +757,7 @@ export function useCover({
       moveLayer,
       deleteSelection: { label: deleteLabel, enabled: deletable, run: deleteSelection },
     }),
-    [patchImageEdit, image.edit?.rotate, photoTarget, onPhotoEdit, onPhotoRotate, moveLayer, deleteLabel, deletable, deleteSelection],
+    [patchImageEdit, image.edit?.rotate, photoTarget, side, patchOverlayEdit, sourceEditFor, moveLayer, deleteLabel, deletable, deleteSelection],
   );
 
   return {
@@ -748,6 +790,8 @@ export function useCover({
     addOverlay,
     patchOverlays,
     replaceOverlay,
+    patchOverlayEdit,
+    amendOverlayEdit,
     removeOverlay,
     duplicateOverlay,
     addSticker,

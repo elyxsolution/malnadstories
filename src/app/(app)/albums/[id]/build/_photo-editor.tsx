@@ -45,6 +45,17 @@ export default function PhotoEditor({
   showGutter,
   onClose,
   onSaved,
+  /**
+   * WHERE THIS EDIT IS WRITTEN. Absent = the SOURCE photo's `photos.edit_config`, through the
+   * existing `savePhotoEdit` action — which is what editing from the tray means and what this
+   * modal has always done.
+   *
+   * A caller that opened the editor on a PLACEMENT supplies its own writer instead, so the crop
+   * lands on that frame (`overlay.edit` / `block.baseEdits[slot]`) and every other placement of
+   * the same image is untouched. Returning the same result shape either way keeps the error and
+   * saving states below exactly as they were.
+   */
+  persist,
 }: {
   photoId: string;
   url: string;
@@ -54,6 +65,7 @@ export default function PhotoEditor({
   showGutter: boolean;
   onClose: () => void;
   onSaved: (edit: EditConfig) => void;
+  persist?: (edit: EditConfig) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [edit, setEdit] = useState<EditConfig>(initial ?? {});
   const [nat, setNat] = useState({ w: 0, h: 0 });
@@ -195,7 +207,7 @@ export default function PhotoEditor({
   const apply = async () => {
     setSaving(true);
     setError(null);
-    const res = await savePhotoEdit({ photoId, edit });
+    const res = persist ? await persist(edit) : await savePhotoEdit({ photoId, edit });
     setSaving(false);
     if (!res.ok) {
       setError(res.error);

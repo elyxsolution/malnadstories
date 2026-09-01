@@ -5,6 +5,9 @@ import BackLink from '@/components/ui/back-link';
 import { createClient } from '@/lib/supabase/server';
 import { listActiveCoverOptions } from '@/lib/covers';
 import { normalizeCoverConfig } from '@/lib/builder/cover';
+import { resolveCoverImageKeys } from '@/lib/albums/cover';
+import { resolveStickerUrls } from '@/lib/stickers';
+import { presignGet } from '@/lib/r2';
 import { albumCoverFace, albumCoverSpine } from '@/components/album-cover';
 import { getPaidOrder } from '@/lib/orders/album-lock';
 import { orderStatusView } from '@/lib/orders/status';
@@ -68,6 +71,18 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
   const ownCover = album.cover_config
     ? normalizeCoverConfig(album.cover_config as Parameters<typeof normalizeCoverConfig>[0])
     : null;
+  /**
+   * THE FRONT COVER'S ARTWORK, through the CANONICAL resolver — the same one the builder, the
+   * print route and checkout use, so this page cannot show a different cover from the one that
+   * prints. One album, so the per-album resolver is the right one here (the SHELF uses the
+   * batched `resolveCoverFrontKeys` for exactly the N+1 reason this page does not have).
+   *
+   * Without it `albumCoverFace` fell back to `imageUrl = null` and a photo cover drew as its
+   * background colour alone — the same defect the dashboard had.
+   */
+  const coverKeys = await resolveCoverImageKeys(supabase, album);
+  const coverFrontUrl = coverKeys.front.key ? await presignGet(coverKeys.front.key, 900) : null;
+  const coverStickerUrls = await resolveStickerUrls(ownCover ? ownCover.stickers.map((s) => s.stickerId) : []);
   const isEditable = !paidOrder; // paid → read-only album
 
   return (
@@ -83,7 +98,7 @@ export default async function AlbumDetailPage({ params }: { params: { id: string
                 <Book
                   title={album.title}
                   coverImage={cover?.thumbUrl ?? null}
-                  coverContent={albumCoverFace(ownCover, album.title)}
+                  coverContent={albumCoverFace(ownCover, album.title, coverFrontUrl, (id) => coverStickerUrls[id])}
                   spineContent={albumCoverSpine(ownCover, album.title)}
                   cover={paletteFor(album.id)}
                   size="lg"

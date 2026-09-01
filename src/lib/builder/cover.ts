@@ -287,6 +287,25 @@ export function normalizeCoverConfig(c: Partial<CoverConfig> | null | undefined)
 }
 
 /**
+ * EVERY PHOTO PLACEMENT THE COVER MAKES, in one list — the cover's contribution to the album-wide
+ * placement count (`placementCounts`).
+ *
+ * The cover is part of the same album and draws from the same tray, so a photo used as the front
+ * backdrop, the back backdrop and a back-cover overlay is placed three times and the tray has to
+ * say so. It lives here, beside the cover model, because this is the only module that knows which
+ * faces store what — the front and the back each have a backdrop `photoId`, and today only the
+ * back stores overlays (see `BackCoverConfig.overlays`). Adding overlays to the front later is a
+ * one-line change here, and the count follows automatically.
+ *
+ * Ids may repeat; that is the point. Duplicates are what the counter counts.
+ */
+export function coverPlacementIds(c: CoverConfig): string[] {
+  return [c.photoId, c.back.photoId, ...c.back.overlays.map((o) => o.photoId)].filter(
+    (id): id is string => !!id,
+  );
+}
+
+/**
  * A cover is "custom" (worth persisting/rendering) when it diverges from plain defaults.
  *
  * Text is counted through `freeTexts`: since Cover Editor 2.0 every cover carries a title object

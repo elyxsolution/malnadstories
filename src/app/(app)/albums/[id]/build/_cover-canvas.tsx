@@ -11,6 +11,8 @@ import {
   type CoverPanelName,
 } from '@/lib/print/spec';
 import Movable, { SnapGuides, type SnapLine } from './_movable';
+import { AdjustHandle, CropBleed, CropLayer, useCropWheel, type CropHandlers } from './_crop-chrome';
+import { resolveFrameEdit } from '@/lib/builder/model';
 import { useTextResize } from './_use-text-resize';
 import TextAutoFit from './_text-autofit';
 import { MIN_TEXT_BOX } from '@/lib/builder/text-fit';
@@ -78,6 +80,21 @@ export type CoverCanvasProps = {
   photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
   /** Open the album photo picker to fill an empty overlay frame on the focused face. */
   onPickOverlayPhoto?: (overlayId: string) => void;
+  /**
+   * ENTER IMAGE ADJUSTMENT on one of this face's overlays — press-and-hold, or the adjust handle.
+   *
+   * The SAME callback the page canvas takes (`onBeginCrop`), pointed at the same `useCanvasCrop`
+   * state in the host. A cover overlay was the one photo frame in the builder with no way to
+   * reposition the picture inside it; giving it this prop is the whole fix, because everything
+   * behind it — the gesture, the capture surface, the ghost — is the shared `_crop-chrome`.
+   *
+   * Absent (the admin cover-template designer, which has no album photos) ⇒ no adjustment,
+   * exactly as before.
+   */
+  onBeginCrop?: (target: { overlayId: string; photoId: string }) => void;
+  /** Which overlay on this cover is being adjusted right now, and the gesture surface for it. */
+  cropOverlayId?: string | null;
+  cropHandlers?: CropHandlers;
   /** Publishes the focused face's element upward so the floating toolbar can anchor to it. */
   onFaceEl?: (el: HTMLDivElement | null) => void;
   /**
@@ -151,6 +168,9 @@ export default function CoverCanvas({
   stickerUrlFor,
   photoFor,
   onPickOverlayPhoto,
+  onBeginCrop,
+  cropOverlayId = null,
+  cropHandlers,
   onFaceEl,
   onCanvasEl,
 }: CoverCanvasProps) {
@@ -223,6 +243,9 @@ export default function CoverCanvas({
               stickerUrlFor={stickerUrlFor}
               photoFor={photoFor}
               onPickOverlayPhoto={onPickOverlayPhoto}
+              onBeginCrop={onBeginCrop}
+              cropOverlayId={cropOverlayId}
+              cropHandlers={cropHandlers}
               onFaceEl={onFaceEl}
             />
             <Hinge cover={cover} />
@@ -234,6 +257,9 @@ export default function CoverCanvas({
               stickerUrlFor={stickerUrlFor}
               photoFor={photoFor}
               onPickOverlayPhoto={onPickOverlayPhoto}
+              onBeginCrop={onBeginCrop}
+              cropOverlayId={cropOverlayId}
+              cropHandlers={cropHandlers}
               onFaceEl={onFaceEl}
             />
             <Hinge cover={cover} />
@@ -245,6 +271,9 @@ export default function CoverCanvas({
               stickerUrlFor={stickerUrlFor}
               photoFor={photoFor}
               onPickOverlayPhoto={onPickOverlayPhoto}
+              onBeginCrop={onBeginCrop}
+              cropOverlayId={cropOverlayId}
+              cropHandlers={cropHandlers}
               onFaceEl={onFaceEl}
             />
           </div>
@@ -376,6 +405,9 @@ function Face({
   stickerUrlFor,
   photoFor,
   onPickOverlayPhoto,
+  onBeginCrop,
+  cropOverlayId = null,
+  cropHandlers,
   onFaceEl,
 }: {
   side: CoverSide;
@@ -385,6 +417,9 @@ function Face({
   stickerUrlFor?: (stickerId: string) => string | undefined;
   photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
   onPickOverlayPhoto?: (overlayId: string) => void;
+  onBeginCrop?: (target: { overlayId: string; photoId: string }) => void;
+  cropOverlayId?: string | null;
+  cropHandlers?: CropHandlers;
   onFaceEl?: (el: HTMLDivElement | null) => void;
 }) {
   const { page } = useBuilderDimensions();
@@ -438,6 +473,20 @@ function Face({
     useCallback((id: string, patch: Partial<TextElement>) => cover.patchText(key, id, patch), [cover, key]),
   );
   const backdropSelected = focused && (cover.selection.kind === 'background' || cover.selection.kind === 'base');
+
+  /**
+   * THE OVERLAY BEING ADJUSTED ON THIS FACE, and the ghost that shows what it is choosing from.
+   *
+   * Identical in shape to the page canvas's `cropFrame` / `cropPhoto` / `cropUrl` triple, because
+   * it is the same problem: a normalized rect, the photo's full-resolution URL, and the edit THIS
+   * frame is showing. The face is the container (0..1 of one cover page), exactly as a spread is
+   * for a page overlay, so the shared `CropBleed` needs no cover-specific case.
+   */
+  const cropOverlay = focused && cropOverlayId ? overlays.find((o) => o.id === cropOverlayId) : undefined;
+  const cropPhoto = cropOverlay?.photoId ? photoFor?.(cropOverlay.photoId) : undefined;
+  /* WHILE ADJUSTING, THE WHEEL BELONGS TO THE IMAGE — scoped to this face, and only while one of
+     its own overlays is being adjusted. Same rule, same hook, as a content page. */
+  useCropWheel(ref, !!cropOverlay, cropHandlers);
 
   return (
     <div
@@ -493,6 +542,21 @@ function Face({
               onSelect={() => pick({ kind: 'overlay', id: oid })}
               onChange={(r) => cover.patchOverlays(key, overlays.map((ov) => (ov.id === oid ? { ...ov, ...r } : ov)))}
               onSnap={setSnap}
+              /* PRESS AND HOLD TO ADJUST THE PICTURE — the same gesture, the same recogniser and
+                 the same adjustment state a page overlay has. An empty frame has nothing to
+                 adjust, so it simply has no handler and the hold falls through. */
+              onLongPress={
+                onBeginCrop && o.photoId && photo
+                  ? () => onBeginCrop({ overlayId: oid, photoId: o.photoId as string })
+                  : undefined
+              }
+              /* The centre ADJUST HANDLE — the visible half of the same affordance. Hidden while
+                 this overlay is already being adjusted, when the crop surface IS the affordance. */
+              centerControl={
+                onBeginCrop && o.photoId && photo && cropOverlayId !== oid ? (
+                  <AdjustHandle onAdjust={() => onBeginCrop({ overlayId: oid, photoId: o.photoId as string })} />
+                ) : null
+              }
               /* NO FRAME — matches `OverlayBox` and `_block` exactly: an overlay is the picture.
                  `overflow-hidden` clips it; the selection outline comes from the chrome layer. */
               className="overflow-hidden"
@@ -504,7 +568,13 @@ function Face({
                   other object are untouched, because `replaceOverlay` patches one `photoId`. */}
               <CoverOverlayDrop onDropPhoto={(id) => cover.replaceOverlay(key, oid, id)} filled={!!photo}>
               {photo ? (
-                <PhotoFrame url={photo.url} edit={photo.edit} alt="overlay" />
+                <>
+                  {/* THIS PLACEMENT's edit, not the shared photo row's — the same resolution the
+                      renderers apply, so the canvas shows what the PDF will print. */}
+                  <PhotoFrame url={photo.url} edit={resolveFrameEdit(o.edit, photo.edit)} alt="overlay" />
+                  {/* The transparent capture surface, only while THIS overlay is being adjusted. */}
+                  {cropOverlayId === oid && <CropLayer handlers={cropHandlers} />}
+                </>
               ) : (
                 /* An unfilled container. It draws an affordance ONLY on the editing canvas —
                    every renderer skips a photo-less overlay, so this never reaches a preview or
@@ -627,6 +697,19 @@ function Face({
         )}
       </div>
       {/* ── end of the clipped render layer ─────────────────────────────────────────── */}
+
+      {/* THE ADJUSTMENT GHOST — the same component, in the same place in the stack, as a content
+          spread: OUTSIDE the clip, because the part of the photo that spills past the frame is
+          precisely what you are aiming at and it would otherwise be cut away. Inert; the capture
+          surface (`CropLayer`) stays inside the frame. */}
+      {cropOverlay && cropPhoto?.url && (
+        <CropBleed
+          rect={{ x: cropOverlay.x, y: cropOverlay.y, w: cropOverlay.w, h: cropOverlay.h }}
+          rounded={false}
+          url={cropPhoto.url}
+          edit={resolveFrameEdit(cropOverlay.edit, cropPhoto.edit)}
+        />
+      )}
 
       {/* THE BACKDROP'S OWN SELECTION RING. The background is an object now, so it gets the same
           feedback every other object gets — inset, so it reads as "this surface" rather than as a

@@ -48,6 +48,7 @@ import {
   freeTexts,
   makeOverlayId,
   type Background,
+  type EditConfig,
   type CoverTextRole,
   type Overlay,
   type QrElement,
@@ -156,6 +157,27 @@ export function replaceCoverOverlayPhoto(
 ): CoverConfig {
   return withCoverSideElements(c, side, {
     overlays: coverSideElements(c, side).overlays.map((o) => (o.id === overlayId ? { ...o, photoId } : o)),
+  });
+}
+
+/**
+ * Write ONE overlay's own placement edit (crop / zoom / pan / rotation / tone).
+ *
+ * The fourth pure overlay write, and it exists for exactly the reason the other three do: so
+ * "nothing else on this face changed" is a property of the code rather than a promise. It touches
+ * one overlay's `edit` and nothing else — not the face's backdrop `imageEdit`, not its
+ * background, not its texts, and not any sibling overlay's framing.
+ *
+ * `null` un-forks the frame, returning it to inheriting the source photo's `photos.edit_config`.
+ */
+export function patchCoverOverlayEdit(
+  c: CoverConfig,
+  side: CoverSide,
+  overlayId: string,
+  edit: EditConfig | null,
+): CoverConfig {
+  return withCoverSideElements(c, side, {
+    overlays: coverSideElements(c, side).overlays.map((o) => (o.id === overlayId ? { ...o, edit } : o)),
   });
 }
 

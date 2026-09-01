@@ -47,6 +47,8 @@ type PageRow = {
   photo_ids: string[] | null;
   layout_config: {
     overlays?: Overlay[];
+    /** Per-base-slot placement edits (see `Block.baseEdits`). Absent on every pre-existing row. */
+    baseEdits?: (EditConfig | null)[];
     texts?: TextElement[];
     qrs?: QrElement[];
     stickers?: StickerElement[];
@@ -186,6 +188,10 @@ export async function loadPrintAlbum(
         // Vacate the slot of a photo that no longer exists — never compact the row, or the right
         // page's photo slides onto the left. `trimBaseIds` drops trailing holes only.
         photoIds: trimBaseIds((r.photo_ids ?? []).map((id) => (id && photoIdSet.has(id) ? id : null))),
+        // The printed book must use the SAME per-placement edit the customer saw, so this rides
+        // through verbatim — a base slot cropped one way on page 1 and another way on page 5 is
+        // two different pictures, and the PDF has to agree with the preview about both.
+        baseEdits: r.layout_config?.baseEdits,
         caption: r.caption ?? '',
         // Print is the FINAL physical book: only overlays with a real, still-present photo render.
         // Empty placeholders (photoId=null) and deleted-photo overlays are intentionally excluded

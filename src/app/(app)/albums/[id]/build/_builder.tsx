@@ -32,7 +32,9 @@ import TrayToolbar from './_tray-toolbar';
 import BlockCard, { PhotoPicker } from './_block';
 import ContextBar from './_context-bar';
 import { useAnchorRect, FULL_PAGE, type NormRect } from './_use-anchor-rect';
-import { useCanvasCrop } from './_use-canvas-crop';
+import Link from 'next/link';
+import { useCanvasCrop, cropFrameRef } from './_use-canvas-crop';
+import { frameSlotRef, isCoverFrame, type FrameRef } from './_frame-ref';
 import SubmitValidationDialog from './_submit-validation-dialog';
 import ConfirmSubmitDialog from './_confirm-submit-dialog';
 import { evaluateAlbum, type AlbumValidationReport, type IssueAction } from '@/lib/albums/validation';
@@ -115,8 +117,8 @@ import { clampRect, EDIT_BOUNDS, PASTEBOARD_PCT } from '@/lib/builder/edit-bound
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
-import { isCustomCover, type CoverConfig } from '@/lib/builder/cover';
-import { freeTexts } from '@/lib/builder/model';
+import { coverPlacementIds, isCustomCover, type CoverConfig } from '@/lib/builder/cover';
+import { freeTexts, placementCounts, resolveFrameEdit } from '@/lib/builder/model';
 import { COVER_SIDE_LABEL, isPermanentRole, type CoverSide } from '@/lib/builder/cover-objects';
 import { type StickerCategory } from '@/lib/stickers';
 import { saveLayout, submitAlbum, saveCoverDesign, savePhotoEdit } from '@/lib/actions/builder';
@@ -127,7 +129,7 @@ import { resolvePhotoUrl, revokeLocalPreview } from '@/lib/builder/photo-url';
 import { useIdMap } from './_use-id-map';
 import { usePhotoPipeline } from './_use-photo-pipeline';
 import { useBlueprintMode } from './_use-blueprint-mode';
-import { PhotoModals, ResubmittedDialog, ExitGuardDialog } from './_builder-modals';
+import { PhotoModals, ResubmittedDialog, SubmittedDialog, ExitGuardDialog } from './_builder-modals';
 import { useSaveController } from './_use-save-controller';
 import { usePhotoFor } from './_use-photo-for';
 import { useIdlePreload } from './_use-idle-preload';
@@ -199,6 +201,8 @@ export default function Builder({
   blueprintMeta = null,
   stickerCatalog = [],
   stickerUrls = {},
+  adminEditing = false,
+  ownerName = null,
 }: {
   albumId: string;
   title: string;
@@ -232,6 +236,18 @@ export default function Builder({
   blueprintDraftOf?: string | null;
   /** Blueprint identity for Blueprint-Mode chrome (0046) — only present in blueprint-edit mode. */
   blueprintMeta?: BlueprintMeta | null;
+  /**
+   * An ADMINISTRATOR is editing a customer's album (see the route's authorization note).
+   *
+   * PRESENTATIONAL ONLY. It changes one banner and nothing else — not a permission, not a code
+   * path, not a save. The authorization that let this page render, and the authorization on every
+   * save it performs, are both server-side (`resolveAlbumWriteAccess`); this flag is what tells
+   * the person at the keyboard whose book they are changing, which is the thing a shared editor
+   * must never leave ambiguous.
+   */
+  adminEditing?: boolean;
+  /** The album owner's name or email, for that banner. Never used for authorization. */
+  ownerName?: string | null;
   stickerCatalog?: StickerCategory[];
   stickerUrls?: Record<string, string>;
 }) {
@@ -315,11 +331,19 @@ export default function Builder({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false); // customer unsaved-changes guard
   const [resubmitted, setResubmitted] = useState(false); // review-mode resubmit confirmation
+  /**
+   * FIRST submission succeeded → offer the two things a customer wants next (checkout, or start
+   * another album). A RESUBMIT keeps its own `ResubmittedDialog`: that album is already paid for
+   * and back with the review team, so neither "checkout" nor "add to cart" applies to it.
+   */
+  const [submitted, setSubmitted] = useState(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
   // Tray search + filters now live in `useTrayFilters` (composable axes), declared below.
   const [removingUnused, setRemovingUnused] = useState(false);
 
   const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
+  /** Which placement the two album-photo modals were opened on; null = the tray (source photo). */
+  const [editingFrame, setEditingFrame] = useState<FrameRef | null>(null);
   const [quickCrop, setQuickCrop] = useState<{ photo: Photo; aspect: number; gutter: boolean } | null>(null);
   const [flipbookOpen, setFlipbookOpen] = useState(false);
   /** The physical page the preview was last showing — read once, on the way back to editing. */
@@ -603,6 +627,14 @@ export default function Builder({
   );
 
   const photoMap = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
+  /**
+   * The DISTINCT photos used on the content spreads. Drives "which photos are still unplaced"
+   * (suggestions, the tray's unused filter, the still-uploading submit guard) — questions about
+   * page coverage, which is why it is blocks-only.
+   *
+   * "How many times is this photo used?" is a different question with a different answer, and the
+   * tray asks it of `placements` below, which counts every instance and includes the cover.
+   */
   const placed = useMemo(() => placedPhotoIds(blocks), [blocks]);
   /**
    * Photos that can be put on a page right now. Phase 3 widens this from "processed" to
@@ -661,20 +693,42 @@ export default function Builder({
     pendingFrameSel.current = null;
   }, [cur, blocks.length]);
 
-  // The fixed crop frame for the editing photo matches WHERE it is placed (WYSIWYG).
+  /**
+   * The fixed crop frame the modal editor previews against — it must be the shape of the frame
+   * BEING EDITED (WYSIWYG).
+   *
+   * It used to find the frame by SEARCHING the album for the photo, which was exact while a photo
+   * could be placed once and is ambiguous now: the same image in four frames has four shapes, and
+   * the first match is not necessarily the one the customer opened. `editingFrame` says which one,
+   * so it is resolved directly and the search survives only as the fallback for a TRAY edit, where
+   * there genuinely is no single frame and the first placement is the best available guess.
+   */
   const editPlacement = useMemo(() => {
     const fallback = { aspect: pageA, gutter: false };
     if (!editingPhoto) return fallback;
-    for (const b of blocks) {
-      if (b.photoIds[0] === editingPhoto.id || b.photoIds[1] === editingPhoto.id) {
-        return b.template === 'double-spread' ? { aspect: pairA, gutter: true } : { aspect: pageA, gutter: false };
+
+    const shapeOf = (b: Block, ovId?: string) => {
+      if (ovId) {
+        const o = b.overlays.find((x) => x.id === ovId);
+        return o && o.h > 0 ? { aspect: (o.w * pairA) / o.h, gutter: false } : fallback;
       }
+      return b.template === 'double-spread' ? { aspect: pairA, gutter: true } : { aspect: pageA, gutter: false };
+    };
+
+    if (editingFrame && editingFrame.kind !== 'source') {
+      // A COVER frame is a full cover page; a page frame resolves against its own block.
+      if (isCoverFrame(editingFrame)) return { aspect: pageA, gutter: false };
+      const b = blocks.find((x) => x.key === editingFrame.blockKey);
+      if (b) return shapeOf(b, editingFrame.kind === 'overlay' ? editingFrame.overlayId : undefined);
+    }
+
+    for (const b of blocks) {
+      if (b.photoIds[0] === editingPhoto.id || b.photoIds[1] === editingPhoto.id) return shapeOf(b);
       const ov = b.overlays.find((o) => o.photoId === editingPhoto.id);
-      // Overlay pixel aspect = (ov.w / ov.h) × pair aspect (the pair is pairA× wider than tall).
       if (ov && ov.h > 0) return { aspect: (ov.w * pairA) / ov.h, gutter: false };
     }
     return fallback;
-  }, [editingPhoto, blocks, pageA, pairA]);
+  }, [editingPhoto, editingFrame, blocks, pageA, pairA]);
 
   // Warn before leaving with unsaved changes — browser refresh / tab-close / window-close (CHANGE 4).
   useEffect(() => {
@@ -848,28 +902,27 @@ export default function Builder({
   const coverIdRef = useRef(coverId);
   coverIdRef.current = coverId;
 
-  /**
-   * `commands.applyPhotoEdit` reached through a ref, because `useCover` is constructed BEFORE the
-   * command layer (the cover's own state is one of the command layer's inputs). The functions
-   * below are called from user events, long after both exist.
-   *
-   * Why the cover needs it at all: a cover OVERLAY is an ordinary album photo in a frame, so its
-   * crop and rotation belong on the `photos` row exactly as a page overlay's do — not in
-   * `cover_config.imageEdit`, which describes the face's backdrop.
-   */
-  const applyPhotoEditRef = useRef<((photoId: string, patch: Partial<EditConfig>) => void) | null>(null);
-
   const cover = useCover({
     initialConfig: initialCoverConfig,
     title,
     pageAspect: pageA,
-    onPhotoEdit: useCallback((photoId: string, patch: Partial<EditConfig>) => {
-      applyPhotoEditRef.current?.(photoId, patch);
-    }, []),
-    onPhotoRotate: useCallback((photoId: string, dir: 1 | -1) => {
-      const cur = photosRef.current.find((p) => p.id === photoId)?.edit?.rotate ?? 0;
-      applyPhotoEditRef.current?.(photoId, { rotate: (((cur + dir * 90 + 360) % 360) as 0 | 90 | 180 | 270) });
-    }, []),
+    /**
+     * WHAT A COVER OVERLAY INHERITS FROM.
+     *
+     * A cover overlay's crop, zoom and rotation are written to the OVERLAY (`overlay.edit`), like
+     * a page overlay's — it is a placement of a reusable photo, not the photo. But a frame that
+     * has never been adjusted inherits the source photo's `edit_config`, so the first adjustment
+     * needs to read that in order to fork it. `useCover` deliberately holds no photos, so it asks
+     * here. A ref read, because this is called from user events long after any given render.
+     *
+     * This REPLACES the old `onPhotoEdit`/`onPhotoRotate` pair, which wrote straight to the
+     * `photos` row — correct while a photo could be placed once, and actively wrong now: it would
+     * re-crop every page that shows the same image the moment the back cover was adjusted.
+     */
+    sourceEditFor: useCallback(
+      (photoId: string) => photosRef.current.find((p) => p.id === photoId)?.edit ?? null,
+      [],
+    ),
     onChange: useCallback(
       ({ config, title: nextTitle }: { config: CoverConfig; title: string }) =>
         persistCover({ title: nextTitle, coverId: coverIdRef.current, config }),
@@ -887,6 +940,34 @@ export default function Builder({
     if (config) cover.update(config);
     else persistCover({ title: albumTitle, coverId: id, config: cover.config });
   };
+
+  /**
+   * LIVE MIRRORS of the two state containers, for the adjustment dispatcher below.
+   *
+   * `writeFrameEdit` and `readFrameEdit` are handed to `usePhotoEditHistory` and to the crop
+   * gesture, both of which memoize on them and call them from pointer events long after the
+   * render that created them. Neither `api` nor `cover` is referentially stable across renders,
+   * so reading them through a ref is what keeps those two functions stable AND current — the same
+   * pattern `photosRef` uses a few hundred lines above, for the same reason.
+   */
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const coverRef = useRef(cover);
+  coverRef.current = cover;
+
+  /**
+   * THE PLACEMENT CENSUS — how many times each uploaded photo appears in the whole album.
+   *
+   * DERIVED, never stored: it is recomputed from `blocks` and `cover_config`, which ARE the
+   * album, so it cannot go stale after a delete, an undo, a page removal, a save, a reload or an
+   * admin edit — an orphaned placement is simply not there to count. The cover contributes
+   * through `coverPlacementIds`, the one place that knows which faces hold photos.
+   */
+  const placements = useMemo(
+    () => placementCounts(blocks, coverPlacementIds(coverConfig)),
+    [blocks, coverConfig],
+  );
+  const placementCountOf = useCallback((id: string) => placements.get(id) ?? 0, [placements]);
 
   /**
    * ── ALBUM QUALITY (Phase 7) ───────────────────────────────────────────────────
@@ -952,18 +1033,84 @@ export default function Builder({
   const layoutMemory = useLayoutMemory();
 
   /**
-   * THE IMAGE-ADJUSTMENT LANE. Undo/redo for crop, zoom, rotation, flip and tone — state that
-   * lives on `photos.edit_config` rather than in `Block[]`, and was therefore outside ⌘Z until
-   * now. Applying a step writes local state AND persists, so undo survives a reload exactly as
-   * the original edit does.
+   * ── WHERE AN IMAGE ADJUSTMENT IS WRITTEN — the ONE dispatcher ─────────────────────────────
+   *
+   * Three destinations, because there are three kinds of container (see `_frame-ref`):
+   *
+   *   source   the tray tile — `photos.edit_config`, through the existing `savePhotoEdit`. This
+   *            is the reusable asset's DEFAULT, inherited by every placement that has not been
+   *            adjusted, and it is exactly what the tray's Edit and Rotate have always meant.
+   *   base     a page half — `block.baseEdits[slot]`, inside `Block[]`.
+   *   overlay  a floating frame — `overlay.edit`, on a page block or on a cover face.
+   *
+   * The two placement destinations are LAYOUT state, so they ride the layout's existing debounced
+   * `saveLayout` / `saveCoverDesign` and need no new persistence path. They are written through
+   * `amend` (no layout undo entry): an adjustment is recorded in the geometry lane below, and
+   * pushing a second entry for the same gesture would make one ⌘Z appear to do nothing.
+   *
+   * This is the function that makes requirement "editing one placement must not touch the others"
+   * true, and it is true by construction: nothing here can reach a frame it was not given.
    */
-  const photoEdits = usePhotoEditHistory(
-    useCallback((photoId: string, e: EditConfig) => {
-      setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit: e } : p)));
-      void savePhotoEdit({ photoId, edit: e });
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []),
+  const writeFrameEditLocal = useCallback(
+    (ref: FrameRef, e: EditConfig) => {
+      if (ref.kind === 'source') {
+        setPhotos((prev) => prev.map((p) => (p.id === ref.photoId ? { ...p, edit: e } : p)));
+        return;
+      }
+      if (isCoverFrame(ref)) {
+        if (ref.kind === 'overlay') coverRef.current?.amendOverlayEdit(ref.blockKey, ref.overlayId, e);
+        return;
+      }
+      apiRef.current?.amendFrameEdit(ref.blockKey, frameSlotRef(ref), e);
+    },
+    // `setPhotos` is a React setter and the two containers are read through refs — all stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
+
+  /**
+   * THE SAME WRITE, PLUS PERSISTENCE — for callers that are not part of a gesture.
+   *
+   * The split matters for exactly one destination. A PLACEMENT edit lands in `Block[]` or
+   * `cover_config`, which the builder's existing debounced save already carries, so writing it is
+   * the whole job. A SOURCE edit lands on the `photos` row, which is a server action — so doing it
+   * inside the live half would fire one `savePhotoEdit` per pointer-move, which is precisely the
+   * live/commit contract this builder has always avoided.
+   *
+   * Its caller is `usePhotoEditHistory`'s `apply`: an undo or redo is not a gesture and has no
+   * commit to follow it, so it has to persist itself — which is what makes an undone edit survive
+   * a reload exactly as the original did.
+   */
+  const writeFrameEdit = useCallback(
+    (ref: FrameRef, e: EditConfig) => {
+      writeFrameEditLocal(ref, e);
+      if (ref.kind === 'source') void savePhotoEdit({ photoId: ref.photoId, edit: e });
+    },
+    [writeFrameEditLocal],
+  );
+
+  /** What a frame is showing right now: its own edit if it has forked, else the source photo's. */
+  const readFrameEdit = useCallback(
+    (ref: FrameRef): EditConfig => {
+      const source = photosRef.current.find((p) => p.id === ref.photoId)?.edit ?? null;
+      if (ref.kind === 'source') return source ?? {};
+      const own = isCoverFrame(ref)
+        ? ref.kind === 'overlay'
+          ? coverRef.current?.elements.overlays.find((o) => o.id === ref.overlayId)?.edit
+          : undefined
+        : apiRef.current?.frameEdit(ref.blockKey, frameSlotRef(ref));
+      return resolveFrameEdit(own, source) ?? {};
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [],
+  );
+
+  /**
+   * THE IMAGE-ADJUSTMENT LANE. Undo/redo for crop, zoom, rotation, flip and tone. Entries are
+   * keyed by FRAME (see `_use-photo-edits`), so an adjustment to page 1's copy of a photo and an
+   * adjustment to the back cover's copy of the same photo are separate steps that undo separately.
+   */
+  const photoEdits = usePhotoEditHistory(writeFrameEdit);
 
   /** The two lanes, in the order the customer edited them. See `_use-edit-history`. */
   const history = useEditHistory({
@@ -985,7 +1132,9 @@ export default function Builder({
   };
 
   const removeUnused = async () => {
-    const targets = photos.filter((p) => p.status === 'ready' && !placed.has(p.id));
+    // `placements` and not `placed`: a photo used ONLY as a cover backdrop or a cover overlay is
+    // in the album, and offering to delete it as "unused" would take it off the customer's cover.
+    const targets = photos.filter((p) => p.status === 'ready' && placementCountOf(p.id) === 0);
     if (targets.length === 0) return;
     if (!confirm(`Remove ${targets.length} unused photo${targets.length === 1 ? '' : 's'} from the album?`)) return;
     setRemovingUnused(true);
@@ -1001,66 +1150,93 @@ export default function Builder({
   };
 
   /**
-   * THE LIVE HALF of every adjustment: patch local photo state so the canvas updates on the same
-   * frame. It also opens a history entry (`markLive` records what the edit was BEFORE the gesture
-   * started, once per gesture), which is what makes crop, zoom and the tone sliders undoable
-   * without any of them growing their own bookkeeping.
+   * THE LIVE HALF of every adjustment: write the edit where THIS FRAME keeps it, so the canvas
+   * updates on the same frame. It also opens a history entry (`markLive` records what the frame
+   * was showing BEFORE the gesture started, once per gesture), which is what makes crop, zoom and
+   * the tone sliders undoable without any of them growing their own bookkeeping.
+   *
+   * It takes a `FrameRef`, not a photo id, and that is the whole change: the same photo in four
+   * frames is four independent adjustments, and `writeFrameEdit` cannot reach a frame it was not
+   * given. A tray edit is `{kind:'source'}` and still writes the photo row, exactly as before.
    */
-  const patchPhotoLocal = useCallback(
-    (photoId: string, edit: EditConfig) => {
-      photoEdits.markLive(photoId, photosRef.current.find((p) => p.id === photoId)?.edit ?? null);
-      setPhotos((prev) => prev.map((p) => (p.id === photoId ? { ...p, edit } : p)));
+  const patchFrameLocal = useCallback(
+    (ref: FrameRef, edit: EditConfig) => {
+      photoEdits.markLive(ref, readFrameEdit(ref));
+      // LOCAL only — a gesture persists ONCE, on release (or, for a placement, through the
+      // layout's own debounced save). See `writeFrameEdit` for why the two are separate.
+      writeFrameEditLocal(ref, edit);
     },
-    // `photoEdits` is a stable object of stable callbacks; `setPhotos` is a React setter.
+    // `photoEdits` is a stable object of stable callbacks; the two writers are ref-backed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
   /**
-   * THE COMMIT HALF: close the history entry. The modal editors have already persisted by the
-   * time they call this, so persistence is the caller's business and this only records.
+   * THE COMMIT HALF: close the history entry. Placement edits live in `Block[]` / `cover_config`
+   * and are already carried by the layout's existing debounced save, and the modal editors persist
+   * a source edit themselves — so this only records.
    */
-  const closePhotoEdit = useCallback(
-    (photoId: string, edit: EditConfig) => {
-      if (photoEdits.commit(photoId, edit)) pushHistoryRef.current('photos');
+  const closeFrameEdit = useCallback(
+    (ref: FrameRef, edit: EditConfig) => {
+      if (photoEdits.commit(ref, edit)) pushHistoryRef.current('photos');
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  /** Modal editor / quick crop: they persist themselves, so sync local state and close the entry. */
-  const onPhotoSaved = useCallback(
-    (photoId: string, edit: EditConfig) => {
-      patchPhotoLocal(photoId, edit);
-      closePhotoEdit(photoId, edit);
+  /** Modal editor / quick crop: sync the frame and close the entry. */
+  const onFrameEditSaved = useCallback(
+    (ref: FrameRef, edit: EditConfig) => {
+      patchFrameLocal(ref, edit);
+      closeFrameEdit(ref, edit);
     },
-    [patchPhotoLocal, closePhotoEdit],
+    [patchFrameLocal, closeFrameEdit],
   );
 
-  /** Live + persist + record — the shape every non-modal adjustment surface uses. */
+  /**
+   * THE SOURCE-ASSET adjustment path, for the tray.
+   *
+   * Editing a photo from the TRAY edits the uploaded image's default — the thing every placement
+   * that has never been adjusted inherits — which is what that control has always meant and still
+   * means. Kept as its own named pair so the distinction is visible at every call site rather than
+   * hidden inside a union.
+   */
+  const patchPhotoLocal = useCallback(
+    (photoId: string, edit: EditConfig) => patchFrameLocal({ kind: 'source', photoId }, edit),
+    [patchFrameLocal],
+  );
+  const onPhotoSaved = useCallback(
+    (photoId: string, edit: EditConfig) => onFrameEditSaved({ kind: 'source', photoId }, edit),
+    [onFrameEditSaved],
+  );
   const commitPhotoEdit = useCallback(
     (photoId: string, edit: EditConfig) => {
       void savePhotoEdit({ photoId, edit });
-      closePhotoEdit(photoId, edit);
+      closeFrameEdit({ kind: 'source', photoId }, edit);
     },
-    [closePhotoEdit],
+    [closeFrameEdit],
   );
 
   /**
    * IN-CANVAS IMAGE ADJUSTMENT — available on EVERY photo frame: both page slots, a full-spread
-   * image, and every overlay whatever its shape. Reuses `EditConfig`'s zoom/offset fields and the
-   * existing `frameOverflow` maths (see `_use-canvas-crop` for why this is a relocation of the
-   * Quick Crop gesture rather than a second crop implementation), and it drives exactly the pair
-   * above — `patchPhotoLocal` per frame, `commitPhotoEdit` on release — so an adjustment is
-   * live, persisted and undoable without this surface knowing anything about any of the three.
+   * image, every overlay whatever its shape, AND every overlay on a cover face (whose block key is
+   * `cover:<side>`). Reuses `EditConfig`'s zoom/offset fields and the existing `frameOverflow`
+   * maths (see `_use-canvas-crop` for why this is a relocation of the Quick Crop gesture rather
+   * than a second crop implementation), and it drives exactly the pair above — `patchFrameLocal`
+   * per frame, `closeFrameEdit` on release — so an adjustment is live, saved and undoable without
+   * this surface knowing anything about any of the three.
    *
-   * Both callbacks are stable, which matters here: they are handed to a canvas that re-renders on
-   * every frame of a drag, and churning their identity would invalidate its props each time.
+   * `editFor` is what makes repeated placements independent: the gesture starts from what THIS
+   * frame is showing, not from the shared photo row.
+   *
+   * All three callbacks are stable, which matters here: they are handed to a canvas that
+   * re-renders on every frame of a drag, and churning their identity would invalidate its props.
    */
   const crop = useCanvasCrop({
     photoFor: useCallback((id: string) => photoMap.get(id), [photoMap]),
-    onChange: patchPhotoLocal,
-    onCommit: commitPhotoEdit,
+    editFor: useCallback((t) => readFrameEdit(cropFrameRef(t)), [readFrameEdit]),
+    onChange: useCallback((t, edit) => patchFrameLocal(cropFrameRef(t), edit), [patchFrameLocal]),
+    onCommit: useCallback((t, edit) => closeFrameEdit(cropFrameRef(t), edit), [closeFrameEdit]),
   });
 
   // ── Phase 6: selection + commands ─────────────────────────────────────────────
@@ -1145,6 +1321,16 @@ export default function Builder({
     history,
     savePhotoEdit: commitPhotoEdit,
     patchPhotoEdit: patchPhotoLocal,
+    /* Placement-scoped adjustment: the toolbar writes the FRAME, never the shared photo row. */
+    applyFrameEdit: useCallback(
+      (ref: FrameRef, patch: Partial<EditConfig>) => {
+        const next = { ...readFrameEdit(ref), ...patch };
+        patchFrameLocal(ref, next);
+        closeFrameEdit(ref, next);
+      },
+      [readFrameEdit, patchFrameLocal, closeFrameEdit],
+    ),
+    readFrameEdit,
     albumSize: size,
     onMessage: setMessage,
     /**
@@ -1165,27 +1351,38 @@ export default function Builder({
     focus: deleteFocus,
   });
 
-  /* Publish the photo-edit command to the cover, which was constructed before this layer. */
-  useEffect(() => {
-    applyPhotoEditRef.current = cmd.applyPhotoEdit;
-  }, [cmd.applyPhotoEdit]);
-
   const contextMenu = useContextMenu();
 
   /**
-   * REPLACE ON DROP — placement on the canvas, with the swap narrated.
+   * The shared DRAG store. `dataTransfer` still carries the payload and still drives every drop,
+   * so drop behaviour is unchanged; this exists so destinations can DESCRIBE what is about to
+   * happen (Smart Replace previews, frame highlighting) — and so a drop can tell where the photo
+   * CAME FROM, which is now the difference between reusing a picture and moving one.
+   */
+  const drag = useDragStore();
+
+  /**
+   * PLACEMENT ON THE CANVAS — and the one distinction that decides what a drop MEANS.
    *
-   * Every canvas placement (drop on a base slot, drop on an overlay, pick from the modal) comes
-   * through here so the behaviour is described once. The placement itself is the existing
-   * `commands.placePhoto` — one `api.batch`, so a replacement is a SINGLE undo entry, dirty-marks
-   * the album like any other edit, and rides the existing debounced save. Nothing new is written.
+   * ── COPY FROM THE TRAY, MOVE BETWEEN FRAMES ────────────────────────────────────────────────
    *
-   * What is added is the sentence. `assignBaseSlot` / `replaceOverlay` displace the previous
-   * occupant by simply no longer referencing it, and the tray is derived from "not referenced
-   * anywhere" — so the old photo is already back in the tray by the next render, with its own
-   * edits intact. That is silent unless someone says so, and a photo quietly vanishing from a
-   * page is exactly the kind of thing a customer reads as data loss. Hence one quiet line, and
-   * still no dialog, no confirm, no extra click.
+   * A photo is a reusable source asset, so dragging one out of the tray ADDS a placement and the
+   * tray tile stays exactly where it is — drag the same file to page 1, page 5 and the back cover
+   * and you get three independent instances. Dragging a photo from one FRAME to another is not
+   * that: it is the customer rearranging their book, and leaving a copy behind would silently
+   * duplicate a picture they were moving.
+   *
+   * The store has modelled this since it was written (`DragOrigin` — "the difference between a
+   * copy and a move"); it simply had nothing to do, because the placed-once invariant made every
+   * placement a move. Now that assignment writes ONE frame, the origin frame is cleared here —
+   * inside the same `api.batch` as the placement, so a move is still a single undo entry.
+   *
+   * ── AND THE SWAP IS STILL NARRATED ─────────────────────────────────────────────────────────
+   *
+   * Dropping onto an occupied frame replaces its photo. The displaced photo is not deleted — it
+   * goes back to being an available source — but a picture vanishing from a page is exactly the
+   * kind of thing a customer reads as data loss, so it gets one quiet line. Still no dialog, no
+   * confirm, no extra click.
    */
   const placeOnCanvas = useCallback(
     (photoId: string, target: { blockKey: string; slot?: BaseSlot; overlayId?: string }) => {
@@ -1196,7 +1393,21 @@ export default function Builder({
           ? b.overlays.find((o) => o.id === target.overlayId)?.photoId ?? undefined
           : b.photoIds[target.slot === 'right' ? 1 : 0];
 
-      cmd.placePhoto(photoId, target);
+      const origin = drag.getPayload()?.origin;
+      const sameFrame =
+        origin?.from === 'frame' &&
+        origin.blockKey === target.blockKey &&
+        origin.slot === target.slot &&
+        origin.overlayId === target.overlayId;
+
+      api.batch(() => {
+        cmd.placePhoto(photoId, target);
+        // A frame-to-frame drag is a MOVE: vacate where it came from. Dropping a frame onto
+        // itself is a no-op, and a tray drag has no origin frame to clear.
+        if (origin?.from === 'frame' && !sameFrame) {
+          api.clearFrames([{ blockKey: origin.blockKey, slot: origin.slot, overlayId: origin.overlayId }]);
+        }
+      });
 
       if (displaced && displaced !== photoId) {
         const name = photoMap.get(displaced)?.filename;
@@ -1206,7 +1417,7 @@ export default function Builder({
         });
       }
     },
-    [blocks, cmd, photoMap],
+    [blocks, cmd, api, drag, photoMap],
   );
 
   /**
@@ -1264,6 +1475,41 @@ export default function Builder({
     const id = cover.photoTarget?.photoId;
     return id ? photoMap.get(id) : undefined;
   }, [cover.photoTarget, photoMap]);
+
+  /**
+   * THE SELECTED FRAME, as a reference every adjustment surface speaks.
+   *
+   * The inspector sliders, the modal editor and Quick Crop used to be handed a PHOTO ID and wrote
+   * the shared `photos` row, which is how adjusting one page's copy of an image re-cropped every
+   * other copy of it. They are handed this instead, so each of them edits the placement the user
+   * is actually looking at. `null` when nothing (or something that is not a photo frame) is
+   * selected, or while the cover is focused — the cover resolves its own target in `useCover`.
+   */
+  const selectedFrameRef = useMemo<FrameRef | null>(() => {
+    if (coverFocused || !block) return null;
+    if (selection.kind === 'base') {
+      const photoId = selection.slot === 'right' ? block.photoIds[1] : block.photoIds[0];
+      return photoId ? { kind: 'base', blockKey: block.key, slot: selection.slot, photoId } : null;
+    }
+    if (selection.kind === 'overlay') {
+      const photoId = block.overlays.find((o) => o.id === selection.id)?.photoId;
+      return photoId ? { kind: 'overlay', blockKey: block.key, overlayId: selection.id, photoId } : null;
+    }
+    return null;
+  }, [coverFocused, block, selection]);
+
+  /**
+   * THE COVER'S selected frame, in the same vocabulary.
+   *
+   * A cover overlay is an ordinary overlay on a face whose block key is `cover:<side>` — the key
+   * `useCover.block` already mints — so it needs no second concept here. Only overlays: the
+   * face's BACKDROP keeps its edit in `cover_config.imageEdit` and has always had its own editor.
+   */
+  const coverFrameRef = useMemo<FrameRef | null>(() => {
+    const t = cover.photoTarget;
+    if (!coverFocused || t?.kind !== 'overlay' || !t.photoId) return null;
+    return { kind: 'overlay', blockKey: `cover:${cover.side}`, overlayId: t.overlayId, photoId: t.photoId };
+  }, [coverFocused, cover.photoTarget, cover.side]);
 
   /** The photo in the selected frame, if the selection is a photo frame. */
   const selectedFramePhoto = useMemo(() => {
@@ -1331,13 +1577,6 @@ export default function Builder({
   }, [sel.selection, photoMap, availablePhotos]);
   const suggestions = useMemo(() => suggestLayouts(profileShapes(suggestionPool)), [suggestionPool]);
   /**
-   * The shared DRAG store. `dataTransfer` still carries the payload and still drives every drop,
-   * so drop behaviour is unchanged; this exists purely so destinations can DESCRIBE what is about
-   * to happen (Smart Replace previews, frame highlighting, cross-page move feedback).
-   */
-  const drag = useDragStore();
-
-  /**
    * MARQUEE over the tray. Hit-testing is GEOMETRIC — it converts the rubber band into index
    * ranges using the virtual grid's own `columns`/`rowStride`, so rows that virtualization has
    * not mounted are selected exactly like visible ones. A DOM-based hit test would silently skip
@@ -1397,10 +1636,9 @@ export default function Builder({
   favouritesRemapRef.current = favourites.remapId;
   labelsRemapRef.current = labels.remapId;
 
-  // Inspector: live (local) change then persist on release — the same pair the canvas crop uses,
-  // so a slider drag becomes exactly one undo step just as a crop gesture does.
-  const onPhotoChange = patchPhotoLocal;
-  const onPhotoCommit = commitPhotoEdit;
+  // The inspector's live/commit pair is now FRAME-scoped (`patchFrameLocal` / `closeFrameEdit`,
+  // resolved through `selectedFrameRef`), so the two photo-keyed aliases that used to sit here are
+  // gone — a slider must move the placement the user is looking at, not every copy of the image.
 
   /**
    * WHAT THE PROPERTIES PANEL SHOWS (Pass 3) — derived from the selection, exactly like the
@@ -1417,14 +1655,17 @@ export default function Builder({
       case 'overlay': {
         const photo = selectedFramePhoto;
         // Tone edits are authored against the sanitized master — same gate as the bar's button.
-        if (!photo || photo.status !== 'ready') return null;
+        if (!photo || photo.status !== 'ready' || !selectedFrameRef) return null;
+        // THE FRAME, not the photo: the sliders show what this placement is showing and write
+        // back to it, so the same image on another page keeps its own tone and framing.
+        const ref = selectedFrameRef;
         return {
           title: 'Photo adjustments',
           node: (
             <PhotoAdjustInspector
-              edit={photo.edit ?? {}}
-              onChange={(next) => onPhotoChange(photo.id, next)}
-              onCommit={(next) => onPhotoCommit(photo.id, next)}
+              edit={readFrameEdit(ref)}
+              onChange={(next) => patchFrameLocal(ref, next)}
+              onCommit={(next) => closeFrameEdit(ref, next)}
             />
           ),
         };
@@ -1500,16 +1741,39 @@ export default function Builder({
   const notYetEditable = () =>
     setMessage({ kind: 'ok', text: 'Still processing — you can crop and adjust this photo in a moment.' });
 
-  const openQuickCrop = (photoId: string, aspect: number, gutter: boolean) => {
+  /**
+   * Both modals remember WHICH FRAME opened them (`null` = the tray, i.e. the source photo).
+   *
+   * The alternative — inferring the frame from the photo id when the dialog saves — is exactly
+   * what stops working once one photo can be in four frames: there would be no single answer.
+   */
+  /**
+   * Turn a canvas frame handle (`{slot}` / `{overlayId}`) into a `FrameRef` against the FOCUSED
+   * spread. The canvas already knows which frame the button belongs to; this is the one place
+   * that knows which block is on screen, so the two halves meet here rather than in the canvas.
+   */
+  const frameRefFor = (
+    photoId: string,
+    frame?: { slot?: BaseSlot; overlayId?: string },
+  ): FrameRef | null => {
+    if (!block || !frame) return null;
+    if (frame.overlayId) return { kind: 'overlay', blockKey: block.key, overlayId: frame.overlayId, photoId };
+    if (frame.slot) return { kind: 'base', blockKey: block.key, slot: frame.slot, photoId };
+    return null;
+  };
+
+  const openQuickCrop = (photoId: string, aspect: number, gutter: boolean, ref: FrameRef | null = null) => {
     const p = photoMap.get(photoId);
     if (!p) return;
     if (p.status !== 'ready') return notYetEditable();
+    setEditingFrame(ref);
     setQuickCrop({ photo: p, aspect, gutter });
   };
-  const openEditor = (photoId: string) => {
+  const openEditor = (photoId: string, ref: FrameRef | null = null) => {
     const p = photoMap.get(photoId);
     if (!p) return;
     if (p.status !== 'ready') return notYetEditable();
+    setEditingFrame(ref);
     setEditingPhoto(p);
   };
 
@@ -2207,10 +2471,15 @@ export default function Builder({
         api.setDirty(false);
         setResubmitted(true);
       } else {
+        // The album is submitted and persisted BEFORE this opens, so the dialog decides nothing
+        // about whether the submission counted — only where the customer goes next. Closing it is
+        // a real third answer (see `SubmittedDialog`), which is why the toast still fires: the
+        // outcome is stated whether or not they engage with the choice.
         setMessage({
           kind: 'ok',
           text: 'Album submitted for review! You can still edit it until you place an order.',
         });
+        setSubmitted(true);
       }
     } else {
       setMessage({ kind: 'err', text: res.error });
@@ -2479,6 +2748,7 @@ export default function Builder({
         saving={saving}
         onSubmit={onSubmitClick}
         submitting={submitting}
+        adminEditing={adminEditing}
         albumId={albumId}
         onOpenSettings={blueprintMode ? undefined : () => setSettingsOpen(true)}
         reviewMode={reviewMode}
@@ -2488,6 +2758,28 @@ export default function Builder({
         onExitBlueprint={requestExitBlueprint}
         blueprintSaving={blueprintSaving}
       />
+
+      {/* ADMIN EDIT BANNER. The builder is the customer's editor; when an administrator is in it,
+          on someone else's album, that has to be stated plainly and permanently — an amber strip
+          rather than a dismissible toast, because it is a fact about the whole session. */}
+      {adminEditing && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-warning/25 bg-warning/[0.08] px-4 py-2 text-[13px] text-foreground">
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <ShieldCheck className="h-3.5 w-3.5 text-warning" />
+            Admin edit
+          </span>
+          <span className="text-muted-foreground">
+            You are editing {ownerName ? <strong className="font-medium text-foreground">{ownerName}</strong> : 'a customer'}
+            ’s album. Changes save to their album and are what the printed PDF will be generated from.
+          </span>
+          <Link
+            href={`/admin/albums/${albumId}`}
+            className="ml-auto shrink-0 rounded-md px-2 py-1 font-medium text-primary underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Back to admin
+          </Link>
+        </div>
+      )}
 
       {/* Review Revision Mode summary card (CHANGE 1/4/5/6/10) — replaces the plain banner with a
           reassuring, actionable review card. Same builder engine below it. */}
@@ -2688,6 +2980,7 @@ export default function Builder({
                     taskFor={taskFor}
                     filtered={tray.active}
                     placedIds={placed}
+                    placementCountOf={placementCountOf}
                     pickedId={pickedId}
                     onPick={(id) => setPickedId((c) => (c === id ? null : id))}
                     onEdit={setEditingPhoto}
@@ -2728,10 +3021,23 @@ export default function Builder({
                     onDragEndPhoto={drag.end}
                     dragActive={drag.dragging}
                     onDropToTray={(photoId) => {
-                      // Dropping onto the tray means "take it off the page" — expressed as the
-                      // SAME command the keyboard and context menu use, so history behaves
-                      // identically however the user asks for it.
-                      const frame = findFrameHolding(blocks, photoId);
+                      /**
+                       * Dropping onto the tray means "take THIS ONE off the page" — expressed as
+                       * the SAME command the keyboard and context menu use, so history behaves
+                       * identically however the user asks for it.
+                       *
+                       * It clears the frame the drag STARTED FROM. Searching for a frame holding
+                       * the photo was exact while a photo could be placed once; with the same
+                       * image legitimately in four frames it would clear whichever one happened to
+                       * come first, which is not the one the customer dragged. The origin is
+                       * carried by the drag itself, so the answer is unambiguous. (A tray-to-tray
+                       * drag has no origin frame and correctly does nothing.)
+                       */
+                      const origin = drag.getPayload()?.origin;
+                      const frame =
+                        origin?.from === 'frame'
+                          ? { blockKey: origin.blockKey, slot: origin.slot, overlayId: origin.overlayId }
+                          : findFrameHolding(blocks, photoId);
                       if (frame) api.batch(() => api.clearFrames([frame]));
                       drag.end();
                     }}
@@ -2897,6 +3203,25 @@ export default function Builder({
                  one set of edits, wherever it is placed. */
               photoFor={photoForOverview}
               onPickOverlayPhoto={(overlayId) => setCoverPhotoPicker({ side: cover.side, target: 'overlay', overlayId })}
+              /**
+               * IMAGE ADJUSTMENT ON A COVER OVERLAY — the SAME state, not a second one.
+               *
+               * `crop` is the one `useCanvasCrop` instance in this builder; the face just addresses
+               * itself with the block key `useCover` already mints (`cover:<side>`). So a
+               * press-and-hold on the back cover and a press-and-hold on page 7 run the identical
+               * gesture, write through the identical dispatcher, and are undone by the identical
+               * ⌘Z — which is what "the back cover is not a special simplified overlay" means.
+               */
+              onBeginCrop={({ overlayId, photoId }) => {
+                const photo = photoMap.get(photoId);
+                if (!photo || photo.status !== 'ready') return notYetEditable();
+                cover.setSelection({ kind: 'overlay', id: overlayId });
+                crop.begin({ blockKey: `cover:${cover.side}`, overlayId, photoId });
+              }}
+              cropOverlayId={
+                crop.target?.blockKey === `cover:${cover.side}` ? (crop.target.overlayId ?? null) : null
+              }
+              cropHandlers={crop.handlers}
               /* The cover canvas is the book area too — ctrl+wheel zooms it the same way. */
               onCanvasEl={zoomAreaRef}
               onFaceEl={(el) => {
@@ -3039,8 +3364,10 @@ export default function Builder({
                         { id: 'danger', commands: [cmd.commands.deletePhotos] },
                       ]);
                     }}
-                    onEditPhoto={openEditor}
-                    onQuickCrop={openQuickCrop}
+                    onEditPhoto={(photoId, frame) => openEditor(photoId, frameRefFor(photoId, frame))}
+                    onQuickCrop={(photoId, aspect, gutter, frame) =>
+                      openQuickCrop(photoId, aspect, gutter, frameRefFor(photoId, frame))
+                    }
                     onPlacePhoto={placeOnCanvas}
                     stickerUrlFor={stickerUrlFor}
                     pickActive={!!pickedId}
@@ -3154,13 +3481,20 @@ export default function Builder({
               onCrop={() => {
                 const t = cover.photoTarget;
                 if (t?.kind === 'overlay') {
-                  if (t.photoId) openEditor(t.photoId);
+                  // THE OVERLAY, not the photo — a back-cover crop must not reach the copies of
+                  // the same image sitting on the pages. `coverFrameRef` is that placement.
+                  if (t.photoId && coverFrameRef) openEditor(t.photoId, coverFrameRef);
                   return;
                 }
                 setCoverImageEditor(cover.side);
               }}
-              cropping={false}
-              onEndCrop={() => setCoverImageEditor(null)}
+              /* The cover's photo toolbar reports adjustment exactly as the page's does, so its
+                 Crop button reads as a toggle and Done ends the same gesture. */
+              cropping={!!crop.target && crop.target.blockKey === `cover:${cover.side}`}
+              onEndCrop={() => {
+                crop.end();
+                setCoverImageEditor(null);
+              }}
               onOpenProperties={() => setPropsPanelOpen((v) => !v)}
               propertiesOpen={propsPanelOpen && !!coverPropsPanelContent}
               onEscape={() => cover.setSelection(NO_SELECTION)}
@@ -3350,8 +3684,15 @@ export default function Builder({
       <PhotoModals
         editingPhoto={editingPhoto}
         editPlacement={editPlacement}
-        onCloseEditor={() => setEditingPhoto(null)}
+        onCloseEditor={() => {
+          setEditingPhoto(null);
+          setEditingFrame(null);
+        }}
         onPhotoSaved={onPhotoSaved}
+        /* WHICH placement these modals are editing — null means the tray, i.e. the source photo. */
+        frameRef={editingFrame}
+        frameEdit={editingFrame ? readFrameEdit(editingFrame) : null}
+        onFrameSaved={onFrameEditSaved}
         coverImageEditor={coverImageEditor}
         coverConfig={coverConfig}
         photoMap={photoMap}
@@ -3359,7 +3700,10 @@ export default function Builder({
         onCloseCoverEditor={() => setCoverImageEditor(null)}
         onCoverImageEdit={(side, edit) => cover.patchImageEdit(edit, side)}
         quickCrop={quickCrop}
-        onCloseQuickCrop={() => setQuickCrop(null)}
+        onCloseQuickCrop={() => {
+          setQuickCrop(null);
+          setEditingFrame(null);
+        }}
       />
       {flipbookOpen && (
         <Flipbook
@@ -3464,6 +3808,8 @@ export default function Builder({
       )}
       {/* Resubmit confirmation (CHANGE 3) — review returns to Pending Review; album is locked again. */}
       {resubmitted && <ResubmittedDialog />}
+      {/* Post-submission: Proceed to checkout · Add to cart & create one more · ✕ (dismiss only). */}
+      {submitted && <SubmittedDialog albumId={albumId} onClose={() => setSubmitted(false)} />}
 
       {/* Album Settings — the revisitable setup hub (General / Format / Photos / Builder). Reuses the
           builder's own surfaces (cover rail, Photos rail, Build-it-for-me picker) — no duplicate UI. */}

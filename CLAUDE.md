@@ -1381,9 +1381,35 @@ In-app builder at `/albums/[id]/build`. All reads/writes go through the
 **authenticated** Supabase client (RLS scopes to the owner); Zod validates every
 action input; ownership is re-verified on every server action.
 
-- **Placement model**: each uploaded photo is placed **at most once** — as a base
-  OR as an overlay — so per-photo edits live on `photos.edit_config` (not per-slot).
-  The tray badges placed photos (base + overlay ids); assigning a placed photo moves it.
+- **Placement model — ONE IMAGE, MANY PLACEMENTS.** An uploaded photo is a **reusable source
+  asset**. It may be placed any number of times (page 1's left half, page 5's overlay, page 8's
+  overlay, a back-cover overlay), and **every placement owns its own `EditConfig`** — crop, zoom,
+  pan, rotation, straighten, flip and tone. Adjusting one placement changes nothing about the
+  others.
+  - **Where a placement's edit lives**: `Overlay.edit` (a floating frame, on a page OR a cover
+    face) and `Block.baseEdits[slot]` (positional, parallel to `photoIds`). Both are additive
+    jsonb inside `album_pages.layout_config` / `albums.cover_config` — **no migration**, because
+    absent means exactly what it always meant.
+  - **`photos.edit_config` is now the SOURCE DEFAULT** a placement inherits until it is adjusted,
+    which is why every album saved before this renders byte-for-byte identically. The first
+    adjustment FORKS: the inherited edit is snapshotted onto the frame. Editing a photo from the
+    TRAY still edits that default (the `source` kind in `_frame-ref`).
+  - **`resolveFrameEdit` / `forkFrameEdit`** (model.ts) are the ONE resolution and ONE fork rule;
+    every renderer and every write path goes through them, so the canvas, the preview, the
+    flipbook, the navigator and both PDFs cannot disagree. This generalises what the cover
+    backdrop already did with `cover_config.imageEdit`.
+  - **An adjustment is addressed by FRAME, not by photo** — `FrameRef` (`_frame-ref.ts`):
+    `source` (the tray tile) · `base` (a page half) · `overlay` (a page or cover frame). The
+    canvas crop gesture, the floating toolbar, the inspector sliders and both modal editors all
+    speak it, and `usePhotoEditHistory` keys its undo entries on it.
+  - **The tray shows a COUNT** ("3 Placed"), derived from `placementCounts(blocks, coverPlacementIds(cover))`
+    — never stored, so it cannot go stale after a delete, an undo, a save or a reload. The tile is
+    **not dimmed** and stays draggable and tap-to-placeable for ever.
+  - **Copy from the tray, MOVE between frames.** A drag out of the tray adds a placement; a drag
+    from one frame to another clears the origin frame (`DragOrigin`, which the drag store has
+    always carried). Dropping a photo back on the tray clears the frame it came FROM.
+  - **Dropping a DIFFERENT photo into a frame resets that frame's edit** — a crop chosen for one
+    picture must not silently reframe another. Re-picking the same photo leaves it alone.
 - **A new spread starts with ONE empty full-page photo frame PER PAGE**, and **"Add photo
   overlay" creates an empty frame rather than opening the picker.** `newUnitOverlayGeoms(template)`
   (model.ts) is the single source: a `single-pair` gets `LEFT_PAGE_OVERLAY_GEOM` (0,0,.5,1) +
@@ -1509,11 +1535,17 @@ action input; ownership is re-verified on every server action.
   is pixel-identical to the slot/preview. Rotating resets the crop to full (the
   oriented frame swapped).
 - **Server actions** (`src/lib/actions/builder.ts`):
-  - `saveLayout` — replaces the album's blocks (delete-all + insert). Validates
-    that every referenced photo (**base AND overlays**) belongs to the album,
-    rejects overflow, and enforces placed-once across base + overlay ids. Overlays
-    capped at 50/block in Zod. Drafts may be incomplete.
-  - `savePhotoEdit` — persists one photo's `edit_config`.
+  - `saveLayout` — replaces the album's blocks (delete-all + insert). Validates that every
+    referenced photo (**base AND overlays**) belongs to the album and rejects overflow. Overlays
+    capped at 50/block in Zod; per-placement `edit` / `baseEdits` are bounded by the SAME
+    `EditConfigSchema` as `savePhotoEdit`. Drafts may be incomplete. **`SaveLayoutSchema` no
+    longer refuses a repeated photo id** — one image, many placements (see the placement model
+    above). Nothing else was relaxed.
+  - `savePhotoEdit` — persists one photo's SOURCE `edit_config` (the default unforked placements
+    inherit). A PLACEMENT's own edit is layout state and rides `saveLayout`.
+  - **Album writes are OWNER-or-ADMIN** — all three of `saveLayout` / `savePhotoEdit` /
+    `saveCoverDesign` resolve access through `resolveAlbumWriteAccess` (`lib/albums/access.ts`).
+    See **Admin album editing** below.
   - `submitAlbum` — **re-reads the saved layout from the DB** (never trusts the
     client), requires leaves == `size` with every **base** slot filled (overlays
     optional), then sets `status='submitted'`. Handoff to the future checkout slice.
@@ -1674,9 +1706,17 @@ picture *on* the back cover. `BackCoverConfig.overlays: Overlay[]` (additive to 
   copy them — and "everything else is preserved" becomes something a test can assert.
 - **Drop-to-replace** works exactly as it does on a page, through the shared `photo-dnd` contract
   (`acceptPhotoDrag`/`readPhotoDrag`/`leftDropTarget`), replacing one `photoId` and leaving the
-  rect, order, identity and the whole face alone. Cover overlays deliberately do NOT `stripPhoto`:
-  placed-once is a `saveLayout` invariant across `album_pages`, and the cover has never
-  participated in it (the face backdrop does not either).
+  rect, order, identity and the whole face alone. (Nothing on any surface `stripPhoto`s on
+  assignment any more — see the placement model.)
+- **A COVER OVERLAY IS A PAGE OVERLAY.** It carries the same adjustment interactions, from the
+  same implementation: press-and-hold to adjust, the centre `AdjustHandle`, in-place pan/zoom,
+  wheel-zoom ownership and the "what am I choosing from" ghost all live in **`_crop-chrome.tsx`**
+  and are imported by BOTH canvases (they used to be private to `_block.tsx`, which is the only
+  reason the cover lacked them). It runs through the builder's ONE `useCanvasCrop` state, keyed
+  `cover:<side>` — the block key `useCover.block` already minted — so there is one gesture, one
+  renderer and one commit path. A cover overlay's crop is written to `overlay.edit`, exactly like
+  a page overlay's; the face BACKDROP keeps `cover_config.imageEdit`, and `photoTarget` is still
+  what keeps the two apart.
 - **It reaches both PDFs.** The preview book passes its existing `photoFor`; the printer-ready
   cover export (which deliberately does not load the album's photo set) resolves exactly the
   overlay photos through `loadPrintAlbum`'s new `coverPhotos`, and both readiness gates count only
@@ -1684,6 +1724,88 @@ picture *on* the back cover. `BackCoverConfig.overlays: Overlay[]` (additive to 
 - **No border**, on every surface: the overlay container is the shared `OverlayBox`
   (`absolute overflow-hidden` and nothing else). Selection outlines and handles are unaffected —
   `Movable` portals its chrome into a separate layer and never styles the element.
+
+## The dashboard shelf shows the REAL front cover — built
+
+Every surface that presents an album as a physical book already drew it through the SAME
+`CoverDesignFromConfig` the builder, the in-app preview, review mode and the printer-ready cover
+export draw through, so there has never been a second visual representation to drift. What the
+shelf was missing was the ARTWORK: `albumCoverFace` hardcoded `imageUrl={null}` (documented as
+avoiding an N+1), so an album whose front is a photograph rendered as its background colour with
+the title on it, and a sticker placed on the cover rendered as nothing.
+
+- **`resolveCoverFrontKeys`** (`lib/albums/cover.ts`) answers the CANONICAL priority chain
+  (photo → template → design/default) for MANY albums in a **fixed three queries**, whatever the
+  shelf holds — one `photos` read, one `cover_templates` read, one `resolveStickerUrls`. It is a
+  batched sibling of `resolveCoverImageKeys`, not a second rule: `tests/dashboard-cover.test.ts`
+  runs the same fixtures through both and asserts they agree case for case.
+- **It prefers `thumb_key`** — a shelf book is ~150 px wide, so presigning the full-resolution
+  print master would download megabytes to draw a thumbnail. Falls back to the sanitized master
+  when a photo has no thumbnail yet.
+- **The album detail page** (`/albums/[id]`) resolves the same thing through the per-album
+  `resolveCoverImageKeys` — one album, so the batched version buys nothing there.
+- **It cannot go stale**: the shelf reads `albums.cover_config`, which is the row
+  `saveCoverDesign` writes. No cached copy, no generated thumbnail file, no `unstable_cache`.
+- `albumCoverFace(cover, title, imageUrl?, stickerUrlFor?)` keeps its old two-argument shape, so
+  the other four call sites (cart, both checkouts) are unchanged and still render CSS-only covers.
+
+## Post-submission dialog — built
+
+A successful submit used to end in a toast, which said what happened and nothing about what to do
+next. `SubmittedDialog` (`_builder-modals.tsx`) offers the two things a customer actually wants —
+**Proceed to checkout** (the existing `/checkout/[albumId]`) and **Add to cart & create one more
+album** (the existing `/albums/new`) — plus a **✕ in the top-right that is a real third answer**.
+
+- **Closing does nothing else.** The ✕, Escape and a backdrop click all call the same `onClose`,
+  which flips one local flag. The album is already submitted and persisted before the dialog
+  opens, so dismissal cannot delete it, revert it, or add it to the cart. Neither action handler
+  is reachable from anything but its own button.
+- **ENSURE, NOT INCREMENT.** "Add to cart" calls the new `ensureAlbumInCart` action, which reuses
+  `cart_ensure_item` (ON CONFLICT DO NOTHING) and the same ownership / blueprint / `submitted`
+  gates as `addAlbumToCart`. `submitAlbum` has already best-effort ensured the row, so
+  incrementing would leave the customer buying two copies of a book they asked to buy once
+  (Phase 6 invariant 2).
+- A **resubmit** keeps its existing `ResubmittedDialog`: that album is already paid and back with
+  the review team, so neither checkout nor add-to-cart applies to it.
+
+## Admin album editing — built
+
+An administrator reviewing a submitted album could see it and approve it, but not fix a crooked
+photo in it: the workflow for a two-second correction was "send it back to the customer". An
+authorised admin now opens **the customer's own builder** on that album.
+
+- **THERE IS NO ADMIN ALBUM EDITOR.** `/admin/albums/[id]` and `/admin/reviews/[id]` link at
+  `/albums/[id]/build` — the same route, the same state model, the same canvas, the same save
+  actions. A second editor would be a second thing to keep in step with the renderer, the layout
+  schema and the print export.
+- **`resolveAlbumWriteAccess`** (`lib/albums/access.ts`) is the ONE authorization boundary, used
+  by the route AND by `saveLayout` / `savePhotoEdit` / `saveCoverDesign`:
+  1. **OWNER FIRST, ALWAYS** — the RLS-scoped read runs unchanged and unconditionally, so for a
+     customer nothing about these actions differs at all and the admin branch never runs.
+  2. Only a `null` result asks the second question, of the EXISTING RBAC gate: `profiles.role =
+     'admin'` (locked by 0019, resolved through the Drizzle superuser) **plus `album:manage`** —
+     the same capability that already authorises the admin album console and admin PDF generation.
+     No new capability, no new policy, no new secret.
+  3. The service-role client is constructed **only on that branch and only after that check**, and
+     every statement stays pinned to `albumId`.
+  Anyone else — including a signed-in customer who guesses the URL — gets the ordinary 404;
+  "not yours" and "does not exist" are deliberately indistinguishable. The hidden buttons are a
+  courtesy, never the boundary. `require-admin` is imported LAZILY there (it reaches the Drizzle
+  superuser and React's server `cache()`), which keeps the album actions loadable outside Next.
+- **Every existing gate still applies on both paths**: the paid-order edit lock
+  (`isEditingLocked`), the album_id pin on every referenced photo, Zod on every input.
+- **Admin edits are AUDITED** — `album.layout_edited` / `album.photo_edited` /
+  `album.cover_edited` via `log_audit` (0016), naming the admin and the album's owner. Owner
+  edits are not audited (they always were the customer's own writes).
+- **The PDF needs no admin path at all.** `startAlbumPdfGeneration` takes an album ID, and the
+  worker renders the print route, which loads the album through `loadPrintAlbum` — a service-role
+  read of the rows the save just wrote. There is no client snapshot for it to render from, so the
+  existing Generate/Regenerate buttons already produce the edited book.
+- **The builder says whose album it is**: an amber "Admin edit" strip naming the owner, with a
+  Back-to-admin link, and the two CUSTOMER terminal actions (Submit, Checkout) hidden — Save
+  stays, because saving is the point. Presentational only; the server refuses both regardless.
+- **Scope**: this is the pre-approval correction path. A PAID album is still frozen by the edit
+  lock for everyone, admins included — that gate was deliberately not weakened.
 
 ## Admin console + fulfillment (Phase 1) — built
 

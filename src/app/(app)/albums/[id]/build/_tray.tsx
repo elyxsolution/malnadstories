@@ -34,6 +34,7 @@ export default function Tray({
   photos,
   taskFor,
   placedIds,
+  placementCountOf,
   pickedId = null,
   onPick,
   onEdit,
@@ -94,7 +95,18 @@ export default function Tray({
   filtered?: boolean;
   /** The upload task backing an optimistic photo, if it still has one. */
   taskFor?: (photoId: string) => UploadTask | undefined;
+  /** Distinct photos used somewhere in the album — drives the "used / unused" filter. */
   placedIds: Set<string>;
+  /**
+   * HOW MANY TIMES this photo is placed, derived from the album itself (see `placementCounts`).
+   *
+   * The tray used to show a binary ✓ Placed and dim the tile, which described a world where a
+   * photo could be used exactly once. One image can now be a page's left half, an overlay five
+   * spreads later and a back-cover overlay all at once, so the honest signal is a NUMBER, and the
+   * tile has to stay fully bright and fully draggable after the first placement — it is a source
+   * asset, not a token that gets spent.
+   */
+  placementCountOf?: (photoId: string) => number;
   /** Tap-to-place: the photo currently "picked up" from the tray (ring), or null. */
   pickedId?: string | null;
   onPick?: (id: string) => void;
@@ -207,7 +219,8 @@ export default function Tray({
         const state = photoUiState(photo, task);
         const optimistic = isTempPhotoId(photo.id);
         const placeable = isPlaceable(photo, state);
-        const placed = placedIds.has(photo.id);
+        const placements = placementCountOf?.(photo.id) ?? (placedIds.has(photo.id) ? 1 : 0);
+        const placed = placements > 0;
         const picked = pickedId === photo.id;
         const previewUrl = resolvePhotoUrl(photo, 'thumb');
         // Editing needs the worker's master (crop geometry is authored against it).
@@ -236,7 +249,10 @@ export default function Tray({
                 return;
               }
               onSelect?.(photo.id, { meta: false, shift: false }, orderedIds);
-              if (placeable && !placed) onPick?.(photo.id);
+              // NOT `&& !placed`. Tap-to-place used to stop working once a photo was on a page,
+              // because placing it again would only have moved it. Placing it again now adds a
+              // second, independent instance, so the gesture stays available for ever.
+              if (placeable) onPick?.(photo.id);
             }}
             onContextMenu={(e) => onContextMenu?.(e, photo.id)}
             aria-selected={isSelected?.(photo.id) ?? undefined}
@@ -265,10 +281,12 @@ export default function Tray({
             }
           >
             {previewUrl ? (
+              // NO DIMMING FOR A PLACED PHOTO. The faded, desaturated tile said "spent" — correct
+              // while a photo could be used once, and actively misleading now that the same image
+              // is meant to be dragged out again. The count badge carries the information instead,
+              // and the tile behaves identically whether it has been used nought or four times.
               <div
-                className={`h-full w-full ${
-                  placed ? 'opacity-40 saturate-[0.85]' : `transition-transform duration-[400ms] ease-glide group-hover:scale-[1.02] ${stateOpacityClass(state)}`
-                }`}
+                className={`h-full w-full transition-transform duration-[400ms] ease-glide group-hover:scale-[1.02] ${stateOpacityClass(state)}`}
               >
                 <PhotoFrame
                   url={previewUrl}
@@ -301,14 +319,20 @@ export default function Tray({
             )}
 
             {/* State chrome — nothing at all once ready. */}
-            {previewUrl && !placed && <UploadBadge state={state} progress={task?.progress} />}
+            {previewUrl && <UploadBadge state={state} progress={task?.progress} />}
 
             {/* hover scrim so the controls always read */}
             <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/35 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
 
-            {placed && (
-              <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-studio px-1.5 py-0.5 text-[10px] font-semibold text-studio-foreground shadow-sm ring-1 ring-white/20 backdrop-blur-sm">
-                <Check className="h-2.5 w-2.5" /> Placed
+            {/* HOW MANY TIMES this image is in the book. Absent at zero — an unused photo is the
+                ordinary case and deserves no chrome — and it sits bottom-right so it never
+                collides with the upload badge (top-left) or the favourite star (bottom-left). */}
+            {placed && state === 'ready' && (
+              <span
+                className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-0.5 rounded-full bg-studio px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-studio-foreground shadow-sm ring-1 ring-white/20 backdrop-blur-sm"
+                title={`Used ${placements} ${placements === 1 ? 'time' : 'times'} in this album`}
+              >
+                <Check className="h-2.5 w-2.5" /> {placements} Placed
               </span>
             )}
 

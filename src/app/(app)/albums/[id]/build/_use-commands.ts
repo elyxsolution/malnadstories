@@ -5,6 +5,7 @@ import { resolveLayerIndex, type LayerAction } from '@/lib/builder/elements';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
+import type { FrameRef } from './_frame-ref';
 import {
   selectedBlockKeys,
   selectedFrames,
@@ -95,10 +96,21 @@ export type CommandDeps = {
    * disagree about what "last" means.
    */
   history?: { canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void };
-  /** Persist one photo's edit config (the existing `savePhotoEdit` path). */
+  /** Persist one photo's SOURCE edit config (the existing `savePhotoEdit` path). */
   savePhotoEdit: (photoId: string, edit: EditConfig) => void;
-  /** Patch the local photo list so an edit shows immediately. */
+  /** Patch the local photo list so a source edit shows immediately. */
   patchPhotoEdit: (photoId: string, edit: EditConfig) => void;
+  /**
+   * APPLY AN EDIT TO ONE FRAME — the placement-scoped write (see `_frame-ref`).
+   *
+   * The toolbar's geometry and tone actions used to write `photos.edit_config`, which is shared
+   * by every placement of the image. With one photo placeable many times that is the bug the
+   * placement model exists to remove, so a frame-addressed write is supplied by the host and the
+   * command layer resolves WHICH frames the current selection means.
+   */
+  applyFrameEdit: (ref: FrameRef, patch: Partial<EditConfig>) => void;
+  /** What a frame is showing right now — its own edit, or the source photo's if it has not forked. */
+  readFrameEdit: (ref: FrameRef) => EditConfig;
   albumSize: number;
   onMessage?: (m: { kind: 'ok' | 'err'; text: string }) => void;
   /**
@@ -154,6 +166,8 @@ export function useCommands(deps: CommandDeps) {
     history: historyDep,
     savePhotoEdit,
     patchPhotoEdit,
+    applyFrameEdit,
+    readFrameEdit,
     albumSize,
     onMessage,
     labels,
@@ -201,6 +215,36 @@ export function useCommands(deps: CommandDeps) {
       }),
     [frames, blocks],
   );
+
+  /**
+   * THE SELECTED PLACEMENTS, as frame references.
+   *
+   * This is the list every image adjustment now writes to. Selecting a frame on the canvas and
+   * selecting a tile in the tray are two different intentions — "adjust this placement" and "edit
+   * the uploaded photo" — and `targetFrames` is the first of them. It is derived from the same
+   * `occupiedFrames` the clear/remove commands use, so what a rotate acts on and what a remove
+   * acts on can never drift apart.
+   */
+  const targetFrames = useMemo<FrameRef[]>(
+    () =>
+      occupiedFrames.flatMap<FrameRef>((f) => {
+        const block = blocks.find((b) => b.key === f.blockKey);
+        if (!block) return [];
+        if (f.kind === 'base') {
+          const photoId = block.photoIds[f.slot === 'right' ? 1 : 0];
+          return photoId ? [{ kind: 'base', blockKey: f.blockKey, slot: f.slot, photoId }] : [];
+        }
+        const photoId = block.overlays.find((o) => o.id === f.id)?.photoId;
+        return photoId ? [{ kind: 'overlay', blockKey: f.blockKey, overlayId: f.id, photoId }] : [];
+      }),
+    [occupiedFrames, blocks],
+  );
+
+  /** Photos selected in the TRAY only — no frame of theirs is selected, so they edit the source. */
+  const sourceOnlyPhotoIds = useMemo(() => {
+    const framed = new Set(targetFrames.map((f) => f.photoId));
+    return photoIds.filter((id) => !framed.has(id));
+  }, [photoIds, targetFrames]);
 
   // ── individual commands ─────────────────────────────────────────────────────────
 
@@ -269,35 +313,66 @@ export function useCommands(deps: CommandDeps) {
    * floating toolbar (rotate, flip, zoom, fill) funnels through here, which is why none of them
    * had to reimplement the live-then-persist contract the inspector sliders already had.
    */
+  /**
+   * THE single write path for an image adjustment from the toolbar or the inspector.
+   *
+   * `photoId` says WHICH picture the caller is describing; the SELECTION says which container(s)
+   * to write. A selected frame holding that photo is adjusted as a PLACEMENT — so the same image
+   * on another page keeps its own crop — and a tray-only selection falls back to the source
+   * photo's default, which is what editing from the tray has always meant.
+   */
   const applyPhotoEdit = useCallback(
     (photoId: string, patch: Partial<EditConfig>) => {
       const photo = photos.find((p) => p.id === photoId);
       // Every edit is authored against the worker's sanitized master — the same gate the
       // editors already enforce, applied once, here.
       if (!photo || photo.status !== 'ready') return;
+      const mine = targetFrames.filter((f) => f.photoId === photoId);
+      if (mine.length > 0) {
+        for (const ref of mine) applyFrameEdit(ref, patch);
+        return;
+      }
       const edit: EditConfig = { ...(photo.edit ?? {}), ...patch };
       patchPhotoEdit(photoId, edit);
       savePhotoEdit(photoId, edit);
     },
-    [photos, patchPhotoEdit, savePhotoEdit],
+    [photos, targetFrames, applyFrameEdit, patchPhotoEdit, savePhotoEdit],
   );
 
-  /** Rotate every selected photo. `dir` is +1 clockwise, −1 anticlockwise. */
+  /**
+   * Rotate the selection a quarter turn. `dir` is +1 clockwise, −1 anticlockwise.
+   *
+   * Selected FRAMES rotate as placements — each from the rotation IT is showing, so two frames of
+   * the same photo that were rotated differently stay different. Photos selected only in the tray
+   * rotate their source default. Both were one loop over photo ids before, which rotated a shared
+   * value once and moved every placement of the image.
+   */
   const doRotatePhotos = useCallback(
     (dir: 1 | -1 = 1) => {
-      for (const id of targetPhotoIds) {
+      for (const ref of targetFrames) {
+        const photo = photos.find((p) => p.id === ref.photoId);
+        if (!photo || photo.status !== 'ready') continue;
+        applyFrameEdit(ref, { rotate: nextRotation(readFrameEdit(ref).rotate, dir) });
+      }
+      for (const id of sourceOnlyPhotoIds) {
         const photo = photos.find((p) => p.id === id);
         if (!photo || photo.status !== 'ready') continue;
-        applyPhotoEdit(id, { rotate: nextRotation(photo.edit?.rotate, dir) });
+        const edit: EditConfig = { ...(photo.edit ?? {}), rotate: nextRotation(photo.edit?.rotate, dir) };
+        patchPhotoEdit(id, edit);
+        savePhotoEdit(id, edit);
       }
     },
-    [targetPhotoIds, photos, applyPhotoEdit],
+    [targetFrames, sourceOnlyPhotoIds, photos, applyFrameEdit, readFrameEdit, patchPhotoEdit, savePhotoEdit],
   );
 
   /**
    * Put `photoId` into a specific frame. THE single implementation behind drag-and-drop, the
-   * picker, tap-to-place and cross-page moves — `assignBaseSlot`/`replaceOverlay` already strip
-   * the photo from wherever it was, so a move is just a placement.
+   * picker, tap-to-place and cross-page moves.
+   *
+   * It writes ONE frame and displaces nothing: a photo is a reusable source asset, so placing it
+   * again adds an independent instance rather than taking it from where it already was. A drag
+   * that started ON A FRAME still MOVES — the host clears the origin frame in the same batch (see
+   * `placeOnCanvas`), because rearranging a book is not the same gesture as reusing a picture.
    */
   const doPlacePhoto = useCallback(
     (photoId: string, target: { blockKey: string; slot?: BaseSlot; overlayId?: string }) => {
