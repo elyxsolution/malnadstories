@@ -18,6 +18,7 @@ import {
 } from '@/lib/builder/cover';
 import { findRole, migrateCoverConfig } from '@/lib/builder/cover-objects';
 import { resolveFrameEdit } from '@/lib/builder/model';
+import { layerZIndexes } from '@/lib/builder/layers';
 import type { Background, EditConfig, Overlay, QrElement, StickerElement, TextElement } from '@/lib/builder/model';
 
 /**
@@ -76,6 +77,7 @@ export default function CoverDesign({
   stickers = [],
   qrs = [],
   overlays = [],
+  layerOrder,
   photoFor,
   stickerUrlFor,
   renderElements = true,
@@ -97,6 +99,12 @@ export default function CoverDesign({
    * plain, borderless, clipped picture.
    */
   overlays?: Overlay[];
+  /**
+   * THIS FACE'S UNIFIED STACKING ORDER — ids back to front across overlays / texts / QR /
+   * stickers (see `lib/builder/layers`). Absent ⇒ the legacy family order, which is exactly what
+   * every cover saved before it existed means.
+   */
+  layerOrder?: readonly string[];
   /** Resolve an overlay's photo id → its URL + edits. Absent ⇒ overlays render nothing. */
   photoFor?: (photoId: string | null | undefined) => PairPhoto | undefined;
   /** Resolve a sticker id → presigned URL (parallel to photoFor on pages). */
@@ -119,10 +127,23 @@ export default function CoverDesign({
 
   const framing = coverLayoutFraming(layout, !!imageUrl);
 
+  /**
+   * This FACE's paint order, across all four object families — the same rule a content spread
+   * uses, from the same function, so "sticker behind the photo" means the same thing on a cover
+   * as on page 7. With no stored `layerOrder` it reproduces the legacy sequence exactly.
+   */
+  const z = layerZIndexes({ overlays, texts, qrs, stickers, layerOrder });
+
   return (
     <div
       className="relative h-full w-full select-none overflow-hidden"
-      style={{ containerType: 'inline-size', ...(imageUrl ? { background: '#1e3a2f' } : coverBackgroundStyle(background)) }}
+      style={{
+        containerType: 'inline-size',
+        // Contains the object z-indexes so they cannot compete with the backdrop, the legibility
+        // scrim, or a host's chrome — see `_pair-frame` for the same reasoning.
+        isolation: 'isolate',
+        ...(imageUrl ? { background: '#1e3a2f' } : coverBackgroundStyle(background)),
+      }}
     >
       {imageUrl && (
         <div className="absolute inset-0">
@@ -141,7 +162,7 @@ export default function CoverDesign({
           const photo = photoFor?.(o.photoId);
           if (!photo) return null;
           return (
-            <OverlayBox key={o.id ?? i} el={o}>
+            <OverlayBox key={o.id ?? i} el={o} z={o.id ? z.get(o.id) : undefined}>
               {/* THIS PLACEMENT'S edit wins over the source photo's — the same rule `_pair-frame`
                   applies to a page overlay, so a photo cropped one way on a page and another way
                   on the back cover really is two independent pictures. */}
@@ -150,10 +171,12 @@ export default function CoverDesign({
           );
         })}
 
-      {renderElements && texts.map((t) => <TextBox key={t.id} el={t} />)}
-      {renderElements && qrs.map((q) => <QrBox key={q.id} el={q} />)}
+      {renderElements && texts.map((t) => <TextBox key={t.id} el={t} z={z.get(t.id)} />)}
+      {renderElements && qrs.map((q) => <QrBox key={q.id} el={q} z={z.get(q.id)} />)}
       {renderElements &&
-        stickers.map((s) => <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onReady} />)}
+        stickers.map((s) => (
+          <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onReady} z={z.get(s.id)} />
+        ))}
     </div>
   );
 }
@@ -188,6 +211,7 @@ export function BackCoverDesign({
         stickers={back.stickers}
         qrs={back.qrs}
         overlays={back.overlays}
+        layerOrder={back.layerOrder}
         photoFor={photoFor}
         stickerUrlFor={stickerUrlFor}
         renderElements={renderElements}
@@ -327,6 +351,7 @@ export function CoverSpread({
             texts={c.texts}
             stickers={c.stickers}
             qrs={c.qrs}
+            layerOrder={c.layerOrder}
             stickerUrlFor={stickerUrlFor}
             onReady={onReady}
           />
@@ -378,6 +403,7 @@ export function CoverDesignFromConfig({
       texts={c.texts}
       stickers={c.stickers}
       qrs={c.qrs}
+      layerOrder={c.layerOrder}
       stickerUrlFor={stickerUrlFor}
       renderElements={renderElements}
       onReady={onReady}

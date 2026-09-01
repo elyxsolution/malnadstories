@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from 'react';
 import { INTERIOR_SAFE_INSET_FRACTION, INTERIOR_TRIM_INSET_FRACTION } from '@/lib/print/spec';
+import { LAYER_CHROME_Z } from '@/lib/builder/layers';
 
 /**
  * PRINT REFERENCE GUIDES for a content pair — the builder's view of what the printer does.
@@ -53,7 +54,12 @@ export function pageInsetStyle(
 /** The trim boundary — where the paper is actually cut. Always visible. */
 export function TrimGuides() {
   return (
-    <div aria-hidden data-guide="trim" className="pointer-events-none absolute inset-0 z-[8]">
+    <div
+      aria-hidden
+      data-guide="trim"
+      className="pointer-events-none absolute inset-0"
+      style={{ zIndex: LAYER_CHROME_Z }}
+    >
       {(['left', 'right'] as const).map((side) => (
         <div
           key={side}
@@ -74,7 +80,12 @@ export function TrimGuides() {
  */
 export function SafeAreaGuides() {
   return (
-    <div aria-hidden data-guide="safe" className="pointer-events-none absolute inset-0 z-[8]">
+    <div
+      aria-hidden
+      data-guide="safe"
+      className="pointer-events-none absolute inset-0"
+      style={{ zIndex: LAYER_CHROME_Z }}
+    >
       {(['left', 'right'] as const).map((side) => (
         <div
           key={side}

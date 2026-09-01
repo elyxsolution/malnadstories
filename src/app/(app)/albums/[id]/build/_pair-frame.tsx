@@ -6,6 +6,7 @@ import UploadBadge, { stateOpacityClass, type BadgeSize } from './_upload-badge'
 import type { PhotoUiState } from './_photo-state';
 import { backgroundStyle } from '@/lib/builder/elements';
 import { resolveFrameEdit, type Block, type EditConfig, type Overlay } from '@/lib/builder/model';
+import { LAYER_CHROME_Z, layerZIndexes } from '@/lib/builder/layers';
 
 /**
  * Shared, read-only renderer for ONE content pair (two physical pages) in the OPEN-BOOK
@@ -116,10 +117,26 @@ export default function PairContent({
   const showLeft = half === 'full' || half === 'left';
   const showRight = half === 'full' || half === 'right';
 
+  /**
+   * THE SURFACE'S PAINT ORDER, spanning all four object families (`lib/builder/layers`).
+   *
+   * The four `.map()` calls below stay exactly as they are — they carry genuinely different props
+   * per family — but they no longer DECIDE the order. Each box takes an explicit z-index from the
+   * unified stack, so a sticker can sit behind a photo and a text in front of both. With no stored
+   * `layerOrder` this reproduces the legacy sequence (overlay → text → qr → sticker) exactly.
+   */
+  const z = layerZIndexes(block);
+
   return (
-    // `container-type: inline-size` makes text `cqw` units scale with the open-pair width
-    // (identical ratio in canvas, preview, and PDF). Background renders beneath everything.
-    <div className="absolute inset-0" style={{ containerType: 'inline-size' }}>
+    /*
+     * `isolation: isolate` makes this element a stacking context, which CONTAINS the object
+     * z-indexes above. Without it they would compete with the editor's and the print route's own
+     * chrome layers (the gutter, page numbers, guides), which sit outside this box.
+     *
+     * `container-type: inline-size` makes text `cqw` units scale with the open-pair width
+     * (identical ratio in canvas, preview, and PDF). Background renders beneath everything.
+     */
+    <div className="absolute inset-0" style={{ containerType: 'inline-size', isolation: 'isolate' }}>
       {block.background && <div className="absolute inset-0" style={backgroundStyle(block.background)} />}
       {/*
         A HALF WITH NO BASE PHOTO IS BLANK PAPER, NOT A GAP.
@@ -173,7 +190,7 @@ export default function PairContent({
         // between the artwork and the trimmed page edge. The cover faces render overlays through
         // the same component, so no surface can grow a frame the others do not have.
         return (
-          <OverlayBox key={i} el={o}>
+          <OverlayBox key={i} el={o} z={o.id ? z.get(o.id) : undefined}>
             <Framed photo={photo} badge={badge} onFrameReady={onFrameReady} />
           </OverlayBox>
         );
@@ -183,16 +200,16 @@ export default function PairContent({
           SVG QR), so the PDF readiness counter is unaffected. The per-page clip window
           handles half-splitting in PDF mode — no overlapsHalf filtering needed here. */}
       {(block.texts ?? []).map((t) => (
-        <TextBox key={t.id} el={t} />
+        <TextBox key={t.id} el={t} z={z.get(t.id)} />
       ))}
       {(block.qrs ?? []).map((q) => (
-        <QrBox key={q.id} el={q} />
+        <QrBox key={q.id} el={q} z={z.get(q.id)} />
       ))}
 
       {/* Stickers — decorative artwork on top. Resolved via stickerUrlFor (a since-deleted
           sticker resolves to undefined → renders nothing, like a missing photo). */}
       {(block.stickers ?? []).map((s) => (
-        <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onFrameReady} />
+        <StickerBox key={s.id} el={s} url={stickerUrlFor?.(s.stickerId)} onReady={onFrameReady} z={z.get(s.id)} />
       ))}
     </div>
   );
@@ -228,7 +245,11 @@ export default function PairContent({
  */
 export function PrintGutter({ className = '' }: { className?: string }) {
   return (
-    <span aria-hidden className={`pointer-events-none absolute inset-y-0 left-1/2 z-[6] -translate-x-1/2 ${className}`}>
+    <span
+      aria-hidden
+      className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 ${className}`}
+      style={{ zIndex: LAYER_CHROME_Z }}
+    >
       {/* Shadow into the spine + the crests where the paper lifts. One gradient: the crossover
           from pale to dark happens inside the ramp, so it stays a single soft falloff rather
           than reading as two separate bands. */}

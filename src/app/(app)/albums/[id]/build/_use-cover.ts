@@ -7,7 +7,6 @@ import {
   makeSticker,
   makeText,
   offsetDuplicate,
-  reorderById,
   type LayerAction,
 } from '@/lib/builder/elements';
 import {
@@ -45,6 +44,7 @@ import {
   type TextVariant,
 } from '@/lib/builder/model';
 import type { Selection } from './_use-builder';
+import { applyLayerAction, trimLayerOrder } from '@/lib/builder/layers';
 
 /**
  * THE COVER AS A CANVAS — one hook, replacing an entire second editor.
@@ -329,6 +329,19 @@ export function useCover({
     [write, sideOfKey],
   );
 
+  /** The same write as `patchSticker`, as a CORRECTION — see `useBlocks.amendSticker`. */
+  const amendSticker = useCallback(
+    (key: string, id: string, patch: Partial<StickerElement>) => {
+      const target = sideOfKey(key);
+      hist.amend((prev) =>
+        withCoverSideElements(prev, target, {
+          stickers: coverSideElements(prev, target).stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+        }),
+      );
+    },
+    [hist, sideOfKey],
+  );
+
   const removeSticker = useCallback(
     (key: string, id: string) => {
       const target = sideOfKey(key);
@@ -585,28 +598,24 @@ export function useCover({
   );
 
   // ── layer ordering ──────────────────────────────────────────────────────────────
+  /**
+   * MOVE ONE OBJECT THROUGH THIS FACE'S UNIFIED STACK — the cover's half of
+   * `useBlocks.moveLayer`, and deliberately the same shape.
+   *
+   * It used to reorder within one family array, so a cover sticker could never go behind the
+   * cover photo and a title could never go behind a sticker. It now writes the face's
+   * `layerOrder` (`lib/builder/layers`), which is what `CoverDesign` paints from — the same
+   * function, the same field name and the same legacy default a content page uses. The element
+   * arrays are untouched, so the cover's persistence model is unchanged.
+   */
   const moveLayer = useCallback(
     (target: { kind: 'overlay' | 'text' | 'sticker' | 'qr'; blockKey: string; id: string }, action: LayerAction) => {
       const s = sideOfKey(target.blockKey);
       write((prev) => {
         const e = coverSideElements(prev, s);
-        if (target.kind === 'text') {
-          const next = reorderById(e.texts, target.id, action);
-          return next ? withCoverSideElements(prev, s, { texts: next }) : prev;
-        }
-        if (target.kind === 'sticker') {
-          const next = reorderById(e.stickers, target.id, action);
-          return next ? withCoverSideElements(prev, s, { stickers: next }) : prev;
-        }
-        if (target.kind === 'qr') {
-          const next = reorderById(e.qrs, target.id, action);
-          return next ? withCoverSideElements(prev, s, { qrs: next }) : prev;
-        }
-        if (target.kind === 'overlay') {
-          const next = reorderById(e.overlays, target.id, action);
-          return next ? withCoverSideElements(prev, s, { overlays: next }) : prev;
-        }
-        return prev;
+        const next = applyLayerAction(e, target.id, action);
+        if (!next) return prev;
+        return withCoverSideElements(prev, s, { layerOrder: trimLayerOrder({ ...e, layerOrder: next }) });
       });
     },
     [write, sideOfKey],
@@ -670,6 +679,12 @@ export function useCover({
       qrs: elements.qrs,
       stickers: elements.stickers,
       background,
+      /**
+       * THE FACE'S STACKING ORDER, on the adapter — which is what lets the SHARED Layers menu,
+       * the shared `ObjectBar` and the cover canvas read the cover's stack through exactly the
+       * same `Block`-shaped accessor a content spread uses, with no cover-specific branch.
+       */
+      layerOrder: elements.layerOrder,
     }),
     [side, image.photoId, elements, background],
   );
@@ -796,6 +811,7 @@ export function useCover({
     duplicateOverlay,
     addSticker,
     patchSticker,
+    amendSticker,
     removeSticker,
     duplicateSticker,
     addQr,

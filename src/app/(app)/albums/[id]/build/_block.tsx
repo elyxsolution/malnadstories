@@ -17,7 +17,10 @@ import { photoUiState } from './_photo-state';
 import UploadBadge, { stateOpacityClass } from './_upload-badge';
 import { resolvePhotoUrl } from '@/lib/builder/photo-url';
 import { backgroundStyle, squareQrHeight } from '@/lib/builder/elements';
-import { PAGE_COST, physicalStart, type Block, type TextElement } from '@/lib/builder/model';
+import { PAGE_COST, physicalStart, resolveFrameEdit, type Block, type EditConfig, type TextElement } from '@/lib/builder/model';
+import { LAYER_CHROME_Z, layerZIndexes } from '@/lib/builder/layers';
+import { useStickerBoxFit } from './_sticker-autofit';
+import { stickerAspectRatio } from '@/lib/builder/sticker-fit';
 import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
 import { TrimGuides, SafeAreaGuides, TRIM_GUIDE_CAPTION } from './_print-guides';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
@@ -215,6 +218,21 @@ export default function BlockCard({
   })();
   const cropPhoto = cropOnThisBlock ? photoMap.get(cropOnThisBlock.photoId) : undefined;
   const cropUrl = cropPhoto ? resolvePhotoUrl(cropPhoto, 'full') : undefined;
+  /**
+   * THE GHOST RENDERS THE FRAME'S EDIT TOO.
+   *
+   * It is the half of adjustment mode that shows what you are choosing FROM, so it has to move
+   * with the gesture. Reading `cropPhoto.edit` made it as stale as the frame itself — the whole
+   * adjustment surface sat still while the committed value changed underneath it.
+   */
+  const cropEdit = cropOnThisBlock
+    ? resolveFrameEdit(
+        cropOnThisBlock.overlayId
+          ? block.overlays.find((o) => o.id === cropOnThisBlock.overlayId)?.edit
+          : (block.baseEdits ?? [])[cropOnThisBlock.slot === 'right' ? 1 : 0],
+        cropPhoto?.edit,
+      )
+    : null;
 
   /**
    * WHILE ADJUSTING, THE WHEEL BELONGS TO THE IMAGE.
@@ -337,6 +355,42 @@ export default function BlockCard({
   ];
   const peersExcept = (id: string) => peerBoxes.filter((p) => p.id !== id);
 
+  /**
+   * THE SPREAD'S PAINT ORDER, across all four object families (`lib/builder/layers`).
+   *
+   * Handed to each `Movable` as its `zIndex`, which `Movable` has always accepted — so the canvas
+   * shows the same stack the preview and the PDF will, without restructuring the four element
+   * maps below (each carries genuinely different props) and without touching selection chrome,
+   * dragging or the crop layers.
+   */
+  const layerZ = layerZIndexes(block);
+
+  /**
+   * THE STICKER BOX HUGS THE ARTWORK.
+   *
+   * A sticker is created with a pixel-SQUARE box whatever shape its artwork is, and drawn
+   * `object-fit: contain` inside it — so a non-square sticker sat in a much larger box, and the
+   * selection outline and the eight handles surrounded that box. This measures the artwork's real
+   * aspect and tightens the box onto the rectangle the artwork is ALREADY drawn in: the picture
+   * does not move or change size, only the empty margin goes. See `lib/builder/sticker-fit`.
+   *
+   * Written through `amendSticker` — a correction, not a second undo step. The returned aspects
+   * also lock each sticker's RESIZE to its artwork (below), which is what keeps the box tight
+   * through a corner drag instead of letting it come loose again.
+   */
+  const stickerAspects = useStickerBoxFit({
+    stickers: block.stickers,
+    urlFor: (id) => stickerUrlFor?.(id),
+    containerAspect: pair,
+    onFit: (id, box) => api.amendSticker(block.key, id, box),
+  });
+  /** The h = w × ratio a sticker's resize is locked to, or undefined until it is measured. */
+  const stickerRatio = (stickerId: string) => {
+    const url = stickerUrlFor?.(stickerId);
+    const a = url ? stickerAspects.get(url) : undefined;
+    return a ? stickerAspectRatio(a, pair) : undefined;
+  };
+
   const leftPhoto = block.photoIds[0] ? photoMap.get(block.photoIds[0]) : undefined;
   const rightPhoto = block.photoIds[1] ? photoMap.get(block.photoIds[1]) : undefined;
   /**
@@ -441,8 +495,12 @@ export default function BlockCard({
               the flipbook and the PDF by construction instead of by inspection.
 
               Movement is untouched: the gesture still travels out onto the pasteboard, and the
-              handles that follow it live in the unclipped chrome layer below. */}
-          <div className="absolute inset-0 overflow-hidden">
+              handles that follow it live in the unclipped chrome layer below.
+
+              `isolation: isolate` makes this a stacking context, which CONTAINS the object
+              z-indexes (see `layerZ`). The trim ring, the adjustment ghost and the handle layer
+              all sit OUTSIDE this element and must stay above everything inside it. */}
+          <div className="absolute inset-0 overflow-hidden" style={{ isolation: 'isolate' }}>
           {block.background ? (
             <div className="absolute inset-0" style={backgroundStyle(block.background)} />
           ) : (
@@ -465,6 +523,9 @@ export default function BlockCard({
           {usesBaseSlots && (isDouble ? (
             <BaseSlotView
               photo={leftPhoto}
+              /* A double-spread's single image is slot 0 — the same positional index the model,
+                 the save and the crop target all use for it. */
+              edit={resolveFrameEdit((block.baseEdits ?? [])[0], leftPhoto?.edit)}
               task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
               label="Click or drop the image (spans both pages)"
               selected={sel({ kind: 'base', slot: 'image' })}
@@ -503,6 +564,7 @@ export default function BlockCard({
               <div className="absolute left-0 top-0 h-full w-1/2">
                 <BaseSlotView
                   photo={leftPhoto}
+                  edit={resolveFrameEdit((block.baseEdits ?? [])[0], leftPhoto?.edit)}
                   task={leftPhoto ? taskFor?.(leftPhoto.id) : undefined}
                   label="Left page"
                   selected={sel({ kind: 'base', slot: 'left' })}
@@ -540,6 +602,7 @@ export default function BlockCard({
               <div className="absolute left-1/2 top-0 h-full w-1/2">
                 <BaseSlotView
                   photo={rightPhoto}
+                  edit={resolveFrameEdit((block.baseEdits ?? [])[1], rightPhoto?.edit)}
                   task={rightPhoto ? taskFor?.(rightPhoto.id) : undefined}
                   label="Right page"
                   selected={sel({ kind: 'base', slot: 'right' })}
@@ -592,6 +655,7 @@ export default function BlockCard({
               <Movable
                 key={oid}
                 rect={o}
+                zIndex={layerZ.get(oid)}
                 selected={sel({ kind: 'overlay', id: oid }) || (isTargetSelected?.({ kind: 'overlay', blockKey: block.key, id: oid }) ?? false)}
                 containerRef={pageRef}
                 chromeContainer={chromeEl}
@@ -633,6 +697,16 @@ export default function BlockCard({
               >
                 <OverlayContent
                   photo={photo}
+                  /**
+                   * THIS FRAME'S EDIT — the fix for "the crop commits but the canvas does not move".
+                   *
+                   * An adjustment is written to the PLACEMENT (`overlay.edit`) and inherited from
+                   * the source photo until it forks. The read-only renderers and the cover canvas
+                   * already resolved that; this canvas did not, and went on drawing
+                   * `photo.edit` — the source row, which a placement crop never writes. So the
+                   * value was correct everywhere except the surface the customer was dragging on.
+                   */
+                  edit={resolveFrameEdit(o.edit, photo?.edit)}
                   task={photo ? taskFor?.(photo.id) : undefined}
                   readiness={overlayReadiness(oid)}
                   cropping={croppingOverlay === oid}
@@ -655,6 +729,7 @@ export default function BlockCard({
             <Movable
               key={t.id}
               rect={t}
+              zIndex={layerZ.get(t.id)}
               rotation={t.rotation}
               rotatable
               /* Matches what auto-fit can produce: a larger minimum would make the first pixel of
@@ -714,6 +789,7 @@ export default function BlockCard({
             <Movable
               key={q.id}
               rect={q}
+              zIndex={layerZ.get(q.id)}
               keepSquare
               squareRatio={pair}
               minW={0.06}
@@ -736,6 +812,14 @@ export default function BlockCard({
             <Movable
               key={s.id}
               rect={s}
+              zIndex={layerZ.get(s.id)}
+              /* THE RESIZE IS LOCKED TO THE ARTWORK'S ASPECT — the same primitive the QR code uses
+                 to stay pixel-square, with the artwork's ratio instead of 1:1. Without it a corner
+                 drag would re-letterbox the sticker and the outline would come loose again on the
+                 very next gesture. Absent until measured, which simply leaves the old free
+                 resize in place for that render. */
+              keepSquare={stickerRatio(s.stickerId) !== undefined}
+              squareRatio={stickerRatio(s.stickerId)}
               rotation={s.rotation}
               rotatable
               locked={s.locked}
@@ -785,10 +869,18 @@ export default function BlockCard({
           {showGutter && <PrintGutter />}
 
           {/* Page numbers */}
-          <span className="pointer-events-none absolute bottom-2 left-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
+          {/* Above the object band — see `LAYER_CHROME_Z`. These used to sit at z-7 and win by
+              default, because objects carried no z-index at all. */}
+          <span
+            className="pointer-events-none absolute bottom-2 left-3 text-[10px] font-medium tabular-nums text-foreground/35"
+            style={{ zIndex: LAYER_CHROME_Z }}
+          >
             {start}
           </span>
-          <span className="pointer-events-none absolute bottom-2 right-3 z-[7] text-[10px] font-medium tabular-nums text-foreground/35">
+          <span
+            className="pointer-events-none absolute bottom-2 right-3 text-[10px] font-medium tabular-nums text-foreground/35"
+            style={{ zIndex: LAYER_CHROME_Z }}
+          >
             {start + cost - 1}
           </span>
           </div>
@@ -806,7 +898,7 @@ export default function BlockCard({
               handles are: the part of the photo that spills past the frame has to be visible to
               be aimed at. Inert — the capture surface stays inside the frame. */}
           {cropFrame && cropUrl && (
-            <CropBleed rect={cropFrame.rect} rounded={cropFrame.rounded} url={cropUrl} edit={cropPhoto?.edit} />
+            <CropBleed rect={cropFrame.rect} rounded={cropFrame.rounded} url={cropUrl} edit={cropEdit} />
           )}
 
           {/* ── EDITING LAYER ───────────────────────────────────────────────────────────────
@@ -865,6 +957,17 @@ export default function BlockCard({
 
 function OverlayContent({
   photo,
+  /**
+   * THE EDIT THIS FRAME RENDERS — its own placement edit, or the source photo's when it has not
+   * forked (see PLACEMENT EDITS in `lib/builder/model`).
+   *
+   * It is a PROP rather than `photo.edit` because the two stopped being the same thing when one
+   * image became placeable many times: a crop is written to the container, so reading it off the
+   * `photos` row shows the source's framing and never moves while the customer drags. That was
+   * exactly the "crop commits correctly but the canvas does not update" defect — the shared
+   * renderers resolved it, this canvas did not.
+   */
+  edit,
   task,
   readiness,
   cropping,
@@ -874,6 +977,7 @@ function OverlayContent({
   onDropPhoto,
 }: {
   photo?: Photo;
+  edit?: EditConfig | null;
   task?: UploadTask;
   readiness?: Readiness;
   cropping?: boolean;
@@ -913,7 +1017,7 @@ function OverlayContent({
       {photo ? (
         <>
           <div className={`h-full w-full ${stateOpacityClass(uiState)} ${incomingPreviewUrl ? 'opacity-30' : ''}`}>
-            <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={photo.edit} alt="overlay" />
+            <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={edit ?? photo.edit} alt="overlay" />
           </div>
           {/* THE REPLACEMENT PREVIEW, exactly as a base slot draws it: the incoming photo
               rendered in place through the same `PhotoFrame`, inert so it can never intercept
@@ -956,6 +1060,8 @@ function OverlayContent({
 // ── Base slot ─────────────────────────────────────────────────────────────────────
 function BaseSlotView({
   photo,
+  /** The edit THIS SLOT renders — see the same prop on `OverlayContent`. */
+  edit,
   task,
   label,
   selected,
@@ -981,6 +1087,7 @@ function BaseSlotView({
   cropHandlers,
 }: {
   photo?: Photo;
+  edit?: EditConfig | null;
   task?: UploadTask;
   label: string;
   selected: boolean;
@@ -1118,7 +1225,7 @@ function BaseSlotView({
               incomingPreviewUrl ? 'opacity-30' : isDragSource ? 'opacity-40' : ''
             }`}
           >
-            <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={photo.edit} alt={photo.filename} />
+            <PhotoFrame url={resolvePhotoUrl(photo, 'full') ?? ''} edit={edit ?? photo.edit} alt={photo.filename} />
           </div>
 
           {/*

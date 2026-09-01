@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
-import { resolveLayerIndex, type LayerAction } from '@/lib/builder/elements';
+import { type LayerAction } from '@/lib/builder/elements';
 import type { Block, EditConfig } from '@/lib/builder/model';
 import type { Photo } from '@/lib/builder/photo';
 import type { BuilderApi, BaseSlot, Selection } from './_use-builder';
@@ -424,50 +424,33 @@ export function useCommands(deps: CommandDeps) {
   );
 
   /**
-   * ── LAYER ORDERING, ONE IMPLEMENTATION FOR EVERY MOVABLE OBJECT ───────────────
+   * ── LAYER ORDERING, ACROSS EVERY OBJECT TYPE ──────────────────────────────────
    *
-   * The model keeps each element family in its own array (overlays / texts / stickers / QR),
-   * and render order IS array order — later means on top. Every layer operation is therefore
-   * "move this element to index j", expressed as |j − i| adjacent swaps through the SAME
-   * `reorder*` primitives the old up/down buttons called. The swaps run inside `api.batch()`,
-   * so "Bring to front" across a ten-deep stack is ONE undo entry, and the mutation marks the
-   * album dirty exactly like any other edit — the save controller needs nothing new.
+   * This used to reorder an element inside ITS OWN family array (overlays / texts / stickers /
+   * QR), because the renderers painted those families in a fixed sequence — so "Bring to front"
+   * on a photo overlay brought it to the front of the overlays and left it under every text and
+   * every sticker. Putting a sticker behind a photo was not a missing button; it was
+   * unrepresentable.
    *
-   * `above`/`below` are the explicit forms: place the element directly on top of (or beneath)
-   * a NAMED sibling. They resolve to the same remove-then-insert index arithmetic, so all six
-   * menu items share one code path.
+   * It now writes the surface's UNIFIED `layerOrder` (`lib/builder/layers`), one permutation of
+   * ids spanning all four families, which every renderer paints from. `target.kind` survives in
+   * the signature because callers already speak it and it names what the menu is describing, but
+   * the move itself no longer depends on it — a text and an overlay are the same kind of thing to
+   * the stack.
+   *
+   * The element ARRAYS are untouched, so the persistence model, the schemas and every existing
+   * reader are unchanged, and the write is a single `mutate` — one undo entry, dirty-marked and
+   * saved exactly like any other edit. `above`/`below` resolve through the same
+   * `resolveLayerIndex` arithmetic as before, now over the unified list.
    */
   const moveLayer = useCallback(
     (
       target: { kind: 'overlay' | 'text' | 'sticker' | 'qr'; blockKey: string; id: string },
       action: LayerAction,
     ) => {
-      const block = blocks.find((b) => b.key === target.blockKey);
-      if (!block) return;
-      const list: { id?: string }[] =
-        target.kind === 'overlay' ? block.overlays : target.kind === 'text' ? block.texts : target.kind === 'sticker' ? block.stickers : block.qrs;
-      const i = list.findIndex((el) => el.id === target.id);
-      if (i < 0) return;
-      // The index arithmetic is shared with the cover canvas (`lib/builder/elements`), which has
-      // element arrays but no blocks — one definition of what "forward" means on either surface.
-      const j = resolveLayerIndex(list, target.id, action);
-      if (j === null) return;
-
-      const dir: -1 | 1 = j > i ? 1 : -1;
-      const steps = Math.abs(j - i);
-      const step =
-        target.kind === 'overlay'
-          ? api.reorderOverlay
-          : target.kind === 'text'
-            ? api.reorderText
-            : target.kind === 'sticker'
-              ? api.reorderSticker
-              : api.reorderQr;
-      api.batch(() => {
-        for (let n = 0; n < steps; n++) step(target.blockKey, target.id, dir);
-      });
+      api.moveLayer(target.blockKey, target.id, action);
     },
-    [blocks, api],
+    [api],
   );
 
   const doDuplicatePage = useCallback(

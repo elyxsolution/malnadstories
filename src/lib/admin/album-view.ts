@@ -53,6 +53,8 @@ type PageRow = {
     qrs?: QrElement[];
     stickers?: StickerElement[];
     background?: Background | null;
+    /** The unified stacking order (see `lib/builder/layers`). Absent ⇒ the legacy family order. */
+    layerOrder?: string[];
   } | null;
 };
 
@@ -161,6 +163,8 @@ export async function loadAlbumForAdmin(
       qrs: r.layout_config?.qrs ?? [],
       stickers: r.layout_config?.stickers ?? [],
       background: r.layout_config?.background ?? null,
+      // The saved stacking order — the admin preview must show the album as it will print.
+      layerOrder: r.layout_config?.layerOrder,
     }));
 
   // Resolve presigned URLs for every referenced sticker (service role → ignores `active`).

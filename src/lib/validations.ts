@@ -251,6 +251,12 @@ const BackgroundSchema = z.object({
   value: z.string().min(1).max(40),
 });
 
+/**
+ * The largest a `layerOrder` can legitimately be: every element cap on one surface, summed. It
+ * bounds a forged payload without ever refusing a real one.
+ */
+const MAX_LAYER_OBJECTS = MAX_OVERLAYS_PER_BLOCK + 30 + 10 + 30;
+
 const BlockSchema = z.object({
   template: z.enum(['single-pair', 'double-spread']),
   /**
@@ -275,6 +281,17 @@ const BlockSchema = z.object({
   qrs: z.array(QrElementSchema).max(10).optional().default([]),
   stickers: z.array(StickerElementSchema).max(30).optional().default([]),
   background: BackgroundSchema.nullable().optional().default(null),
+  /**
+   * THE UNIFIED STACKING ORDER — element ids back to front, spanning overlays / texts / QR /
+   * stickers (see `lib/builder/layers`).
+   *
+   * A PERMUTATION, not a second copy of the objects: the renderer builds the stack from the
+   * element arrays and uses this only to sort them, so an id here that names nothing is inert and
+   * an object missing from here still paints (on top). Optional and absent on every row saved
+   * before it existed, which reads as the legacy family order. Bounded by the sum of the element
+   * caps, and each entry by the same id length every element id already uses.
+   */
+  layerOrder: z.array(z.string().min(1).max(64)).max(MAX_LAYER_OBJECTS).optional(),
   // The layout-preset id this block was built from (additive; for accurate blueprint breakdowns).
   preset: z.string().max(40).optional(),
 });
@@ -322,6 +339,17 @@ const BackCoverConfigSchema = z.object({
    * every cover saved before overlays existed. Capped at the page limit for the same reason.
    */
   overlays: z.array(OverlaySchema).max(MAX_OVERLAYS_PER_BLOCK).optional().default([]),
+  /**
+   * THE UNIFIED STACKING ORDER — element ids back to front, spanning overlays / texts / QR /
+   * stickers (see `lib/builder/layers`).
+   *
+   * A PERMUTATION, not a second copy of the objects: the renderer builds the stack from the
+   * element arrays and uses this only to sort them, so an id here that names nothing is inert and
+   * an object missing from here still paints (on top). Optional and absent on every row saved
+   * before it existed, which reads as the legacy family order. Bounded by the sum of the element
+   * caps, and each entry by the same id length every element id already uses.
+   */
+  layerOrder: z.array(z.string().min(1).max(64)).max(MAX_LAYER_OBJECTS).optional(),
   showLogo: z.boolean().optional().default(false),
 });
 
@@ -349,6 +377,17 @@ export const CoverConfigSchema = z.object({
        * cover saved before it existed (which the renderer reads as the legacy spine colour).
        */
       background: BackgroundSchema.nullable().optional().default(null),
+  /**
+   * THE UNIFIED STACKING ORDER — element ids back to front, spanning overlays / texts / QR /
+   * stickers (see `lib/builder/layers`).
+   *
+   * A PERMUTATION, not a second copy of the objects: the renderer builds the stack from the
+   * element arrays and uses this only to sort them, so an id here that names nothing is inert and
+   * an object missing from here still paints (on top). Optional and absent on every row saved
+   * before it existed, which reads as the legacy family order. Bounded by the sum of the element
+   * caps, and each entry by the same id length every element id already uses.
+   */
+  layerOrder: z.array(z.string().min(1).max(64)).max(MAX_LAYER_OBJECTS).optional(),
     })
     .optional()
     .default({ texts: [], background: null }),
@@ -368,6 +407,8 @@ export const CoverConfigSchema = z.object({
   texts: z.array(TextElementSchema).max(30).optional().default([]),
   stickers: z.array(StickerElementSchema).max(30).optional().default([]),
   qrs: z.array(QrElementSchema).max(10).optional().default([]),
+  /** The FRONT face's unified stacking order — same contract as the page's. */
+  layerOrder: z.array(z.string().min(1).max(64)).max(MAX_LAYER_OBJECTS).optional(),
   back: BackCoverConfigSchema.optional().default({
     background: null,
     photoId: null,

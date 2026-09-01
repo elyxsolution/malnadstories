@@ -338,7 +338,8 @@ describe('a back-cover overlay renders as a plain image', () => {
   });
 
   it('is the SAME container a page overlay uses — positioned and clipped, nothing more', () => {
-    expect(html).toContain('class="absolute overflow-hidden" style="left:20%;top:30%;width:45%;height:25%"');
+    expect(html).toContain('class="absolute overflow-hidden"');
+    expect(html).toMatch(/style="left:20%;top:30%;width:45%;height:25%(;z-index:\d+)?"/);
   });
 
   it('lets the photo reach every edge of its frame', () => {
@@ -420,7 +421,12 @@ describe('editing a back-cover overlay reuses what already exists', () => {
 
   it('is selectable, layerable and deletable through the existing command paths', () => {
     expect(canvas).toContain("pick({ kind: 'overlay', id: oid })");
-    expect(hook).toContain("if (target.kind === 'overlay')");
+    // LAYERING IS NO LONGER PER-KIND. This used to assert a per-kind branch
+    // inside the cover moveLayer, which existed because each family was reordered inside its
+    // own array. The face now has ONE stack spanning all four families, so there is no per-kind
+    // branch left to assert — the move is kind-agnostic by construction, which is the point.
+    expect(hook).toContain('applyLayerAction');
+    expect(hook).toContain('layerOrder: trimLayerOrder(');
     expect(hook).toContain("selection.kind === 'overlay') removeOverlay(key, selection.id)");
     expect(hook).toContain("selection.kind === 'overlay' ||");
   });

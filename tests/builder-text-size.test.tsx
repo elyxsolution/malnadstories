@@ -351,7 +351,12 @@ describe('an overlay renders as a plain image', () => {
   });
 
   it('is exactly a positioned, clipped box — nothing else', () => {
-    expect(html).toContain('class="absolute overflow-hidden" style="left:10%;top:10%;width:40%;height:50%"');
+    // The class is EXACT: `absolute overflow-hidden` and nothing more (no border, no radius, no
+    // shadow — the neighbouring cases assert those absences directly).
+    expect(html).toContain('class="absolute overflow-hidden"');
+    // The geometry is exact. The container also carries the unified stack's z-index now, so the
+    // style is matched by its parts rather than as one frozen string.
+    expect(html).toMatch(/style="left:10%;top:10%;width:40%;height:50%(;z-index:\d+)?"/);
   });
 
   it('lets the photo reach every edge of that box', () => {

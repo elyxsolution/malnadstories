@@ -57,6 +57,12 @@ export type BackCoverConfig = {
   texts: TextElement[];
   stickers: StickerElement[];
   qrs: QrElement[];
+  /**
+   * This face's unified stacking order — ids back to front across overlays / texts / QR /
+   * stickers (see `lib/builder/layers`). Absent ⇒ the legacy family order, so every cover saved
+   * before it existed renders identically. Additive inside the existing `cover_config` jsonb.
+   */
+  layerOrder?: string[];
   showLogo: boolean; // print the Malnad Stories mark in the bottom corner
 };
 
@@ -71,6 +77,10 @@ export const DEFAULT_BACK_COVER: BackCoverConfig = {
   showLogo: false,
 };
 
+/** Read a stored per-face layer order defensively — anything that is not a string list is none. */
+const asLayerOrder = (v: unknown): string[] | undefined =>
+  Array.isArray(v) && v.every((s) => typeof s === 'string') ? (v as string[]) : undefined;
+
 /**
  * The SPINE as a printable surface with its own objects.
  *
@@ -82,6 +92,8 @@ export const DEFAULT_BACK_COVER: BackCoverConfig = {
  */
 export type SpineConfig = {
   texts: TextElement[];
+  /** The spine's own stacking order. Absent ⇒ legacy; a spine holds only text today. */
+  layerOrder?: string[];
   /**
    * The spine's OWN backdrop, independent of the front and the back.
    *
@@ -194,6 +206,8 @@ export type CoverConfig = {
   texts: TextElement[];
   stickers: StickerElement[];
   qrs: QrElement[];
+  /** The FRONT face's unified stacking order (see `lib/builder/layers`). Absent ⇒ legacy. */
+  layerOrder?: string[];
   spine: SpineConfig; // the bound edge — its own objects (v2)
   back: BackCoverConfig; // the back cover composition
 };
@@ -241,6 +255,7 @@ export function normalizeBackCover(b: Partial<BackCoverConfig> | null | undefine
     qrs: Array.isArray(b.qrs) ? b.qrs : [],
     // Absent on every cover saved before overlays existed — reads as "none", never as broken.
     overlays: Array.isArray(b.overlays) ? b.overlays : [],
+    layerOrder: asLayerOrder(b.layerOrder),
     showLogo: b.showLogo === true,
   };
 }
@@ -263,7 +278,7 @@ export function normalizeCoverConfig(c: Partial<CoverConfig> | null | undefined)
     v: typeof c.v === 'number' ? c.v : 1,
     spine:
       c.spine && Array.isArray(c.spine.texts)
-        ? { texts: c.spine.texts, background: c.spine.background ?? null }
+        ? { texts: c.spine.texts, background: c.spine.background ?? null, layerOrder: asLayerOrder(c.spine.layerOrder) }
         : { ...DEFAULT_SPINE },
     subtitle: typeof c.subtitle === 'string' ? c.subtitle : '',
     author: typeof c.author === 'string' ? c.author : '',
@@ -282,6 +297,7 @@ export function normalizeCoverConfig(c: Partial<CoverConfig> | null | undefined)
     texts: Array.isArray(c.texts) ? c.texts : [],
     stickers: Array.isArray(c.stickers) ? c.stickers : [],
     qrs: Array.isArray(c.qrs) ? c.qrs : [],
+    layerOrder: asLayerOrder(c.layerOrder),
     back: normalizeBackCover(c.back),
   };
 }

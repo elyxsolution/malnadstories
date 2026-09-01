@@ -39,15 +39,26 @@ import type { QrElement, StickerElement, TextElement } from '@/lib/builder/model
  */
 export function OverlayBox({
   el,
+  z,
   children,
 }: {
   el: { x: number; y: number; w: number; h: number };
+  /**
+   * WHERE THIS OBJECT PAINTS IN THE SURFACE'S STACK (see `lib/builder/layers`).
+   *
+   * Paint order used to be the order the renderer's four `.map()` calls ran in, which made it a
+   * property of an object's TYPE rather than of the object. An explicit z-index is the CSS
+   * primitive for the question, and it leaves the markup — and therefore selection, dragging,
+   * drop targets and the crop layers — completely untouched. Omitted ⇒ the element paints in
+   * document order exactly as it did before.
+   */
+  z?: number;
   children: React.ReactNode;
 }) {
   return (
     <div
       className="absolute overflow-hidden"
-      style={{ left: `${el.x * 100}%`, top: `${el.y * 100}%`, width: `${el.w * 100}%`, height: `${el.h * 100}%` }}
+      style={{ left: `${el.x * 100}%`, top: `${el.y * 100}%`, width: `${el.w * 100}%`, height: `${el.h * 100}%`, zIndex: z }}
     >
       {children}
     </div>
@@ -115,7 +126,7 @@ export function QrContent({ el }: { el: QrElement }) {
 }
 
 /** Positioned, read-only text box (preview / PDF / thumbnails). */
-export function TextBox({ el }: { el: TextElement }) {
+export function TextBox({ el, z }: { el: TextElement; z?: number }) {
   return (
     <div
       className="absolute"
@@ -125,6 +136,7 @@ export function TextBox({ el }: { el: TextElement }) {
         width: `${el.w * 100}%`,
         height: `${el.h * 100}%`,
         transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+        zIndex: z,
       }}
     >
       <TextContent el={el} />
@@ -133,11 +145,11 @@ export function TextBox({ el }: { el: TextElement }) {
 }
 
 /** Positioned, read-only QR box (preview / PDF / thumbnails). */
-export function QrBox({ el }: { el: QrElement }) {
+export function QrBox({ el, z }: { el: QrElement; z?: number }) {
   return (
     <div
       className="absolute"
-      style={{ left: `${el.x * 100}%`, top: `${el.y * 100}%`, width: `${el.w * 100}%`, height: `${el.h * 100}%` }}
+      style={{ left: `${el.x * 100}%`, top: `${el.y * 100}%`, width: `${el.w * 100}%`, height: `${el.h * 100}%`, zIndex: z }}
     >
       <QrContent el={el} />
     </div>
@@ -171,7 +183,18 @@ export function StickerContent({ el, url }: { el: StickerElement; url?: string }
 }
 
 /** Positioned, read-only sticker box (preview / PDF / thumbnails). Fires onReady on load/error. */
-export function StickerBox({ el, url, onReady }: { el: StickerElement; url?: string; onReady?: () => void }) {
+export function StickerBox({
+  el,
+  url,
+  onReady,
+  z,
+}: {
+  el: StickerElement;
+  url?: string;
+  onReady?: () => void;
+  /** Paint order within the surface's unified stack (see `OverlayBox`). */
+  z?: number;
+}) {
   if (!url) return null;
   return (
     <div
@@ -183,6 +206,7 @@ export function StickerBox({ el, url, onReady }: { el: StickerElement; url?: str
         height: `${el.h * 100}%`,
         transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
         opacity: el.opacity,
+        zIndex: z,
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -13,6 +13,9 @@ import {
 import Movable, { SnapGuides, type SnapLine } from './_movable';
 import { AdjustHandle, CropBleed, CropLayer, useCropWheel, type CropHandlers } from './_crop-chrome';
 import { resolveFrameEdit } from '@/lib/builder/model';
+import { LAYER_CHROME_Z, layerZIndexes } from '@/lib/builder/layers';
+import { useStickerBoxFit } from './_sticker-autofit';
+import { stickerAspectRatio } from '@/lib/builder/sticker-fit';
 import { useTextResize } from './_use-text-resize';
 import TextAutoFit from './_text-autofit';
 import { MIN_TEXT_BOX } from '@/lib/builder/text-fit';
@@ -465,6 +468,32 @@ function Face({
   const key = `cover:${side}`;
 
   /**
+   * THIS FACE'S PAINT ORDER, across all four object families — the same function, the same
+   * contract and the same legacy default a content spread uses (`lib/builder/layers`). It is what
+   * lets a cover sticker sit behind the cover photo and the title in front of both.
+   */
+  const layerZ = layerZIndexes(coverSideElements(config, side));
+
+  /**
+   * THE STICKER BOX HUGS THE ARTWORK — the identical correction a content page applies, from the
+   * identical hook. A cover sticker is created pixel-square like a page sticker and letterboxed
+   * the same way, so it had the same oversized outline. See `lib/builder/sticker-fit`.
+   *
+   * `page` is one cover face's width / height, which is the space these boxes are normalized to.
+   */
+  const stickerAspects = useStickerBoxFit({
+    stickers,
+    urlFor: (id) => stickerUrlFor?.(id),
+    containerAspect: page,
+    onFit: (id, box) => cover.amendSticker(key, id, box),
+  });
+  const stickerRatio = (stickerId: string) => {
+    const url = stickerUrlFor?.(stickerId);
+    const a = url ? stickerAspects.get(url) : undefined;
+    return a ? stickerAspectRatio(a, page) : undefined;
+  };
+
+  /**
    * The SAME drag-resize→font-size behaviour a caption on page 7 has. Cover text is ordinary text
    * (Cover Editor 2.0), and this is the seam where that has to stay true: a corner handle on the
    * title scales it exactly as it scales any other text element.
@@ -505,7 +534,9 @@ function Face({
       {/* ── RENDER LAYER, CLIPPED AT THE TRIM ────────────────────────────────────────────
           Everything that draws, cut where the cover ends — identical to a content page, so an
           object pushed off the edge shows only the part that will print. */}
-      <div className="absolute inset-0 overflow-hidden">
+      {/* `isolation: isolate` contains the object z-indexes, so the backdrop selection ring, the
+          trim edge and the face label — which sit outside this element — keep their own bands. */}
+      <div className="absolute inset-0 overflow-hidden" style={{ isolation: 'isolate' }}>
         {side === 'spine' ? (
           <SpineDesign config={config} renderElements={false} />
         ) : side === 'front' ? (
@@ -530,6 +561,7 @@ function Face({
             <Movable
               key={oid}
               rect={o}
+              zIndex={layerZ.get(oid)}
               minW={0.04}
               minH={0.04}
               selected={sel({ kind: 'overlay', id: oid })}
@@ -599,6 +631,7 @@ function Face({
           <Movable
             key={t.id}
             rect={t}
+            zIndex={layerZ.get(t.id)}
             rotation={t.rotation}
             rotatable
             /* The same floor auto-fit can reach — see MIN_TEXT_BOX. */
@@ -646,6 +679,7 @@ function Face({
           <Movable
             key={q.id}
             rect={q}
+            zIndex={layerZ.get(q.id)}
             keepSquare
             squareRatio={page}
             minW={0.06}
@@ -668,6 +702,10 @@ function Face({
           <Movable
             key={s.id}
             rect={s}
+            zIndex={layerZ.get(s.id)}
+            /* Aspect-locked resize, exactly as on a page — see `_block`. */
+            keepSquare={stickerRatio(s.stickerId) !== undefined}
+            squareRatio={stickerRatio(s.stickerId)}
             rotation={s.rotation}
             rotatable
             locked={s.locked}
@@ -691,7 +729,10 @@ function Face({
 
         {/* Quiet face label, so the three surfaces are nameable at a glance. */}
         {side !== 'spine' && (
-          <span className="pointer-events-none absolute left-2 top-2 z-[2] rounded bg-foreground/35 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-white opacity-70">
+          <span
+            className="pointer-events-none absolute left-2 top-2 rounded bg-foreground/35 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-white opacity-70"
+            style={{ zIndex: LAYER_CHROME_Z }}
+          >
             {side === 'front' ? 'Front cover' : 'Back cover'}
           </span>
         )}

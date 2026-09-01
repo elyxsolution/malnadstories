@@ -84,14 +84,28 @@ type CoverSideElements = {
   stickers: StickerElement[];
   qrs: QrElement[];
   overlays: Overlay[];
+  /**
+   * The face's UNIFIED stacking order (see `lib/builder/layers`). Carried here with the element
+   * arrays for the reason every other family is: a face is the unit that owns its objects, so it
+   * is the unit that owns the order they paint in. Absent ⇒ the legacy family order.
+   */
+  layerOrder?: string[];
 };
 
 const NO_OVERLAYS: Overlay[] = [];
 
 export function coverSideElements(c: CoverConfig, side: CoverSide): CoverSideElements {
-  if (side === 'front') return { texts: c.texts, stickers: c.stickers, qrs: c.qrs, overlays: NO_OVERLAYS };
-  if (side === 'back') return { texts: c.back.texts, stickers: c.back.stickers, qrs: c.back.qrs, overlays: c.back.overlays };
-  return { texts: c.spine.texts, stickers: [], qrs: [], overlays: NO_OVERLAYS };
+  if (side === 'front')
+    return { texts: c.texts, stickers: c.stickers, qrs: c.qrs, overlays: NO_OVERLAYS, layerOrder: c.layerOrder };
+  if (side === 'back')
+    return {
+      texts: c.back.texts,
+      stickers: c.back.stickers,
+      qrs: c.back.qrs,
+      overlays: c.back.overlays,
+      layerOrder: c.back.layerOrder,
+    };
+  return { texts: c.spine.texts, stickers: [], qrs: [], overlays: NO_OVERLAYS, layerOrder: c.spine.layerOrder };
 }
 
 /** Write one face's element arrays back into the config, leaving the other two untouched. */
@@ -106,7 +120,14 @@ export function withCoverSideElements(c: CoverConfig, side: CoverSide, patch: Pa
   if (side === 'back') return { ...c, back: { ...c.back, ...patch } };
   // Spread the spine rather than rebuilding it: it carries a `background` now, and a literal
   // `{ texts }` here would silently erase the customer's spine colour on every text edit.
-  return { ...c, spine: { ...c.spine, texts: patch.texts ?? c.spine.texts } };
+  return {
+    ...c,
+    spine: {
+      ...c.spine,
+      texts: patch.texts ?? c.spine.texts,
+      layerOrder: 'layerOrder' in patch ? patch.layerOrder : c.spine.layerOrder,
+    },
+  };
 }
 
 /**

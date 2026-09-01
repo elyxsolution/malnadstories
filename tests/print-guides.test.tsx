@@ -98,7 +98,8 @@ describe('the white hairline around content artwork', () => {
   it('lets the photo reach the overlay box on every side', () => {
     // No border means no content-box inset: the <img> fills the overlay, which fills the page.
     const html = renderContent();
-    expect(html).toContain('class="absolute overflow-hidden" style="left:0%;top:0%;width:50%;height:100%"');
+    expect(html).toContain('class="absolute overflow-hidden"');
+    expect(html).toMatch(/style="left:0%;top:0%;width:50%;height:100%(;z-index:\d+)?"/);
     expect(html).toContain('class="absolute inset-0 h-full w-full select-none object-cover"');
   });
 

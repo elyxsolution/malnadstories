@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { CanvasBar, BarRow, BarBtn, BarSep, BarLabel, BarPopover, PAGE_BAR_GAP, type BarBand } from './_canvas-bar';
 import LayerMenu, { type LayerSibling } from './_layer-menu';
+import { layerIndexOf, layerStack } from '@/lib/builder/layers';
 import FontPicker from './_font-picker';
 import FontSizeField from './_font-size-field';
 import { ColorField } from './_color-picker';
@@ -304,21 +305,39 @@ export function ObjectBar(p: BarProps) {
 type PageBarProps = ContextBarProps & { block: Block };
 
 /** Human labels for the Layers menu's "Move above/below…" sibling lists. */
-const overlaySiblings = (block: Block, photoMap: Map<string, Photo>): LayerSibling[] =>
-  block.overlays.map((o, i) => ({
-    id: o.id ?? String(i),
-    label: o.photoId ? (photoMap.get(o.photoId)?.filename || `Photo ${i + 1}`) : `Empty frame ${i + 1}`,
-  }));
-
-const textSiblings = (block: Block): LayerSibling[] =>
-  block.texts.map((t, i) => {
-    const preview = t.text.trim().replace(/\s+/g, ' ');
-    return { id: t.id, label: preview ? (preview.length > 22 ? `${preview.slice(0, 22)}…` : preview) : `Text ${i + 1}` };
+/**
+ * THE SURFACE'S WHOLE STACK, back to front — every object of every type, named.
+ *
+ * There used to be four of these, one per family, because layering could only move an object
+ * within its own array. The Layers menu therefore listed "the other photos" or "the other texts"
+ * and could never offer "put this behind that sticker". With one unified order
+ * (`lib/builder/layers`) there is one list, and Bring-to-front / Move-above genuinely span types.
+ *
+ * It takes a `Block`, which is what both surfaces present — a content spread directly, and a
+ * cover face through `useCover`'s adapter — so the menu needs no idea which one it is on.
+ */
+const stackSiblings = (block: Block, photoMap: Map<string, Photo>): LayerSibling[] => {
+  const counts: Record<string, number> = { overlay: 0, text: 0, qr: 0, sticker: 0 };
+  return layerStack(block).map(({ kind, id }) => {
+    const n = ++counts[kind];
+    if (kind === 'overlay') {
+      const o = block.overlays.find((el) => el.id === id);
+      const name = o?.photoId ? photoMap.get(o.photoId)?.filename : undefined;
+      return { id, label: name || (o?.photoId ? `Photo ${n}` : `Empty frame ${n}`) };
+    }
+    if (kind === 'text') {
+      const preview = (block.texts.find((el) => el.id === id)?.text ?? '').trim().replace(/\s+/g, ' ');
+      return { id, label: preview ? (preview.length > 22 ? `${preview.slice(0, 22)}…` : preview) : `Text ${n}` };
+    }
+    return { id, label: kind === 'qr' ? `QR code ${n}` : `Sticker ${n}` };
   });
+};
 
-const stickerSiblings = (block: Block): LayerSibling[] => block.stickers.map((s, i) => ({ id: s.id, label: `Sticker ${i + 1}` }));
-
-const qrSiblings = (block: Block): LayerSibling[] => block.qrs.map((q, i) => ({ id: q.id, label: `QR code ${i + 1}` }));
+/** Where one object sits in that stack, and how deep the stack is — the menu's two numbers. */
+const stackPos = (block: Block, id: string) => {
+  const stack = layerStack(block);
+  return { index: layerIndexOf(stack, id), total: stack.length };
+};
 
 // ── photo (base slot or overlay) ──────────────────────────────────────────────────
 
@@ -422,9 +441,8 @@ function PhotoBar(p: BarProps) {
         <>
           <BarSep />
           <LayerMenu
-            index={ovIndex}
-            total={block.overlays.length}
-            siblings={overlaySiblings(block, p.photoMap)}
+            {...stackPos(block, overlayId)}
+            siblings={stackSiblings(block, p.photoMap)}
             onMove={(a) => commands.moveLayer({ kind: 'overlay', blockKey: block.key, id: overlayId }, a)}
           />
           <BarBtn
@@ -475,7 +493,8 @@ function TextBar(p: BarProps) {
   if (selection.kind !== 'text') return null;
   const el = block.texts.find((t) => t.id === selection.id);
   if (!el) return null;
-  const i = block.texts.findIndex((t) => t.id === el.id);
+  // The element's position now comes from the SURFACE's stack (stackPos), not from its index
+  // inside block.texts — layering spans object types.
   const set = (patch: Partial<typeof el>) => api.patchText(block.key, el.id, patch);
 
   return (
@@ -499,9 +518,8 @@ function TextBar(p: BarProps) {
       </BarPopover>
       <BarSep />
       <LayerMenu
-        index={i}
-        total={block.texts.length}
-        siblings={textSiblings(block)}
+        {...stackPos(block, el.id)}
+        siblings={stackSiblings(block, p.photoMap)}
         onMove={(a) => commands.moveLayer({ kind: 'text', blockKey: block.key, id: el.id }, a)}
       />
       <BarBtn
@@ -561,7 +579,7 @@ function StickerBar(p: BarProps) {
       <LayerMenu
         index={i}
         total={block.stickers.length}
-        siblings={stickerSiblings(block)}
+        siblings={stackSiblings(block, p.photoMap)}
         onMove={(a) => commands.moveLayer({ kind: 'sticker', blockKey: block.key, id: el.id }, a)}
       />
       <BarBtn
@@ -600,7 +618,7 @@ function QrBar(p: BarProps) {
       <LayerMenu
         index={i}
         total={block.qrs.length}
-        siblings={qrSiblings(block)}
+        siblings={stackSiblings(block, p.photoMap)}
         onMove={(a) => commands.moveLayer({ kind: 'qr', blockKey: block.key, id: el.id }, a)}
       />
       <BarSep />

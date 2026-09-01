@@ -444,6 +444,21 @@ export type Block = {
   qrs: QrElement[]; // QR codes (default [])
   stickers: StickerElement[]; // decorative stickers (default [])
   background: Background | null; // page background (default null)
+  /**
+   * THE UNIFIED STACKING ORDER — element ids from BACK to FRONT, spanning overlays, texts, QR
+   * codes and stickers (see `lib/builder/layers`).
+   *
+   * Paint order used to be decided by which ARRAY an object lived in, so a sticker was always
+   * above a text which was always above a photo overlay, and "bring to front" could only reorder
+   * an object among its own kind. This is the one order that spans all four.
+   *
+   * OPTIONAL, and absent means `LEGACY_LAYER_ORDER` — the exact family sequence the renderers
+   * used before it existed. So every page saved earlier renders identically with no migration,
+   * and `trimLayerOrder` drops it again whenever it would say nothing new. Stored additively in
+   * `album_pages.layout_config.layerOrder`; it is a PERMUTATION of ids the arrays already hold,
+   * never a second copy of the objects.
+   */
+  layerOrder?: string[];
   // Additive, optional: the LAYOUT PRESET key this block was created from (single / panorama /
   // collage / …). Persisted in layout_config so blueprint breakdowns are accurate. The renderer
   // never reads it; absent/legacy blocks fall back to inference from the geometry.
@@ -503,6 +518,7 @@ export function normalizeBlock(b: Partial<Block> & { template: LayoutTemplate; k
     qrs: b.qrs ?? [],
     stickers: b.stickers ?? [],
     background: b.background ?? null,
+    layerOrder: b.layerOrder,
   };
 }
 

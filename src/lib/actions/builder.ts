@@ -103,12 +103,18 @@ export async function saveLayout(input: unknown): Promise<ActionResult> {
       // exact object it always did. It also makes `layout_config` non-null on its own: a page
       // whose only state is "the left half is cropped like this" must still persist that.
       const baseEdits = (b.baseEdits ?? []).some((e) => e != null) ? b.baseEdits : undefined;
+      // The unified stacking order (`lib/builder/layers`). Written ONLY when it says something
+      // the legacy family order would not have said — `trimLayerOrder` drops it otherwise — so a
+      // page whose objects have never been reordered across families stores the exact
+      // `layout_config` it always did.
+      const layerOrder = b.layerOrder && b.layerOrder.length > 0 ? b.layerOrder : undefined;
       const hasContent =
-        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background || !!b.preset || !!baseEdits;
+        b.overlays.length > 0 || b.texts.length > 0 || b.qrs.length > 0 || b.stickers.length > 0 || !!b.background || !!b.preset || !!baseEdits || !!layerOrder;
       const layoutConfig = hasContent
         ? {
             overlays: b.overlays,
             ...(baseEdits ? { baseEdits } : {}),
+            ...(layerOrder ? { layerOrder } : {}),
             ...(b.texts.length > 0 ? { texts: b.texts } : {}),
             ...(b.qrs.length > 0 ? { qrs: b.qrs } : {}),
             ...(b.stickers.length > 0 ? { stickers: b.stickers } : {}),

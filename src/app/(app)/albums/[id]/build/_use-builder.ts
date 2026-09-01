@@ -25,6 +25,8 @@ import {
   type TextVariant,
 } from '@/lib/builder/model';
 import { makeQr, makeSticker, makeText, offsetDuplicate, PAIR_ASPECT, type LayoutPreset } from '@/lib/builder/elements';
+import { applyLayerAction, trimLayerOrder } from '@/lib/builder/layers';
+import type { LayerAction } from '@/lib/builder/elements';
 
 /** Only for a NEW overlay's default placement, which should always start on the page. */
 
@@ -569,6 +571,24 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
       ),
     );
 
+  /**
+   * The same write as `patchSticker`, but as a CORRECTION — no undo entry (see
+   * `useHistoryState.amend` and `amendText`).
+   *
+   * Its caller is the sticker box fit: a placed sticker's box is created pixel-square and then
+   * tightened onto the artwork's real aspect once the image has been measured. That tightening is
+   * a consequence of placing the sticker, not a second thing the customer did — pushing it as its
+   * own entry would make the first ⌘Z appear to do nothing.
+   */
+  const amendSticker = (key: string, id: string, patch: Partial<StickerElement>) => {
+    hist.amend((prev) =>
+      prev.map((b) =>
+        b.key === key ? { ...b, stickers: b.stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)) } : b,
+      ),
+    );
+    setDirty(true);
+  };
+
   const removeSticker = (key: string, id: string) =>
     mutate((prev) => prev.map((b) => (b.key === key ? { ...b, stickers: b.stickers.filter((s) => s.id !== id) } : b)));
 
@@ -597,6 +617,31 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
         const ss = [...b.stickers];
         [ss[i], ss[j]] = [ss[j], ss[i]];
         return { ...b, stickers: ss };
+      }),
+    );
+
+  // ── layer order ───────────────────────────────────────────────────────────────
+  /**
+   * MOVE ONE OBJECT THROUGH THE PAGE'S UNIFIED STACK.
+   *
+   * The old implementation reordered an object inside ITS OWN family array, which is why a photo
+   * overlay could never be brought in front of a text: the renderers painted the families in a
+   * fixed sequence, so "front" only ever meant "front of the overlays". This writes `layerOrder`
+   * — one permutation of ids spanning overlays, texts, QR codes and stickers — and the renderers
+   * take their paint order from it.
+   *
+   * The element arrays are NOT touched. They remain the persistence model, so nothing about the
+   * schemas, the jsonb shape or any existing reader changes, and an object cannot be lost by a
+   * reorder. `trimLayerOrder` drops the field again whenever the resulting stack is the legacy
+   * one, so an album that has never been reordered stays byte-identical on disk.
+   */
+  const moveLayer = (key: string, id: string, action: LayerAction) =>
+    mutate((prev) =>
+      prev.map((b) => {
+        if (b.key !== key) return b;
+        const next = applyLayerAction(b, id, action);
+        if (!next) return b;
+        return { ...b, layerOrder: trimLayerOrder({ ...b, layerOrder: next }) };
       }),
     );
 
@@ -767,6 +812,9 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
       qrs: b.qrs,
       stickers: b.stickers,
       background: b.background,
+      // The unified stacking order — normalized on the way out, so a page whose objects still sit
+      // in the legacy family order serializes no `layerOrder` at all.
+      layerOrder: trimLayerOrder(b),
       preset: b.preset,
     }));
 
@@ -810,11 +858,13 @@ export function useBlocks(initial: Block[], pairRatio: number = PAIR_ASPECT, onE
     reorderQr,
     addSticker,
     patchSticker,
+    amendSticker,
     removeSticker,
     duplicateSticker,
     reorderSticker,
     setBackground,
     setBackgroundAll,
+    moveLayer,
     applyPreset,
     batch,
     clearFrames,

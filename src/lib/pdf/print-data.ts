@@ -53,6 +53,8 @@ type PageRow = {
     qrs?: QrElement[];
     stickers?: StickerElement[];
     background?: Background | null;
+    /** The unified stacking order (see `lib/builder/layers`). Absent ⇒ the legacy family order. */
+    layerOrder?: string[];
   } | null;
 };
 
@@ -201,6 +203,12 @@ export async function loadPrintAlbum(
         qrs: r.layout_config?.qrs ?? [],
         stickers: r.layout_config?.stickers ?? [],
         background: r.layout_config?.background ?? null,
+        // THE PRINTED BOOK USES THE SAVED STACK. Without this the PDF would fall back to the
+        // legacy family order and quietly disagree with the album the customer approved.
+      // The unified stacking order rides through verbatim. It is a permutation of ids the
+      // element arrays already hold, so a stale id names nothing and is ignored by `layerStack`
+      // — there is nothing to reconcile here.
+      layerOrder: r.layout_config?.layerOrder,
       }));
   }
 

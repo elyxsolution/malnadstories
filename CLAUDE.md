@@ -1725,6 +1725,120 @@ picture *on* the back cover. `BackCoverConfig.overlays: Overlay[]` (additive to 
   (`absolute overflow-hidden` and nothing else). Selection outlines and handles are unaffected —
   `Movable` portals its chrome into a separate layer and never styles the element.
 
+## Unified layers — every object type in ONE stacking order — built
+
+A surface (a page pair, or one cover face) keeps its objects in four arrays, and every renderer
+painted them by mapping those arrays **in a fixed sequence**: overlays → texts → QR → stickers. So
+paint order was a property of an object's TYPE. A sticker was always above a text, which was always
+above a photo, and the Layers menu — which was real — could only reorder an object **within its own
+array**. "Bring to front" on a photo overlay brought it to the front of the overlays and left it
+under everything else. Putting a sticker behind a photo was not a missing button; it was
+unrepresentable.
+
+- **`lib/builder/layers.ts`** is the whole model, pure: `layerStack` (the surface's objects, back
+  to front), `applyLayerAction` (the four operations + move-above/below), `layerZIndexes` (id → z)
+  and `trimLayerOrder` (what to store). The index arithmetic is still `resolveLayerIndex` — the
+  same function the per-family menu used — applied to the unified list instead of one family.
+- **`layerOrder` is a PERMUTATION, not a second copy of the data.** The stack is always built from
+  the element arrays and `layerOrder` only sorts them, so an id naming a deleted object is inert,
+  an object the order does not name is appended ON TOP (which is what "add" has always meant), and
+  no reorder can lose or duplicate an object. The four arrays are untouched — they remain the
+  persistence model, the Zod schemas and every existing reader.
+- **BACKWARDS-COMPATIBLE BY CONSTRUCTION.** `layerOrder` is OPTIONAL and absent means
+  `LEGACY_LAYER_ORDER` — the exact family sequence above — so every album renders identically with
+  **no migration and no backfill**. `trimLayerOrder` drops the field again whenever the resulting
+  stack IS the legacy one, so a page that has never been reordered stores the exact
+  `layout_config` it always did. `tests/unified-layers.test.ts` checks the default against the
+  renderers themselves, so the compatibility promise cannot quietly stop being the truth.
+- **Stored per surface**: `album_pages.layout_config.layerOrder` for a page; **one per FACE** on
+  the cover (`cover_config.layerOrder` / `back.layerOrder` / `spine.layerOrder`), carried by
+  `coverSideElements`/`withCoverSideElements` like any other face property. Both additive jsonb.
+- **Rendering is an explicit `z-index`, not restructured markup.** Each renderer keeps its four
+  `.map()` calls (they carry genuinely different props per family) and takes paint order from
+  `layerZIndexes`. That is the CSS primitive for the question, it works identically on the editing
+  canvases and in Chromium's PDF render, and it leaves selection chrome, dragging, drop targets and
+  the crop layers completely untouched. `Movable` already accepted a `zIndex`.
+  - The object band is contained by `isolation: isolate` on each surface's render layer, so it can
+    never compete with the editor's own chrome bands (the trim ring, the gutter, the adjustment
+    ghost, the handle layer) which sit outside it.
+- **ONE menu, both surfaces.** `stackSiblings` lists the whole stack by name, so "Move above…"
+  offers objects of every type; the cover reaches it through `useCover`'s existing `Block` adapter
+  with no cover-specific branch. `commands.moveLayer` keeps its `{kind, id}` signature (callers
+  already speak it) but the move no longer depends on `kind`.
+
+## Cover keyboard — the shortcut table follows the SELECTION — built
+
+The builder has one shortcut table and one listener (`useShortcuts`), and Undo/Redo already
+branched on the focused canvas. Everything else was wired to the PAGE: Delete ran the page command
+layer's ladder while `useCover`'s equivalent was reachable only from its toolbar button, and
+nudging was gated on a literal `!coverFocused`. A selected cover object could be dragged with a
+pointer and then ignored Delete and the arrow keys.
+
+- **No second keyboard system and no second undo stack.** One `surface` value resolves the focused
+  canvas once — `useCover` has always exposed the same `Selection` union and the same
+  `patchOverlays`/`patchText`/`patchQr`/`patchSticker` signatures as `useBlocks`, so this needed
+  no new abstraction.
+- **Delete** → `coverFocused ? cover.barCommands.deleteSelection : cmd.commands.deleteSelection`.
+  Each surface's own ladder already reads its own selection and refuses what must not be removed
+  (a permanent cover role, an empty frame).
+- **Arrows / shift-arrows** nudge whatever is selected on whichever canvas, clamped through the
+  same `clampRect(EDIT_BOUNDS)` a released drag is — a nudge can never reach somewhere the save
+  would refuse. `canNudge` is now decided by the SELECTION's kind, not by the surface.
+- **`r`** rotates through the cover's resolved `photoTarget` (overlay vs face backdrop), so it
+  cannot rotate the backdrop while an overlay is selected. **`mod+d`** stays page-only and says so:
+  "duplicate page" has no cover analogue.
+- **Escape** clears BOTH selection stores and ends an in-progress adjustment.
+- The typing guard is unchanged: only `mod+s` and `Escape` fire while an input is focused.
+
+## Sticker bounds — the box is the sticker — built
+
+A placed sticker's selection outline and its eight handles were far larger than the visible
+artwork. The cause is geometric and universal, not an artefact of one asset: **`makeSticker`
+creates a pixel-SQUARE box (`h = w × containerAspect`) whatever shape the artwork is**, and the
+renderer draws it `object-fit: contain` inside that box. `contain` letterboxes, so every
+non-square sticker sat in a box with empty margins — and `Movable`, correctly, outlined the box.
+
+- **`lib/builder/sticker-fit.ts`** (pure) returns the rectangle the artwork is ALREADY drawn in.
+  So **the visible sticker does not move or change size** — the new box IS the rendered rect, and
+  only the empty margin goes. Nothing is a constant, a fudge factor or a per-asset tweak: the
+  inputs are the image's own `naturalWidth`/`naturalHeight` and the container's aspect, so any
+  shape works because the shape is an input. The CENTRE is held.
+- **`_sticker-autofit.tsx`** is the measuring half — the direct counterpart of `_text-autofit`,
+  including its contract: editing canvases only, and applied as an **AMEND** (a correction, not a
+  second undo step). Aspects are cached per URL module-wide, because intrinsic size is a property
+  of the ASSET and one sticker placed twelve times should decode once.
+- **The resize is aspect-locked** through `Movable`'s existing `keepSquare`/`squareRatio` — the
+  same primitive the QR code uses to stay pixel-square, with the artwork's ratio instead of 1:1.
+  That is what keeps the box tight through a corner drag, and it is also why the fit needs no
+  "suppress while resizing" flag: a resize cannot change the box aspect, so there is nothing to
+  fight. The fit is idempotent, which is what terminates it.
+- ⚠️ **NOT addressed: transparent padding baked INTO an asset.** Pixels the artwork itself declares
+  as its own need per-pixel analysis of admin artwork and belong upstream in the sticker catalog,
+  not in the builder. Where a sticker PNG carries its own margin, the box hugs the FILE, which is
+  the correct answer available here.
+
+## THE CROP EDITOR SHOWS THE CROP — fixed
+
+Long-press or the Crop button entered adjustment mode, dragging changed the stored value, and the
+preview and the PDF showed the result — but the canvas being dragged on did not move.
+
+**One missed consumer, and it was the surface being used to author the value.** An adjustment is
+written to the PLACEMENT (`overlay.edit` / `block.baseEdits[slot]`) and inherited from the source
+photo until it forks. The shared read-only renderers and the cover canvas resolve that with
+`resolveFrameEdit`; **`_block.tsx` — the interactive page canvas — did not**, and went on rendering
+`photo.edit`, the `photos` row, which a placement crop never writes. `OverlayContent`,
+`BaseSlotView` and the adjustment ghost (`CropBleed`) were all reading it, so the frame, the
+neighbouring frames and the ghost all sat still while the committed value moved.
+
+- The fix is that those three now resolve the frame's edit, which makes the live loop close:
+  `useCanvasCrop.onChange` → `patchFrameLocal` → `api.amendFrameEdit` → new `Block` → the canvas
+  redraws. Nothing about the commit, the save or the renderers changed — they were already right.
+- **The two entry paths were never two implementations.** Long-press, the centre `AdjustHandle` and
+  the toolbar's Crop button all call `beginCropOn` → the single `useCanvasCrop`, on both canvases
+  (a cover face addresses itself as `cover:<side>`). Fixing the shared consumer fixed both doors.
+- **Independence is preserved**: the gesture is addressed by `CropTarget`/`FrameRef` throughout, so
+  cropping the back cover's copy of a photo still cannot reach the copies on pages.
+
 ## The dashboard shelf shows the REAL front cover — built
 
 Every surface that presents an album as a physical book already drew it through the SAME

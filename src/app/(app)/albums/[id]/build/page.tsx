@@ -71,6 +71,8 @@ type PageRow = {
     qrs?: QrElement[];
     stickers?: StickerElement[];
     background?: Background | null;
+    /** The unified stacking order (see `lib/builder/layers`). Absent ⇒ the legacy family order. */
+    layerOrder?: string[];
     preset?: string;
   } | null;
 };
@@ -209,6 +211,10 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       qrs: r.layout_config?.qrs ?? [],
       stickers: r.layout_config?.stickers ?? [],
       background: r.layout_config?.background ?? null,
+      // The unified stacking order rides through verbatim. It is a permutation of ids the
+      // element arrays already hold, so a stale id names nothing and is ignored by `layerStack`
+      // — there is nothing to reconcile here.
+      layerOrder: r.layout_config?.layerOrder,
       preset: r.layout_config?.preset,
     }));
 

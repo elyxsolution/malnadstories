@@ -1827,7 +1827,52 @@ export default function Builder({
   const NUDGE = 0.002;
   const NUDGE_COARSE = 0.02;
 
-  const canNudge = !coverFocused && !!block && selection.kind !== 'none' && selection.kind !== 'base';
+  /**
+   * ── THE FOCUSED CANVAS, RESOLVED ONCE ──────────────────────────────────────────────────────
+   *
+   * The keyboard used to be wired to the PAGE api and the page's selection, with the cover
+   * excluded by a literal `!coverFocused`. That is why a cover object could be selected and then
+   * ignore Delete and the arrow keys: the shortcut table had no way to reach the surface holding
+   * it, even though `useCover` has exposed the same `Selection` union and the same
+   * `patchOverlays` / `patchText` / `patchQr` / `patchSticker` signatures all along.
+   *
+   * So the table stops asking "is this a page?" and asks "what is selected, and on which canvas?".
+   * There is no second keyboard system and no second undo stack — one table, one `useShortcuts`,
+   * dispatching to whichever surface currently has focus.
+   */
+  const surface = useMemo(
+    () =>
+      coverFocused
+        ? {
+            block: cover.block,
+            selection: cover.selection,
+            patchOverlays: cover.patchOverlays,
+            patchText: cover.patchText,
+            patchQr: cover.patchQr,
+            patchSticker: cover.patchSticker,
+          }
+        : {
+            block,
+            selection,
+            patchOverlays: api.patchOverlays,
+            patchText: api.patchText,
+            patchQr: api.patchQr,
+            patchSticker: api.patchSticker,
+          },
+    [coverFocused, cover.block, cover.selection, cover.patchOverlays, cover.patchText, cover.patchQr, cover.patchSticker, block, selection, api],
+  );
+
+  /**
+   * Nudging is decided by WHAT IS SELECTED, not by which canvas it happens to be on — the four
+   * movable object kinds on either surface. A `base` selection is the page's own image slot (or
+   * the cover's backdrop), which has no box of its own to move.
+   */
+  const canNudge =
+    !!surface.block &&
+    (surface.selection.kind === 'overlay' ||
+      surface.selection.kind === 'text' ||
+      surface.selection.kind === 'qr' ||
+      surface.selection.kind === 'sticker');
 
   /**
    * EDIT ↔ PREVIEW, WITHOUT LOSING YOUR PLACE.
@@ -1855,29 +1900,30 @@ export default function Builder({
 
   const nudgeSelection = useCallback(
     (dx: number, dy: number) => {
-      if (!block) return;
+      const { block: b, selection: s } = surface;
+      if (!b) return;
       // One box for every kind — the nudge is clamped exactly where a released drag is.
       const shift = <T extends { x: number; y: number; w: number; h: number }>(el: T): T => ({
         ...el,
         ...clampRect({ x: el.x + dx, y: el.y + dy, w: el.w, h: el.h }, EDIT_BOUNDS),
       });
-      if (selection.kind === 'overlay') {
-        api.patchOverlays(
-          block.key,
-          block.overlays.map((o) => (o.id === selection.id ? shift(o) : o)),
+      if (s.kind === 'overlay') {
+        surface.patchOverlays(
+          b.key,
+          b.overlays.map((o) => (o.id === s.id ? shift(o) : o)),
         );
-      } else if (selection.kind === 'text') {
-        const el = block.texts.find((t) => t.id === selection.id);
-        if (el) api.patchText(block.key, el.id, shift(el));
-      } else if (selection.kind === 'qr') {
-        const el = block.qrs.find((q) => q.id === selection.id);
-        if (el) api.patchQr(block.key, el.id, shift(el));
-      } else if (selection.kind === 'sticker') {
-        const el = block.stickers.find((s) => s.id === selection.id);
-        if (el && !el.locked) api.patchSticker(block.key, el.id, shift(el));
+      } else if (s.kind === 'text') {
+        const el = b.texts.find((t) => t.id === s.id);
+        if (el) surface.patchText(b.key, el.id, shift(el));
+      } else if (s.kind === 'qr') {
+        const el = b.qrs.find((q) => q.id === s.id);
+        if (el) surface.patchQr(b.key, el.id, shift(el));
+      } else if (s.kind === 'sticker') {
+        const el = b.stickers.find((st) => st.id === s.id);
+        if (el && !el.locked) surface.patchSticker(b.key, el.id, shift(el));
       }
     },
-    [api, block, selection],
+    [surface],
   );
 
   const cycleSteps = useMemo(
@@ -2546,6 +2592,13 @@ export default function Builder({
    * platform-resolved (`mod` = ⌘ on Apple, Ctrl elsewhere) and bindings are inert while typing
    * unless they explicitly opt in.
    */
+  /**
+   * DELETE, RESOLVED BY FOCUS. Each surface already owns a delete that reads its own selection
+   * and refuses what must not be removed (a permanent cover role, an empty frame). This picks
+   * between them; it decides nothing itself.
+   */
+  const deleteCommand = coverFocused ? cover.barCommands.deleteSelection : cmd.commands.deleteSelection;
+
   const shortcuts = useMemo<Shortcut[]>(
     () => [
       // Undo follows the focused surface — the cover is history-backed now, not an exception.
@@ -2562,33 +2615,47 @@ export default function Builder({
       },
       { combo: "mod+a", label: "Select all", group: "Selection", run: () => cmd.commands.selectAll.run() },
       /**
-       * DELETE / BACKSPACE now run the priority-resolved `deleteSelection` rather than the frame
-       * -only `removeFromPage`. Selecting an overlay and pressing Delete removes THAT OVERLAY;
-       * it can no longer leave an empty container behind, and it can never reach the page.
-       * The ladder lives in the command layer — see `deleteSelection`.
+       * DELETE / BACKSPACE run the priority-resolved `deleteSelection` for whichever canvas has
+       * focus. On a page that is the command layer's ladder (overlay → text → sticker → QR →
+       * frame); on a cover it is `useCover`'s equivalent, which the Delete BUTTON has always
+       * used and the keyboard never reached. Both resolve from the selected OBJECT, so selecting
+       * a sticker on the back cover and pressing Delete removes that sticker — and neither can
+       * reach the page or the face itself.
        */
       {
         combo: "Delete",
         label: "Delete selection",
         group: "Editing",
-        when: () => cmd.commands.deleteSelection.enabled,
-        run: () => cmd.commands.deleteSelection.run(),
+        when: () => deleteCommand.enabled,
+        run: () => deleteCommand.run(),
       },
       {
         combo: "Backspace",
         label: "Delete selection",
         group: "Editing",
-        when: () => cmd.commands.deleteSelection.enabled,
-        run: () => cmd.commands.deleteSelection.run(),
+        when: () => deleteCommand.enabled,
+        run: () => deleteCommand.run(),
       },
       {
+        // Page-only, and deliberately: "duplicate page" has no cover analogue — a cover is not a
+        // page you can have two of. Duplicating a cover OBJECT lives on its toolbar, as it does
+        // for a page object.
         combo: "mod+d",
         label: "Duplicate page",
         group: "Editing",
-        when: () => cmd.commands.duplicatePage.enabled,
+        when: () => !coverFocused && cmd.commands.duplicatePage.enabled,
         run: () => cmd.commands.duplicatePage.run(),
       },
-      { combo: "r", label: "Rotate 90°", group: "Editing", when: () => cmd.commands.rotatePhotos.enabled, run: () => cmd.commands.rotatePhotos.run() },
+      {
+        // Rotating the selected photo is meaningful on either canvas, and both surfaces already
+        // expose it to their toolbar — the cover through `barCommands.rotateBy`, which routes to
+        // the resolved photo target (overlay vs face backdrop) rather than guessing.
+        combo: "r",
+        label: "Rotate 90°",
+        group: "Editing",
+        when: () => (coverFocused ? !!cover.photoTarget?.photoId : cmd.commands.rotatePhotos.enabled),
+        run: () => (coverFocused ? cover.barCommands.rotateBy(1) : cmd.commands.rotatePhotos.run()),
+      },
       /**
        * TRIAGE KEYS. 1–4 mark the selected photos, following the convention every photo editor
        * has used for twenty years — the number IS the mark, and 0 clears it. Each one runs the
@@ -2647,8 +2714,14 @@ export default function Builder({
           setQuickCrop(null);
           setPickedId(null);
           setExitDialogOpen(false);
+          // An in-progress image adjustment is the innermost mode, so it is what Escape leaves
+          // first. Idempotent when none is running.
+          crop.end();
           sel.clear();
           setSelection(NO_SELECTION);
+          // The COVER's selection is its own store; leaving it set would keep the cover toolbar
+          // describing an object the customer just dismissed.
+          cover.setSelection(NO_SELECTION);
         },
       },
       /**
@@ -2690,7 +2763,7 @@ export default function Builder({
         },
       ]),
     ],
-    [api, save, saveBlueprint, blueprintMode, cmd, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused, undoEdits, redoEdits, zoomIn, zoomOut, resetZoom],
+    [api, save, saveBlueprint, blueprintMode, cmd, deleteCommand, crop, editLayout, blocks.length, setExitDialogOpen, sel, contextMenu, canNudge, nudgeSelection, cover, coverFocused, undoEdits, redoEdits, zoomIn, zoomOut, resetZoom],
   );
   /**
    * Review mode owns the keyboard while it is open (it binds its own capture-phase listener), so
