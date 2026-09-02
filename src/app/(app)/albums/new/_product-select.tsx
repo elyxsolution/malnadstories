@@ -12,10 +12,31 @@ import type { ProductOption } from '@/lib/products/catalog';
  *
  * DENSITY. These cards were built to sell: a 4:3 hero, 16px padding, a description block, a
  * price. In onboarding they are a *picker* — the customer is choosing a size, not being
- * convinced — so the footprint is roughly a quarter smaller (3:2 hero, 12px padding, tighter
- * gaps, no description) and the grid goes four-up on wide screens, so more products fit
- * without scrolling. Everything that identifies a product survives: thumbnail, name,
- * dimensions, available page counts, selection state.
+ * convinced — so the footprint is far smaller. Everything that identifies a product survives:
+ * thumbnail, name, dimensions, available page counts, the icons, the selection state.
+ *
+ * THE SECOND PASS SET THE HEIGHT AGAINST THE COLUMN BESIDE IT. Three books and three page
+ * counts are ONE decision presented as two lists, and they only read that way if the two
+ * stacks are the same height — otherwise the books trail past the page counts and the pair
+ * looks like two unrelated sections that happen to be adjacent. So the card is tuned to the
+ * page-count row rather than to itself, and the two now share ONE height floor
+ * (`CARD_MIN_H`) rather than arriving at the same number by arithmetic coincidence.
+ *
+ * NOTHING WAS DROPPED to get there: the thumbnail, the name, the ruler, the dimensions, the
+ * layers icon, the page counts, the Popular badge, the selected tick and every type size are
+ * exactly what they were. The height came out of the WHITESPACE — tighter vertical padding,
+ * a smaller gap between the two metadata lines, and `leading-none` on lines that are one
+ * line each anyway.
+ *
+ * THE THUMBNAIL NO LONGER SETS THE HEIGHT. It used to be `aspect-[3/2]`, so its width chose
+ * how tall every card was and the two columns could only be aligned by solving for a width.
+ * It now stretches to whatever the body needs (the row is already `items-stretch`) and crops
+ * with `object-cover`, which is why the card can be sized by its content and its floor.
+ *
+ * An earlier attempt put the two metadata facts on one wrapping row. It was rejected: the
+ * dimension strings differ in length, so "25 × 35 cm" fitted on one line while "21 × 29.7 cm"
+ * wrapped to two — and three cards of two different heights is a worse answer than three
+ * slightly taller ones.
  *
  * NO PRICING. Onboarding creates an album; it does not sell one. `prices`/`pageCounts` still
  * drive which page counts exist — the money is simply never rendered. Checkout is untouched.
@@ -24,6 +45,16 @@ import type { ProductOption } from '@/lib/products/catalog';
  * an already-created album had to show a frozen copy of this screen. The two-step flow never
  * returns here after creation, so the state was unreachable.
  */
+/**
+ * THE ONE HEIGHT FLOOR, shared by a book card and a page-count card.
+ *
+ * The two stacks have to end level — three books beside three page counts is one decision, and
+ * it stops reading as one the moment the left column trails past the right. Stated once here so
+ * the alignment is a property of the code rather than of two numbers that happen to agree, and
+ * so a future change to either card cannot silently break the other.
+ */
+const CARD_MIN_H = 'min-h-[65px]';
+
 export default function ProductSelect({
   products,
   selectedProductId,
@@ -50,12 +81,12 @@ export default function ProductSelect({
             type="button"
             onClick={() => onSelectProduct(p.id)}
             aria-pressed={isSel}
-            className={`group relative flex w-full items-stretch gap-3 overflow-hidden rounded-xl border bg-card text-left transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99] ${
+            className={`group relative flex w-full items-stretch gap-3 overflow-hidden rounded-xl border bg-card text-left transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99] ${CARD_MIN_H} ${
               isSel ? 'border-primary shadow-md ring-2 ring-primary' : 'hover:-translate-y-0.5 hover:shadow-md'
             }`}
           >
             {/* Cover preview */}
-            <div className="relative aspect-[3/2] w-[104px] flex-none overflow-hidden bg-muted sm:w-[120px]">
+            <div className="relative w-[92px] flex-none overflow-hidden bg-muted sm:w-[100px]">
               {p.coverPreviewUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -93,7 +124,7 @@ export default function ProductSelect({
             </div>
 
             {/* Body — identity only: name, dimensions, available page counts. */}
-            <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 py-3 pr-3">
+            <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-2 pr-3">
               <div className="flex items-start justify-between gap-2">
                 <h3 className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight text-foreground">
                   {p.name}
@@ -110,14 +141,22 @@ export default function ProductSelect({
                   )
                 )}
               </div>
-              <p className="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground">
-                <Ruler className="h-3 w-3 flex-none" /> {p.widthCm} × {p.heightCm} cm
-              </p>
-              {p.pageCounts.length > 0 && (
-                <p className="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted-foreground">
-                  <Layers className="h-3 w-3 flex-none" /> {p.pageCounts.join(' · ')} pages
-                </p>
-              )}
+              {/*
+                TWO LINES, AT A PREDICTABLE HEIGHT. `leading-none` is safe precisely because
+                each of these is one line: it removes the half-line of air above and below
+                without ever clipping a descender, which is where most of the saved height came
+                from. Same icons, same 11px, same tabular figures as before.
+              */}
+              <span className="flex flex-col gap-0.5 text-[11px] leading-none tabular-nums text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <Ruler className="h-3 w-3 flex-none" /> {p.widthCm} × {p.heightCm} cm
+                </span>
+                {p.pageCounts.length > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <Layers className="h-3 w-3 flex-none" /> {p.pageCounts.join(' · ')} pages
+                  </span>
+                )}
+              </span>
             </div>
           </button>
         );
@@ -173,7 +212,7 @@ export function PageCountSelect({
             type="button"
             onClick={() => onSelectPageCount(n)}
             aria-pressed={isSel}
-            className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3.5 text-left transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99] ${
+            className={`flex w-full items-center justify-between gap-3 rounded-xl border p-3.5 text-left transition-all duration-200 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99] ${CARD_MIN_H} ${
               isSel ? 'border-primary bg-primary/[0.04] ring-1 ring-primary' : 'hover:border-ring hover:bg-accent/40'
             }`}
           >

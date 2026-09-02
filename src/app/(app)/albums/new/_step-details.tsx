@@ -4,6 +4,7 @@ import { ArrowRight, ImageIcon, Layers, Ruler } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { InlineLoader } from '@/components/loading';
+import { LUX_PRIMARY } from '@/components/brand';
 import { photoCap } from '@/lib/builder/model';
 import type { ProductOption } from '@/lib/products/catalog';
 import ProductSelect, { PageCountSelect } from './_product-select';
@@ -73,33 +74,78 @@ export default function StepDetails({
       </header>
 
       {/*
-        THREE COLUMNS at `lg`, one below it. The two choice columns share the available width
-        and the specification rail keeps its fixed track, so the rail never squeezes the
-        controls and the controls never squash the preview.
+        TWO REGIONS, NOT THREE COLUMNS — which is the same picture with a different skeleton.
+        It used to be one grid of three tracks (book | pages | rail) with the Continue button
+        floating beneath the whole thing. The two choice columns and the button they enable are
+        ONE region, so they are now nested inside one: `CONFIGURATION | SPECIFICATION`, with the
+        book and page stacks as a two-track grid inside the first.
+
+        WHY IT HAD TO BE NESTED. Left flat, the button would have been a second grid row, and a
+        row's height is set by the tallest cell in the row above — the specification rail, which
+        is far taller than three option cards. The button would have been pushed to the bottom of
+        the rail with a field of empty space above it, and the two option stacks would have
+        stretched to meet a card they have nothing to do with. Nesting makes the button's
+        position a property of the choices it belongs to.
+
+        The COLUMN WIDTHS ARE UNCHANGED: the rail keeps its fixed 290/310px track and the same
+        `lg:gap-8`, so the two option columns come out at exactly the width they had before.
+        Below `lg` everything still stacks in one column, in the same order, exactly as it did.
       */}
-      <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_290px] lg:gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_310px]">
-        {/* ── 1 · THE BOOK ─────────────────────────────────────────────── */}
-        <Column title="The book" description="A real, bound photo book. Size decides how many photographs it holds.">
-          <ProductSelect
-            products={albumProducts}
-            selectedProductId={albumProductId}
-            onSelectProduct={onSelectProduct}
-          />
-        </Column>
+      <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_290px] lg:gap-8 xl:grid-cols-[minmax(0,1fr)_310px]">
+        {/* ── CONFIGURATION — the two choices, then the commit ──────────── */}
+        <div className="min-w-0">
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* ── 1 · THE BOOK ─────────────────────────────────────────── */}
+            <Column title="The book" description="A real, bound photo book. Size decides how many photographs it holds.">
+              <ProductSelect
+                products={albumProducts}
+                selectedProductId={albumProductId}
+                onSelectProduct={onSelectProduct}
+              />
+            </Column>
 
-        {/* ── 2 · HOW MANY PAGES ───────────────────────────────────────── */}
-        <Column
-          title="How many pages?"
-          description="This fixes the album’s length and photo capacity — you arrange them freely while building."
-        >
-          <PageCountSelect
-            product={selectedProduct}
-            pageCount={pageCount}
-            onSelectPageCount={onSelectPageCount}
-          />
-        </Column>
+            {/* ── 2 · HOW MANY PAGES ───────────────────────────────────── */}
+            <Column
+              title="How many pages?"
+              description="This fixes the album’s length and photo capacity — you arrange them freely while building."
+            >
+              <PageCountSelect
+                product={selectedProduct}
+                pageCount={pageCount}
+                onSelectPageCount={onSelectPageCount}
+              />
+            </Column>
+          </div>
 
-        {/* ── 3 · SPECIFICATION RAIL ───────────────────────────────────── */}
+          {/*
+            THE COMMIT, AT THE FOOT OF THE THING IT COMMITS. It was a 240px button centred under
+            the whole page, which read as page furniture rather than as the end of this decision;
+            here it spans the two choice columns and the gap between them, so the region closes
+            with the same edges it opened with.
+
+            `w-full` inside this region is what produces that span — no width is hard-coded, so
+            it tracks the columns at every breakpoint and can never be wider than the viewport.
+            It stops at the configuration region: the specification rail is a separate column and
+            is deliberately not under the button.
+
+            PRESENTATION ONLY. `canContinue`, `creating` and `onContinue` are the wizard's,
+            untouched — the same disabled rule, the same loader, the same album-creation call.
+          */}
+          <div className="mt-8">
+            <Button
+              size="lg"
+              onClick={onContinue}
+              disabled={!canContinue || creating}
+              className={`h-14 w-full gap-2.5 text-[16px] tracking-tight sm:h-16 sm:text-[17px] ${LUX_PRIMARY}`}
+            >
+              {creating ? <InlineLoader /> : null}
+              {creating ? 'Creating…' : 'Continue'}
+              {!creating && <ArrowRight className="size-[18px]" />}
+            </Button>
+          </div>
+        </div>
+
+        {/* ── 3 · SPECIFICATION RAIL — an independent column, unchanged ─── */}
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <div className="overflow-hidden rounded-2xl border bg-card shadow-xs">
             <div className="relative aspect-[4/3] w-full bg-muted">
@@ -158,27 +204,6 @@ export default function StepDetails({
         </aside>
       </div>
 
-      {/*
-        THE COMMIT, WHERE THE DECISION IS. It used to sit in the bottom-right of a sticky footer,
-        the far corner from the page counts that enable it — so the control you were waiting for
-        was the one place you were not looking. Centred beneath the choices, it reads as the
-        conclusion of them.
-
-        Presentation only: `canContinue` and the click handler are the wizard's, unchanged, so the
-        disabled rule and the album-creation call are exactly what they were.
-      */}
-      <div className="mt-10 flex justify-center">
-        <Button
-          size="lg"
-          onClick={onContinue}
-          disabled={!canContinue || creating}
-          className="h-12 min-w-[240px] px-8 text-[15px]"
-        >
-          {creating ? <InlineLoader /> : null}
-          {creating ? 'Creating…' : 'Continue'}
-          {!creating && <ArrowRight />}
-        </Button>
-      </div>
     </div>
   );
 }
