@@ -108,7 +108,14 @@ export function PublicHeaderNav({
   return (
     <header
       data-scrolled={scrolled ? '' : undefined}
-      className="sticky top-0 z-50 border-b border-transparent transition-[background-color,border-color,backdrop-filter] duration-300 ease-glide data-[scrolled]:border-border/60 data-[scrolled]:bg-background/85 data-[scrolled]:supports-[backdrop-filter]:backdrop-blur-md"
+      /*
+        `font-heading` ON THE BAR, not on each control. Every text node inside inherits it — the
+        wordmark, the four nav links, "Explore designs", "Login" and the whole mobile sheet — so
+        the masthead has ONE typeface and a control added here later cannot quietly arrive in a
+        different one. It is the same `--font-heading` the global heading rule uses; nothing new
+        is loaded. The two exceptions below opt out explicitly, and say why.
+      */
+      className="sticky top-0 z-50 border-b border-transparent font-heading transition-[background-color,border-color,backdrop-filter] duration-300 ease-glide data-[scrolled]:border-border/60 data-[scrolled]:bg-background/85 data-[scrolled]:supports-[backdrop-filter]:backdrop-blur-md"
     >
       {/*
         ── THE ROW, AND WHY IT SCALES IN TWO STEPS ────────────────────────────────────────
@@ -138,12 +145,12 @@ export function PublicHeaderNav({
           aria-label="Malnad Stories — home"
         >
           <Image src="/logo.png" alt="" width={447} height={558} priority unoptimized className="h-8 w-auto" />
-          {/* The wordmark is brand heading typography, so it takes the heading face explicitly —
-              it is a <span> and therefore outside the element rule in globals.css. "Stories"
-              stays the small uppercase counterweight it has always been. */}
-          <span className="font-heading text-lg font-semibold leading-none text-primary lg:text-xl">
+          {/* THE WHOLE WORDMARK is the brand face — "Stories" too. It used to be pinned to the UI
+              sans as a small-caps counterweight, which made the lockup two typefaces; it keeps
+              its size, letterspacing and colour and simply joins the word above it. */}
+          <span className="text-lg font-semibold leading-none text-primary lg:text-xl">
             Malnad{' '}
-            <span className="font-ui text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
           </span>
         </Link>
 
@@ -239,7 +246,11 @@ export function PublicHeaderNav({
                   <Link
                     href={l.href}
                     aria-current={active ? 'page' : undefined}
-                    className={`flex min-h-[3.5rem] items-center font-display text-2xl tracking-tight transition-colors duration-150 ${
+                    /* No `font-display` here any more: these are the SAME four destinations as the
+                       desktop row, so they take the bar's face by inheritance rather than being
+                       the one place in the masthead set in a different typeface. Size, tracking,
+                       row height and the active colour are unchanged. */
+                    className={`flex min-h-[3.5rem] items-center text-2xl tracking-tight transition-colors duration-150 ${
                       active ? 'text-gold' : 'text-primary'
                     }`}
                   >
@@ -288,8 +299,11 @@ export function PublicHeaderNav({
                   <span className="mt-0.5 block truncate font-display text-[15px] leading-tight text-primary">
                     {identity.name}
                   </span>
+                  {/* The one thing in this bar that is DATA rather than navigation. An address is
+                      read character by character — "@", ".", a digit next to a letter — and a
+                      display face is the wrong tool for that, so it keeps the UI sans. */}
                   {identity.email && (
-                    <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+                    <span className="block truncate font-ui text-[11px] leading-tight text-muted-foreground">
                       {identity.email}
                     </span>
                   )}

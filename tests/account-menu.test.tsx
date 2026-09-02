@@ -205,12 +205,29 @@ describe('the app-context menu', () => {
 });
 
 describe('both contexts share one implementation', () => {
-  it('differ ONLY in their navigation rows', () => {
+  it('differ ONLY in their navigation rows and the public menu s typeface', () => {
     // The rows differ — and so does the sign-out row's stagger index, which counts from however
-    // many rows precede it. Both are normalised away; everything else must match exactly.
+    // many rows precede it. So does one class on the popup (see the test below). All three are
+    // normalised away; everything else must match exactly.
     const strip = (h: string) =>
-      h.replace(/<a[^>]*data-part="link-item"[\s\S]*?<\/a>/g, '').replace(/ style="[^"]*"/g, '');
+      h
+        .replace(/<a[^>]*data-part="link-item"[\s\S]*?<\/a>/g, '')
+        .replace(/ style="[^"]*"/g, '')
+        .replace(/ font-heading"/g, '"')
+        .replace(/ outline-none "/g, ' outline-none"');
     expect(strip(render('app').html)).toBe(strip(render('public').html));
+  });
+
+  it('the PUBLIC menu takes the masthead s typeface, and only the public one', () => {
+    /*
+     * The public header declares `font-heading` on the bar and every control inside inherits it.
+     * This popup is PORTALLED, so it inherits nothing and has to say so itself — and only for
+     * the masthead, whose whole navbar is one typeface. The app header and the builder were not
+     * re-typed, so their menus keep the UI sans.
+     */
+    const popup = (h: string) => /<div[^>]*data-part="popup"[^>]*>/.exec(h)?.[0] ?? '';
+    expect(popup(render('public').html)).toContain('font-heading');
+    expect(popup(render('app').html)).not.toContain('font-heading');
   });
 
   it('the trigger is a labelled button, 44x44, in both', () => {

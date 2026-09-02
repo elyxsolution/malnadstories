@@ -361,7 +361,8 @@ export default function Checkout({
 
       {/* Progress header */}
       <header className="sticky top-14 z-20 flex h-16 items-center justify-between gap-4 border-b bg-background/95 px-5 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-8">
-        <span className="hidden font-display text-[19px] font-semibold text-primary sm:block">Malnad Stories</span>
+        {/* The wordmark, in the ONE brand face. */}
+        <span className="hidden font-heading text-[21px] font-semibold text-primary sm:block">Malnad Stories</span>
         <CheckoutProgress step={step} maxIdx={maxIdx} onJump={go} />
         <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
           <Lock className="h-3.5 w-3.5 text-success" /> Secure

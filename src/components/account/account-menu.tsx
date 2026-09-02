@@ -117,7 +117,18 @@ export default function AccountMenu({
           bar and the panel so the panel reads as sitting above it.
         */}
         <Menu.Positioner side="bottom" align="end" sideOffset={10} className="z-50">
-          <Menu.Popup className="ms-account-popup w-[268px] overflow-hidden rounded-md border border-border bg-card shadow-elevated outline-none">
+          {/*
+            THE POPUP IS PORTALLED, so it inherits nothing from the header that opened it. On the
+            PUBLIC masthead — which is one typeface end to end — the menu is part of that navbar
+            and takes the same face; the app header and the builder keep the UI sans, because
+            their bars were never re-typed. The email inside stays UI sans in both (it is an
+            address, not a label).
+          */}
+          <Menu.Popup
+            className={`ms-account-popup w-[268px] overflow-hidden rounded-md border border-border bg-card shadow-elevated outline-none ${
+              context === 'public' ? 'font-heading' : ''
+            }`}
+          >
             {/*
               ── THE IDENTITY PLATE ────────────────────────────────────────────────────────
               A block of forest at the top of a warm paper card — the same pairing the command
@@ -142,8 +153,13 @@ export default function AccountMenu({
                 <span className="mt-1 block truncate font-display text-[15px] leading-tight text-primary-foreground">
                   {identity.name}
                 </span>
+                {/* The address stays in the UI sans in BOTH contexts. It is read character by
+                    character — "@", ".", a digit beside a letter — which is the one job a display
+                    face is bad at, and on the public masthead the popup around it is now set in
+                    one. The class is identical in both contexts, so the two menus still differ by
+                    exactly one thing (the popup typeface) plus their rows. */}
                 {identity.email && (
-                  <span className="block truncate text-[11px] leading-tight text-primary-foreground/50">
+                  <span className="block truncate font-ui text-[11px] leading-tight text-primary-foreground/50">
                     {identity.email}
                   </span>
                 )}

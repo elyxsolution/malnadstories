@@ -116,7 +116,9 @@ export default function Book({
               className="flex h-full w-full flex-col items-center justify-center px-4 text-center"
               style={{ background: p.cover }}
             >
-              <span className="text-[7px] uppercase tracking-[0.2em]" style={{ color: p.accent }}>
+              {/* The brand imprint on the mock cover — the brand name, so the brand face. The
+                  album TITLE below it keeps the display serif: one is us, the other is theirs. */}
+              <span className="font-heading text-[7px] uppercase tracking-[0.2em]" style={{ color: p.accent }}>
                 Malnad Stories
               </span>
               <span className="my-3 h-px w-6" style={{ background: p.accent, opacity: 0.6 }} />

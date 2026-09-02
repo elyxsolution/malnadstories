@@ -34,7 +34,8 @@ export default function SuccessScreen({
             <img src={coverUrl} alt="" className="h-full w-full object-cover" />
           ) : (
             <>
-              <span className="text-[7px] uppercase tracking-[0.2em] text-[#b89a5c]">Malnad Stories</span>
+              {/* The brand imprint on the mock cover — the brand name, so the brand face. */}
+              <span className="font-heading text-[7px] uppercase tracking-[0.2em] text-[#b89a5c]">Malnad Stories</span>
               <span className="my-2.5 h-px w-5 bg-[#b89a5c]/70" />
               <span className="font-display text-[17px] leading-tight text-[#ecd9ad]">{albumTitle}</span>
             </>

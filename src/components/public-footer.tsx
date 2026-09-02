@@ -52,10 +52,10 @@ export function PublicFooter() {
                 className="h-8 w-auto"
               />
               {/* The wordmark, in the brand heading face — the same statement the masthead makes, so
-                  the page opens and closes on one typeface. */}
+                  the page opens and closes on one typeface. The WHOLE lockup, "Stories" included. */}
               <span className="font-heading text-lg font-semibold leading-none text-primary">
                 Malnad{' '}
-                <span className="font-ui text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
+                <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
               </span>
             </Link>
             <p className="mt-4 text-sm font-light leading-relaxed text-muted-foreground">

@@ -87,7 +87,9 @@ export default function BuilderHeader({
           className="h-8 w-auto transition-transform duration-200 ease-glide group-hover:scale-105"
         />
         <span className="hidden flex-col leading-none sm:flex">
-          <span className="font-display text-[15px] font-semibold tracking-tight text-foreground">Malnad Stories</span>
+          {/* The wordmark, in the ONE brand face. "Album studio" beneath it stays the UI-sans
+              micro-label it has always been — it is a descriptor, not part of the wordmark. */}
+          <span className="font-heading text-[17px] font-semibold tracking-tight text-foreground">Malnad Stories</span>
           <span className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Album studio</span>
         </span>
       </Link>

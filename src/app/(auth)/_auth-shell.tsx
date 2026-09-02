@@ -53,7 +53,9 @@ export default function AuthShell({
               <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.2em] text-[hsl(var(--gold-pale))]">
                 Oscar Wilde
               </p>
-              <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.2em] text-white/55">
+              {/* Carries the brand name, so it carries the brand face. Size, tracking and colour
+                  are unchanged — only the typeface. */}
+              <p className="mt-1 font-heading text-[11px] font-medium uppercase tracking-[0.2em] text-white/60">
                 Malnad Stories Preservation Studio
               </p>
             </footer>

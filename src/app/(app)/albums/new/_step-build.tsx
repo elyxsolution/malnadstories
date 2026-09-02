@@ -91,18 +91,25 @@ export default function StepBuild({
 
   return (
     /*
-      TWO COLUMNS. Photographs are the work of this screen and they need the width — a grid of
-      thumbnails in a half-width column wastes both. Everything about HOW the album gets built is
-      a short menu, so it all lives in a narrow rail on the right where it stays in view beside
-      the upload area instead of sitting below it: the automated starting points, then CONTINUE,
-      which is the way onward rather than a fourth starting point.
+      TWO COLUMNS, EACH ONE A DECISION.
 
-      The main column is therefore the photographs and nothing else, and the rail reads top to
-      bottom as one decision. Below `lg` the rail drops beneath the main column and everything
-      reads in the same order it always did — photographs, then how to build.
+      LEFT is everything about the photographs — the heading, the count, the dropzone, the grid —
+      and then CONTINUE, because "I am done here, open the builder" is the end of that column's
+      thought rather than an item in the menu on the right.
+
+      RIGHT is how the album gets built for you, and its two starting points sit SIDE BY SIDE.
+      They are alternatives to each other, and a vertical stack reads as a sequence: do this,
+      then that. Two columns say "one or the other", which is what they are. It also stops the
+      pair running past the fold on a laptop.
+
+      The split is roughly 52/48 rather than an even half: the photograph grid is the only thing
+      on this screen whose height depends on content, so it takes the wider side.
+
+      Below `lg` the two columns become one and everything reads in the order it always did —
+      photographs, CONTINUE, then how to build.
     */
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_340px]">
-      {/* ── MAIN COLUMN — the photographs ──────────────────────────────── */}
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-10">
+      {/* ── LEFT COLUMN — the photographs, then CONTINUE ───────────────── */}
       <div className="min-w-0">
       {/* ── UPLOAD — compact utility strip ─────────────────────────────── */}
       <section ref={uploadAnchorRef} className="scroll-mt-28 space-y-3" aria-labelledby="upload-heading">
@@ -239,18 +246,64 @@ export default function StepBuild({
           </ul>
         )}
       </section>
+
+      {/*
+        ── CONTINUE — the manual route, and the left column's terminal action ─────────────
+        It replaced the old "Design Yourself" card, which was a fourth option dressed as the
+        other three: same shell, same statistics slot, same outline button. It is not a fourth
+        option. Auto Create and Choose Layout hand the album to something that lays it out FOR
+        you; this one just opens the builder — so it belongs under the photographs, as the end of
+        that column's thought, not in the menu of automated starting points beside it.
+
+        THE WHOLE BLOCK IS THE BUTTON. One target, and it fires the SAME `onDesignMyself` the old
+        "Open builder" button fired — handler, route and album state untouched. The green is
+        `LUX_PRIMARY`, the project's existing crafted forest CTA surface, so this wears the brand
+        green every other primary action already wears rather than a colour invented for one block.
+      */}
+      <button
+        type="button"
+        onClick={onDesignMyself}
+        disabled={busy}
+        className={`group/continue mt-6 block w-full rounded-2xl px-6 py-8 text-center transition-all duration-200 ease-glide hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-60 ${LUX_PRIMARY}`}
+      >
+        <span className="flex items-center justify-center gap-3 sm:gap-4">
+          {/* An h3, so it belongs to the central heading typography system like every other
+              title on this screen rather than being a one-off label with a hand-picked size. */}
+          <h3 className="text-[clamp(2rem,4.4vw,2.5rem)] font-semibold uppercase leading-none tracking-[0.06em]">
+            CONTINUE
+          </h3>
+          <ArrowRight className="h-7 w-7 flex-none transition-transform duration-200 ease-glide group-hover/continue:translate-x-1 motion-reduce:transition-none sm:h-8 sm:w-8" />
+        </span>
+        {/* Supporting text: says what CONTINUE actually does. Deliberately quieter — several
+            steps down in size and held off full opacity, so the word above it stays the loud
+            thing and the block still reads as one statement rather than two. */}
+        <span className="mt-2.5 block text-[15px] font-light leading-relaxed text-primary-foreground/75">
+          to edit album builder manually
+        </span>
+      </button>
       </div>
 
-      {/* ── RIGHT RAIL — the starting points, then CONTINUE ─────────────── */}
-      <aside className="min-w-0 space-y-3 lg:sticky lg:top-24 lg:self-start" aria-labelledby="build-heading">
+      {/* ── RIGHT COLUMN — the two automated starting points, side by side ── */}
+      <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start" aria-labelledby="build-heading">
         <div>
-          <h2 id="build-heading" className="font-display text-lg font-semibold tracking-tight">
+          <h2 id="build-heading" className="font-display text-xl font-semibold tracking-tight">
             How should we build it?
           </h2>
-          <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+          <p className="mt-1 max-w-md text-sm leading-relaxed text-muted-foreground">
             Pick a starting point — you can change every page afterwards in the builder.
           </p>
         </div>
+
+        {/*
+          THE PAIR. `items-stretch` is the grid default, and each card is a flex column whose
+          content block is `flex-1`, so the two buttons line up along one baseline however
+          differently the descriptions and statistics wrap. Below `sm` they stack, because two
+          of these side by side on a phone would be two cramped cards rather than a choice.
+
+          A design the customer arrived with spans BOTH columns above the pair: it is the
+          recommended answer, not a third alternative of equal weight.
+        */}
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
 
         {/*
           YOUR DESIGN — first in the rail, and the only accented card when it exists. It reuses
@@ -259,6 +312,7 @@ export default function StepBuild({
         */}
         {selectedDesign && onUseDesign && (
           <MethodCard
+            className="sm:col-span-2"
             Icon={Sparkles}
             title={selectedDesign.name}
             badge="Your design"
@@ -324,40 +378,10 @@ export default function StepBuild({
           disabled={busy || blueprints.length === 0}
         />
 
-        {/*
-          ── CONTINUE — the manual route, and the rail's terminal action ───────────────────
-          This replaces the old "Design Yourself" card, which was a fourth option dressed as the
-          other three: same shell, same statistics slot, same outline button, sitting alone in the
-          main column. It is not a fourth option. Auto Create and Choose Layout hand the album to
-          something that lays it out FOR you; this one just opens the builder — so it reads as the
-          way onward from the menu rather than another item in it.
-
-          THE WHOLE CARD IS THE BUTTON. One target, and it fires the SAME `onDesignMyself` the old
-          "Open builder" button fired — handler, route and album state untouched. The green is
-          `LUX_PRIMARY`, the project's existing crafted forest CTA surface, so this wears the brand
-          green every other primary action already wears rather than a colour invented for one card.
-        */}
-        <button
-          type="button"
-          onClick={onDesignMyself}
-          disabled={busy}
-          className={`group/continue !mt-5 block w-full rounded-2xl px-6 py-7 text-center transition-all duration-200 ease-glide hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-60 ${LUX_PRIMARY}`}
-        >
-          <span className="flex items-center justify-center gap-2.5">
-            {/* An h3, so it belongs to the central heading typography system like every other card
-                title on this screen — not a one-off label with a size hand-picked for it. */}
-            <h3 className="text-[30px] font-semibold uppercase leading-none tracking-[0.08em]">CONTINUE</h3>
-            <ArrowRight className="h-6 w-6 flex-none transition-transform duration-200 ease-glide group-hover/continue:translate-x-1 motion-reduce:transition-none" />
-          </span>
-          {/* Supporting text: says what CONTINUE actually does. Deliberately quieter — a step down
-              in size and held off full opacity, so the word above it stays the loud thing. */}
-          <span className="mt-2 block text-[13px] font-light leading-relaxed text-primary-foreground/75">
-            to edit album builder manually
-          </span>
-        </button>
+        </div>
 
         {error && (
-          <p role="alert" className="text-[13px] text-destructive">
+          <p role="alert" className="mt-3 text-[13px] text-destructive">
             {error}
           </p>
         )}
@@ -389,6 +413,7 @@ function MethodCard({
   onClick,
   disabled,
   primary = false,
+  className = '',
 }: {
   Icon: typeof ArrowRight;
   title: string;
@@ -400,8 +425,10 @@ function MethodCard({
   onClick: () => void;
   disabled?: boolean;
   primary?: boolean;
+  /** Grid placement only — the pair sit in one column each, a chosen design spans both. */
+  className?: string;
 }) {
-  const shell = `rounded-2xl border p-4 transition-all duration-200 ease-glide sm:p-5 ${
+  const shell = `rounded-2xl border p-4 transition-all duration-200 ease-glide sm:p-5 ${className} ${
     disabled ? 'opacity-60' : 'hover:-translate-y-1 hover:shadow-elevated'
   } ${primary ? 'border-primary/30 bg-primary/[0.03] ring-1 ring-primary/10' : 'bg-card'}`;
 

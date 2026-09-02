@@ -295,14 +295,30 @@ export default function Navigator({
 
           <span className="mt-1 block text-center text-[10px] font-medium tabular-nums text-muted-foreground">{i + 1}</span>
 
-          {/* Insert-after seam */}
+          {/*
+            INSERT-AFTER SEAM — and why it sits at 38px rather than 18px.
+
+            It straddles the right edge (`-right-2.5`, so half of it hangs in the 10px gutter
+            between two thumbs, which is the seam it inserts into). At `top-[18px]` its box was
+            y 8-28 and x w-10 to w+10, while the Delete control above is y 4-24 and x w-24 to
+            w-4 — a real 6x16px overlap, so the two round targets touched and the outer one
+            could swallow a click meant for the other.
+
+            `top-[38px]` (still centred by `-translate-y-1/2`) puts it at y 28-48: four clear
+            pixels below Delete, still comfortably inside the 72px thumb, and still on the seam
+            it belongs to. ONLY this control moved — Duplicate and Delete are untouched, and so
+            are the icons, the hit area, the hover reveal and `onInsertAfter`.
+
+            The geometry is fixed (144x72 thumbs, 20px controls) at every viewport, so the two
+            cannot collide again at some other width.
+          */}
           <button
             type="button"
             disabled={!canAddMore}
             onClick={() => onInsertAfter(i)}
             aria-label={`Insert page after ${i + 1}`}
             title="Insert page here"
-            className="absolute -right-2.5 top-[18px] z-10 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-all duration-150 hover:bg-studio hover:text-studio-foreground group-hover/thumb:opacity-100 disabled:pointer-events-none disabled:opacity-0"
+            className="absolute -right-2.5 top-[38px] z-10 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-all duration-150 hover:bg-studio hover:text-studio-foreground group-hover/thumb:opacity-100 disabled:pointer-events-none disabled:opacity-0"
           >
             <Plus className="h-3 w-3" />
           </button>

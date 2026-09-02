@@ -548,7 +548,8 @@ export default function CreateWizard({
             unoptimized
             className="h-7 w-auto transition-transform duration-200 group-hover:scale-105"
           />
-          <span className="hidden font-display text-[15px] font-semibold sm:inline">Malnad Stories</span>
+          {/* The wordmark, in the ONE brand face (`--font-heading`, src/lib/fonts.ts). */}
+          <span className="hidden font-heading text-[17px] font-semibold sm:inline">Malnad Stories</span>
         </Link>
 
         <WizardProgress current={step} tone="brand" className="hidden md:flex" />
