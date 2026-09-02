@@ -420,6 +420,112 @@ describe('the new auth surfaces are keyboard-usable and never fight a scroll', (
   });
 });
 
+// ── J · THE PUBLIC HEADER'S AUTH ENTRY (Phase 2 follow-up) ───────────────────────────────────
+
+describe('the public header offers Login when signed out and an account control when signed in', () => {
+  const shell = src('src/components/public-header.tsx');
+  const nav = src('src/components/public-header-nav.tsx');
+
+  it('resolves the visitor SERVER-SIDE with the existing bounded getUser — no second client', () => {
+    expect(shell).toContain("from '@/lib/supabase/server'");
+    expect(shell).toContain('getUserWithDeadline');
+    // Never the service role, never a browser client, never Drizzle, never a raw cookie read.
+    for (const bad of ['@/lib/supabase/service', 'createBrowserClient', 'SERVICE_ROLE', "from '@/db'", 'cookies()']) {
+      expect(shell).not.toContain(bad);
+    }
+    // The shell is a Server Component; only the bar it renders is client code.
+    expect(shell).not.toContain("'use client'");
+    expect(nav).toContain("'use client'");
+  });
+
+  it('hands the bar two plain values, so no public page became client-rendered', () => {
+    expect(shell).toContain('signedIn={!!user}');
+    expect(shell).toContain('loginHref={loginHref(pendingNext)}');
+    // The four public pages import the SAME path they always did — none of them changed.
+    for (const f of [
+      'src/app/page.tsx',
+      'src/app/stories/page.tsx',
+      'src/app/about/page.tsx',
+      'src/app/contact/page.tsx',
+      'src/components/public-page.tsx',
+    ]) {
+      expect(src(f)).toContain("from '@/components/public-header'");
+      expect(code(src(f))).not.toContain('signedIn');
+    }
+  });
+
+  it('draws exactly one of the two controls — never both', () => {
+    // A single ternary per surface (desktop bar, mobile sheet) is what makes that structural.
+    expect(nav).toContain('{signedIn ? <AccountIcon /> : <LoginLink href={loginHref} />}');
+    expect(nav).toContain('{signedIn ? (');
+  });
+
+  it('Login points at the EXISTING /login route and preserves a pending continuation', () => {
+    expect(nav).toContain('function LoginLink({ href }: { href: string }) {');
+    expect(nav).toContain('>\n      Login\n    </Link>');
+    // The href is computed by the shell through the ONE validator — never assembled in the bar.
+    expect(shell).toContain('loginHref');
+    expect(shell).toContain("safeNextPath(new URLSearchParams(search).get('next'))");
+    expect(shell).toContain("headers().get('x-search')");
+    // No second login route, and no second sign-in mechanism.
+    expect(code(nav)).not.toContain('signInWithPassword');
+    expect(code(nav)).not.toContain('signInWithOAuth');
+  });
+
+  it('the account control is a real, labelled 44x44 link to the EXISTING /dashboard', () => {
+    expect(nav).toContain('function AccountIcon()');
+    expect(nav).toContain('href="/dashboard"');
+    expect(nav).toContain('aria-label="Your account — go to your dashboard"');
+    expect(nav).toContain('h-11 w-11'); // 44x44 exactly
+    expect(nav).toContain('focus-visible:ring-2');
+    // A link, because it navigates — not a button with an onClick, and not a popover holding
+    // a single destination. No new dashboard route was invented.
+    expect(code(nav)).not.toMatch(/\/dashboard\/[a-z]/);
+  });
+
+  it('the mobile sheet exposes the same pair without touching the bar or the menu mechanics', () => {
+    expect(nav).toContain('Your dashboard');
+    expect(nav).toContain('min-h-[3rem]'); // full-width rows clear 44px
+    // The existing sheet behaviour is untouched: scroll lock, Escape, focus return, focus-in.
+    expect(nav).toContain("body.style.overflow = 'hidden'");
+    expect(nav).toContain("if (e.key === 'Escape')");
+    expect(nav).toContain('toggleRef.current?.focus()');
+    expect(nav).toContain("panelRef.current?.querySelector<HTMLElement>('a, button')?.focus()");
+    expect(nav).toContain('aria-modal="true"');
+  });
+
+  it('adds no touch/pointer handler that could capture a vertical scroll', () => {
+    const c = code(nav);
+    for (const bad of ['onPointerDown', 'onTouchStart', 'onTouchMove', 'setPointerCapture', 'touch-action']) {
+      expect(c).not.toContain(bad);
+    }
+    // The one scroll listener is the pre-existing passive one.
+    expect(nav).toContain("window.addEventListener('scroll', onScroll, { passive: true })");
+  });
+
+  it('adds no dependency, no gradient, no bespoke animation', () => {
+    const pkg = JSON.parse(src('package.json')) as { dependencies: Record<string, string> };
+    expect(pkg.dependencies['framer-motion']).toBeUndefined();
+    for (const bad of ['gradient', 'animate-bounce', 'transition-all duration-500']) {
+      expect(nav).not.toContain(bad);
+    }
+    // Motion is the existing system.
+    expect(nav).toContain('ease-glide');
+  });
+
+  it('the four public destinations and "Explore designs" are unchanged', () => {
+    const labels = Array.from(nav.matchAll(/label: '([^']+)'/g), (m) => m[1]);
+    expect(labels).toEqual(['Home', 'Stories', 'About', 'Contact & FAQ']);
+    expect(nav).toContain('Explore designs');
+    expect(code(nav)).not.toContain('/pricing');
+  });
+
+  it('client-side state is never the security boundary — /dashboard stays server-guarded', () => {
+    expect(code(src('src/app/(app)/layout.tsx'))).toContain('getUserWithDeadline');
+    expect(code(src('src/app/(app)/layout.tsx'))).toContain('loginHref');
+  });
+});
+
 // ── I · THINGS PHASE 2 MUST NOT HAVE TOUCHED ─────────────────────────────────────────────────
 
 describe('scope discipline', () => {

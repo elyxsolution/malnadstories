@@ -175,7 +175,12 @@ describe('The public projection is safe to serialise to an anonymous visitor', (
 });
 
 describe('Public navigation', () => {
-  const header = src('src/components/public-header.tsx');
+  /*
+   * The nav MARKUP lives in `public-header-nav.tsx` since the Phase 2 follow-up split the header
+   * into a server shell (which resolves who is looking) and this, the bar itself. The four
+   * destinations, the brand mark and the absence of Pricing are unchanged — only the file is.
+   */
+  const header = src('src/components/public-header-nav.tsx');
   const footer = src('src/components/public-footer.tsx');
 
   it('is exactly Home / Stories / About / Contact & FAQ', () => {
@@ -193,7 +198,12 @@ describe('Public navigation', () => {
 
   it('sends the brand mark to Home, never to a dashboard', () => {
     expect(header).toContain('aria-label="Malnad Stories — home"');
-    expect(code(header)).not.toContain('/dashboard');
+    // The PRIMARY NAV names four public destinations and no app route. `/dashboard` now appears
+    // once in this file — as the signed-in account control — which is a separate, deliberate
+    // entry beside "Explore designs", not a nav item.
+    const labels = Array.from(header.matchAll(/label: '([^']+)'/g), (m) => m[1]);
+    expect(labels).not.toContain('Dashboard');
+    expect(code(header)).not.toMatch(/href: '\/dashboard'/);
     expect(code(footer)).not.toContain('/dashboard');
   });
 
@@ -257,19 +267,27 @@ describe('Design tiles cannot capture a touch scroll', () => {
   });
 });
 
-describe('Phase 2 authentication was NOT implemented', () => {
-  it('the Use Design CTA states its destination contract without building the auth flow', () => {
+/*
+ * This block used to assert "Phase 2 authentication was NOT implemented" — a true statement when
+ * it was written and a superseded one now. What was WORTH pinning in it survives, restated as the
+ * current architecture: the tile still carries no auth logic of its own (the continuation is built
+ * at the boundary, not in the card), and the header still reads no session in the browser.
+ */
+describe('The public surface stays free of auth logic', () => {
+  it('the Use Design CTA states its destination and nothing about who is looking', () => {
     const tile = src('src/components/public/blueprint-tile.tsx');
     expect(tile).toMatch(/\/albums\/new\?design=/);
-    // No return-to plumbing, no auth state, no sign-in awareness in the public tile.
+    // The tile is the same for a signed-in and a signed-out visitor. The `?next=` round trip is
+    // constructed by the (app) guard when it is actually needed — never here.
     const c = code(tile);
     for (const bad of ['next=', 'returnTo', 'getUser', 'useSession', 'signIn']) expect(c).not.toContain(bad);
   });
 
-  it('the public header renders no auth state', () => {
-    const c = code(src('src/components/public-header.tsx'));
-    for (const bad of ['getUser', 'useSession', 'UserMenu', 'signOut', 'createBrowserClient']) {
+  it('the header bar itself reads no session — the state arrives as two plain props', () => {
+    const c = code(src('src/components/public-header-nav.tsx'));
+    for (const bad of ['getUser', 'useSession', 'createBrowserClient', '@/lib/supabase']) {
       expect(c).not.toContain(bad);
     }
+    expect(c).toContain('signedIn');
   });
 });

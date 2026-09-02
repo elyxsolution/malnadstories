@@ -2841,8 +2841,8 @@ visitor who lands on `/login?next=…` to that destination instead of bouncing t
 `/login` and `/signup` became **Server Components** (`page.tsx` reads and validates `searchParams`;
 `_form.tsx` is the client half) rather than using `useSearchParams`, which would have made each
 screen's rendering mode depend on a Suspense boundary. They are consequently rendered dynamically
-now; the four PUBLIC pages (`/`, `/stories`, `/about`, `/contact`) are untouched and still static
-with their Phase 1 ISR.
+now. (The four PUBLIC pages were untouched by Phase 2 itself and stayed static — the follow-up
+below is what changed that, and says why.)
 
 ### THE DESIGN ID IS UNTRUSTED INPUT — FOUR GATES
 
@@ -2874,6 +2874,53 @@ no longer available and creation continues normally.
   double click could reach the server twice. A synchronous `creatingRef` closes it, released on
   failure only — on success `albumId` is the guard. (Same reasoning as checkout's `payInFlight`.)
   Verified in the browser: a genuine double-click produced exactly one `albums` row.
+
+### THE PUBLIC HEADER'S AUTH ENTRY (Phase 2 follow-up)
+
+The masthead now says whether you are signed in: **Login** beside "Explore designs" when you are
+not, and one compact account control that goes to `/dashboard` when you are. Never both — a single
+ternary per surface, so that is structural rather than a rule someone has to remember.
+
+**The header is now TWO files.** `public-header.tsx` is a thin **Server Component** that resolves
+the visitor and renders `public-header-nav.tsx` — the bar itself, unchanged in every other respect
+and still the Client Component it always was (it owns a scroll listener and a mobile sheet).
+`signedIn` and `loginHref` reach it as a boolean and a string. **No public page changed**: the
+import path is the same, and none of them became client-rendered.
+
+- **The session is read with the EXISTING mechanism** — `createClient()` + `getUserWithDeadline`,
+  the same bounded `getUser()` the middleware and the `(app)` layout use. No service role, no
+  browser auth client, no cookie parsing, and no user data beyond *is there a validated session*.
+  For an anonymous visitor `getUser()` returns in ~1ms with **no network call** (no `sb-*` cookie
+  to validate), which is most public traffic. A timeout is treated as signed out.
+- **PRESENTATION ONLY.** It picks which of two controls is drawn. `/dashboard` is still guarded
+  server-side by `(app)/layout.tsx`; nothing here is an authorization decision.
+- **The pending continuation is preserved.** If the current URL carries a `?next=` still in
+  flight, the Login link carries it — read from the `x-search` header middleware already forwards
+  and put through the same `safeNextPath` validator, so this link cannot become an open redirect
+  and an absent value simply yields a bare `/login`. Pressing Login can never be the thing that
+  discards a chosen design.
+- **No dropdown.** There is no account popover in this project to reuse, and a menu holding one
+  destination is a click in front of the destination. The control is a real `<a>` (44×44, `User`
+  glyph — the same one `customer-shell` uses for its account row, `aria-label="Your account — go
+  to your dashboard"`), so it is focusable, announced as a link and openable in a new tab.
+- **Mobile keeps its bar and its sheet.** The account entry is a full-width row inside the existing
+  sheet rather than a second icon next to the hamburger, which would have been a redesign of the
+  bar. Scroll lock, Escape, focus return, focus-into-panel and the dialog semantics are untouched.
+
+**⚠️ THE COST, stated plainly: the pages that render this header now render per request.** `/`,
+`/stories`, `/about`, `/contact` and the `PublicPage` routes (`/faq`, `/testimonials`, `/pricing`,
+`/destinations`) moved from prerendered to dynamic, because per-visitor chrome cannot be baked into
+static HTML. **Their expensive reads are untouched and still cached** — `listActiveBlueprints`
+under `templatesActive` and `listPublished` under `cms-public`, both 300s, and their
+`export const revalidate = 300` still governs those caches. What is no longer reused is the
+finished HTML. The alternative was resolving the session in the browser, which keeps the HTML
+static and pays for it with a visible flash of the wrong control on every page load, plus a second
+auth path. If prerendering these pages ever matters more than the flash, the honest fix is
+Partial Prerendering, not a client-side session read.
+
+Tests: `tests/public-header-auth.test.tsx` (20 — both states RENDERED, plus a strict check that
+stripping the two auth controls leaves byte-identical markup) and section J of
+`tests/auth-continuation.test.ts`.
 
 ### WHAT WAS DELIBERATELY NOT TOUCHED
 
