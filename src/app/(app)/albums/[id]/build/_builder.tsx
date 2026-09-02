@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// The EXISTING logout server action — signing out of the builder is guarded, not reinvented.
+import { signOut } from '@/lib/actions/auth';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
@@ -189,6 +191,7 @@ export default function Builder({
   title,
   size,
   email,
+  identityName = null,
   productName = null,
   destination = null,
   travelDates = null,
@@ -214,6 +217,8 @@ export default function Builder({
   title: string;
   size: number;
   email: string;
+  /** The signed-in customer's display name, for the account menu. Never authorization. */
+  identityName?: string | null;
   /** Album metadata for the Album Settings hub (General + Format summary). */
   productName?: string | null;
   destination?: string | null;
@@ -349,6 +354,21 @@ export default function Builder({
   const [propsPanelOpen, setPropsPanelOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false); // customer unsaved-changes guard
+  /*
+   * WHERE THE CUSTOMER WAS TRYING TO GO. The guard used to be hard-coded to /dashboard, because
+   * "Save & exit" and the Back button were the only two ways out of the builder. The header now
+   * offers four public destinations, a cart, a checkout and a sign-out — so the destination is
+   * remembered while the dialog is open and honoured after it, instead of every route dumping
+   * the customer on the dashboard.
+   *
+   * A ref, not state, and set BEFORE the dialog opens: it is read only inside the confirm
+   * handlers, so it never needs to cause a render, and it can never be stale relative to the
+   * dialog that is showing.
+   */
+  const pendingNav = useRef<{ kind: 'route'; href: string } | { kind: 'signout' }>({
+    kind: 'route',
+    href: '/dashboard',
+  });
   const [resubmitted, setResubmitted] = useState(false); // review-mode resubmit confirmation
   /**
    * FIRST submission succeeded → offer the two things a customer wants next (checkout, or start
@@ -391,6 +411,8 @@ export default function Builder({
   const [validation, setValidation] = useState<AlbumValidationReport | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [exiting, setExiting] = useState(false);
+  /** Synchronous double-submit guard for Save & leave — see `confirmSaveAndLeave`. */
+  const exitingRef = useRef(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   /**
    * Where this spread sits in its curated layout cycle, plus the snapshot to return to. Cleared
@@ -779,6 +801,9 @@ export default function Builder({
       if (!dirtyRef.current) return; // clean → let the back proceed
       window.history.pushState(null, '', window.location.href); // re-arm the single sentinel
       setMessage(null);
+      // The destination a trapped Back resolves to is the dashboard, exactly as before the guard
+      // became destination-aware — this only states explicitly what used to be hard-coded.
+      pendingNav.current = { kind: 'route', href: '/dashboard' };
       setExitConfirmOpen(true);
     };
     window.addEventListener('popstate', onPop);
@@ -2397,33 +2422,76 @@ export default function Builder({
     onMessage: setMessage,
   });
 
-  // Save & exit (header) — never leave silently: with unsaved changes, open the guard dialog
-  // (CHANGE 4). Clean albums leave immediately.
-  const saveAndExit = () => {
-    if (api.dirty) {
-      setMessage(null); // dialog error area starts clean
+  /*
+   * ── THE ONE WAY OUT OF THE BUILDER ────────────────────────────────────────────────────────
+   *
+   * `performLeave` is the only thing in this file that actually leaves, and `requestLeave` is
+   * the only thing that decides whether it may. Every exit goes through the pair: Save & exit,
+   * the brand mark, all four account-menu destinations, Log out, the cart drawer's View cart and
+   * Checkout, and the trapped Back press. That is what makes "no navigation can silently discard
+   * unsaved work" a property of the code rather than a rule each new control has to remember.
+   *
+   * Signing out is a destination like any other here — it leaves the builder, so it is guarded
+   * like any other. It runs the EXISTING `signOut` server action; there is no second logout.
+   */
+  const leaving = useRef(false);
+  const performLeave = useCallback(
+    (nav: { kind: 'route'; href: string } | { kind: 'signout' }) => {
+      // Exactly one navigation per decision. Without this, a double-click on "Leave without
+      // saving" — or a click that lands while a save is resolving — could fire two.
+      if (leaving.current) return;
+      leaving.current = true;
+      if (nav.kind === 'signout') void signOut();
+      else router.push(nav.href);
+    },
+    [router],
+  );
+
+  const requestLeave = useCallback(
+    (nav: { kind: 'route'; href: string } | { kind: 'signout' }) => {
+      if (leaving.current) return;
+      pendingNav.current = nav;
+      if (!api.dirty) {
+        performLeave(nav);
+        return;
+      }
+      setMessage(null); // the dialog's error area starts clean
       setExitConfirmOpen(true);
-      return;
-    }
-    router.push('/dashboard');
-  };
+    },
+    [api, performLeave],
+  );
+
+  /** Header/menu/drawer entry points — thin wrappers so callers never touch the shape. */
+  const leaveTo = useCallback((href: string) => requestLeave({ kind: 'route', href }), [requestLeave]);
+  const leaveBySigningOut = useCallback(() => requestLeave({ kind: 'signout' }), [requestLeave]);
+
+  // Save & exit (header) — unchanged in behaviour, now expressed through the shared guard.
+  const saveAndExit = () => leaveTo('/dashboard');
 
   // Guard-dialog actions. Save & Leave runs the full reliable save and ONLY navigates on success
   // (CHANGE 5 — a failed save prevents exit and shows the error); Leave discards.
   const confirmSaveAndLeave = async () => {
+    // `exiting` already disables both dialog buttons; the ref closes the window between the
+    // click and that re-render, so a fast double-click cannot start two saves.
+    if (exitingRef.current) return;
+    exitingRef.current = true;
     setExiting(true);
     const ok = await save();
     if (!ok) {
+      exitingRef.current = false;
       setExiting(false);
-      return; // keep the dialog open; the error message is shown
+      return; // keep the dialog open; the error message is shown, the changes are untouched
     }
+    // SAVE → SUCCESS → NAVIGATE, in that order and never any other. `save()` resolves only once
+    // the layout is persisted and has already marked the album clean.
     setExitConfirmOpen(false);
-    router.push('/dashboard');
+    performLeave(pendingNav.current);
   };
   const confirmLeaveWithout = () => {
+    if (exitingRef.current) return;
     api.setDirty(false); // suppress the beforeunload/popstate guard for this intentional exit
     setExitConfirmOpen(false);
-    router.push('/dashboard');
+    performLeave(pendingNav.current);
   };
 
   // ── Blueprint Mode (admin) ──────────────────────────────────────────────────────
@@ -2812,9 +2880,18 @@ export default function Builder({
           dirty={api.dirty}
         />
       ) : (
-        <BuilderHeader email={email} saving={saving} exiting={exiting} onSaveExit={saveAndExit} />
+        <BuilderHeader
+          identityEmail={email}
+          identityName={identityName}
+          saving={saving}
+          exiting={exiting}
+          onSaveExit={saveAndExit}
+          onLeave={leaveTo}
+          onSignOut={leaveBySigningOut}
+        />
       )}
       <CanvasToolbar
+        onLeave={leaveTo}
         title={albumTitle}
         status={status}
         review={review}
@@ -2868,8 +2945,14 @@ export default function Builder({
             You are editing {ownerName ? <strong className="font-medium text-foreground">{ownerName}</strong> : 'a customer'}
             ’s album. Changes save to their album and are what the printed PDF will be generated from.
           </span>
+          {/* An ADMIN exit, but an exit — an administrator's unsaved corrections are worth no
+              less than a customer's, so it runs the same guard. */}
           <Link
             href={`/admin/albums/${albumId}`}
+            onClick={(e) => {
+              e.preventDefault();
+              leaveTo(`/admin/albums/${albumId}`);
+            }}
             className="ml-auto shrink-0 rounded-md px-2 py-1 font-medium text-primary underline-offset-4 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Back to admin
@@ -3857,6 +3940,7 @@ export default function Builder({
       {settingsOpen && (
         <AlbumSettings
           albumId={albumId}
+          onLeave={leaveTo}
           title={albumTitle}
           destination={destination}
           travelDates={travelDates}

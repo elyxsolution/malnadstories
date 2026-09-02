@@ -10,6 +10,7 @@ import {
   removeCartItem,
   setCartQuantity,
 } from '@/lib/cart/queries';
+import { loadCartRows, type CartRow } from '@/lib/cart/rows';
 
 /**
  * `count` is the authoritative number of DISTINCT ALBUMS in the cart after the write, read back
@@ -199,4 +200,38 @@ export async function updateCartQuantity(input: unknown): Promise<CartActionResu
   // itself must re-read so a reload and the rendered value never disagree.
   revalidateCartSurfaces();
   return { ok: true, count: await getCartCount(supabase) };
+}
+
+export type CartOverviewResult =
+  | { ok: true; rows: CartRow[]; eligibleCount: number }
+  | { ok: false; error: string };
+
+/**
+ * THE CART, FOR AN OVERLAY THAT IS NOT A PAGE.
+ *
+ * The builder's cart drawer opens over a long-lived client screen, so it cannot be handed
+ * server-rendered rows the way `/cart` is: by the time someone opens it, the cart may have
+ * changed several times. It reads on OPEN — not on mount, not on a timer, and never on a poll —
+ * so the builder pays nothing for a drawer nobody opens, and what the drawer shows is what the
+ * cart contains at the moment it is asked.
+ *
+ * It is a READ, and it adds nothing: `loadCartRows` is the cart page's own query plan, and this
+ * wrapper contributes only the two things an action must do — resolve the user from the verified
+ * JWT and hand the AUTHENTICATED client down, so RLS scopes every row to its owner. No service
+ * role, no second eligibility rule, and no price: money is computed at checkout and nowhere else.
+ */
+export async function getCartOverview(): Promise<CartOverviewResult> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  try {
+    const { rows, eligibleCount } = await loadCartRows(supabase);
+    return { ok: true, rows, eligibleCount };
+  } catch (e) {
+    console.error('[cart] overview read failed', e);
+    return { ok: false, error: 'We couldn’t load your cart just now. Please try again.' };
+  }
 }

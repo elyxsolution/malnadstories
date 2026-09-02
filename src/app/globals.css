@@ -840,3 +840,86 @@
     }
   }
 }
+@layer utilities {
+  /* ── THE CART DRAWER (components/cart/cart-drawer.tsx) ────────────────────────
+     A panel arriving from the right, and the one rule that makes it read as arriving
+     rather than appearing: the BACKDROP leads and the PANEL follows it in. Base UI
+     stamps `data-starting-style` / `data-ending-style` either side of the transition
+     and holds the element mounted for the exit, so the whole thing is CSS.
+
+     Timings are the drawer's own, not the menu's: a full-height surface travelling
+     380px needs longer than a 268px popup dropping 6px, so it enters at 320ms and
+     leaves at 220ms. Still `transform` + `opacity` only, still on --ease-premium. */
+
+  .ms-drawer-backdrop {
+    transition: opacity 260ms var(--ease-glide);
+  }
+  .ms-drawer-backdrop[data-starting-style],
+  .ms-drawer-backdrop[data-ending-style] {
+    opacity: 0;
+  }
+
+  .ms-drawer-popup {
+    transition:
+      opacity 320ms var(--ease-premium),
+      transform 320ms var(--ease-premium);
+  }
+  .ms-drawer-popup[data-starting-style] {
+    opacity: 0;
+    /* Just past its own width, so it starts genuinely off-screen and never flashes at
+       the edge on a slow first paint. The 2% is the depth cue — a surface arriving from
+       further away — and is small enough that nothing appears to zoom. */
+    transform: translateX(102%);
+  }
+  .ms-drawer-popup[data-ending-style] {
+    opacity: 0;
+    transform: translateX(102%);
+    /* Out faster than in, and accelerating: a panel you have finished with should leave. */
+    transition:
+      opacity 220ms var(--ease-glide),
+      transform 220ms var(--ease-glide);
+  }
+
+  /* The contents settle after the panel has arrived — a short, shallow lift, 30ms apart.
+     Enter only: Base UI unmounts the popup on close, so it never replays, and the exit
+     is the panel's alone rather than the rows scattering. */
+  .ms-drawer-row {
+    animation: ms-drawer-row-in 260ms var(--ease-premium) calc(180ms + var(--i, 0) * 30ms) both;
+  }
+  @keyframes ms-drawer-row-in {
+    from {
+      opacity: 0;
+      transform: translateX(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .ms-drawer-popup[data-ending-style] .ms-drawer-row {
+    animation: none;
+  }
+
+  /* REDUCED MOTION — the drawer still opens and closes, it simply stops travelling.
+     The delays are cleared explicitly for the same reason as the account menu: the
+     global rule collapses durations but not delays, and a `both`-filled row would
+     otherwise sit invisible for a beat. */
+  @media (prefers-reduced-motion: reduce) {
+    .ms-drawer-popup,
+    .ms-drawer-popup[data-starting-style],
+    .ms-drawer-popup[data-ending-style] {
+      transition: none;
+      transform: none;
+    }
+    .ms-drawer-popup[data-starting-style],
+    .ms-drawer-popup[data-ending-style] {
+      opacity: 0;
+    }
+    .ms-drawer-backdrop {
+      transition: none;
+    }
+    .ms-drawer-row {
+      animation: none;
+    }
+  }
+}

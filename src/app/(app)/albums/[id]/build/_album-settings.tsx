@@ -44,6 +44,7 @@ const SECTIONS: { key: Section; label: string; Icon: typeof Settings2; hint: str
  */
 export default function AlbumSettings({
   albumId,
+  onLeave,
   title,
   destination,
   travelDates,
@@ -64,6 +65,8 @@ export default function AlbumSettings({
   onShowGutterChange,
 }: {
   albumId: string;
+  /** Leave the builder through the canonical unsaved-changes guard. */
+  onLeave: (href: string) => void;
   title: string;
   destination: string | null;
   travelDates: string | null;
@@ -392,7 +395,24 @@ export default function AlbumSettings({
             </p>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button variant="ghost" size="sm" onClick={() => setNewAlbumConfirm(false)}>Cancel</Button>
-              <Button size="sm" className={STUDIO_PRIMARY} render={<Link href="/albums/new" />}>
+              {/*
+                LEAVES THE BUILDER, so it goes through the guard like every other exit. It stays
+                an ANCHOR — middle-click, copy-link and screen-reader semantics are worth keeping —
+                and only the left-click is intercepted.
+              */}
+              <Button
+                size="sm"
+                className={STUDIO_PRIMARY}
+                render={
+                  <Link
+                    href="/albums/new"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onLeave('/albums/new');
+                    }}
+                  />
+                }
+              >
                 New album <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </div>

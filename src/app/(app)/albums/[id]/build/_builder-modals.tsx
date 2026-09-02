@@ -318,7 +318,19 @@ export function ResubmittedDialog() {
 
 // ── exit guarding ────────────────────────────────────────────────────────────────
 
-/** The unsaved-changes guard: Save & leave (full flush) / Leave without saving / Cancel. */
+/**
+ * The unsaved-changes guard: Save & leave (full flush) / Leave without saving / Cancel.
+ *
+ * IT NO LONGER KNOWS WHERE THE CUSTOMER IS GOING, and deliberately so. The builder's guard used
+ * to lead only to the dashboard; it now leads to the dashboard, four public pages, the cart,
+ * checkout or a sign-out. The question this dialog asks is the same in every case — what should
+ * happen to your unsaved work — so it asks it once, and the destination stays with the caller.
+ *
+ * DIALOG SEMANTICS were added when it stopped being an exit-only prompt: `role="dialog"` +
+ * `aria-modal`, a title and description it points at, Escape to dismiss, and focus moved to the
+ * primary action on open. Escape and the backdrop are both refused mid-save, because there is
+ * nothing useful to do with a dismissal while the save it is waiting on is in flight.
+ */
 export function ExitGuardDialog({
   reviewMode,
   exiting,
@@ -335,22 +347,49 @@ export function ExitGuardDialog({
   onLeaveWithout: () => void;
   onCancel: () => void;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const exitingRef = useRef(exiting);
+  exitingRef.current = exiting;
+
+  useEffect(() => {
+    /*
+     * Focus the recommended action, not the destructive one — a stray Enter should save.
+     * Queried off the PANEL rather than held as a ref on the button: `Button` is the Base UI
+     * primitive, and depending on it to forward a ref is a dependency this does not need. The
+     * first button in the panel is Save & leave.
+     */
+    panelRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !exitingRef.current) {
+        e.stopPropagation(); // the builder's own Escape shortcut must not also fire
+        onCancel();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+
   return (
     <div
       className="animate-fade-in fixed inset-0 z-[130] flex items-center justify-center bg-foreground/50 p-4 backdrop-blur-sm"
       onClick={() => !exiting && onCancel()}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ms-exit-guard-title"
+        aria-describedby="ms-exit-guard-desc"
         className="animate-scale-in w-full max-w-md rounded-2xl border bg-background p-6 shadow-elevated"
         onClick={(e) => e.stopPropagation()}
       >
         <span className="grid h-10 w-10 place-items-center rounded-full bg-warning/10 text-warning">
           <MessageSquareWarning className="h-5 w-5" />
         </span>
-        <h3 className="mt-3 font-display text-lg font-semibold tracking-tight">
+        <h3 id="ms-exit-guard-title" className="mt-3 font-display text-lg font-semibold tracking-tight">
           {reviewMode ? 'Leave the review for now?' : 'Leave the builder?'}
         </h3>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+        <p id="ms-exit-guard-desc" className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
           {reviewMode ? (
             <>
               You still have requested changes to finish. Save your progress and you can pick up right where you left
@@ -363,7 +402,8 @@ export function ExitGuardDialog({
         {error && <p className="mt-3 text-[13px] text-destructive">{error}</p>}
         <div className="mt-5 flex flex-col gap-2">
           <Button onClick={onSaveAndLeave} disabled={exiting} className={STUDIO_PRIMARY}>
-            {exiting ? <InlineLoader /> : <Save className="h-4 w-4" />} Save &amp; leave
+            {exiting ? <InlineLoader /> : <Save className="h-4 w-4" />}
+            {exiting ? 'Saving…' : 'Save & leave'}
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={onLeaveWithout} disabled={exiting}>

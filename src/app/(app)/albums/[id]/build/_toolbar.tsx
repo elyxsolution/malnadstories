@@ -38,6 +38,7 @@ export default function CanvasToolbar({
   onSave,
   saving,
   onSubmit,
+  onLeave,
   submitting,
   adminEditing = false,
   albumId,
@@ -76,6 +77,8 @@ export default function CanvasToolbar({
   onSave: () => void;
   saving: boolean;
   onSubmit: () => void;
+  /** Leave the builder through the canonical unsaved-changes guard. */
+  onLeave: (href: string) => void;
   submitting: boolean;
   /**
    * An ADMINISTRATOR is editing a customer's album. Hides the two CUSTOMER terminal actions —
@@ -288,7 +291,22 @@ export default function CanvasToolbar({
                 {submitting ? <InlineLoader /> : <Send />} <span className="hidden sm:inline">Resubmit album</span><span className="sm:hidden">Resubmit</span>
               </Button>
             ) : status === 'submitted' ? (
-              <Button size="sm" render={<Link href={`/checkout/${albumId}`} />} className={STUDIO_PRIMARY}>
+              /* LEAVES THE BUILDER, so it goes through the guard like every other exit. It stays an
+                 ANCHOR — middle-click, copy-link and screen-reader semantics are worth keeping —
+                 and only the left-click is intercepted. */
+              <Button
+                size="sm"
+                render={
+                  <Link
+                    href={`/checkout/${albumId}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onLeave(`/checkout/${albumId}`);
+                    }}
+                  />
+                }
+                className={STUDIO_PRIMARY}
+              >
                 <ShoppingCart /> Checkout
               </Button>
             ) : (

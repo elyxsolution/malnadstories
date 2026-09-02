@@ -7,7 +7,6 @@ import { AlertTriangle, Check, Minus, Plus, ReceiptText, ShoppingCart, Trash2, X
 
 import Book, { paletteFor } from '@/components/book';
 import { albumCoverFace, albumCoverSpine } from '@/components/album-cover';
-import type { CoverConfig } from '@/lib/builder/cover';
 import { Button } from '@/components/ui/button';
 import { InlineLoader } from '@/components/loading';
 import { LUX_PRIMARY } from '@/components/brand';
@@ -18,19 +17,13 @@ import { removeFromCart, updateCartQuantity } from '@/lib/actions/cart';
 /** Mirrors `CreateOrderSchema.copies` and the `cart_items` CHECK — never a local invention. */
 const MAX_QUANTITY = 10;
 
-export type CartRow = {
-  albumId: string;
-  title: string;
-  size: number;
-  /** `submitted` and not already ordered — i.e. what `createOrder` would accept. */
-  eligible: boolean;
-  subtitle: string | null;
-  quantity: number;
-  /** Already normalized server-side; `null` = this album has no cover design. */
-  cover: CoverConfig | null;
-  /** The album's paid order, when it has one. Its presence is what makes a row read-only. */
-  order: { orderId: string; status: string } | null;
-};
+/*
+ * The row shape moved to `lib/cart/rows.ts`, beside the query that produces it — the builder's
+ * cart drawer renders the same rows and cannot import a type out of a client component that
+ * belongs to the cart page. Re-exported here so every existing importer is unaffected.
+ */
+export type { CartRow } from '@/lib/cart/rows';
+import type { CartRow } from '@/lib/cart/rows';
 
 /**
  * The cart's interactive rows.

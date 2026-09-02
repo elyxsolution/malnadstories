@@ -467,6 +467,7 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         title={album.title}
         size={album.size}
         email={user?.email ?? ''}
+        identityName={(user?.user_metadata?.name as string | undefined) ?? null}
         productName={album.product_name}
         destination={album.destination}
         travelDates={album.travel_dates}

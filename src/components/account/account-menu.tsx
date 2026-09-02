@@ -1,5 +1,6 @@
 'use client';
 
+import type * as React from 'react';
 import Link from 'next/link';
 import { Menu } from '@base-ui/react/menu';
 import { ChevronRight, LogOut, User } from 'lucide-react';
@@ -30,6 +31,17 @@ import { accountMenuLinks, type AccountContext } from './account-menu-model';
  * those two attributes in `globals.css` (`.ms-account-*`), using the project's own
  * `--ease-premium` / `--ease-glide` and honouring `prefers-reduced-motion` explicitly.
  *
+ * ── INTERPOSING ON NAVIGATION (`onNavigate` / `onSignOut`) ─────────────────────────────────
+ * Both are OPTIONAL and both default to nothing, so every existing surface behaves exactly as
+ * before: the rows are ordinary anchors and Log out is an ordinary form submit.
+ *
+ * They exist for ONE caller — the album builder, which holds unsaved work and may not let any
+ * control leave the page without asking first. Returning `true` means "I have taken this over";
+ * the anchor's navigation and the form's submit are then prevented, and the builder's canonical
+ * unsaved-changes guard decides what happens. That is what keeps this the ONLY account menu:
+ * the builder gets its guard without a second copy of the identity block, the destinations, the
+ * hover treatment or the motion — and every other surface pays nothing for it.
+ *
  * ── WHAT IT KNOWS ABOUT THE USER ───────────────────────────────────────────────────────────
  * A name and an email, resolved SERVER-SIDE by whichever layout already holds the authenticated
  * user (`AccountIdentity`). No session, no id, no token, no client-side auth read, and no extra
@@ -39,9 +51,22 @@ import { accountMenuLinks, type AccountContext } from './account-menu-model';
 export default function AccountMenu({
   identity,
   context,
+  tone = 'brand',
+  onNavigate,
+  onSignOut,
 }: {
   identity: AccountIdentity;
   context: AccountContext;
+  /**
+   * Which accent the trigger's focus ring and open state wear. `studio` is the album builder's
+   * own interaction green (`--studio-bright`), which every other control in that header already
+   * uses; `brand` is the forest ring the rest of the app uses. Presentation only.
+   */
+  tone?: 'brand' | 'studio';
+  /** Return `true` to take over a destination — see the note above. */
+  onNavigate?: (href: string) => boolean;
+  /** Return `true` to take over signing out. */
+  onSignOut?: () => boolean;
 }) {
   const links = accountMenuLinks(context);
   const initial = accountInitial(identity);
@@ -59,7 +84,11 @@ export default function AccountMenu({
       */}
       <Menu.Trigger
         aria-label={`Account — ${identity.name}`}
-        className="ms-account-trigger grid h-11 w-11 place-items-center rounded-full border border-border bg-card text-primary outline-none transition-[background-color,border-color,transform] duration-150 ease-glide hover:border-primary/40 hover:bg-secondary active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background aria-expanded:border-primary/45 aria-expanded:bg-secondary"
+        className={`ms-account-trigger grid h-11 w-11 place-items-center rounded-full border border-border bg-card text-primary outline-none transition-[background-color,border-color,transform] duration-150 ease-glide hover:border-primary/40 hover:bg-secondary active:scale-[0.97] aria-expanded:border-primary/45 aria-expanded:bg-secondary ${
+          tone === 'studio'
+            ? 'focus-visible:ring-2 focus-visible:ring-studio-bright'
+            : 'focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background'
+        }`}
       >
         <User className="ms-account-trigger-icon h-[18px] w-[18px]" aria-hidden />
       </Menu.Trigger>
@@ -116,6 +145,15 @@ export default function AccountMenu({
                   key={link.href}
                   closeOnClick
                   render={<Link href={link.href} />}
+                  /*
+                    The host may take the destination over (the builder does, to run its
+                    unsaved-changes guard). Preventing the default stops the anchor navigating;
+                    `closeOnClick` still dismisses the menu, so the guard's dialog is never
+                    opened underneath an open menu.
+                  */
+                  onClick={(event: React.MouseEvent) => {
+                    if (onNavigate?.(link.href)) event.preventDefault();
+                  }}
                   style={{ ['--i' as string]: i }}
                   className="ms-account-row group/row flex select-none items-center gap-3 rounded-sm px-2.5 py-2 text-[13px] leading-none text-foreground outline-none transition-colors duration-150 ease-glide data-[highlighted]:bg-secondary"
                 >
@@ -150,7 +188,17 @@ export default function AccountMenu({
               Set apart by the rule above and by weight, never by alarm colour: signing out is
               routine, not destructive.
             */}
-            <form action={signOut} className="p-1.5">
+            {/*
+              Signing out is leaving, so the host may take it over too — same contract, same
+              reason. Untouched when it does not: the form still submits the existing action.
+            */}
+            <form
+              action={signOut}
+              onSubmit={(event) => {
+                if (onSignOut?.()) event.preventDefault();
+              }}
+              className="p-1.5"
+            >
               <Menu.Item
                 closeOnClick
                 style={{ ['--i' as string]: links.length }}
