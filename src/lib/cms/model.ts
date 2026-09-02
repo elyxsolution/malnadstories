@@ -52,7 +52,13 @@ export const statusChip = (v: string): string =>
 export type MetaField = {
   key: string;
   label: string;
-  kind: 'text' | 'textarea' | 'number' | 'boolean';
+  /**
+   * `blueprints` is an ENTITY-REFERENCE field (Phase 1): an ordered list of design ids stored
+   * under `metadata[key]`. It is a generic field KIND rather than a homepage-only special case,
+   * so any future content type that curates designs declares it the same way and gets the same
+   * picker — the editor branches on the kind, never on the content type.
+   */
+  kind: 'text' | 'textarea' | 'number' | 'boolean' | 'blueprints';
   placeholder?: string;
   min?: number;
   max?: number;
@@ -116,9 +122,12 @@ export const TYPE_CONFIG: Record<ContentType, TypeConfig> = {
       { key: 'heading', label: 'Heading', kind: 'text' },
       { key: 'subheading', label: 'Subheading', kind: 'text' },
       { key: 'cta_label', label: 'CTA label', kind: 'text' },
-      { key: 'cta_link', label: 'CTA link', kind: 'text', placeholder: '/signup' },
+      { key: 'cta_link', label: 'CTA link', kind: 'text', placeholder: '/stories' },
+      // The curated designs this section shows, in the order chosen here (Phase 1).
+      { key: 'blueprintIds', label: 'Designs', kind: 'blueprints' },
     ],
-    blurb: 'A homepage content block. Stored and managed only (rendered later).',
+    blurb:
+      'A homepage content block. Publish one with the slug "home-featured-designs" to control the curated design shelf on the home page.',
   },
   announcement: {
     titleLabel: 'Title',

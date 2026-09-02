@@ -6,6 +6,7 @@ import { ensureCartItem } from '@/lib/cart/queries';
 import { SaveLayoutSchema, PhotoEditSchema, SelectCoverSchema, CoverDesignSchema, ApplyBlueprintSchema } from '@/lib/validations';
 import { PAGE_COST, type LayoutTemplate } from '@/lib/builder/model';
 import { applyBlueprint, shuffleIds } from '@/lib/builder/blueprint';
+import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
 import { selectAutoBlueprint } from '@/lib/builder/blueprint-select';
 import { getActiveBlueprint, listActiveBlueprints } from '@/lib/templates/catalog';
 import { isEditingLocked } from '@/lib/orders/album-lock';
@@ -451,6 +452,31 @@ async function applyBlueprintById(
     })),
   });
   if (!res.ok) return { ok: false, error: res.error };
+
+  /*
+   * THE BLUEPRINT'S COVER TRAVELS WITH IT — AS A SNAPSHOT (Phase 0).
+   *
+   * Choosing a blueprint is choosing a complete design, cover included; a customer who picks a
+   * design and then finds the default green cover on the front has not received what they chose.
+   * This is the moment they choose it (the creation wizard applies the blueprint AFTER the album
+   * row exists), so this is where the cover is copied.
+   *
+   * SNAPSHOT, NEVER A REFERENCE. `applyCoverTemplateToAlbum` deep-clones and clears the photo
+   * slots — the same function, and the same semantics, the cover-design catalog already used. The
+   * album ends up owning an independent `cover_config`, so a later admin edit to this blueprint
+   * cannot reach back and change an album that has already been created, ordered or printed.
+   *
+   * BEST-EFFORT, exactly like the creation path's cover write: the layout has already been saved
+   * successfully, and losing that over a cover copy would be a far worse outcome than a cover the
+   * customer can re-pick in the builder.
+   */
+  if (bp.blueprint.cover) {
+    const { error: coverErr } = await supabase
+      .from('albums')
+      .update({ cover_config: applyCoverTemplateToAlbum(bp.blueprint.cover) })
+      .eq('id', albumId);
+    if (coverErr) console.error('[blueprint] cover snapshot failed (layout saved):', coverErr.message);
+  }
 
   const placed = blocks.reduce(
     (s, b) => s + b.photoIds.filter(Boolean).length + b.overlays.filter((o) => o.photoId).length,

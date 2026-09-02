@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 import { LoginSchema } from '@/lib/validations';
 import { checkLimit, clientIp } from '@/lib/security/guard';
 import { captureException } from '@/lib/observability/capture';
+import { resolveNextPath } from '@/lib/auth/next';
 
 const REMEMBER_MAX_AGE = 400 * 24 * 60 * 60; // ~400 days (browser cap)
 const cookieDefaults = {
@@ -104,7 +105,17 @@ export async function signIn(
     return { error: 'Invalid email or password' };
   }
 
-  redirect('/dashboard');
+  /*
+   * CONTINUATION (Phase 2). The form carries the destination the customer was trying to reach —
+   * for the public design flow that is `/albums/new?design=<id>`, so the design they chose
+   * before signing in is still the design they land on. `resolveNextPath` is the SAME
+   * open-redirect validator /auth/callback uses, so an attacker-supplied absolute or
+   * protocol-relative URL silently becomes /dashboard rather than leaving the site.
+   *
+   * The value is only ever a DESTINATION. Nothing about the design is trusted from it: the id
+   * inside the path is re-resolved against the active catalog by the page it lands on.
+   */
+  redirect(resolveNextPath(String(formData.get('next') ?? '')));
 }
 
 export async function signOut() {

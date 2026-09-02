@@ -2,17 +2,28 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { validateName } from '@/lib/auth/policy';
+import { resolveNextPath } from '@/lib/auth/next';
 
-// Only allow same-site, single-slash relative paths as the post-auth redirect target
-// (prevents open redirects via ?next=//evil.com, ?next=https://evil.com, backslashes…).
-function safeNext(raw: string | null): string {
-  return raw && /^\/[^/\\]/.test(raw) ? raw : '/dashboard';
-}
+/*
+ * THE POST-AUTH DESTINATION.
+ *
+ * The open-redirect rule that used to live here as a local `safeNext` now lives in
+ * `lib/auth/next.ts`. Phase 2 gave four more callers the same question (the login form, the
+ * signup form, the Google entry, the app layout's guard), and five near-identical regexes is
+ * how an open redirect eventually gets shipped. The BEHAVIOUR is unchanged: a single-slash
+ * relative path is honoured, everything else becomes /dashboard.
+ *
+ * THIS IS ALSO THE BLUEPRINT CONTINUATION POINT. A visitor who pressed "Use this design" while
+ * signed out arrives here with `next=/albums/new?design=<id>` after verifying their email or
+ * returning from Google, and lands on the design they chose — the id having travelled in the
+ * URL and never in any store. The id itself means nothing until `/albums/new` re-resolves it
+ * against the active catalog server-side.
+ */
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = safeNext(searchParams.get('next'));
+  const next = resolveNextPath(searchParams.get('next'));
 
   if (code) {
     const cookieStore = cookies();
@@ -62,5 +73,16 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
+  /*
+   * CALLBACK FAILURE — a missing/expired/replayed code, or a failed exchange.
+   *
+   * The customer is returned to sign-in with the existing `error=auth_callback_failed` marker
+   * AND their intended destination intact, so retrying the sign-in still lands them on the
+   * design they picked rather than dropping them on the dashboard. `next` is already validated
+   * above, so re-emitting it cannot smuggle an off-site redirect through the error path.
+   */
+  const failed = new URL('/login', origin);
+  failed.searchParams.set('error', 'auth_callback_failed');
+  if (next !== '/dashboard') failed.searchParams.set('next', next);
+  return NextResponse.redirect(failed);
 }

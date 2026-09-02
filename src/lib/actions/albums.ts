@@ -13,6 +13,8 @@ import { toPdfKind } from '@/lib/pdf/kind';
 import { getActiveCoverTemplateConfig, getDefaultCoverTemplateConfig } from '@/lib/cover-templates/catalog';
 import { applyCoverTemplateToAlbum } from '@/lib/cover-templates/model';
 import { getActiveProduct, getDefaultProduct } from '@/lib/products/catalog';
+import { getActiveBlueprint, listActiveBlueprints } from '@/lib/templates/catalog';
+import { blueprintsForPageCount } from '@/lib/builder/blueprint-select';
 import { deriveAlbumTitle } from '@/lib/albums/title';
 import type { CoverConfig } from '@/lib/builder/cover';
 
@@ -89,16 +91,31 @@ async function insertAlbumForUser(
     return { ok: false, error: 'Please choose an album and page count.' };
   }
 
-  // Cover source resolution. Mutually-exclusive paths, in priority order:
-  //   1. coverDesignTemplateId → copy the builder-JSON template's CoverConfig into the album
-  //      (fully editable; photoIds nulled by applyCoverTemplateToAlbum). cover_template_id stays null.
-  //   2. coverTemplateId → legacy uploaded-PNG cover artwork; must be an ACTIVE row.
-  //   3. neither → THE admin default cover template (0052), applied exactly as path 1 —
-  //      same catalog, same active + config-validity gates, same clone. The creation flow no
-  //      longer asks the customer to choose; they change it freely in the builder.
-  //   4. neither, and no default set → a blank custom cover (the pre-0052 behaviour, unchanged).
+  /*
+   * Cover source resolution. Mutually-exclusive paths, in priority order:
+   *   1. blueprintId → THE CURRENT PATH (Phase 0). A Blueprint is the single design entity, so
+   *      choosing one chooses its cover too; `blueprint.cover` is SNAPSHOTTED into the album.
+   *   2. coverDesignTemplateId → LEGACY (0040). Same snapshot mechanics, retired as a product.
+   *   3. coverTemplateId → legacy uploaded-PNG cover artwork; must be an ACTIVE row.
+   *   4. none → the DEFAULT design's cover: the default Blueprint for this page count (0045)
+   *      first, then the legacy default cover template (0052). Both are applied exactly as path 1
+   *      — same clone, same photo-stripping — so the customer always starts on a real design and
+   *      changes it freely in the builder.
+   *   5. none, and no default anywhere → a blank custom cover (the pre-0052 behaviour, unchanged).
+   *
+   * EVERY path produces an INDEPENDENT `cover_config` on the album. Nothing here stores a
+   * reference, so editing a blueprint (or a legacy template) later can never alter an album that
+   * already exists — the guarantee orders, invoices and printed books depend on.
+   */
   let appliedCoverConfig: CoverConfig | null = null;
-  if (data.coverDesignTemplateId) {
+  if (data.blueprintId) {
+    // Service-role catalog read, re-checking active + blueprint-validity, so a forged or retired
+    // id cannot be applied. A blueprint with no cover of its own falls through to the default
+    // below rather than failing: its LAYOUT is still perfectly applicable.
+    const bp = await getActiveBlueprint(data.blueprintId);
+    if (!bp) return { ok: false, error: 'That design is unavailable. Please choose another.' };
+    if (bp.blueprint.cover) appliedCoverConfig = applyCoverTemplateToAlbum(bp.blueprint.cover);
+  } else if (data.coverDesignTemplateId) {
     // Read via the service-role catalog (validates + re-checks active) so a forged/inactive id
     // can't be applied; the config is deep-cloned with photo slots cleared.
     const tplConfig = await getActiveCoverTemplateConfig(data.coverDesignTemplateId);
@@ -113,12 +130,44 @@ async function insertAlbumForUser(
       .eq('active', true)
       .maybeSingle();
     if (!cover) return { ok: false, error: 'That cover design is unavailable. Please choose another.' };
-  } else {
-    // No cover was requested — apply THE admin default, through the very same catalog and gates
-    // as path 1. Best-effort by design: a missing/inactive/invalid default resolves to null and
-    // the album starts blank, because creation must never fail over a cover nobody chose.
-    const fallback = await getDefaultCoverTemplateConfig();
-    if (fallback) appliedCoverConfig = applyCoverTemplateToAlbum(fallback.config);
+  }
+
+  /*
+   * NO DESIGN CHOSEN → THE DEFAULT DESIGN'S COVER.
+   *
+   * Blueprint first: 0045 already gives every page count exactly ONE admin-chosen default
+   * blueprint (a partial unique index enforces it), and that is the explicit default-design
+   * concept this architecture should use — not a second, separately-managed default living in a
+   * catalog whose admin UI has been retired.
+   *
+   * The legacy cover-design default (0052) remains as the fallback beneath it, deliberately
+   * untouched: existing behaviour for anyone who set one must not change just because a new
+   * source was added above it. Both are BEST-EFFORT — a missing, inactive or cover-less default
+   * resolves to null and the album simply starts blank, because creation must never fail over a
+   * cover nobody chose.
+   *
+   * `?? undefined` reaches this block only when nothing above set a cover, which includes the
+   * blueprint path when the chosen blueprint has no cover of its own.
+   */
+  if (!appliedCoverConfig) {
+    /*
+     * THE EXPLICIT DEFAULT ONLY — `find(isDefault)`, deliberately not `selectAutoBlueprint`.
+     *
+     * That helper exists for Auto Create, where SOMETHING must be chosen, so when no default is
+     * set it falls back to the closest-capacity blueprint. That is the right rule there and the
+     * wrong rule here: silently dressing every new album in whichever design happened to sort
+     * first is inventing a default nobody configured. If an admin has not marked a default for
+     * this page count, the correct answer is "no blueprint default", and we fall through.
+     */
+    const defaultBlueprint = blueprintsForPageCount(await listActiveBlueprints(), pageCount).find(
+      (b) => b.isDefault,
+    );
+    if (defaultBlueprint?.blueprint.cover) {
+      appliedCoverConfig = applyCoverTemplateToAlbum(defaultBlueprint.blueprint.cover);
+    } else {
+      const fallback = await getDefaultCoverTemplateConfig();
+      if (fallback) appliedCoverConfig = applyCoverTemplateToAlbum(fallback.config);
+    }
   }
 
   /**

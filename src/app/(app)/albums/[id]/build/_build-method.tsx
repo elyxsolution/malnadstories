@@ -4,6 +4,7 @@ import { Dices, LayoutTemplate, Sparkles, X, ImagePlus, Wand2, Shuffle, ArrowRig
 import { Button } from '@/components/ui/button';
 import { STUDIO_PRIMARY } from './_ui';
 import type { Blueprint } from '@/lib/builder/blueprint';
+import type { CoverConfig } from '@/lib/builder/cover';
 
 /** A matching active blueprint, with its config for client-side apply inside the builder. */
 export type BuilderBlueprint = {
@@ -20,6 +21,8 @@ export type BuilderBlueprint = {
   isDefault: boolean;
   isNew: boolean;
   breakdown: { label: string; count: number }[];
+  /** The design's own front cover (Phase 0) — how a blueprint is presented. */
+  cover: CoverConfig | null;
   thumbUrl: string | null;
   blueprint: Blueprint;
 };

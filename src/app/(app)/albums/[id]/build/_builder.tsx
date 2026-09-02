@@ -18,7 +18,7 @@ import {
   Wand2,
   ChevronLeft,
   ChevronRight,
-  BookImage,
+
   Eye,
   ShieldCheck,
   AlertTriangle,
@@ -59,7 +59,6 @@ import CoverCanvas from './_cover-canvas';
 import CoverContextBar from './_cover-bar';
 import { useCover } from './_use-cover';
 import { CoverSpread } from './_cover-render';
-import CoverTemplatesPanel, { type BuilderCoverTemplate } from './_panel-cover-templates';
 import StickersPanel from './_panel-stickers';
 import { TextInspector, StickerInspector, QrInspector, PhotoAdjustInspector } from './_element-inspectors';
 import PropertiesPanel from './_properties-panel';
@@ -117,7 +116,7 @@ import { clampRect, EDIT_BOUNDS, PASTEBOARD_PCT } from '@/lib/builder/edit-bound
 import { useBuilderDimensions } from './_dimensions';
 import { autoAlignBlock, autoAlignCover } from '@/lib/builder/auto-align';
 import { applyBlueprint } from '@/lib/builder/blueprint';
-import { coverPlacementIds, isCustomCover, type CoverConfig } from '@/lib/builder/cover';
+import { coverPlacementIds, type CoverConfig } from '@/lib/builder/cover';
 import { freeTexts, placementCounts, resolveFrameEdit } from '@/lib/builder/model';
 import { COVER_SIDE_LABEL, isPermanentRole, type CoverSide } from '@/lib/builder/cover-objects';
 import { type StickerCategory } from '@/lib/stickers';
@@ -162,14 +161,22 @@ const ZOOM_STEP_PCT = 15;
 
 type LayoutKind = 'build' | 'fill' | 'suggest';
 
-type RailTab = 'images' | 'layouts' | 'templates' | 'text' | 'stickers' | 'backgrounds' | 'qr' | 'quality';
-// 'layouts' is content-page only; 'templates' (cover designs) is cover-only. The rail is filtered
-// per mode below so each shows only its relevant tools. 'quality' (Phase 7) is available in both,
-// because a cover has quality problems too.
+type RailTab = 'images' | 'layouts' | 'text' | 'stickers' | 'backgrounds' | 'qr' | 'quality';
+// 'layouts' is content-page only. The rail is filtered per mode below so each shows only its
+// relevant tools. 'quality' (Phase 7) is available in both, because a cover has quality problems
+// too.
+//
+// PHASE 0 removed the cover-only 'templates' tab. It held the two galleries of the two retired
+// design products — the legacy PNG "Cover artwork" catalog (0023) and the "Cover templates"
+// cover-DESIGN catalog (0040) — and a browse-and-apply gallery is precisely the customer-facing
+// face of a product that no longer exists. A cover now arrives with the BLUEPRINT the customer
+// chose, and is edited from here with the same Backdrop / Text / Stickers / QR tools as any other
+// surface. Nothing about rendering changed: an album that already carries legacy artwork still
+// resolves and draws it exactly as before (see lib/albums/cover.ts) — it simply can no longer be
+// re-picked from a catalog that is no longer a product.
 const RAIL: { key: RailTab; label: string; Icon: typeof Images }[] = [
   { key: 'images', label: 'Images', Icon: Images },
   { key: 'layouts', label: 'Layouts', Icon: LayoutTemplateIcon },
-  { key: 'templates', label: 'Templates', Icon: BookImage },
   { key: 'text', label: 'Text', Icon: TypeIcon },
   { key: 'stickers', label: 'Stickers', Icon: Sticker },
   { key: 'backgrounds', label: 'Backdrop', Icon: Palette },
@@ -195,7 +202,6 @@ export default function Builder({
   initialReview,
   initialRenderReadiness = null,
   layoutTemplates = [],
-  coverTemplates = [],
   blueprints = [],
   blueprintDraftOf = null,
   blueprintMeta = null,
@@ -229,7 +235,6 @@ export default function Builder({
   initialRenderReadiness?: RenderReadinessReport | null;
   layoutTemplates?: ActiveTemplate[];
   /** Active cover-design templates (Task 2) — applied into cover_config, fully editable after. */
-  coverTemplates?: BuilderCoverTemplate[];
   /** Active whole-album blueprints for THIS album size (0043) — the "Build it for me" workflow. */
   blueprints?: BuilderBlueprint[];
   /** When set, this album is a blueprint-editing draft (0046) — the builder enters Blueprint Mode. */
@@ -276,7 +281,21 @@ export default function Builder({
 
   const [status, setStatus] = useState(initialStatus);
   const [review, setReview] = useState(initialReview);
-  const [coverId, setCoverId] = useState<string | null>(initialCoverId);
+  /*
+   * LEGACY COVER ARTWORK — READ-ONLY, AND DELIBERATELY STILL HERE.
+   *
+   * `albums.cover_template_id` (0023) is how an album created before Phase 0 names its uploaded
+   * PNG cover artwork, and `resolveCoverImageKeys` still resolves and renders it on the shelf, in
+   * this builder, at checkout and in both PDFs. So the value must survive an edit: `saveCoverDesign`
+   * writes it back unchanged on every save, and dropping it here would silently blank the cover of
+   * every album that has one.
+   *
+   * There is no SETTER any more, which is the whole of "Cover Artwork is no longer a product": the
+   * gallery that used to assign one is gone, so nothing can pick a NEW artwork cover. An album that
+   * already has one keeps it, for ever, unless the customer chooses a photo or a background —
+   * which outranks it in the canonical chain exactly as it always did.
+   */
+  const [coverId] = useState<string | null>(initialCoverId);
   const [albumTitle, setAlbumTitle] = useState(title);
   const coverSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -782,7 +801,6 @@ export default function Builder({
       setCoverFocused(cf);
       let rt: RailTab = s.railTab && RAIL.some((r) => r.key === s.railTab) ? s.railTab : 'images';
       if (cf && rt === 'layouts') rt = 'images'; // layouts is content-only
-      if (!cf && rt === 'templates') rt = 'images'; // templates is cover-only
       setRailTab(rt);
       if (typeof s.current === 'number' && Number.isFinite(s.current)) {
         setCurrent(Math.min(Math.max(0, Math.floor(s.current)), Math.max(0, api.blocks.length - 1)));
@@ -933,13 +951,6 @@ export default function Builder({
     onTitleChange: setAlbumTitle,
   });
   const coverConfig = cover.config;
-
-  /** Choose the base cover artwork (an admin template) — the one cover write that isn't an object. */
-  const setCoverTemplate = (id: string | null, config?: Partial<CoverConfig>) => {
-    setCoverId(id);
-    if (config) cover.update(config);
-    else persistCover({ title: albumTitle, coverId: id, config: cover.config });
-  };
 
   /**
    * LIVE MIRRORS of the two state containers, for the adjustment dispatcher below.
@@ -2014,7 +2025,9 @@ export default function Builder({
   const focusCoverForEditing = () => {
     cover.setSide('front');
     setCoverFocused(true);
-    setRailTab((t) => (coverStarted ? (t === 'layouts' ? 'images' : t) : 'templates'));
+    // Cover editing starts on the Backdrop tools now that the retired cover-design gallery is
+    // gone: 'Backdrop' is where an undesigned cover is actually given its look.
+    setRailTab((t) => (coverStarted ? (t === 'layouts' ? 'images' : t) : 'backgrounds'));
   };
 
   // Review-card navigation (CHANGE 5) — reuse the builder's existing view state to guide the
@@ -2141,7 +2154,7 @@ export default function Builder({
   const focusBlock = (i: number) => {
     setCoverFocused(false);
     cover.setSelection(NO_SELECTION);
-    setRailTab((t) => (t === 'templates' ? 'images' : t)); // templates is cover-only
+
     setCurrent(i);
   };
   const goPrev = () => {
@@ -2420,6 +2433,13 @@ export default function Builder({
     albumId,
     api,
     serializeBlocks: serializeForSave,
+    // The SAME cover accessors the customer save controller uses, so Blueprint Mode persists the
+    // cover through one implementation rather than a parallel one (Phase 0 — the blueprint owns
+    // its cover, and the draft album is where that cover is authored).
+    flushCoverDebounce: () => {
+      if (coverSaveTimer.current) clearTimeout(coverSaveTimer.current);
+    },
+    getCover: () => ({ title: albumTitle, coverId, config: coverConfig }),
     onMessage: setMessage,
     onSaved: () => setLastSaved(Date.now()),
   });
@@ -2785,6 +2805,9 @@ export default function Builder({
           size={size}
           capacity={totalSlots}
           recommended={totalSlots}
+          // The SAME "has this cover been designed?" signal the customer rail uses — not a second
+          // definition — so the header can never claim a cover the blueprint will not save.
+          coverDesigned={coverStarted}
           lastSaved={lastSaved}
           dirty={api.dirty}
         />
@@ -2892,7 +2915,7 @@ export default function Builder({
             className="pointer-events-auto order-2 flex w-[68px] flex-col items-center gap-1 border-border/70 py-3 max-md:order-none max-md:w-full max-md:flex-row max-md:justify-between max-md:gap-0 max-md:border-t max-md:bg-card max-md:px-1 max-md:py-1 max-md:pb-[max(0.25rem,env(safe-area-inset-bottom))] md:order-none md:border-r"
             aria-label="Tools"
           >
-            {RAIL.filter((t) => (coverFocused ? t.key !== 'layouts' : t.key !== 'templates')).map((t) => {
+            {RAIL.filter((t) => (coverFocused ? t.key !== 'layouts' : true)).map((t) => {
               const active = railTab === t.key;
               // The Quality tab carries a count of what needs attention — the ONLY badge on the
               // rail, and absent entirely when the album is clean, so it means something.
@@ -3145,60 +3168,6 @@ export default function Builder({
                 onGoToIssue={goToIssue}
                 onOpenReview={() => setReviewOpen(true)}
               />
-            )}
-
-            {/* Cover artwork — cover-only. Applying copies the template's CoverConfig into
-                cover_config through `cover.update`, which migrates it to the object model on the
-                way in, so an admin template authored before Cover Editor 2.0 lands as objects. */}
-            {coverFocused && railTab === 'templates' && (
-              <div className="ms-scroll flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
-                {/*
-                  COVER ARTWORK — the admin-managed PNG covers (0023). This gallery used to live
-                  inside the deprecated cover panel's "Artwork" source tab; it belongs in the rail
-                  with every other catalog of things you can add, which is where it is now.
-                  Choosing one sets `albums.cover_template_id`; the objects on top are untouched.
-                */}
-                <h2 className="mb-3 text-[13px] font-semibold tracking-tight text-foreground">Cover artwork</h2>
-                <div className="mb-5 grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCoverTemplate(null)}
-                    title="No artwork — use a photo or a background"
-                    className={`relative aspect-[3/4] overflow-hidden rounded-lg bg-muted ring-1 transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
-                      coverId === null ? 'ring-2 ring-studio' : 'ring-border hover:ring-studio-bright/50'
-                    }`}
-                  >
-                    <span className="absolute inset-0 grid place-items-center px-1 text-center text-[10px] font-medium text-muted-foreground">
-                      None
-                    </span>
-                  </button>
-                  {covers.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setCoverTemplate(c.id)}
-                      title={c.name}
-                      className={`relative aspect-[3/4] overflow-hidden rounded-lg bg-muted ring-1 transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
-                        coverId === c.id ? 'ring-2 ring-studio' : 'ring-border hover:ring-studio-bright/50'
-                      }`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={c.thumbUrl} alt={c.name} className="h-full w-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-
-                <h2 className="mb-3 text-[13px] font-semibold tracking-tight text-foreground">Cover templates</h2>
-                <CoverTemplatesPanel
-                  templates={coverTemplates}
-                  stickerUrlFor={stickerUrlFor}
-                  hasExistingDesign={isCustomCover(coverConfig)}
-                  onApply={(cfg) => {
-                    cover.update(cfg);
-                    cover.setSelection(NO_SELECTION);
-                  }}
-                />
-              </div>
             )}
 
             {/* The add-object rails are surface-agnostic: the same panels, pointed at whichever
@@ -3536,7 +3505,6 @@ export default function Builder({
                     : { side: cover.side, target: 'image' },
                 )
               }
-              onOpenArtwork={() => setRailTab('templates')}
               onAddOverlay={() => {
                 // Create the CONTAINER, then open the picker for it — the same two steps the page
                 // canvas takes, so an empty frame is a real, selectable object either way.
@@ -3962,6 +3930,7 @@ export default function Builder({
           blueprints={blueprints}
           uploaded={enginePhotos.length}
           busy={false}
+          stickerUrls={stickerUrls}
           onApply={(id, autoPlace) => {
             const bp = blueprints.find((b) => b.id === id);
             if (bp) applyBlueprintInBuilder(bp, autoPlace);

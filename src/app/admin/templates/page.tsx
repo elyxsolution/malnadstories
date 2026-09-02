@@ -7,6 +7,7 @@ import { getValidAlbumPageCounts } from '@/lib/products/catalog';
 import { requireTemplateCapability } from '@/lib/templates/access';
 import NewBlueprintButton from './_new-blueprint';
 import { presignGet } from '@/lib/r2';
+import { resolveStickerUrls } from '@/lib/stickers';
 import { normalizeBlueprint, blueprintBreakdown } from '@/lib/builder/blueprint';
 import BlueprintList, { type BlueprintRow } from './_blueprints';
 import {
@@ -99,10 +100,22 @@ export default async function AdminTemplatesPage({
         pinned: r.pinned,
         isDefault: r.isDefault,
         breakdown: bp ? blueprintBreakdown(bp) : [],
+        // THE BLUEPRINT'S OWN FRONT COVER — what the card now shows. `normalizeBlueprint` has
+        // already stripped album state from it, so this is design data only.
+        cover: bp?.cover ?? null,
         thumbUrl: r.thumbKey ? await presignGet(r.thumbKey, 3600) : null,
         updatedAt: r.updatedAt as unknown as string,
       };
     }),
+  );
+
+  /*
+   * Stickers placed on blueprint COVERS, resolved by id (service role) — the same call every other
+   * surface makes, so a since-deactivated but still-placed sticker draws here exactly as it does in
+   * the builder and the PDF. One query for the whole list, not one per card.
+   */
+  const blueprintStickerUrls = await resolveStickerUrls(
+    blueprints.flatMap((b) => (b.cover ? b.cover.stickers.map((s) => s.stickerId) : [])),
   );
 
   // Data-driven album sizes for the New Blueprint picker — the page counts offered by active
@@ -139,16 +152,13 @@ export default async function AdminTemplatesPage({
         <div>
           <h1 className="text-xl font-bold">Layouts &amp; Blueprints</h1>
           <p className="text-sm text-muted-foreground">
-            Single-spread presets for the builder &amp; auto-layout, plus whole-album Blueprints customers can start from.
+            Single-spread presets for the builder &amp; auto-layout, plus whole-album Blueprints —
+            interior <em>and</em> cover — that customers start from.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/admin/covers"
-            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
-          >
-            <BookImage className="h-4 w-4" /> Cover styles
-          </Link>
+          {/* The "Cover styles" link to /admin/covers is gone with the section it pointed at:
+              a blueprint now carries its own cover, edited inside the blueprint itself. */}
           <Link
             href="/admin/templates/new"
             className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted"
@@ -234,7 +244,7 @@ export default async function AdminTemplatesPage({
           Complete albums assembled from Layout Presets, grouped by size. Give each size one ⭐ Default — that&rsquo;s what
           Auto Create uses. Create one with <span className="font-medium">+ New Blueprint</span> to design it in the builder.
         </p>
-        <BlueprintList rows={blueprints} />
+        <BlueprintList rows={blueprints} stickerUrls={blueprintStickerUrls} />
       </section>
 
       {totalPages > 1 && (

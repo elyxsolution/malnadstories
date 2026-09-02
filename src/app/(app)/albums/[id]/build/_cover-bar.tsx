@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Image as ImageIcon,
   Images,
   Palette,
   Type as TypeIcon,
@@ -56,8 +55,6 @@ export type CoverBarProps = {
    * `overlayId` it fills that overlay and nothing else. One picker, one call site, two subjects.
    */
   onPickPhoto: (target?: { overlayId: string }) => void;
-  /** Open the cover-artwork gallery (the admin template catalog) in the rail. */
-  onOpenArtwork: () => void;
   /** Create a photo overlay on the focused face and open the picker to fill it. */
   onAddOverlay: () => void;
   /** Open the rail on a given tool — the cover's add-object actions reuse the existing panels. */
@@ -201,7 +198,6 @@ function BackgroundBar(p: CoverBarProps) {
       />
 
       {side !== 'spine' && <BarBtn label="Use one of your photos" icon={<Images />} text="Photo" onClick={() => p.onPickPhoto()} />}
-      {side === 'front' && <BarBtn label="Choose cover artwork" icon={<ImageIcon />} text="Artwork" onClick={p.onOpenArtwork} />}
       <BarSep />
 
       {/* THEME. All that remains of the old `layout` enum: it no longer positions anything (the
@@ -304,7 +300,6 @@ function CoverBar(p: CoverBarProps) {
       {cover.side !== 'spine' && (
         <>
           <BarBtn label="Use one of your photos" icon={<Images />} onClick={() => p.onPickPhoto()} />
-          {cover.side === 'front' && <BarBtn label="Choose cover artwork" icon={<ImageIcon />} onClick={p.onOpenArtwork} />}
         </>
       )}
       <BarSep />

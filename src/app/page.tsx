@@ -7,7 +7,11 @@ import { Sprig } from '@/components/brand';
 import PublicHeader from '@/components/public-header';
 import BookJourney from '@/components/book-journey';
 import PublicFooter from '@/components/public-footer';
+import BlueprintShelf from '@/components/public/blueprint-shelf';
+import Reveal from '@/components/public/reveal';
 import { listPublished } from '@/lib/cms/public';
+import { loadBlueprintPlacement } from '@/lib/cms/blueprint-placement';
+import { HOME_BLUEPRINTS_SLUG } from '@/lib/cms/blueprint-refs';
 
 export const metadata = {
   title: 'Malnad Stories — Travel photo albums, hand-bound to order',
@@ -58,6 +62,17 @@ export default async function HomePage() {
   const lead = testimonials[0] ?? null;
   const faqs = (await listPublished('faq')).slice(0, 4);
 
+  /*
+   * THE CURATED DESIGN SHELF. Which designs appear is an EDITORIAL decision made in the CMS, not
+   * a frontend one: this reads the published `homepage_section` row whose slug is
+   * HOME_BLUEPRINTS_SLUG and resolves the design ids it names, in that order. There is no
+   * hardcoded id here, and no "featured" heuristic standing in for a real selection.
+   *
+   * It never throws and never fabricates — an unresolvable or absent selection yields an empty
+   * set and the section simply does not render.
+   */
+  const featuredDesigns = await loadBlueprintPlacement(HOME_BLUEPRINTS_SLUG);
+
   return (
     <div className="brand-surface flex min-h-screen flex-col font-ui">
       <PublicHeader />
@@ -98,8 +113,11 @@ export default async function HomePage() {
                 <Button render={<Link href="/signup" />} size="lg">
                   Create your album <ArrowRight />
                 </Button>
-                <Button render={<Link href="/pricing" />} variant="outline" size="lg">
-                  See pricing
+                {/* The hero's second action now leads to design discovery rather than a price
+                    list — the same reason Pricing left the primary navigation. `/pricing` still
+                    exists and is still linked from the catalogue section further down. */}
+                <Button render={<Link href="/stories" />} variant="outline" size="lg">
+                  Explore designs
                 </Button>
               </div>
               <p className="mt-5 text-xs text-muted-foreground">
@@ -116,13 +134,18 @@ export default async function HomePage() {
 
         {/* ── How it works ─────────────────────────────────────────────────── */}
         <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
-          <div className="mx-auto max-w-xl text-center">
+          {/* The heading settles first, the three steps a beat later — the small delay is what
+              makes them read as belonging to it rather than arriving independently. */}
+          <Reveal className="mx-auto max-w-xl text-center" distance="sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold">The process</p>
             <h2 className="mt-3 font-display text-4xl font-normal tracking-tight text-primary">
               Three steps to something you can hold
             </h2>
-          </div>
-          <div className="mt-14 grid gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-3">
+          </Reveal>
+          <Reveal
+            delay={90}
+            className="mt-14 grid gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-3"
+          >
             {STEPS.map((s, i) => {
               const Icon = s.icon;
               return (
@@ -138,7 +161,7 @@ export default async function HomePage() {
                 </div>
               );
             })}
-          </div>
+          </Reveal>
         </section>
 
         {/* ── Destinations showcase ───────────────────────────────────────── */}
@@ -160,19 +183,43 @@ export default async function HomePage() {
                 All destinations <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
+            {/* A short stagger across the three chapters — 70ms apart is enough to read as a
+                sequence and short enough that the last one is not kept waiting. */}
             <div className="mt-12 grid gap-6 sm:grid-cols-3">
-              {DESTINATIONS.map((d) => (
-                <article key={d.name} className="flex flex-col border border-border bg-card p-6 shadow-xs">
+              {DESTINATIONS.map((d, i) => (
+                <Reveal
+                  key={d.name}
+                  delay={i * 70}
+                  as="article"
+                  className="flex flex-col border border-border bg-card p-6 shadow-xs"
+                >
                   <h3 className="select-none font-handwritten text-4xl leading-none text-gold">{d.name}</h3>
                   <span className="mt-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                     {d.sub}
                   </span>
                   <p className="mt-3 flex-1 text-sm font-light leading-relaxed text-muted-foreground">{d.note}</p>
-                </article>
+                </Reveal>
               ))}
             </div>
           </div>
         </section>
+
+        {/* ── Curated designs (CMS-selected) ──────────────────────────────────
+            The designs an editor chose, in the order they chose them. Nothing about
+            WHICH designs appear is decided here — see `loadBlueprintPlacement`. The
+            section renders nothing at all when no selection is published, so the page
+            reads correctly before an editor has curated anything. */}
+        <BlueprintShelf
+          eyebrow="Start from a design"
+          heading={featuredDesigns.heading ?? 'Designs made for real journeys'}
+          subheading={
+            featuredDesigns.subheading ??
+            'Every design is a complete book — cover, pages and rhythm already composed. Choose one, drop your photos in, and make it yours.'
+          }
+          set={featuredDesigns.set}
+          ctaHref={featuredDesigns.ctaLink ?? '/stories'}
+          ctaLabel={featuredDesigns.ctaLabel ?? 'Browse all designs'}
+        />
 
         {/* ── Pricing teaser (real catalogue) ─────────────────────────────── */}
         <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
@@ -244,7 +291,9 @@ export default async function HomePage() {
         {/* ── Testimonial ─────────────────────────────────────────────────── */}
         {lead?.content && (
           <section className="border-y border-border bg-secondary px-5 py-20 sm:px-8">
-            <figure className="mx-auto max-w-2xl text-center">
+            {/* A pull quote should feel like it was already on the page — pure opacity, no
+                travel. Movement here would turn someone's words into an effect. */}
+            <Reveal as="figure" distance="none" className="mx-auto max-w-2xl text-center">
               <Quote className="mx-auto h-8 w-8 text-gold" aria-hidden />
               <blockquote className="mt-6 text-balance font-display text-2xl italic leading-relaxed text-foreground sm:text-[28px]">
                 {lead.content}
@@ -255,7 +304,7 @@ export default async function HomePage() {
                   <span className="mt-0.5 block text-xs text-muted-foreground">{lead.metadata.location}</span>
                 )}
               </figcaption>
-            </figure>
+            </Reveal>
           </section>
         )}
 

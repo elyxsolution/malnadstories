@@ -30,6 +30,7 @@ export function BlueprintHeader({
   size,
   capacity,
   recommended,
+  coverDesigned,
   lastSaved,
   dirty,
 }: {
@@ -37,6 +38,12 @@ export function BlueprintHeader({
   size: number;
   capacity: number;
   recommended: number;
+  /**
+   * Has this blueprint's front cover been designed? (Phase 0 — a blueprint is Interior + Cover.)
+   * Stated in the header because the cover is edited on a different canvas from the pages, so
+   * without it an admin can save a blueprint believing it carries a cover it does not.
+   */
+  coverDesigned: boolean;
   lastSaved: number | null;
   dirty: boolean;
 }) {
@@ -75,6 +82,7 @@ export function BlueprintHeader({
           <MetaPill k="Size" v={`${size} pages`} />
           <MetaPill k="Capacity" v={`${capacity}`} />
           <MetaPill k="Recommended" v={`${recommended}`} />
+          <MetaPill k="Cover" v={coverDesigned ? 'Designed' : 'Not set'} />
         </div>
         <span className="mx-1 hidden h-8 w-px bg-border lg:block" />
         <span

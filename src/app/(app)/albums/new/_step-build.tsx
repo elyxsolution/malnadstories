@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, ArrowRight, CheckCircle2, LayoutTemplate, Palette, RotateCw, Wand2 } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, LayoutTemplate, Palette, RotateCw, Sparkles, Wand2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { InlineLoader } from '@/components/loading';
@@ -44,9 +44,11 @@ export default function StepBuild({
   busy,
   error,
   uploadAnchorRef,
+  selectedDesign = null,
   onAutoCreate,
   onChooseLayouts,
   onDesignMyself,
+  onUseDesign,
 }: {
   albumId: string;
   cap: number;
@@ -62,9 +64,17 @@ export default function StepBuild({
   error: string | null;
   /** Scroll target for "Upload photos" in the Auto Create warning. */
   uploadAnchorRef: React.RefObject<HTMLDivElement>;
+  /**
+   * THE DESIGN THE CUSTOMER ARRIVED WITH (Phase 2), when there is one and it matches this
+   * album's length. Its presence adds a card at the top of the rail and demotes Auto Create
+   * from primary — a customer who already chose a design on the public site should not have to
+   * hunt for it among three generic starting points.
+   */
+  selectedDesign?: WizardBlueprint | null;
   onAutoCreate: () => void;
   onChooseLayouts: () => void;
   onDesignMyself: () => void;
+  onUseDesign?: () => void;
 }) {
   const ready = photos.filter((p) => p.status === 'ready').length;
   const processing = photos.filter((p) => p.status === 'pending').length;
@@ -258,11 +268,35 @@ export default function StepBuild({
           </p>
         </div>
 
+        {/*
+          YOUR DESIGN — first in the rail, and the only accented card when it exists. It reuses
+          `MethodCard` rather than introducing a fourth card style, so the rail stays one list of
+          starting points with a clear first choice rather than a special case bolted on top.
+        */}
+        {selectedDesign && onUseDesign && (
+          <MethodCard
+            Icon={Sparkles}
+            title={selectedDesign.name}
+            badge="Your design"
+            primary
+            desc="Use the design you chose — its cover is already applied, and this lays out its pages."
+            meta={[
+              { k: 'Pages', v: `${selectedDesign.pageCount}` },
+              { k: 'Holds', v: `${selectedDesign.slotCount}` },
+              { k: 'Will place', v: `${usableCount}` },
+            ]}
+            note={usableCount === 0 ? 'You can open the builder now and add photographs as they upload.' : null}
+            cta="Use this design"
+            onClick={onUseDesign}
+            disabled={busy}
+          />
+        )}
+
         <MethodCard
           Icon={Wand2}
           title="Auto Create"
           badge="Fastest"
-          primary
+          primary={!selectedDesign}
           desc={
             autoTarget
               ? `Generate a complete album from the “${autoTarget.name}” layout, with your photos placed for you.`

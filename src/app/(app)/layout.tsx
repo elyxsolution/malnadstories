@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import AppHeaderGate from '@/components/app-header-gate';
@@ -6,6 +7,7 @@ import { PendingPlacementsProvider } from '@/lib/builder/pending-placements';
 import { CartProvider } from '@/lib/cart/provider';
 import { getCartCount } from '@/lib/cart/queries';
 import { getUserWithDeadline } from '@/lib/supabase/timeout';
+import { loginHref } from '@/lib/auth/next';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
@@ -20,7 +22,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     console.warn('[app-layout] supabase auth check exceeded its deadline — redirecting to /login');
   }
 
-  if (!user) redirect('/login');
+  /*
+   * THE AUTHENTICATION BOUNDARY (Phase 2) — and the point where a chosen design must survive.
+   *
+   * It used to redirect to a bare `/login`, which is why a signed-out visitor pressing "Use this
+   * design" on the public gallery lost their choice: `/albums/new?design=<id>` was replaced by
+   * `/login` and, after signing in, by `/dashboard`. The destination is now carried through as a
+   * validated `?next=`, so the round trip ends where it started.
+   *
+   * The intended URL is rebuilt from the headers the middleware forwards (`x-pathname` +
+   * `x-search`) because a layout receives no request object of its own. Both are set by our own
+   * middleware from `request.nextUrl`, and `loginHref` applies the same open-redirect validator
+   * as every other caller, so a crafted header cannot turn this into an off-site redirect.
+   *
+   * A TIMED-OUT auth check reaches here as `!user` and is treated exactly as signed out — the
+   * pre-existing fail-closed behaviour, now merely preserving where the customer was going.
+   */
+  if (!user) {
+    const h = headers();
+    const intended = `${h.get('x-pathname') ?? ''}${h.get('x-search') ?? ''}`;
+    redirect(loginHref(intended));
+  }
 
   // The cart badge's number, fetched ONCE here rather than in each of the fourteen pages
   // that render CustomerShell. RLS scopes it to this user; `getCartCount` returns 0 rather

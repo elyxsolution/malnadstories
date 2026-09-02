@@ -460,9 +460,29 @@ export async function openBlueprintForEditing(input: unknown): Promise<OpenBluep
   // Clean up any earlier draft for this blueprint by this admin (cascade removes its pages).
   await svc.from('albums').delete().eq('user_id', actor.userId).eq('blueprint_draft_of', id);
 
+  // Normalise BEFORE the insert: the draft album must be seeded with the blueprint's cover in the
+  // same statement that creates it, so the admin never sees a blueprint open with a blank cover
+  // and then silently save that blankness back over the real design.
+  const normalized = normalizeBlueprint(bp.blueprint);
+
   const { data: albumRow, error: albErr } = await svc
     .from('albums')
-    .insert({ user_id: actor.userId, title: `Blueprint: ${bp.name}`, size, blueprint_draft_of: id })
+    .insert({
+      user_id: actor.userId,
+      title: `Blueprint: ${bp.name}`,
+      size,
+      blueprint_draft_of: id,
+      /*
+       * THE COVER TRAVELS INTO THE DRAFT (Phase 0).
+       *
+       * The draft album IS the blueprint editor — it opens in the customer's own builder, which
+       * already knows how to edit a cover from `albums.cover_config`. So seeding this column is
+       * the whole of "the blueprint editor can edit the cover"; no second cover editor exists and
+       * none is needed. A blueprint with no cover yet seeds nothing and the draft starts on the
+       * builder's ordinary default, exactly as every blueprint draft did before.
+       */
+      ...(normalized?.cover ? { cover_config: normalized.cover } : {}),
+    })
     .select('id')
     .single();
   if (albErr || !albumRow) {
@@ -472,7 +492,6 @@ export async function openBlueprintForEditing(input: unknown): Promise<OpenBluep
   const albumId = (albumRow as { id: string }).id;
 
   // Materialize the blueprint's layout (empty slots) into album_pages so the builder loads it.
-  const normalized = normalizeBlueprint(bp.blueprint);
   const blocks = normalized ? applyBlueprint(normalized, []) : [];
   if (blocks.length > 0) {
     const { error: pagesErr } = await svc.from('album_pages').insert(blocksToPageRows(albumId, blocks));
@@ -504,11 +523,19 @@ export async function updateBlueprintFromAlbum(input: unknown): Promise<Template
   const { albumId } = parsed.data;
 
   const svc = createServiceClient();
-  const { data: album } = await svc.from('albums').select('id, user_id, blueprint_draft_of').eq('id', albumId).maybeSingle();
-  const a = album as { id: string; user_id: string; blueprint_draft_of: string | null } | null;
+  // `cover_config` rides on the EXISTING album read (Phase 0). The draft's cover is now part of
+  // the blueprint, so saving must capture it: reading only `album_pages`, as this action used to,
+  // is exactly what discarded every cover an admin designed in Blueprint Mode.
+  const { data: album } = await svc
+    .from('albums')
+    .select('id, user_id, blueprint_draft_of, cover_config')
+    .eq('id', albumId)
+    .maybeSingle();
+  const a = album as { id: string; user_id: string; blueprint_draft_of: string | null; cover_config: unknown } | null;
   if (!a || !a.blueprint_draft_of) return { ok: false, error: 'This album is not a blueprint draft.' };
   if (a.user_id !== actor.userId) return { ok: false, error: 'You can only save your own blueprint draft.' };
   const blueprintId = a.blueprint_draft_of;
+  const draftCover = a.cover_config ?? null;
 
   const { data: pageData } = await svc
     .from('album_pages')
@@ -541,7 +568,11 @@ export async function updateBlueprintFromAlbum(input: unknown): Promise<Template
     );
   if (blocks.length === 0) return { ok: false, error: 'Add at least one page before saving.' };
 
-  const bp = blueprintFromBlocks(blocks);
+  // Blocks AND cover, in one capture. `blueprintFromBlocks` runs the cover through
+  // `blueprintCoverFromConfig`, so the album's photo ids and image edits are stripped here — a
+  // blueprint records the DESIGN the admin composed, never the pictures they happened to preview
+  // it with. A draft with no cover_config yields a cover-less blueprint, unchanged from before.
+  const bp = blueprintFromBlocks(blocks, draftCover);
   const check = BlueprintSchema.safeParse(bp);
   if (!check.success) return { ok: false, error: 'The layout could not be saved as a blueprint.' };
   const stats = blueprintStats(bp);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_BLUEPRINT_REFS } from '@/lib/cms/blueprint-refs';
 import { nameSchema, passwordSchema } from '@/lib/auth/policy';
 import { FONT_KEYS } from '@/lib/builder/fonts-catalog';
 import { COVER_TEXT_ROLES, MAX_OVERLAYS_PER_BLOCK } from '@/lib/builder/model';
@@ -36,11 +37,17 @@ const optionalText = (max: number, msg: string) =>
 // UpdateAlbumDetailsSchema below, and the cover editor's CoverDesignSchema.
 export const CreateAlbumSchema = z
   .object({
-    // Cover source (Phase 3). Exactly one path (or neither = blank custom cover):
-    //   coverTemplateId       → legacy uploaded-PNG cover artwork (0023), kept for back-compat.
-    //   coverDesignTemplateId → a full builder-JSON cover DESIGN template (0040); its CoverConfig
-    //                           is copied into albums.cover_config, fully editable thereafter.
-    // Both optional so "Custom Cover" (blank) is also valid; they are mutually exclusive.
+    // Cover source. Exactly one path (or none = the default design, else a blank custom cover):
+    //   blueprintId           → THE CURRENT PATH (Phase 0). A Blueprint is the single design
+    //                           entity; its `cover` is snapshotted into albums.cover_config.
+    //   coverTemplateId       → legacy uploaded-PNG cover artwork (0023), kept for back-compat so
+    //                           an album created before this still means what it meant.
+    //   coverDesignTemplateId → LEGACY (0040). The separate "Cover Design" product it named is
+    //                           retired; the field is retained so any in-flight caller keeps
+    //                           working, and because the underlying snapshot behaviour is
+    //                           unchanged. Prefer `blueprintId` for anything new.
+    // All optional so "Custom Cover" (blank) is also valid; they are mutually exclusive.
+    blueprintId: z.string().uuid('Invalid design').optional(),
     coverTemplateId: z.string().uuid('Please choose a cover design').optional(),
     coverDesignTemplateId: z.string().uuid('Invalid cover template').optional(),
     // NEW product model (0047): the chosen physical product + page count. Both optional so the
@@ -55,10 +62,16 @@ export const CreateAlbumSchema = z
     travelDates: optionalText(60, 'Travel dates must be 60 characters or less'),
     description: optionalText(500, 'Description must be 500 characters or less'),
   })
-  .refine((d) => !(d.coverTemplateId && d.coverDesignTemplateId), {
-    message: 'Choose either a cover artwork or a cover template, not both.',
-    path: ['coverDesignTemplateId'],
-  })
+  // At most ONE cover source. Three mutually-exclusive paths rather than two, because a blueprint
+  // now carries a cover of its own and silently letting a second source win would make "which
+  // cover did this album actually get?" unanswerable from the request.
+  .refine(
+    (d) => [d.blueprintId, d.coverTemplateId, d.coverDesignTemplateId].filter(Boolean).length <= 1,
+    {
+      message: 'Choose one design source, not several.',
+      path: ['blueprintId'],
+    },
+  )
   // Must resolve a size: the NEW path needs albumProductId + pageCount; the LEGACY path needs productId.
   .refine((d) => (d.albumProductId && d.pageCount) || d.productId, {
     message: 'Please choose an album and page count.',
@@ -934,9 +947,23 @@ const CONTENT_TYPE_VALUES = [
 const CONTENT_STATUS_VALUES = ['draft', 'published', 'archived'] as const;
 
 // metadata: a flat record of strings / numbers / booleans (per-type keys defined in the
-// model config). Bounded to keep payloads sane.
+// model config), plus ONE list shape. Bounded to keep payloads sane.
+//
+// THE LIST IS FOR ENTITY REFERENCES (Phase 1): a homepage section names the designs it curates
+// as an ordered array of uuids under `blueprintIds`. It is bounded to `MAX_BLUEPRINT_REFS` and to
+// uuid-shaped strings, so this widening admits a reference list and nothing else — not free-form
+// arrays, not nested objects. The stored value is still read through `blueprintRefsFrom`, which
+// re-validates independently, so a hand-edited row cannot bypass this either.
 const CmsMetadataSchema = z
-  .record(z.string().max(40), z.union([z.string().max(2000), z.number(), z.boolean()]))
+  .record(
+    z.string().max(40),
+    z.union([
+      z.string().max(2000),
+      z.number(),
+      z.boolean(),
+      z.array(z.string().uuid()).max(MAX_BLUEPRINT_REFS),
+    ]),
+  )
   .optional()
   .default({});
 
@@ -1060,6 +1087,19 @@ const BlueprintBlockSchema = z.object({
 export const BlueprintSchema = z.object({
   version: z.literal(1),
   blocks: z.array(BlueprintBlockSchema).min(1, 'A blueprint needs at least one page').max(100, 'Too many pages'),
+  /**
+   * The blueprint's own front/back/spine cover design (Phase 0 — Blueprint owns the design).
+   *
+   * OPTIONAL, so every blueprint authored before this field parses unchanged and `version` stays
+   * at 1: an additive optional key needs no bump, and bumping would invalidate stored rows that
+   * are still perfectly valid. Bounded by the EXISTING `CoverConfigSchema` — the same rules
+   * `albums.cover_config` is validated against — so a blueprint cover can never carry a shape the
+   * album renderer cannot draw, and there is one validation source rather than two.
+   *
+   * Album-specific state (photo ids / image edits) is stripped separately and unconditionally by
+   * `blueprintCoverFromConfig`; this schema bounds the SHAPE, that function bounds the CONTENT.
+   */
+  cover: CoverConfigSchema.optional(),
 });
 
 

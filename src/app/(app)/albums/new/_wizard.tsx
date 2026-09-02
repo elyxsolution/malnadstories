@@ -16,6 +16,7 @@ import { saveLayout, applyBlueprintToAlbum } from '@/lib/actions/builder';
 import { photoCap } from '@/lib/builder/model';
 import { autoLayout, type TemplateChoice } from '@/lib/builder/auto-layout';
 import { applyBlueprint, type Blueprint } from '@/lib/builder/blueprint';
+import type { CoverConfig } from '@/lib/builder/cover';
 import { blueprintsForPageCount, selectAutoBlueprint } from '@/lib/builder/blueprint-select';
 import { pendingPlacementsFor, resolveLayoutForSave } from '@/lib/builder/persist-layout';
 import { usePendingPlacements } from '@/lib/builder/pending-placements';
@@ -25,6 +26,7 @@ import { layoutInputs } from '../[id]/build/_use-optimistic-layout';
 import type { Photo } from '@/lib/builder/photo';
 import type { ProductOption } from '@/lib/products/catalog';
 import BlueprintPicker from './_blueprint-picker';
+import SelectedDesign from './_selected-design';
 import StepDetails from './_step-details';
 import StepBuild from './_step-build';
 
@@ -100,6 +102,8 @@ export type WizardBlueprint = {
   isDefault: boolean;
   isNew: boolean;
   breakdown: { label: string; count: number }[];
+  /** The design's own front cover (Phase 0) — how a blueprint is presented to a customer. */
+  cover: CoverConfig | null;
   thumbUrl: string | null;
   /** The geometry itself — Auto Create applies it client-side (Phase 4). */
   blueprint: Blueprint;
@@ -109,12 +113,25 @@ export default function CreateWizard({
   albumProducts,
   templates = [],
   blueprints = [],
+  stickerUrls = {},
+  initialBlueprintId = null,
+  designUnavailable = false,
 }: {
   albumProducts: ProductOption[];
   /** Active layout presets — feed the deterministic auto-layout fallback. */
   templates?: TemplateChoice[];
   /** Active whole-album blueprints (0043) — the auto-select / choose-layout strategies. */
   blueprints?: WizardBlueprint[];
+  /** Cover stickers for the blueprint picker, resolved by id server-side (Phase 0). */
+  stickerUrls?: Record<string, string>;
+  /**
+   * THE DESIGN THE CUSTOMER ARRIVED WITH (Phase 2) — already resolved against the active catalog
+   * by the page. An id and nothing more: every property of the design is read out of
+   * `blueprints`, and the server re-resolves the id again on both write paths.
+   */
+  initialBlueprintId?: string | null;
+  /** A design WAS requested but no longer resolves — said plainly rather than silently dropped. */
+  designUnavailable?: boolean;
 }) {
   const router = useRouter();
   /** Carries Auto Create's unresolved placements across the hand-off to the builder. */
@@ -143,10 +160,46 @@ export default function CreateWizard({
   const fromDate: string = '';
   const toDate: string = '';
   const description: string = '';
-  const [albumProductId, setAlbumProductId] = useState(
-    albumProducts.find((p) => p.isDefault)?.id ?? albumProducts[0]?.id ?? '',
+  /*
+   * ── THE CHOSEN DESIGN (Phase 2) ────────────────────────────────────────────
+   *
+   * `initialBlueprintId` was resolved server-side against the active catalog, so this lookup is
+   * over rows the page already loaded — the URL contributed an id and nothing else.
+   *
+   * A design DECIDES THE PAGE COUNT, because a blueprint's layout is built for a book of an exact
+   * length. So arriving with one preselects both the page count and a product that offers it,
+   * turning step 1 from a blank configurator into a confirmation of what the customer already
+   * chose on the public site.
+   */
+  const arrivedWith = initialBlueprintId ? blueprints.find((b) => b.id === initialBlueprintId) ?? null : null;
+
+  const [albumProductId, setAlbumProductId] = useState(() => {
+    const preferred = albumProducts.find((p) => p.isDefault) ?? albumProducts[0] ?? null;
+    if (!arrivedWith) return preferred?.id ?? '';
+    // Keep the default book when it can be made at the design's length; otherwise the first that can.
+    if (preferred?.pageCounts.includes(arrivedWith.pageCount)) return preferred.id;
+    return albumProducts.find((p) => p.pageCounts.includes(arrivedWith.pageCount))?.id ?? preferred?.id ?? '';
+  });
+  const [pageCount, setPageCount] = useState<number | null>(() =>
+    arrivedWith && albumProducts.some((p) => p.pageCounts.includes(arrivedWith.pageCount))
+      ? arrivedWith.pageCount
+      : null,
   );
-  const [pageCount, setPageCount] = useState<number | null>(null);
+
+  /**
+   * The design is held as an ID and everything about it is DERIVED, never mirrored into state —
+   * so it cannot go stale when the customer changes the book beneath it.
+   *
+   * A design applies to a book of ITS length only. If the page count moves away from it, the
+   * design is not silently discarded (which would look exactly like losing it across the login
+   * that just happened) and not silently applied to the wrong length either: it is held aside
+   * with one press back to the length it needs.
+   */
+  const [dismissedDesignId, setDismissedDesignId] = useState<string | null>(null);
+  const chosenDesign = arrivedWith && arrivedWith.id !== dismissedDesignId ? arrivedWith : null;
+  const designMismatch = chosenDesign !== null && pageCount !== null && chosenDesign.pageCount !== pageCount;
+  /** The design that will actually be applied — null while it is on hold. */
+  const selectedDesign = chosenDesign && !designMismatch ? chosenDesign : null;
 
   const selectProduct = useCallback(
     (id: string) => {
@@ -161,6 +214,8 @@ export default function CreateWizard({
   // ── Created album ─────────────────────────────────────────────────────────
   const [albumId, setAlbumId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  /** Synchronous double-submit guard — see `createAndContinue`. */
+  const creatingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [entering, setEntering] = useState(false); // cinematic builder-entry veil
 
@@ -253,6 +308,16 @@ export default function CreateWizard({
   const createAndContinue = async () => {
     if (albumId) return setStep(STEP_BUILD); // already created (defensive; the button is hidden)
     if (!canContinue) return;
+    /*
+     * ONE ALBUM PER PRESS. `creating` disables the button, but a state flag is applied on the
+     * NEXT render — a double click, a held Enter key or a retried tap can fire this handler twice
+     * before that happens, and the result is two albums for one customer. The ref is written
+     * synchronously, so the second call returns before it can reach the server. It is released
+     * only on FAILURE; on success `albumId` above becomes the guard. (Same reasoning as the
+     * `payInFlight` ref on checkout.)
+     */
+    if (creatingRef.current) return;
+    creatingRef.current = true;
 
     setCreating(true);
     setError(null);
@@ -264,6 +329,14 @@ export default function CreateWizard({
     const res = await createAlbumDraft({
       albumProductId,
       pageCount: pageCount ?? undefined,
+      /*
+       * THE DESIGN, AS AN ID (Phase 2). This is the EXISTING Phase 0 creation path — the server
+       * re-resolves the id through the active catalog and snapshots `blueprint.cover` onto the
+       * album, exactly as it does for any other caller. No cover, no geometry and no metadata is
+       * sent from the browser; omitting it (no design chosen, or one on hold) reproduces the
+       * previous behaviour byte for byte, including the default-design fallback.
+       */
+      blueprintId: selectedDesign?.id,
       destination,
       travelDates: travelPeriod,
       description,
@@ -271,6 +344,7 @@ export default function CreateWizard({
     setCreating(false);
 
     if (!res.ok) {
+      creatingRef.current = false; // released: no album exists, the customer may retry
       setError(res.error);
       return;
     }
@@ -501,6 +575,43 @@ export default function CreateWizard({
             `composePeriod` and the create payload are all unchanged — they simply have no UI
             on this screen any more.
           */}
+          {/*
+            THE CHOSEN DESIGN, visible on BOTH steps. A customer who has just been through a
+            login (or a signup and a verification email) needs to see that their choice came with
+            them — an identical-looking blank wizard is indistinguishable from having lost it.
+          */}
+          <SelectedDesign
+            design={chosenDesign}
+            stickerUrls={stickerUrls}
+            mismatchPageCount={designMismatch ? pageCount : null}
+            onRestorePageCount={() => {
+              if (!chosenDesign) return;
+              // Move the product too when the current book cannot be made at that length.
+              const current = albumProducts.find((p) => p.id === albumProductId);
+              if (!current?.pageCounts.includes(chosenDesign.pageCount)) {
+                const fit = albumProducts.find((p) => p.pageCounts.includes(chosenDesign.pageCount));
+                if (fit) setAlbumProductId(fit.id);
+              }
+              setPageCount(chosenDesign.pageCount);
+            }}
+            onClear={() => setDismissedDesignId(chosenDesign?.id ?? null)}
+          />
+
+          {/*
+            A DESIGN THAT NO LONGER EXISTS. It was active when the customer chose it and is not
+            now — deactivated, archived, or simply an id that never resolved. Creation continues
+            unaffected; saying nothing would be the only wrong answer.
+          */}
+          {designUnavailable && !chosenDesign && (
+            <p
+              role="status"
+              className="animate-rise mb-6 rounded-2xl border bg-card px-4 py-3 text-[13px] leading-relaxed text-muted-foreground"
+            >
+              That design isn’t available any more. You can start your album here and pick another
+              layout in a moment — everything else works exactly the same.
+            </p>
+          )}
+
           {step === STEP_DETAILS && (
             <StepDetails
               albumProducts={albumProducts}
@@ -528,9 +639,17 @@ export default function CreateWizard({
               busy={autoCreating || bpBusy}
               error={bpError}
               uploadAnchorRef={uploadAnchorRef}
+              selectedDesign={selectedDesign}
               onAutoCreate={runAutoCreate}
               onChooseLayouts={() => setBpPickerOpen(true)}
               onDesignMyself={launchBuilder}
+              /*
+                The chosen design is applied through `runApplyBlueprint` — the SAME call the
+                layout picker makes, which is the same `applyBlueprintToAlbum` server action that
+                re-resolves the id against the active catalog. There is no second apply path.
+                Auto-place is used only when there is something to place.
+              */
+              onUseDesign={() => selectedDesign && runApplyBlueprint(selectedDesign.id, ready.length > 0)}
             />
           )}
 
@@ -567,6 +686,7 @@ export default function CreateWizard({
           blueprints={matchingBlueprints}
           uploaded={ready.length}
           busy={bpBusy}
+          stickerUrls={stickerUrls}
           onApply={runApplyBlueprint}
           onClose={() => setBpPickerOpen(false)}
         />

@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Star, Sparkles, Pin, Copy, Trash2, Eye, EyeOff, Archive, Pencil, Search, X, Check, RefreshCw, LayoutGrid, Crown, PencilRuler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { categoryLabel, statusChip, statusLabel } from '@/lib/templates/model';
+import BlueprintCover from '@/components/blueprint-cover';
+import type { CoverConfig } from '@/lib/builder/cover';
 import {
   setTemplateStatus,
   duplicateTemplate,
@@ -30,6 +32,9 @@ export type BlueprintRow = {
   pinned: boolean;
   isDefault: boolean;
   breakdown: { label: string; count: number }[];
+  /** The blueprint's OWN front cover (Phase 0) — the card's primary representation. */
+  cover: CoverConfig | null;
+  /** LEGACY raster of the interior montage. Fallback only, for blueprints with no cover yet. */
   thumbUrl: string | null;
   updatedAt: string;
 };
@@ -60,7 +65,8 @@ const writeUi = (patch: UiState) => {
  * by Auto Create). Cards show the thumbnail, capacity, recommended, layout breakdown, badges, and
  * quick actions. Reuses the existing gated server actions; refreshes on change.
  */
-export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
+export default function BlueprintList({ rows, stickerUrls = {} }: { rows: BlueprintRow[]; stickerUrls?: Record<string, string> }) {
+  const stickerUrlFor = (id: string) => stickerUrls[id];
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState('');
@@ -174,7 +180,7 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
               </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {items.map((r) => (
-                  <BlueprintCard key={r.id} r={r} busy={busy === r.id} onEdit={() => setEditing(r)} onEditLayout={() => editInBuilder(r.id)} run={run} />
+                  <BlueprintCard key={r.id} r={r} busy={busy === r.id} stickerUrlFor={stickerUrlFor} onEdit={() => setEditing(r)} onEditLayout={() => editInBuilder(r.id)} run={run} />
                 ))}
               </div>
             </section>
@@ -192,12 +198,15 @@ export default function BlueprintList({ rows }: { rows: BlueprintRow[] }) {
 function BlueprintCard({
   r,
   busy,
+  stickerUrlFor,
   onEdit,
   onEditLayout,
   run,
 }: {
   r: BlueprintRow;
   busy: boolean;
+  /** Resolves cover stickers by id — server-resolved once for the whole list, never per card. */
+  stickerUrlFor: (stickerId: string) => string | undefined;
   onEdit: () => void;
   onEditLayout: () => void;
   run: (id: string, fn: () => Promise<{ ok: boolean; error?: string }>) => Promise<void>;
@@ -210,19 +219,40 @@ function BlueprintCard({
         r.isDefault ? 'ring-2 ring-gold/50' : ''
       }`}
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
-        {r.thumbUrl && !thumbFailed ? (
+      {/*
+        THE CARD IS THE BLUEPRINT'S FRONT COVER (Phase 0).
+        A 3:4 portrait, because that is a book's proportion — the old 4:3 landscape existed to fit
+        a 2x2 montage of interior spreads, which is no longer what a blueprint is represented by.
+        Drawn live through the canonical cover renderer: no screenshot, no R2 object, no worker,
+        and therefore nothing that can go stale between an edit and the next page load.
+      */}
+      <div className="relative mx-auto aspect-[3/4] w-full max-w-[220px] overflow-hidden bg-muted">
+        {r.cover ? (
+          <div className="absolute inset-0 transition-transform duration-300 ease-glide group-hover:scale-[1.03]">
+            <BlueprintCover cover={r.cover} name={r.name} stickerUrlFor={stickerUrlFor} />
+          </div>
+        ) : r.thumbUrl && !thumbFailed ? (
+          /*
+            LEGACY RASTER FALLBACK, for blueprints authored before covers existed. It is the old
+            interior montage, so it is deliberately SECOND: a real cover always wins. Kept rather
+            than deleted so an existing blueprint still shows something recognisable until an admin
+            opens it and gives it a cover.
+          */
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={r.thumbUrl}
-            alt={`${r.name} preview`}
+            alt={`${r.name} interior preview`}
             loading="lazy"
             onError={() => setThumbFailed(true)}
             className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 ease-glide group-hover:scale-[1.03]"
           />
         ) : (
-          // No thumbnail yet, or the presigned URL expired/failed — show a calm placeholder, never a broken image.
-          <span className="absolute inset-0 grid place-items-center text-muted-foreground/40"><LayoutGrid className="h-6 w-6" /></span>
+          // No cover designed yet and no legacy thumbnail — say so plainly rather than showing a
+          // broken image or an empty box the admin has to guess at.
+          <span className="absolute inset-0 grid place-items-center gap-1 text-center text-muted-foreground/60">
+            <LayoutGrid className="mx-auto h-6 w-6" />
+            <span className="text-[10px] font-medium">No cover yet</span>
+          </span>
         )}
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
           {r.isDefault && <Badge className="bg-gold/90 text-background"><Crown className="h-3 w-3" /> Default</Badge>}

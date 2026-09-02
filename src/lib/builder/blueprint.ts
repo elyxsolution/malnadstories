@@ -22,8 +22,48 @@ import {
   type TextElement,
 } from './model';
 import { LAYOUT_PRESETS } from './elements';
+import { normalizeCoverConfig, type CoverConfig } from './cover';
 
 export const BLUEPRINT_VERSION = 1 as const;
+
+/**
+ * THE BLUEPRINT'S FRONT COVER — design state only, never album state.
+ *
+ * A blueprint used to describe interior pages alone, so "the design" and "the cover" were two
+ * separate admin products. The blueprint now owns its cover, which is what makes it the single
+ * customer-facing design entity. The stored value is an ordinary `CoverConfig` — the exact type
+ * `albums.cover_config` already holds — so the canonical renderer, the builder, the preview and
+ * both PDFs draw a blueprint's cover through the code they already draw an album's cover through.
+ * There is no second cover model and no second renderer.
+ *
+ * WHAT MUST NEVER BE STORED HERE. A `CoverConfig` can name a specific customer's photos:
+ * `photoId` / `imageEdit` on the front, the same pair on the back, and `back.overlays[].photoId`.
+ * Those are ALBUM state — a row in `photos`, owned by one customer, scoped by RLS. A blueprint is
+ * global, admin-authored and (in a later phase) publicly browsable, so a photo id reaching it
+ * would be both meaningless to every other album and a reference to private data on a public
+ * surface. `blueprintCoverFromConfig` is the ONE gate that strips them, and it is applied on the
+ * way IN (authoring) as well as on the way OUT (normalisation), so a hand-edited or imported row
+ * cannot smuggle one past.
+ *
+ * Sticker ids are deliberately KEPT: a sticker is admin-managed artwork resolved by id at render
+ * time (exactly as the builder, the print route and the admin preview already resolve it), not
+ * customer data.
+ */
+export function blueprintCoverFromConfig(raw: unknown): CoverConfig {
+  // Normalise first so a partial/legacy/hand-written object becomes a complete CoverConfig, then
+  // deep-clone so the caller's object can never be aliased into the blueprint (the album-snapshot
+  // rule in reverse — see `applyCoverTemplateToAlbum`).
+  const cover: CoverConfig = JSON.parse(JSON.stringify(normalizeCoverConfig(raw as Parameters<typeof normalizeCoverConfig>[0])));
+  cover.photoId = null;
+  cover.imageEdit = null;
+  cover.back.photoId = null;
+  cover.back.imageEdit = null;
+  // An overlay is a CONTAINER plus a photo. The geometry is design; the photo is album state. The
+  // container is preserved with an empty photo — exactly what `applyBlueprint` does for an interior
+  // overlay slot — so a designed back-cover composition survives without naming anyone's picture.
+  cover.back.overlays = cover.back.overlays.map((o) => ({ ...o, photoId: null }));
+  return cover;
+}
 
 /** One page unit of a blueprint — a layout primitive + empty overlay slots + decorative elements. */
 export type BlueprintBlock = {
@@ -54,6 +94,17 @@ export function presetLabel(key: string): string {
 export type Blueprint = {
   version: typeof BLUEPRINT_VERSION;
   blocks: BlueprintBlock[];
+  /**
+   * The design's FRONT COVER (and back/spine), as an ordinary `CoverConfig`.
+   *
+   * OPTIONAL, AND ABSENT MEANS EXACTLY WHAT IT ALWAYS MEANT. Every blueprint authored before this
+   * field existed has no `cover`, loads unchanged, and behaves unchanged — which is why the
+   * version stays at 1 rather than bumping: an optional additive key is already inside the
+   * existing versioning contract, and a bump would force a rewrite of rows that need none.
+   * Consumers must treat `undefined` as "this blueprint does not define a cover" and fall back to
+   * whatever they did before (the album's own default), never invent one.
+   */
+  cover?: CoverConfig;
 };
 
 export type BlueprintStats = {
@@ -97,9 +148,13 @@ export function blueprintStats(bp: Blueprint): BlueprintStats {
  * overlay GEOMETRY, and decorative elements; DROP the photos (base ids + overlay photo ids →
  * empty slots). This is how "Save current album as Blueprint" reuses the builder for authoring.
  */
-export function blueprintFromBlocks(blocks: Block[]): Blueprint {
+export function blueprintFromBlocks(blocks: Block[], cover?: unknown): Blueprint {
   return {
     version: BLUEPRINT_VERSION,
+    // The cover is captured through the SAME gate normalisation uses, so the authoring path and
+    // the read path cannot disagree about what a blueprint cover is allowed to contain. Passing
+    // nothing (or null) leaves the blueprint cover-less, which is the pre-existing behaviour.
+    ...(cover === undefined || cover === null ? {} : { cover: blueprintCoverFromConfig(cover) }),
     blocks: blocks.map((b) => ({
       template: b.template,
       caption: b.caption ?? '',
@@ -198,7 +253,7 @@ export function applyBlueprint(bp: Blueprint, photoIds: string[]): Block[] {
 /** Normalize arbitrary stored JSON into a safe Blueprint (defensive; pairs with the Zod gate). */
 export function normalizeBlueprint(raw: unknown): Blueprint | null {
   if (!raw || typeof raw !== 'object') return null;
-  const r = raw as { version?: unknown; blocks?: unknown };
+  const r = raw as { version?: unknown; blocks?: unknown; cover?: unknown };
   if (!Array.isArray(r.blocks)) return null;
   const blocks: BlueprintBlock[] = [];
   for (const b of r.blocks as Record<string, unknown>[]) {
@@ -217,7 +272,13 @@ export function normalizeBlueprint(raw: unknown): Blueprint | null {
       preset: typeof b.preset === 'string' ? b.preset : inferPresetKey(template, overlaySlots.length),
     });
   }
-  return { version: BLUEPRINT_VERSION, blocks };
+  // A cover is optional. When present it is re-sanitised rather than trusted: this function is the
+  // boundary every stored blueprint crosses (catalog reads, the preview route, edit-open, apply),
+  // so stripping album state here means no consumer can ever receive a blueprint cover naming a
+  // customer photo — including rows written before the gate existed, or edited by hand in SQL.
+  const cover =
+    r.cover && typeof r.cover === 'object' ? blueprintCoverFromConfig(r.cover) : undefined;
+  return { version: BLUEPRINT_VERSION, blocks, ...(cover ? { cover } : {}) };
 }
 
 // Re-export so callers building fresh blocks have a stable id source (parity with auto-layout).

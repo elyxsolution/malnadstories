@@ -30,7 +30,7 @@ import {
 import { listActiveCoverOptions } from '@/lib/covers';
 import { listActiveStickers, resolveStickerUrls } from '@/lib/stickers';
 import { listActiveTemplates, listActiveBlueprints } from '@/lib/templates/catalog';
-import { listActiveCoverTemplates } from '@/lib/cover-templates/catalog';
+
 import { DEFAULT_COVER_CONFIG, normalizeCoverConfig } from '@/lib/builder/cover';
 import { resolveCoverImageKeys } from '@/lib/albums/cover';
 import { builderFontVars } from '@/lib/fonts';
@@ -291,21 +291,11 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
       isDefault: b.isDefault,
       isNew: b.isNew,
       breakdown: b.breakdown,
+      // The design's own front cover (Phase 0) — what a blueprint is shown as.
+      cover: b.blueprint.cover ?? null,
       thumbUrl: b.thumbUrl,
       blueprint: b.blueprint,
     }));
-
-  const coverTemplates = (await listActiveCoverTemplates()).map((t) => ({
-    id: t.id,
-    name: t.name,
-    category: t.category,
-    featured: t.featured,
-    popular: t.popular,
-    pinned: t.pinned,
-    isNew: t.isNew,
-    config: t.config,
-    previewUrl: t.previewUrl,
-  }));
 
   // Custom cover design (0038). Best-effort secondary read: if the `cover_config` column
   // isn't migrated yet, supabase-js returns an error (not a throw) → we keep defaults, so
@@ -325,6 +315,10 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
     ...initialBlocks.flatMap((b) => b.stickers.map((s) => s.stickerId)),
     ...initialCoverConfig.stickers.map((s) => s.stickerId),
     ...initialCoverConfig.back.stickers.map((s) => s.stickerId),
+    // Stickers on the COVERS of the blueprints offered by "Build it for me" (Phase 0). Those
+    // covers are drawn live in the picker, so their stickers need resolving here alongside the
+    // album's own — same call, same resolver, no extra round trip.
+    ...blueprints.flatMap((b) => (b.cover ? b.cover.stickers.map((s) => s.stickerId) : [])),
   ];
   const stickerUrls = await resolveStickerUrls(referencedStickerIds);
 
@@ -486,7 +480,6 @@ export default async function BuildPage({ params }: { params: { id: string } }) 
         initialReview={initialReview}
         initialRenderReadiness={initialRenderReadiness}
         layoutTemplates={layoutTemplates}
-        coverTemplates={coverTemplates}
         blueprints={blueprints}
         blueprintDraftOf={blueprintDraftOf}
         blueprintMeta={blueprintMeta}

@@ -194,6 +194,74 @@
     }
   }
 
+  /* ── Public scroll reveal (components/public/reveal.tsx) ─────────────────────
+     One transition, three distances. `transform` + `opacity` only, so it is
+     composited and never triggers layout. `will-change` is deliberately ABSENT:
+     the elements are large, they animate once, and promoting every section to
+     its own layer for the life of the page costs more than it saves. */
+  [data-reveal] {
+    transition:
+      opacity 0.7s var(--ease-premium),
+      transform 0.7s var(--ease-premium);
+  }
+  [data-reveal='idle'] {
+    opacity: 0;
+  }
+  [data-reveal='idle'][data-reveal-distance='sm'] {
+    transform: translate3d(0, 10px, 0);
+  }
+  [data-reveal='idle'][data-reveal-distance='md'] {
+    transform: translate3d(0, 22px, 0);
+  }
+  [data-reveal='shown'] {
+    opacity: 1;
+    transform: none;
+  }
+  /* NO SCRIPTING → NO HIDING. The idle state is rendered on the SERVER (it has to be, or the
+     content would paint and then vanish as the observer took over), which means that without
+     JavaScript nothing would ever set it to `shown`. This makes the whole reveal system inert
+     for a reader — or a crawler — that is not running scripts, so the page is simply the page. */
+  @media (scripting: none) {
+    [data-reveal],
+    [data-reveal='idle'] {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+  }
+
+  /* A cover lifting on hover. One shared rule so every design tile on every public
+     surface moves identically — and so the motion lives next to the reveal it has
+     to feel consistent with, rather than being re-invented per component. */
+  .ms-lift {
+    transition:
+      transform 0.5s var(--ease-premium),
+      box-shadow 0.5s var(--ease-premium);
+  }
+  @media (hover: hover) {
+    .group\/tile:hover .ms-lift {
+      transform: translate3d(0, -6px, 0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* THE CONTENT STILL ARRIVES — only the movement stops. Never `display:none`
+       or a permanently transparent element: a reader who asks for less motion is
+       asking for less motion, not for less page. */
+    [data-reveal],
+    [data-reveal='idle'],
+    [data-reveal='shown'] {
+      transition: none;
+      transform: none;
+      opacity: 1;
+    }
+    .ms-lift,
+    .group\/tile:hover .ms-lift {
+      transition: none;
+      transform: none;
+    }
+  }
+
   /* ── Album Builder "Studio" surfaces ─────────────────────────────────────────
      Scoped to the builder; no global token is changed so other pages are
      untouched. Two atmospheres: a bright workspace and a dark editing stage. */

@@ -6,6 +6,8 @@ import { Search, X, Star, Sparkles, Pin, Clock, LayoutGrid, Eye, Check, Wand2, I
 import { Button } from '@/components/ui/button';
 import { blueprintMatch, type BlueprintMatchTone } from '@/lib/builder/blueprint';
 import { categoryLabel } from '@/lib/templates/model';
+import BlueprintCover from '@/components/blueprint-cover';
+import type { CoverConfig } from '@/lib/builder/cover';
 
 export type PickerBlueprint = {
   id: string;
@@ -21,6 +23,8 @@ export type PickerBlueprint = {
   isDefault: boolean;
   isNew: boolean;
   breakdown: { label: string; count: number }[];
+  /** The design's OWN front cover (Phase 0) — how a blueprint is represented to a customer. */
+  cover: CoverConfig | null;
   thumbUrl: string | null;
 };
 
@@ -42,15 +46,19 @@ export default function BlueprintPicker({
   blueprints,
   uploaded,
   busy,
+  stickerUrls = {},
   onApply,
   onClose,
 }: {
   blueprints: PickerBlueprint[];
   uploaded: number;
   busy: boolean;
+  /** Cover stickers, resolved by id server-side (one query for the catalog, never per card). */
+  stickerUrls?: Record<string, string>;
   onApply: (id: string, autoPlace: boolean) => void;
   onClose: () => void;
 }) {
+  const stickerUrlFor = (id: string) => stickerUrls[id];
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('all');
   const [preview, setPreview] = useState<PickerBlueprint | null>(null);
@@ -82,8 +90,15 @@ export default function BlueprintPicker({
     const m = blueprintMatch(uploaded, b.slotCount, b.recommendedPhotos);
     return (
       <div className="group flex flex-col overflow-hidden rounded-2xl border bg-card shadow-xs transition-all duration-200 ease-glide hover:-translate-y-1 hover:shadow-elevated">
-        <button type="button" onClick={() => setPreview(b)} className="relative block aspect-[4/3] w-full overflow-hidden bg-muted" aria-label={`Preview ${b.name}`}>
-          {b.thumbUrl ? (
+        {/* A design is shown as its FRONT COVER — a 3:4 book face, drawn live through the
+            canonical cover renderer, so what is browsed here is what arrives on the album. */}
+        <button type="button" onClick={() => setPreview(b)} className="relative block aspect-[3/4] w-full overflow-hidden bg-muted" aria-label={`Preview ${b.name}`}>
+          {b.cover ? (
+            <div className="absolute inset-0 transition-transform duration-300 group-hover:scale-[1.03]">
+              <BlueprintCover cover={b.cover} name={b.name} stickerUrlFor={stickerUrlFor} />
+            </div>
+          ) : b.thumbUrl ? (
+            // Legacy raster (the old interior montage) for designs authored before covers existed.
             // eslint-disable-next-line @next/next/no-img-element
             <img src={b.thumbUrl} alt={b.name} loading="lazy" className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
           ) : (
@@ -190,7 +205,14 @@ export default function BlueprintPicker({
         <div className="animate-fade-in fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4" onClick={() => setPreview(null)}>
           <div className="animate-scale-in flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-background shadow-elevated sm:flex-row" onClick={(e) => e.stopPropagation()}>
             <div className="relative aspect-[4/3] w-full bg-muted sm:w-3/5">
-              {preview.thumbUrl ? (
+              {preview.cover ? (
+                // The design's real cover, centred as a book face on the modal's ground.
+                <div className="absolute inset-0 grid place-items-center p-6">
+                  <div className="aspect-[3/4] h-full max-h-full overflow-hidden shadow-elevated">
+                    <BlueprintCover cover={preview.cover} name={preview.name} stickerUrlFor={stickerUrlFor} />
+                  </div>
+                </div>
+              ) : preview.thumbUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={preview.thumbUrl} alt={preview.name} className="absolute inset-0 h-full w-full object-contain" />
               ) : (

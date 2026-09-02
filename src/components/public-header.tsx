@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
@@ -8,111 +8,181 @@ import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 /**
- * Shared public/marketing header (Claude Design Foundations top-nav). Solid paper surface
- * with a hairline rule — no stacked glass on persistent chrome. Tokenized end to end.
- * Presentation + navigation only; every link is an existing public or auth route.
+ * THE public navigation. Four destinations, and no more.
+ *
+ * `Destinations`, `Testimonials` and `Pricing` are gone from the primary nav: the site now leads
+ * with the thing a visitor is actually choosing — a design — and a price list in the masthead is
+ * the wrong first impression for a made-to-order product. The routes themselves are untouched;
+ * only their promotion to top-level navigation was removed.
+ *
+ * The brand mark points at `/`. It is the one link a visitor is certain about, and pointing it at
+ * a dashboard is how a marketing site starts feeling like an admin tool.
  */
 const LINKS = [
-  { href: '/destinations', label: 'Destinations' },
+  { href: '/', label: 'Home', exact: true },
   { href: '/stories', label: 'Stories' },
-  { href: '/testimonials', label: 'Testimonials' },
-  { href: '/pricing', label: 'Pricing' },
-  { href: '/faq', label: 'FAQ' },
-  { href: '/contact', label: 'Contact' },
+  { href: '/about', label: 'About' },
+  { href: '/contact', label: 'Contact & FAQ' },
 ];
 
 export function PublicHeader() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '/';
   const [open, setOpen] = useState(false);
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const [scrolled, setScrolled] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+
+  const isActive = (l: (typeof LINKS)[number]) =>
+    l.exact ? pathname === l.href : pathname === l.href || pathname.startsWith(`${l.href}/`);
+
+  /**
+   * The bar earns its edge only once the page has moved. At the very top it sits flush on the
+   * hero with no rule at all, which is what keeps the masthead from looking like chrome bolted
+   * onto the design.
+   *
+   * `{ passive: true }` — this listener never calls `preventDefault`, and saying so lets the
+   * browser keep scrolling off the main thread. The handler itself only ever sets a boolean, and
+   * only when it actually changes, so React re-renders twice per page rather than per frame.
+   */
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Any navigation closes the menu. Without this, tapping a link on mobile leaves the panel open
+  // over the page it just navigated to.
+  useEffect(() => setOpen(false), [pathname]);
+
+  /**
+   * Open-menu behaviour: lock the background, close on Escape, and return focus to the button
+   * that opened it. Focus is moved INTO the panel on open so the next Tab lands on the first
+   * link rather than continuing from wherever the reader was in the page behind it.
+   */
+  useEffect(() => {
+    if (!open) return;
+    const { body } = document;
+    const previousOverflow = body.style.overflow;
+    body.style.overflow = 'hidden';
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        toggleRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    panelRef.current?.querySelector<HTMLElement>('a, button')?.focus();
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm">
+    <header
+      data-scrolled={scrolled ? '' : undefined}
+      className="sticky top-0 z-50 border-b border-transparent transition-[background-color,border-color,backdrop-filter] duration-300 ease-glide data-[scrolled]:border-border/60 data-[scrolled]:bg-background/85 data-[scrolled]:supports-[backdrop-filter]:backdrop-blur-md"
+    >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
-        <Link href="/" className="inline-flex items-center gap-2.5" aria-label="Malnad Stories — home">
-          <Image
-            src="/logo.png"
-            alt=""
-            width={447}
-            height={558}
-            priority
-            unoptimized
-            className="h-8 w-auto"
-          />
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+          aria-label="Malnad Stories — home"
+        >
+          <Image src="/logo.png" alt="" width={447} height={558} priority unoptimized className="h-8 w-auto" />
           <span className="font-display text-lg font-semibold leading-none text-primary">
-            Malnad{' '}
-            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
+            Malnad <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
           </span>
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden items-center gap-7 md:flex">
-          {LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={`text-sm font-medium transition-colors ${
-                isActive(l.href) ? 'text-primary' : 'text-muted-foreground hover:text-primary'
-              }`}
-            >
-              {l.label}
-            </Link>
-          ))}
+        {/* Desktop nav. The active state is an underline that GROWS from the left rather than a
+            colour swap, so moving between sections reads as travel along one row. */}
+        <nav className="hidden items-center gap-8 md:flex" aria-label="Primary">
+          {LINKS.map((l) => {
+            const active = isActive(l);
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                aria-current={active ? 'page' : undefined}
+                className={`group relative rounded-sm py-1 text-sm font-medium transition-colors duration-150 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background ${
+                  active ? 'text-primary' : 'text-muted-foreground hover:text-primary'
+                }`}
+              >
+                {l.label}
+                <span
+                  aria-hidden
+                  className={`absolute -bottom-0.5 left-0 h-px bg-gold transition-[width] duration-300 ease-premium motion-reduce:transition-none ${
+                    active ? 'w-full' : 'w-0 group-hover:w-full'
+                  }`}
+                />
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="hidden items-center gap-2.5 md:flex">
-          <Button render={<Link href="/login" />} variant="outline" size="sm">
-            Log in
-          </Button>
-          <Button render={<Link href="/signup" />} size="sm">
-            Create album
+        <div className="hidden items-center md:flex">
+          <Button render={<Link href="/stories" />} size="sm">
+            Explore designs
           </Button>
         </div>
 
-        {/* Mobile toggle */}
         <button
+          ref={toggleRef}
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-controls="public-mobile-nav"
           aria-label={open ? 'Close menu' : 'Open menu'}
-          className="grid h-11 w-11 place-items-center rounded-sm text-foreground transition-colors hover:bg-accent md:hidden"
+          className="grid h-11 w-11 place-items-center rounded-sm text-foreground transition-transform duration-150 ease-glide active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary md:hidden"
         >
           {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
       </div>
 
-      {/* Mobile sheet */}
-      {open && (
-        <nav
-          id="public-mobile-nav"
-          className="animate-fade-in border-t border-border/70 bg-background px-5 py-3 md:hidden"
-        >
+      {/*
+        MOBILE PANEL — a full-height sheet, not a dropdown.
+        It is kept MOUNTED and toggled with opacity/transform so it has a real exit as well as an
+        entrance, and `pointer-events-none` + `invisible` when closed so it can never intercept a
+        touch meant for the page. Exit is faster than the enter (200ms vs 300ms), which is what
+        makes dismissing feel immediate rather than like waiting for an animation.
+      */}
+      <div
+        id="public-mobile-nav"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Site menu"
+        data-open={open ? '' : undefined}
+        className="invisible fixed inset-x-0 top-16 bottom-0 z-40 translate-y-2 overflow-y-auto overscroll-contain bg-background/98 opacity-0 backdrop-blur-md transition-[opacity,transform,visibility] duration-200 ease-in data-[open]:visible data-[open]:translate-y-0 data-[open]:opacity-100 data-[open]:duration-300 data-[open]:ease-premium motion-reduce:transition-none motion-reduce:translate-y-0 md:hidden"
+      >
+        <nav aria-label="Primary (mobile)" className="mx-auto max-w-6xl px-5 py-6">
           <ul className="flex flex-col">
-            {LINKS.map((l) => (
-              <li key={l.href}>
-                <Link
-                  href={l.href}
-                  onClick={() => setOpen(false)}
-                  className={`flex min-h-11 items-center text-sm font-medium transition-colors ${
-                    isActive(l.href) ? 'text-primary' : 'text-muted-foreground hover:text-primary'
-                  }`}
-                >
-                  {l.label}
-                </Link>
-              </li>
-            ))}
+            {LINKS.map((l) => {
+              const active = isActive(l);
+              return (
+                <li key={l.href} className="border-b border-border/50">
+                  <Link
+                    href={l.href}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex min-h-[3.5rem] items-center font-display text-2xl tracking-tight transition-colors duration-150 ${
+                      active ? 'text-gold' : 'text-primary'
+                    }`}
+                  >
+                    {l.label}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
-          <div className="mt-2 flex gap-2.5 border-t border-border/60 pt-3">
-            <Button render={<Link href="/login" />} variant="outline" size="sm" className="flex-1">
-              Log in
-            </Button>
-            <Button render={<Link href="/signup" />} size="sm" className="flex-1">
-              Create album
-            </Button>
-          </div>
+          <Button render={<Link href="/stories" />} size="lg" className="mt-8 w-full">
+            Explore designs
+          </Button>
         </nav>
-      )}
+      </div>
     </header>
   );
 }

@@ -5,28 +5,33 @@ import Image from 'next/image';
  * Shared public/marketing footer (Claude Design). Editorial brand block + grouped link
  * columns on the paper surface. Presentation only — every destination is an existing route.
  */
+/**
+ * The footer mirrors the primary navigation rather than inventing a second information
+ * architecture. Pricing is deliberately absent here as well — it is not a destination this
+ * product leads with. `Destinations` and `Testimonials` keep their routes and move into a
+ * secondary "More" column, so nothing that existed became unreachable.
+ */
 const COLUMNS: { heading: string; links: { href: string; label: string }[] }[] = [
   {
     heading: 'Explore',
     links: [
-      { href: '/destinations', label: 'Destinations' },
+      { href: '/', label: 'Home' },
       { href: '/stories', label: 'Stories' },
-      { href: '/testimonials', label: 'Testimonials' },
-    ],
-  },
-  {
-    heading: 'Order',
-    links: [
-      { href: '/pricing', label: 'Pricing' },
-      { href: '/signup', label: 'Create an album' },
-      { href: '/login', label: 'Log in' },
+      { href: '/about', label: 'About' },
     ],
   },
   {
     heading: 'Help',
     links: [
-      { href: '/faq', label: 'FAQ' },
-      { href: '/contact', label: 'Contact' },
+      { href: '/contact', label: 'Contact & FAQ' },
+      { href: '/login', label: 'Log in' },
+    ],
+  },
+  {
+    heading: 'More',
+    links: [
+      { href: '/destinations', label: 'Destinations' },
+      { href: '/testimonials', label: 'Testimonials' },
     ],
   },
 ];

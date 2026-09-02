@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { InlineLoader } from '@/components/loading';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
+import { authCallbackUrl } from '@/lib/auth/next';
 
 /**
  * "Continue with Google" — the OAuth entry shared by the login + signup pages.
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button';
  * new auth architecture, no schema/RLS/session change. Identity is the Supabase UUID, so
  * repeated Google logins reuse the one profile and never create a duplicate.
  */
-export default function GoogleAuth() {
+export default function GoogleAuth({ next = null }: { next?: string | null }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,8 +28,14 @@ export default function GoogleAuth() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // The very same callback the email flow lands on; its `next` defaults to /dashboard.
-        redirectTo: `${window.location.origin}/auth/callback`,
+        /*
+         * The very same callback the email flow lands on. Phase 2 attaches the pending
+         * destination to it, so a visitor who chose a design and signed in with Google returns
+         * to that design rather than to /dashboard. `authCallbackUrl` re-applies the shared
+         * open-redirect validator, so an unusable value simply produces the bare callback and
+         * `next` falls back to /dashboard there.
+         */
+        redirectTo: authCallbackUrl(window.location.origin, next),
         // Let returning users pick which Google account to use.
         queryParams: { prompt: 'select_account' },
       },

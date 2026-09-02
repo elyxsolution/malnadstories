@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { boundedFetch, getUserWithDeadline } from '@/lib/supabase/timeout';
+import { resolveNextPath, withNext } from '@/lib/auth/next';
 
 // Absolute session age enforced when "Stay logged in" is OFF. A reliable backstop
 // for browsers that restore session cookies on restart: even if the auth cookie
@@ -54,6 +55,10 @@ export async function middleware(request: NextRequest) {
   // route-guard). Presentation/authorization only — no auth/cookie behavior changes.
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', request.nextUrl.pathname);
+  // Phase 2: the QUERY too. `(app)/layout.tsx` rebuilds the intended destination from these two
+  // so an unauthenticated "Use this design" round-trips back to /albums/new?design=<id> rather
+  // than to a bare /dashboard. The path alone is not enough — the design lives in the query.
+  requestHeaders.set('x-search', request.nextUrl.search);
 
   // Request correlation (Phase 10B): mint a request id (honor an upstream one) and forward it so
   // any server code in the request scope — server components/actions, route handlers, and the
@@ -140,18 +145,21 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Redirect unauthenticated users away from protected paths
+  // Redirect unauthenticated users away from protected paths, CARRYING the destination
+  // (Phase 2). Same validator as everywhere else, applied to a value we built ourselves —
+  // belt and braces, since the path+query come from the request line.
   if (!user && (pathname.startsWith('/dashboard') || pathname.startsWith('/admin'))) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    return NextResponse.redirect(url);
+    const intended = `${pathname}${request.nextUrl.search}`;
+    return NextResponse.redirect(new URL(withNext('/login', intended), request.nextUrl.origin));
   }
 
-  // Redirect authenticated users away from auth pages
+  // Redirect authenticated users away from auth pages — to their pending destination when they
+  // brought one, else the dashboard. Without this, a signed-in customer following a
+  // /login?next=/albums/new?design=<id> link (a shared link, a stale tab, the back button) would
+  // be dumped on the dashboard and lose the design.
   if (user && (pathname === '/login' || pathname === '/signup')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/dashboard';
-    return NextResponse.redirect(url);
+    const dest = resolveNextPath(request.nextUrl.searchParams.get('next'));
+    return NextResponse.redirect(new URL(dest, request.nextUrl.origin));
   }
 
   // Echo the correlation id (the setAll callback above may have rebuilt the response).

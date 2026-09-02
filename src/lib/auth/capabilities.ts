@@ -30,7 +30,6 @@ export const CAPABILITIES = [
   'customer:view',
   'cms:edit', 'cms:publish', 'cms:archive',
   'template:edit', 'template:publish', 'template:archive',
-  'cover:manage',
   'sticker:manage',
   'product:manage',
   'coupon:manage',
@@ -70,7 +69,6 @@ const SUPPORT: Capability[] = [
 const CONTENT: Capability[] = [
   'cms:edit', 'cms:publish', 'cms:archive',
   'template:edit', 'template:publish', 'template:archive',
-  'cover:manage',
   'sticker:manage',
 ];
 
@@ -105,8 +103,6 @@ const ROUTE_CAPABILITY: { prefix: string; capability: Capability }[] = [
   { prefix: '/admin/reprints', capability: 'reprint:view' },
   { prefix: '/admin/customers', capability: 'customer:view' },
   { prefix: '/admin/albums', capability: 'album:view' },
-  { prefix: '/admin/cover-templates', capability: 'cover:manage' },
-  { prefix: '/admin/covers', capability: 'cover:manage' },
   { prefix: '/admin/stickers', capability: 'sticker:manage' },
   { prefix: '/admin/coupons', capability: 'coupon:manage' },
   { prefix: '/admin/dimensions', capability: 'product:manage' },

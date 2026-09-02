@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Save, CheckCircle2, Archive, Copy, Undo2, ArrowLeft } from 'lucide-react';
 import { saveContent, setContentStatus, duplicateContent } from '@/lib/actions/admin/cms';
+import BlueprintPickerField, { type PickableBlueprint } from './_blueprint-picker-field';
 import {
   CONTENT_TYPES,
   TYPE_CONFIG,
@@ -17,7 +18,8 @@ import {
   type ContentType,
 } from '@/lib/cms/model';
 
-type MetaValue = string | number | boolean;
+/** Scalars, plus the ordered id list an entity-reference field stores (Phase 1). */
+type MetaValue = string | number | boolean | string[];
 
 export type EditorInitial = {
   id: string | null;
@@ -37,7 +39,16 @@ export type EditorInitial = {
  * directly. Save persists content (status unchanged); Publish/Archive/Move-to-draft change
  * status; Duplicate clones as a fresh draft.
  */
-export default function CmsEditor({ initial }: { initial: EditorInitial }) {
+export default function CmsEditor({
+  initial,
+  blueprintOptions = [],
+  blueprintStickerUrls = {},
+}: {
+  initial: EditorInitial;
+  /** Active designs offered by any `blueprints` metadata field on this type. */
+  blueprintOptions?: PickableBlueprint[];
+  blueprintStickerUrls?: Record<string, string>;
+}) {
   const router = useRouter();
   const isNew = initial.id === null;
 
@@ -212,7 +223,17 @@ export default function CmsEditor({ initial }: { initial: EditorInitial }) {
         {/* Per-type metadata fields */}
         {cfg.metaFields.map((f) => (
           <Field key={f.key} label={f.label}>
-            {f.kind === 'boolean' ? (
+            {f.kind === 'blueprints' ? (
+              /* Entity references (Phase 1) — the editor picks real covers, never ids. Branching
+                 on the FIELD KIND, not on the content type, so any type declaring this field gets
+                 the same picker for free. */
+              <BlueprintPickerField
+                value={metadata[f.key]}
+                options={blueprintOptions}
+                stickerUrls={blueprintStickerUrls}
+                onChange={(ids) => setMeta(f.key, ids)}
+              />
+            ) : f.kind === 'boolean' ? (
               <label className="inline-flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"

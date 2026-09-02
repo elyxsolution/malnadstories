@@ -5,6 +5,7 @@ import { contentPages } from '@/db/schema';
 import { requireCmsCapability } from '@/lib/cms/access';
 import { isContentType, type ContentType } from '@/lib/cms/model';
 import CmsEditor from '../_editor';
+import { listBlueprintOptions } from '@/lib/cms/blueprint-options';
 
 export default async function EditContentPage({ params }: { params: { id: string } }) {
   await requireCmsCapability('cms:edit');
@@ -13,7 +14,9 @@ export default async function EditContentPage({ params }: { params: { id: string
   if (!row) notFound();
 
   const type: ContentType = isContentType(row.type) ? (row.type as ContentType) : 'blog';
-  const metadata = (row.metadata ?? {}) as Record<string, string | number | boolean>;
+  // Includes entity-reference lists (Phase 1) as well as scalars.
+  const metadata = (row.metadata ?? {}) as Record<string, string | number | boolean | string[]>;
+  const { options, stickerUrls } = await listBlueprintOptions();
 
   return (
     <CmsEditor
@@ -28,6 +31,8 @@ export default async function EditContentPage({ params }: { params: { id: string
         coverImage: row.coverImage ?? '',
         metadata,
       }}
+      blueprintOptions={options}
+      blueprintStickerUrls={stickerUrls}
     />
   );
 }

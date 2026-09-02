@@ -511,7 +511,7 @@ exposed — direct browser uploads/displays fail without it.
 Two suites, ONE framework (Vitest). Neither touches a database, a network, or R2.
 
 ```bash
-pnpm test              # app suite — 31 files / 610 tests
+pnpm test              # app suite — 41 files / 813 tests
 cd worker && pnpm test # worker suite — 143 files / 1296 tests
 ```
 
@@ -2114,7 +2114,7 @@ overlay rects, all flowing through one `Block[]`; a template's `geometry` is
 produces an ordinary `Block`** — nothing new ever reaches the renderer, `saveLayout`, the
 `BlockSchema` enum, or the `album_pages` CHECK. PDF parity, saveLayout compatibility, and
 no-photo-loss therefore hold **by construction**. Cover management (the spec's Phase 6)
-**already exists** at `/admin/covers` and is reused (linked from the templates area) — no
+**existed** at `/admin/covers` — RETIRED in Phase 0, when the Blueprint absorbed the cover; no
 cover changes.
 - **Geometry safety**: `validateGeometry()` (`src/lib/templates/model.ts`) is the single
   source of truth (base ∈ existing primitives; overlays = bounded numeric rects inside
@@ -2698,6 +2698,189 @@ Both columns stay NOT NULL as first-item pointers. Every remaining reader was cl
 - **MUST MIGRATE EVENTUALLY (not a bug today)**: `admin/production/page.tsx` shows `orders.copies`
   as the print quantity, which for a combined order is only the first item's copies. Harmless
   while no combined order has been printed; fix before the first combined production run.
+
+## Blueprint owns the design (Phase 0) — built
+
+Three separate design products became one. **A Blueprint is now the single design entity**: identity,
+merchandising, interior layout, **and its own front/back/spine cover**. "Cover Design"
+(`cover_design_templates`, 0040) and "Cover Artwork" (`cover_templates`, 0023) are no longer
+products — neither has an admin section, and neither has a customer-facing gallery.
+
+**NO MIGRATION WAS NEEDED, AND NONE WAS WRITTEN.** `layout_templates.blueprint` is unconstrained
+`jsonb`, so the cover lives inside the JSON that is already there. `drizzle/` is unchanged at 58
+files.
+
+### The Blueprint
+
+```ts
+type Blueprint = { version: 1; blocks: BlueprintBlock[]; cover?: CoverConfig }
+```
+
+- **`cover` is OPTIONAL and `version` stays 1.** An additive optional key is already inside the
+  existing versioning contract; bumping would have invalidated stored rows that are still valid and
+  forced a rewrite of every blueprint. Absent means "this design defines no cover" — never a
+  default invented on read.
+- **It is an ordinary `CoverConfig`** — the exact type `albums.cover_config` holds — so the
+  canonical renderer, the builder, the preview and both PDFs draw a blueprint's cover through the
+  code they already draw an album's cover through. There is no second cover model.
+- **`blueprintCoverFromConfig` is the ONE gate**, applied on the way IN (`blueprintFromBlocks`) and
+  on the way OUT (`normalizeBlueprint`). It strips `photoId` / `imageEdit` on both faces and clears
+  `back.overlays[].photoId` while KEEPING the overlay container. A photo id names one customer's
+  private upload and a blueprint is global, so it must never be stored on one — sanitising on read
+  too means a hand-edited jsonb row cannot smuggle one through. **Sticker ids are kept**: a sticker
+  is admin artwork resolved by id, not customer data.
+
+### The draft-album round trip (the bug this phase fixed)
+
+`openBlueprintForEditing` → draft album → builder → `updateBlueprintFromAlbum` used to carry the
+pages **only**, so a cover an admin composed in Blueprint Mode was silently discarded on save. Now:
+the draft is INSERTED with `cover_config` seeded from `blueprint.cover`; Blueprint Mode's Save calls
+`saveCoverDesign` **before** `saveLayout`/`updateBlueprintFromAlbum` (that action re-reads the row,
+so a cover left in client state would be invisible to it); and the save reads `cover_config` back
+into `blueprint.cover`. There is still exactly ONE builder and ONE cover editor.
+
+### SNAPSHOT, never a reference
+
+```
+Blueprint.cover ──(deep clone, photo slots cleared)──► albums.cover_config
+```
+
+Applying a blueprint (`applyBlueprintById`) and creating an album (`insertAlbumForUser`, new
+`blueprintId` input) both snapshot through the existing `applyCoverTemplateToAlbum`. **No album
+column points at a blueprint's cover**, so an admin editing a design later cannot alter an album
+that has already been created, ordered or printed. Default cover for an album created with no design
+chosen: the **explicit** default Blueprint for that page count (0045 `is_default`) — deliberately
+`find(isDefault)`, not `selectAutoBlueprint`, whose no-default fallback would dress every album in
+whichever design sorted first — then the legacy 0052 default, then blank.
+
+### The thumbnail IS the front cover
+
+`components/blueprint-cover.tsx` draws `blueprint.cover` through `CoverDesignFromConfig` — the same
+component the builder, preview, flipbook, review mode, dashboard shelf and printer-ready cover
+export use. **Live React/CSS: no Chromium, no worker, no R2 object, no `thumb_key`**, so it cannot
+go stale between an edit and the next page load. Used by `/admin/templates` and the customer
+blueprint picker, both now a 3:4 book face. The old 2×2 **interior-spread montage** is a FALLBACK
+only, for blueprints authored before covers existed.
+
+> ⚠️ The `blueprint-thumbnail` / `cover-thumbnail` queues are still enqueued but **have no
+> registered processor in Worker V2** (V1 had one; see `git show worker-v1-final:worker/src/jobs/`).
+> They fail as `UnroutableJobError`. Left in place deliberately — nothing depends on them now that
+> covers render live. **Follow-up:** either port the processor or retire the queues + the
+> `regenerateBlueprintThumbnail` action.
+
+### LEGACY COVER ARTWORK IS RETAINED — the admin PRODUCT is gone, the DATA is not
+
+`cover_templates`, `albums.cover_template_id`, the R2 `cover-templates/…` objects and **every read
+path** (`lib/albums/cover.ts`, `lib/covers.ts`, builder, checkout, render-readiness, product
+preview, both PDFs) are untouched. `classifyCover`'s four-way chain (photo → template → design →
+default) is unchanged, and a deactivated template is still grandfathered. `_builder.tsx` keeps
+`coverId` as **read-only** state and still writes it back on every save, so editing a legacy album
+cannot blank its cover. What is gone is the ability to PICK a new one: no admin CRUD, no builder
+gallery. Measured before removal: **0 albums referenced `cover_template_id`** and `cover_templates`
+held **0 rows** — retained regardless, per the audited "remove the product, not the data" rule.
+
+**Removed:** `/admin/cover-templates/**`, `/admin/covers/**`, `lib/actions/admin/cover-templates.ts`,
+`lib/actions/admin/covers.ts`, `lib/admin/covers.ts`, `lib/cover-templates/access.ts`, the builder's
+`_panel-cover-templates.tsx` + its cover-only `templates` rail tab, both nav entries, and the
+`cover:manage` capability. **Kept:** `lib/cover-templates/catalog.ts` + `model.ts` — creation still
+reads the legacy 0052 default through them, and `applyCoverTemplateToAlbum` is the shared snapshot
+primitive.
+
+Tests: `tests/blueprint-cover.test.ts` (26).
+
+## Authentication + Blueprint continuation (Phase 2) — built
+
+Browsing designs is public; using one is not. Phase 2 closes the gap the public gallery opened:
+a visitor picks a design on `/stories` or the Home shelf, is asked to sign in, and lands **on that
+design** — not on a generic dashboard with their choice forgotten.
+
+**NO SECOND AUTH SYSTEM WAS INTRODUCED.** Supabase Auth, `@supabase/ssr` cookies, the `signIn`
+server action, the browser-client signup, the Google OAuth entry, `/auth/callback`, the
+`remember_me` persistence model and the 8-hour absolute backstop are all unchanged. No dependency
+was added. What changed is that one value — *where was this person going?* — now survives the
+round trip.
+
+### THE CONTINUATION IS A URL, AND ONLY A URL
+
+```
+/stories  ──"Use this design"──►  /albums/new?design=<id>
+                                        │ (signed out)
+                                        ▼
+                    /login?next=%2Falbums%2Fnew%3Fdesign%3D<id>
+                                        │  sign in · sign up · Google
+                                        ▼
+                    /albums/new?design=<id>  ──►  album created  ──►  builder
+```
+
+- **`src/lib/auth/next.ts` is the ONE validator**, pure (no `server-only`), so the middleware
+  (edge), the Server Components, the client forms and the tests all apply the same rule.
+  `safeNextPath` accepts a single-slash relative path and **rejects everything else outright** —
+  absolute URLs, protocol-relative `//host`, backslash variants, control characters (URL/header
+  smuggling), absurd lengths — and additionally rejects `/login` and `/signup` themselves, which
+  would be a redirect loop once middleware forwards a signed-in visitor to their pending
+  destination. `/reset-password` stays legal, because the password-reset flow is built on it.
+  A rejected value is never an error the customer sees: it silently becomes `/dashboard`.
+- **The open-redirect rule that used to live inside `/auth/callback` moved here.** Phase 2 gave
+  four more callers the same question, and five near-identical regexes is how an open redirect
+  eventually ships. Behaviour is unchanged.
+- **NO SESSION RECORD, NO COOKIE, NO `localStorage`, NO React state.** The chosen design is
+  already expressible as a destination, so the continuation needs no store — which is exactly why
+  it survives a full page load, a verification email opened in another tab, and an OAuth redirect.
+  **The blueprint JSON is never in the URL**: an id travels, and nothing else.
+
+### WHERE THE BOUNDARY ACTUALLY IS
+
+`(app)/layout.tsx` is still the ONE gate for `/albums/*`, `/cart`, `/checkout/*`, `/orders`,
+`/dashboard` and the rest — Phase 2 added no second guard and no "use design" entry point of its
+own. It used to `redirect('/login')`, discarding the destination; it now rebuilds the intended URL
+from **`x-pathname` + `x-search`** (middleware forwards both; the query is where the design id
+lives, so the path alone was not enough) and redirects through `loginHref`. Middleware's own
+`/dashboard`+`/admin` guard does the same, and — the other half — forwards an ALREADY-SIGNED-IN
+visitor who lands on `/login?next=…` to that destination instead of bouncing them to `/dashboard`.
+
+`/login` and `/signup` became **Server Components** (`page.tsx` reads and validates `searchParams`;
+`_form.tsx` is the client half) rather than using `useSearchParams`, which would have made each
+screen's rendering mode depend on a Suspense boundary. They are consequently rendered dynamically
+now; the four PUBLIC pages (`/`, `/stories`, `/about`, `/contact`) are untouched and still static
+with their Phase 1 ISR.
+
+### THE DESIGN ID IS UNTRUSTED INPUT — FOUR GATES
+
+1. `/albums/new` shape-checks `?design=` as a uuid before it is used for anything;
+2. resolves it against `listActiveBlueprints()` — the same cached, service-role catalog every
+   other surface uses — so an archived, deactivated or invented id resolves to **nothing**;
+3. hands the wizard an **id only**. No cover, geometry or metadata crosses from the URL; every
+   property is read from the catalog rows the page already loaded;
+4. `createAlbumDraft` re-resolves the id itself through `getActiveBlueprint`, and
+   `applyBlueprintToAlbum` re-resolves it again. Those are the security gates; step 1 is UX.
+
+An id that no longer resolves is **neither a 500 nor a silent drop**: the wizard says the design is
+no longer available and creation continues normally.
+
+### ONE CREATION PATH, ONE APPLY PATH
+
+- The **cover** is snapshotted by the EXISTING Phase 0 path: the wizard passes `blueprintId` to
+  `createAlbumDraft`, which clones `blueprint.cover` onto `albums.cover_config`. Omitting it (no
+  design, or a design on hold) reproduces the previous behaviour byte for byte, default-cover
+  fallback included.
+- The **interior** is applied by `applyBlueprintToAlbum` — the same action the layout picker calls.
+  The "Use this design" card on step 2 is a new affordance, not a new code path.
+- **A design decides the page count**, because a blueprint's layout is built for a book of an exact
+  length. Arriving with one preselects the page count and a product that offers it. If the customer
+  changes the length, the design is neither silently discarded (indistinguishable from having lost
+  it across the login that just happened) nor silently applied to the wrong book: it is held aside
+  with one press back. All of it is DERIVED from the current page count, never mirrored into state.
+- **ONE PRESS CREATES ONE ALBUM.** `creating` disables the button but only on the next render, so a
+  double click could reach the server twice. A synchronous `creatingRef` closes it, released on
+  failure only — on success `albumId` is the guard. (Same reasoning as checkout's `payInFlight`.)
+  Verified in the browser: a genuine double-click produced exactly one `albums` row.
+
+### WHAT WAS DELIBERATELY NOT TOUCHED
+
+The builder (including its dirty-state guard), the PDF pipeline, checkout, pricing, payments, the
+cover system (legacy included), the CMS data model, the Blueprint model, Book Journey, the public
+IA, the Phase 1 motion system, and the touch behaviour of the design tiles. No migration, no schema
+change, no new capability, no new dependency. Tests: `tests/auth-continuation.test.ts` (45).
 
 ## What's NOT built yet (do not add until asked)
 
