@@ -715,3 +715,128 @@
     background-color: hsl(var(--studio-bright) / 0.6);
   }
 }
+@layer utilities {
+  /* ── THE ACCOUNT MENU (components/account/account-menu.tsx) ───────────────────
+     One choreography, three layers, all of it `transform` + `opacity` so it stays on
+     the compositor. Base UI stamps `data-starting-style` before the popup paints and
+     `data-ending-style` while it closes, and keeps the element mounted for the exit —
+     which is the only reason a CSS close animation is possible here at all.
+
+     The sequence, and what each part is FOR:
+
+       1 · the surface arrives — 190ms, from the trigger's corner, so the panel is
+           visibly the thing that button just opened rather than a card that appeared;
+       2 · the rows settle — 26ms apart, 170ms each, a slight lift. Enough to read as
+           a sequence, not enough to wait for. Mount only: Base UI unmounts the popup
+           on close, so this never replays on a re-render;
+       3 · hover takes over — the chevron slides and warms. Nothing else moves.
+
+     Exit is ~⅔ of the enter (120ms) and accelerates away: a menu you are done with
+     should get out of the way faster than it arrived. */
+
+  .ms-account-popup {
+    transform-origin: top right;
+    transition:
+      opacity 190ms var(--ease-premium),
+      transform 190ms var(--ease-premium);
+  }
+  /* Left-aligned or upward flips (collision handling) re-anchor the origin, so the
+     panel always grows out of the corner nearest its trigger. */
+  .ms-account-popup[data-align='start'] {
+    transform-origin: top left;
+  }
+  .ms-account-popup[data-side='top'] {
+    transform-origin: bottom right;
+  }
+  .ms-account-popup[data-side='top'][data-align='start'] {
+    transform-origin: bottom left;
+  }
+  .ms-account-popup[data-starting-style] {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.975);
+  }
+  .ms-account-popup[data-ending-style] {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.99);
+    transition:
+      opacity 120ms var(--ease-glide),
+      transform 120ms var(--ease-glide);
+  }
+
+  /* The identity plate leads; the rows follow it. `both` holds the from-state during
+     the delay so nothing flashes at full opacity before its turn. */
+  .ms-account-plate {
+    animation: ms-account-in 200ms var(--ease-premium) 40ms both;
+  }
+  .ms-account-row {
+    animation: ms-account-in 170ms var(--ease-premium) calc(90ms + var(--i, 0) * 26ms) both;
+  }
+  @keyframes ms-account-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  /* The exit is the SURFACE's job alone. Re-animating each row on the way out would
+     read as the menu falling apart rather than closing. */
+  .ms-account-popup[data-ending-style] .ms-account-plate,
+  .ms-account-popup[data-ending-style] .ms-account-row {
+    animation: none;
+  }
+
+  /* The one moving affordance. Transform + opacity; the label never shifts. */
+  .ms-account-chevron {
+    opacity: 0;
+    transform: translateX(-3px);
+    transition:
+      opacity 150ms var(--ease-glide),
+      transform 150ms var(--ease-glide);
+  }
+  .ms-account-row:hover .ms-account-chevron,
+  .ms-account-row[data-highlighted] .ms-account-chevron {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* The trigger acknowledges the open state with the icon, not with a colour swap. */
+  .ms-account-trigger-icon {
+    transition: transform 200ms var(--ease-premium);
+  }
+  .ms-account-trigger[aria-expanded='true'] .ms-account-trigger-icon {
+    transform: translateY(0.5px) scale(1.06);
+  }
+
+  /* REDUCED MOTION — the menu still looks composed, it simply stops moving.
+     The global rule in @layer base already collapses durations, but it does NOT clear
+     an animation DELAY: without this the staggered rows would sit invisible (they are
+     `both`-filled) for a beat before appearing. So the delays are zeroed explicitly and
+     every transform is dropped, while opacity and every state cue are kept. */
+  @media (prefers-reduced-motion: reduce) {
+    .ms-account-popup,
+    .ms-account-popup[data-starting-style],
+    .ms-account-popup[data-ending-style] {
+      transition: none;
+      transform: none;
+    }
+    .ms-account-popup[data-starting-style] {
+      opacity: 0;
+    }
+    .ms-account-plate,
+    .ms-account-row {
+      animation: none;
+    }
+    .ms-account-chevron {
+      transition: none;
+      transform: none;
+      opacity: 0.45;
+    }
+    .ms-account-trigger-icon {
+      transition: none;
+      transform: none;
+    }
+  }
+}

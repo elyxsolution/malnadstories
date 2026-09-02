@@ -2922,6 +2922,79 @@ Tests: `tests/public-header-auth.test.tsx` (20 — both states RENDERED, plus a 
 stripping the two auth controls leaves byte-identical markup) and section J of
 `tests/auth-continuation.test.ts`.
 
+### THE ACCOUNT MENU — one control, two contexts (Phase 2 follow-up ②)
+
+The signed-in navbar used to print the customer's email in plain text beside a "Log out" link.
+Both are now inside a single account control: a 44×44 profile button that opens a small menu.
+
+```
+components/account/
+  account-menu-model.ts   PURE — what each context offers (no JSX, no React)
+  account-menu.tsx        the ONE control: trigger + popup, both headers render it
+lib/auth/identity.ts      PURE — name/email resolution + the avatar initial
+```
+
+- **PUBLIC context** (`/`, `/stories`, `/about`, `/contact`) → account block · Your stories
+  (`/dashboard`) · Cart (`/cart`) · Log out.
+- **APP context** (`(app)/**`, `admin/**`) → account block · Home · Stories · Contact & FAQ ·
+  Log out. It offers the way BACK OUT, because the person is already inside; re-listing the
+  dashboard there would be a menu item that does nothing.
+- **The context comes from the LAYOUT that renders the header**, not from inspecting a pathname:
+  `(app)/layout.tsx` and `admin/layout.tsx` render the app header, public pages render the public
+  one. The route group *is* the context, so it cannot drift out of step with a hand-maintained
+  list of path prefixes.
+
+**⚠️ SIGN OUT IS IN BOTH MENUS — a deliberate departure from the brief**, which asked for it on
+the public menu only. Before this change the app header's "Log out" was the **only** way to sign
+out of the product: `/account` has none, the rail has none, and the builder's own header is a
+different route. A menu without it would leave a signed-in customer unable to sign out at all.
+It is separated by a rule and set quietly in both contexts.
+
+**Nothing about authentication moved.** `signOut` is the existing server action, submitted as
+`<form action={signOut}>` — the shape this codebase has always used — so the session is
+invalidated by Supabase and the redirect to `/` re-renders every header from the server, which is
+why no stale signed-in chrome can survive it. There is no second logout, no client-side session
+clearing, and no new auth client.
+
+**What crosses the boundary is a name and an email** (`AccountIdentity`), resolved server-side by
+whichever layout already holds the authenticated user. The name comes from `user_metadata` on
+that same user, so it costs **zero extra queries**; `accountIdentity` falls back to the email's
+local part through the EXISTING `validateName` policy — the same rule `/auth/callback` applies
+before writing `profiles.name` — and then to "Your account", never to a blank line. No id, no
+token, no session object reaches the client.
+
+**`@base-ui/react`'s Menu, not a hand-rolled popover, and not a new dependency.** It is already
+this project's primitive (shadcn@4 is built on it; `ui/button.tsx` and `ui/input.tsx` import from
+it). It owns `role="menu"`, roving focus with arrow keys, Escape, outside-click dismissal, focus
+return and collision handling — and it keeps the popup mounted through its exit, which is what
+makes a CSS closing animation possible at all. Menu items are real `<a role="menuitem">` anchors
+(`Menu.LinkItem` + `render`), and sign out is a `<button role="menuitem" type="submit">`.
+
+**The motion is the project's own CSS** (`.ms-account-*` in `globals.css`), hung off Base UI's
+`data-starting-style` / `data-ending-style`. Three layers, `transform` + `opacity` only:
+the surface arrives in **190ms** on `--ease-premium` from `transform-origin: top right` — the
+trigger's own corner, re-anchored automatically when collision flips the side or alignment; the
+plate and rows follow **26ms apart**, mount-only; hover slides the chevron 3px. The exit is
+**120ms** on `--ease-glide` and the rows do not re-animate — a menu you are done with should get
+out of the way faster than it arrived, in one piece. **Reduced motion has its own explicit
+block**, because the global rule collapses durations but NOT delays: a staggered, `both`-filled
+row would otherwise sit invisible for a beat. Transforms and animations are dropped; the menu and
+every state cue remain.
+
+**The dashboard sidebar lost its brand block** (`customer-shell.tsx`) — the mark and wordmark sat
+there AND in the app header directly above, the same statement made twice, pushing the navigation
+down the column. The rail now opens on "Your stories". Its width, ground, icons, active
+treatment, labels, New album CTA and account chip are untouched, and no spacing was re-tuned:
+`py-6` already provided what the block's `mb-9` did. **The app header's branding stays** — it is
+now the only brand statement on those screens.
+
+**Mobile keeps its sheet.** The account is presented INSIDE the existing panel as ordinary rows —
+identity stated inline, then the same destinations as full-width ≥44px links and the same sign-out
+form. A popover floating over an open sheet would be a menu inside a menu, and the one shape that
+could fight the sheet's scroll. The sheet's Escape, scroll lock and focus handling are unchanged.
+
+Tests: `tests/account-menu.test.tsx` (26) · `tests/dashboard-shell.test.tsx` (16).
+
 ### WHAT WAS DELIBERATELY NOT TOUCHED
 
 The builder (including its dirty-state guard), the PDF pipeline, checkout, pricing, payments, the

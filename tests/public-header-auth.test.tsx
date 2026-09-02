@@ -27,14 +27,33 @@ vi.mock('next/link', () => ({
 vi.mock('next/image', () => ({
   default: ({ alt }: { alt?: string }) => React.createElement('img', { alt: alt ?? '' }),
 }));
+/*
+ * The account control is exercised in full by `account-menu.test.tsx`. Here it is reduced to the
+ * one thing this file is about — WHICH control the bar draws — so these assertions cannot start
+ * failing for reasons that belong to the menu's own suite.
+ */
+vi.mock('@/components/account/account-menu', () => ({
+  default: ({ identity, context }: { identity: { name: string }; context: string }) =>
+    React.createElement(
+      'button',
+      { 'data-account-menu': context, 'aria-label': `Account — ${identity.name}`, className: 'h-11 w-11 focus-visible:ring-2' },
+      'account',
+    ),
+}));
+vi.mock('@/lib/actions/auth', () => ({ signOut: async () => {} }));
 
 // Static import is safe: Vitest hoists every vi.mock() above it.
 import { PublicHeaderNav } from '@/components/public-header-nav';
 
 const DESIGN_NEXT = '/login?next=%2Falbums%2Fnew%3Fdesign%3D4f1c2a3e-0000-4000-8000-000000000001';
 
+const IDENTITY = { name: 'Anita Rao', email: 'anita@example.com' };
+
 function render(props: { signedIn?: boolean; loginHref?: string } = {}) {
-  const html = renderToStaticMarkup(React.createElement(PublicHeaderNav, props));
+  const { signedIn, ...rest } = props;
+  const html = renderToStaticMarkup(
+    React.createElement(PublicHeaderNav, { ...rest, identity: signedIn ? IDENTITY : null }),
+  );
   const hrefs = Array.from(html.matchAll(/href="([^"]*)"/g)).map((m) => m[1]);
   const labels = Array.from(html.matchAll(/aria-label="([^"]*)"/g)).map((m) => m[1]);
   const text = html
@@ -46,7 +65,7 @@ function render(props: { signedIn?: boolean; loginHref?: string } = {}) {
   return { html, hrefs, labels, text };
 }
 
-const ACCOUNT_LABEL = 'Your account — go to your dashboard';
+const ACCOUNT_LABEL = 'Account — Anita Rao';
 
 // ── SIGNED OUT ───────────────────────────────────────────────────────────────────────────────
 
@@ -92,9 +111,18 @@ describe('signed in', () => {
     expect(labels).toContain(ACCOUNT_LABEL);
   });
 
-  it('reaches the EXISTING /dashboard — and invents no new route', () => {
+  it('the bar itself no longer links straight to /dashboard — the menu owns that now', () => {
+    const { html } = render({ signedIn: true });
+    // The desktop control is the account menu's trigger, not an anchor to a destination.
+    expect(html).toContain('data-account-menu="public"');
+    const bar = html.split('id="public-mobile-nav"')[0];
+    expect(bar).not.toMatch(/<a[^>]*href="\/dashboard"/);
+  });
+
+  it('the mobile sheet still reaches the EXISTING /dashboard and /cart, and invents no route', () => {
     const { hrefs } = render({ signedIn: true });
     expect(hrefs).toContain('/dashboard');
+    expect(hrefs).toContain('/cart');
     for (const h of hrefs.filter((x) => x.startsWith('/dashboard'))) expect(h).toBe('/dashboard');
   });
 
@@ -104,26 +132,45 @@ describe('signed in', () => {
     expect(text).not.toContain('Login');
   });
 
-  it('is a real link — focusable, openable in a new tab, announced as a link', () => {
+  it('never prints the email in the bar itself — it lives inside the account surface', () => {
     const { html } = render({ signedIn: true });
-    expect(html).toMatch(/<a[^>]*aria-label="Your account/);
-    // Not a div with a click handler, and not a button that navigates by script.
-    expect(html).not.toMatch(/<div[^>]*aria-label="Your account/);
+    const bar = html.split('id="public-mobile-nav"')[0];
+    expect(bar).not.toContain('anita@example.com');
+  });
+
+  it('offers no standalone Log out action in the bar', () => {
+    const { html } = render({ signedIn: true });
+    const bar = html.split('id="public-mobile-nav"')[0];
+    expect(bar).not.toContain('Log out');
+  });
+
+  it('is a real button — the control opens a menu, so it is announced as a button', () => {
+    const { html } = render({ signedIn: true });
+    expect(html).toMatch(/<button[^>]*aria-label="Account — /);
+    // Never a div with a click handler.
+    expect(html).not.toMatch(/<div[^>]*aria-label="Account — /);
   });
 
   it('meets the 44x44 touch target and shows a visible focus ring', () => {
     const { html } = render({ signedIn: true });
-    const control = /<a[^>]*aria-label="Your account[^"]*"[^>]*>/.exec(html)?.[0] ?? '';
+    const control = /<button[^>]*aria-label="Account — [^"]*"[^>]*>/.exec(html)?.[0] ?? '';
     expect(control).toContain('h-11');
     expect(control).toContain('w-11');
     expect(control).toContain('focus-visible:ring-2');
   });
 
-  it('gives the mobile sheet its own full-width, ≥44px dashboard entry', () => {
+  it('states the account inline in the mobile sheet, with ≥44px rows and no nested popover', () => {
     const { html, text } = render({ signedIn: true });
-    expect(text).toContain('Your dashboard');
-    const row = /<a[^>]*href="\/dashboard"[^>]*>\s*(?:<svg[\s\S]*?<\/svg>)?\s*Your dashboard/.exec(html)?.[0] ?? '';
+    // The identity is presented as content, not behind a second menu inside the sheet.
+    expect(text).toContain('Anita Rao');
+    expect(text).toContain('anita@example.com');
+    // No popover nested inside the open sheet — the trigger exists only in the bar above it.
+    const sheet = html.split('id="public-mobile-nav"')[1] ?? '';
+    expect(sheet).not.toContain('data-account-menu');
+    const row = /<a[^>]*href="\/dashboard"[^>]*>/.exec(html)?.[0] ?? '';
     expect(row).toContain('min-h-[3rem]');
+    // And the sheet's sign out is the existing server action, submitted as a form.
+    expect(html).toMatch(/<form[^>]*>[\s\S]*?<button[^>]*type="submit"[\s\S]*?Log out/);
   });
 });
 
@@ -165,11 +212,14 @@ describe('everything else about the masthead is unchanged', () => {
     const out = render({ signedIn: false }).html;
     const inn = render({ signedIn: true }).html;
     // Strip the two auth controls from each; what remains must be byte-identical.
+    // Everything the two states are ALLOWED to differ by: the desktop control, and the sheet's
+    // account section (which is one control signed out and an identity + rows signed in). The
+    // masthead, the nav, "Explore designs" and the sheet's own mechanics must match exactly.
     const strip = (h: string) =>
       h
-        .replace(/<a[^>]*aria-label="Your account[\s\S]*?<\/a>/g, '')
-        .replace(/<a[^>]*href="\/dashboard"[\s\S]*?<\/a>/g, '')
-        .replace(/<a[^>]*href="\/login"[\s\S]*?<\/a>/g, '');
+        .replace(/<button[^>]*data-account-menu[\s\S]*?<\/button>/g, '<!--account-->')
+        .replace(/<a[^>]*href="\/login"[\s\S]*?<\/a>/g, '<!--account-->')
+        .replace(/<div class="mt-8 border-t[\s\S]*?<\/form><\/div><\/div>/g, '<!--account-->');
     expect(strip(inn)).toBe(strip(out));
   });
 });

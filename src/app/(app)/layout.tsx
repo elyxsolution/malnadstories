@@ -60,7 +60,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex flex-col min-h-[100dvh]">
       {/* Hidden on the builder route, which renders its own unified full-bleed header. */}
-      <AppHeaderGate email={user.email!} />
+      <AppHeaderGate email={user.email!} name={(user.user_metadata?.name as string | undefined) ?? null} />
       {/*
         Uploads outlive the page that started them (Phase 3). The provider owns ONE
         UploadManager for the session, mounted here because Phase 0 proved this layout is not

@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Library, Package, User, Plus, LifeBuoy, ClipboardCheck, ShoppingCart } from 'lucide-react';
-import { Sprig } from '@/components/brand';
 import { useCart } from '@/lib/cart/provider';
 
 /**
@@ -47,16 +46,17 @@ export default function CustomerShell({ email, children }: { email: string; chil
           no-op wherever the content already fits (portrait 611/611, desktop 844/844), which is
           why no other viewport changes. Matches the admin rail, which already scrolls. */}
       <aside className="sticky top-14 z-20 flex h-[calc(100vh-3.5rem)] w-[68px] flex-none flex-col overflow-y-auto bg-primary-deep py-6 text-primary-foreground/80 sm:w-[236px]">
-        <Link href="/dashboard" className="mb-9 flex items-center gap-3 px-4 sm:px-6">
-          <span className="grid h-8 w-8 flex-none place-items-center border border-gold-light text-gold-pale">
-            <Sprig className="h-4 w-4" />
-          </span>
-          <span className="hidden font-display text-[19px] font-semibold leading-none text-primary-foreground sm:block">
-            Malnad
-            <span className="block text-[10px] uppercase tracking-[0.2em] text-primary-foreground/45">Stories</span>
-          </span>
-        </Link>
+        {/*
+          NO BRAND BLOCK HERE. The mark and the wordmark sit in the app header directly above
+          this rail, so a second copy three rems below it was the same statement made twice —
+          and it pushed the actual navigation, which is what this column is for, down the page.
+          The rail now opens on "Your stories".
 
+          Only the block was removed: the rail keeps its width, its forest ground, its icons,
+          its active treatment, its labels, the New album CTA and the account chip. `py-6`
+          already gives the first row the breathing space the block's `mb-9` used to provide,
+          so no spacing was re-tuned to compensate.
+        */}
         <nav className="flex flex-col gap-1 px-3">
           {NAV.map((n) => {
             const active = n.match(pathname);

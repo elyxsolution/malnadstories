@@ -283,11 +283,12 @@ describe('The public surface stays free of auth logic', () => {
     for (const bad of ['next=', 'returnTo', 'getUser', 'useSession', 'signIn']) expect(c).not.toContain(bad);
   });
 
-  it('the header bar itself reads no session — the state arrives as two plain props', () => {
+  it('the header bar itself reads no session — the state arrives as plain props', () => {
     const c = code(src('src/components/public-header-nav.tsx'));
     for (const bad of ['getUser', 'useSession', 'createBrowserClient', '@/lib/supabase']) {
       expect(c).not.toContain(bad);
     }
-    expect(c).toContain('signedIn');
+    // A name and an email, resolved server-side, or null. Never a user or a session object.
+    expect(c).toContain('identity?: AccountIdentity | null');
   });
 });

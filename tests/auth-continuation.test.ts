@@ -438,8 +438,10 @@ describe('the public header offers Login when signed out and an account control 
     expect(nav).toContain("'use client'");
   });
 
-  it('hands the bar two plain values, so no public page became client-rendered', () => {
-    expect(shell).toContain('signedIn={!!user}');
+  it('hands the bar plain values, so no public page became client-rendered', () => {
+    // An identity (name + email) or null — never the user object, never the session.
+    expect(shell).toContain('identity={identity}');
+    expect(shell).toContain('accountIdentity(user.email');
     expect(shell).toContain('loginHref={loginHref(pendingNext)}');
     // The four public pages import the SAME path they always did — none of them changed.
     for (const f of [
@@ -456,8 +458,8 @@ describe('the public header offers Login when signed out and an account control 
 
   it('draws exactly one of the two controls — never both', () => {
     // A single ternary per surface (desktop bar, mobile sheet) is what makes that structural.
-    expect(nav).toContain('{signedIn ? <AccountIcon /> : <LoginLink href={loginHref} />}');
-    expect(nav).toContain('{signedIn ? (');
+    expect(nav).toContain('{identity ? <AccountMenu identity={identity} context="public" /> : <LoginLink href={loginHref} />}');
+    expect(nav).toContain('{identity ? (');
   });
 
   it('Login points at the EXISTING /login route and preserves a pending continuation', () => {
@@ -472,19 +474,19 @@ describe('the public header offers Login when signed out and an account control 
     expect(code(nav)).not.toContain('signInWithOAuth');
   });
 
-  it('the account control is a real, labelled 44x44 link to the EXISTING /dashboard', () => {
-    expect(nav).toContain('function AccountIcon()');
-    expect(nav).toContain('href="/dashboard"');
-    expect(nav).toContain('aria-label="Your account — go to your dashboard"');
-    expect(nav).toContain('h-11 w-11'); // 44x44 exactly
-    expect(nav).toContain('focus-visible:ring-2');
-    // A link, because it navigates — not a button with an onClick, and not a popover holding
-    // a single destination. No new dashboard route was invented.
-    expect(code(nav)).not.toMatch(/\/dashboard\/[a-z]/);
+  it('the account control is the ONE shared menu, not a per-header copy', () => {
+    expect(nav).toContain("import AccountMenu from '@/components/account/account-menu'");
+    expect(src('src/components/app-header.tsx')).toContain("import AccountMenu from '@/components/account/account-menu'");
+    // Same component, different context — that is the whole difference between the two headers.
+    expect(nav).toContain('context="public"');
+    expect(src('src/components/app-header.tsx')).toContain('context="app"');
+    // The old direct-to-dashboard icon is gone from the bar.
+    expect(nav).not.toContain('function AccountIcon()');
   });
 
-  it('the mobile sheet exposes the same pair without touching the bar or the menu mechanics', () => {
-    expect(nav).toContain('Your dashboard');
+  it('the mobile sheet exposes the account without touching the bar or the menu mechanics', () => {
+    // Inline rows in the existing sheet — never a popover nested inside an open sheet.
+    expect(nav).toContain("accountMenuLinks('public')");
     expect(nav).toContain('min-h-[3rem]'); // full-width rows clear 44px
     // The existing sheet behaviour is untouched: scroll lock, Escape, focus return, focus-in.
     expect(nav).toContain("body.style.overflow = 'hidden'");

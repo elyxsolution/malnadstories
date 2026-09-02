@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
 import { getUserWithDeadline } from '@/lib/supabase/timeout';
 import { loginHref, safeNextPath } from '@/lib/auth/next';
+import { accountIdentity } from '@/lib/auth/identity';
 import PublicHeaderNav from '@/components/public-header-nav';
 
 /**
@@ -47,7 +48,18 @@ export async function PublicHeader() {
   const search = headers().get('x-search') ?? '';
   const pendingNext = safeNextPath(new URLSearchParams(search).get('next'));
 
-  return <PublicHeaderNav signedIn={!!user} loginHref={loginHref(pendingNext)} />;
+  /*
+   * WHAT CROSSES THE BOUNDARY: a name and an email, or null. Nothing else about the session
+   * reaches the browser — no id, no token, no metadata, no user object. The NAME comes from
+   * `user_metadata` on the authenticated user already in hand (Google supplies it; the signup
+   * form writes it; `/auth/callback` validates it before it ever reaches `profiles`), so this
+   * still costs ZERO extra queries. `accountIdentity` owns the fallback when there is no name.
+   */
+  const identity = user
+    ? accountIdentity(user.email, (user.user_metadata?.name as string | undefined) ?? null)
+    : null;
+
+  return <PublicHeaderNav identity={identity} loginHref={loginHref(pendingNext)} />;
 }
 
 export default PublicHeader;

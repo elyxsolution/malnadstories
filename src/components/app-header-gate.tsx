@@ -9,11 +9,11 @@ import AppHeader from '@/components/app-header';
  * (`albums/[id]/build/_header.tsx`) and the album-creation wizard (`albums/new/_wizard.tsx`).
  * This removes the old duplicate-navbar problem without changing the header on any other page.
  */
-export default function AppHeaderGate({ email }: { email: string }) {
+export default function AppHeaderGate({ email, name }: { email: string; name?: string | null }) {
   const pathname = usePathname() ?? '';
   const ownsHeader =
     /^\/albums\/[^/]+\/build\/?$/.test(pathname) || // album builder
     /^\/albums\/new\/?$/.test(pathname); // album-creation wizard
   if (ownsHeader) return null;
-  return <AppHeader email={email} />;
+  return <AppHeader email={email} name={name} />;
 }

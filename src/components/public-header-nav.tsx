@@ -4,8 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
-import { Menu, User, X } from 'lucide-react';
+import { LogOut, Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import AccountMenu from '@/components/account/account-menu';
+import { accountMenuLinks } from '@/components/account/account-menu-model';
+import { signOut } from '@/lib/actions/auth';
+import type { AccountIdentity } from '@/lib/auth/identity';
 
 /**
  * THE public navigation. Four destinations, and no more.
@@ -28,16 +32,21 @@ const LINKS = [
 /**
  * THE INTERACTIVE HALF of the public header — the scroll state and the mobile sheet, exactly as
  * they were. It is a Client Component because both of those are; it has never known anything
- * about the visitor, and it still does not. `signedIn` and `loginHref` are RESOLVED SERVER-SIDE
- * by `public-header.tsx` and handed down as plain values, so no session is read in the browser,
- * no auth client is constructed here, and no public page became client-rendered to show them.
+ * about the visitor, and it still does not. The account identity and `loginHref` are RESOLVED
+ * SERVER-SIDE by `public-header.tsx` and handed down as plain values, so no session is read in
+ * the browser, no auth client is constructed here, and no public page became client-rendered to
+ * show them.
  */
 export function PublicHeaderNav({
-  signedIn = false,
+  identity = null,
   loginHref = '/login',
 }: {
-  /** Presentational ONLY. /dashboard is server-protected; this decides which control is drawn. */
-  signedIn?: boolean;
+  /**
+   * The signed-in visitor's name + email, resolved SERVER-SIDE, or `null` when nobody is signed
+   * in. Presentational ONLY — /dashboard is server-protected; this decides which control is
+   * drawn, never who may reach what.
+   */
+  identity?: AccountIdentity | null;
   /** `/login`, carrying a pending Phase 2 continuation when the current URL has one. */
   loginHref?: string;
 }) {
@@ -148,7 +157,7 @@ export function PublicHeaderNav({
           <Button render={<Link href="/stories" />} size="sm">
             Explore designs
           </Button>
-          {signedIn ? <AccountIcon /> : <LoginLink href={loginHref} />}
+          {identity ? <AccountMenu identity={identity} context="public" /> : <LoginLink href={loginHref} />}
         </div>
 
         <button
@@ -209,14 +218,62 @@ export function PublicHeaderNav({
             — so the sheet, which is already where every other destination lives, carries this one
             too. Full-width rows, so both states clear 44px without a hit-area rule.
           */}
-          {signedIn ? (
-            <Link
-              href="/dashboard"
-              className="mt-3 flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-sm border border-border bg-card px-5 text-sm font-semibold text-primary transition-colors duration-150 ease-glide hover:border-primary/40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            >
-              <User className="h-4 w-4" aria-hidden />
-              Your dashboard
-            </Link>
+          {identity ? (
+            /*
+              MOBILE KEEPS ITS SHEET, and the account lives INSIDE it rather than as a second icon
+              crowding the hamburger. The sheet is already the app's scroll container and already
+              owns Escape, the scroll lock and focus, so the account is presented here as ordinary
+              rows: the identity stated inline, then the same destinations as full-width links.
+              A popover floating over an open sheet would be a menu inside a menu — and it is the
+              one shape that could fight the sheet's scroll. Nothing here portals, captures a
+              pointer, or locks anything of its own.
+            */
+            <div className="mt-8 border-t border-border/50 pt-6">
+              <div className="flex items-center gap-3">
+                <span
+                  aria-hidden
+                  className="grid h-10 w-10 flex-none place-items-center rounded-full bg-primary font-display text-[15px] leading-none text-gold-pale"
+                >
+                  {(identity.name || identity.email || 'U').trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[9px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                    Account
+                  </span>
+                  <span className="mt-0.5 block truncate font-display text-[15px] leading-tight text-primary">
+                    {identity.name}
+                  </span>
+                  {identity.email && (
+                    <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+                      {identity.email}
+                    </span>
+                  )}
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2">
+                {accountMenuLinks('public').map((l) => (
+                  <Link
+                    key={l.href}
+                    href={l.href}
+                    className="flex min-h-[3rem] w-full items-center gap-3 rounded-sm border border-border bg-card px-4 text-sm font-semibold text-primary transition-colors duration-150 ease-glide hover:border-primary/40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <l.icon className="h-4 w-4 flex-none text-muted-foreground" aria-hidden />
+                    {l.label}
+                  </Link>
+                ))}
+                {/* The EXISTING action, in the shape this codebase has always submitted it. */}
+                <form action={signOut}>
+                  <button
+                    type="submit"
+                    className="flex min-h-[3rem] w-full items-center gap-3 rounded-sm px-4 text-sm font-medium text-muted-foreground transition-colors duration-150 ease-glide hover:text-primary active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <LogOut className="h-4 w-4 flex-none" aria-hidden />
+                    Log out
+                  </button>
+                </form>
+              </div>
+            </div>
           ) : (
             <Link
               href={loginHref}
@@ -249,27 +306,11 @@ function LoginLink({ href }: { href: string }) {
   );
 }
 
-/**
- * SIGNED IN — one compact control that goes straight to the dashboard.
- *
- * NO DROPDOWN, deliberately. The project has no account popover to reuse, and a menu holding a
- * single destination is a click in the way of the destination. The `User` glyph is the same one
- * `customer-shell` already uses for the account row, so the two surfaces agree on what an
- * account looks like.
- *
- * A real `<a>` (via next/link) rather than a button-with-onClick: it navigates, so it should be
- * openable in a new tab, focusable, and announced as a link. 44x44 exactly.
+/*
+ * The account control that used to live here — an icon linking straight to /dashboard — is gone.
+ * It is now `components/account/account-menu.tsx`, rendered with `context="public"`, and the
+ * app header renders the SAME component with `context="app"`. One control, one identity block,
+ * one set of hover and motion rules, two lists of destinations.
  */
-function AccountIcon() {
-  return (
-    <Link
-      href="/dashboard"
-      aria-label="Your account — go to your dashboard"
-      className="grid h-11 w-11 place-items-center rounded-full border border-border bg-card text-primary transition-all duration-150 ease-glide hover:border-primary/40 hover:bg-secondary active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background"
-    >
-      <User className="h-[18px] w-[18px]" aria-hidden />
-    </Link>
-  );
-}
 
 export default PublicHeaderNav;
