@@ -122,6 +122,78 @@ describe('a customer with no albums', () => {
   });
 });
 
+// ── THE NEW-ALBUM PANEL IS A PANEL ───────────────────────────────────────────────────────────
+
+describe('the New album panel carries real visual weight', () => {
+  /** The panel's own markup, in whichever state it is rendered. */
+  const panelOf = (html: string) =>
+    /<a[^>]*aria-label="Start a new album"[^>]*>/.exec(html)?.[0] ?? '';
+
+  it('is a forest panel, not the dashed white card it used to be', () => {
+    for (const state of [render([]), render([album()])]) {
+      const panel = panelOf(state.html);
+      expect(panel).not.toBe('');
+      // The existing "leather" token — a sibling of the resume panel's bg-primary.
+      expect(panel).toContain('bg-primary-deep');
+      // The old treatment is gone entirely.
+      expect(panel).not.toContain('border-dashed');
+      expect(panel).not.toContain('bg-card');
+      expect(panel).not.toContain('text-muted-foreground');
+    }
+  });
+
+  it('shares the row with Resume rather than perching beside it', () => {
+    const { html } = render([album()]);
+    // A fractional second track, not a fixed 240/260px sliver — the grid stretches both cells,
+    // so their heights and edges match by construction rather than by tuning.
+    expect(html).toContain('md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]');
+    expect(html).not.toContain('_240px]');
+    expect(html).not.toContain('_260px]');
+  });
+
+  it('states the hierarchy: a prominent +, the name, then the editorial line', () => {
+    const { html, text } = render([]);
+    const panel = panelOf(html);
+    expect(panel).toContain('py-16'); // the first-run panel is the taller of the two
+    expect(html).toContain('h-14 w-14'); // the plus, ringed
+    expect(html).toContain('ring-gold-pale/40');
+    expect(text).toContain('New album');
+    expect(text).toContain('Begin a new chapter');
+    expect(html).toContain('tracking-[0.2em]'); // the supporting line is letter-spaced, not bold
+  });
+
+  it('is ONE link to the existing route, with no nested control', () => {
+    const { html } = render([album()]);
+    const whole = /<a[^>]*aria-label="Start a new album"[\s\S]*?<\/a>/.exec(html)?.[0] ?? '';
+    expect(whole).toContain('href="/albums/new"');
+    expect(whole.match(/<a\b/g)?.length).toBe(1);
+    expect(whole).not.toContain('<button');
+  });
+
+  it('moves on hover with the existing easing, and stops moving under reduced motion', () => {
+    const panel = panelOf(render([]).html);
+    expect(panel).toContain('ease-premium');
+    expect(panel).toContain('hover:-translate-y-0.5');
+    expect(panel).toContain('motion-reduce:hover:translate-y-0');
+    expect(panel).toContain('motion-reduce:transition-none');
+    // Restrained: no bounce, no pulse, no rotation, no gradient.
+    for (const bad of ['animate-bounce', 'animate-pulse', 'rotate-', 'gradient']) {
+      expect(panel).not.toContain(bad);
+    }
+  });
+
+  it('is one component in both states, so the two front doors cannot drift', () => {
+    const lib = src('src/app/(app)/dashboard/_library.tsx');
+    expect(lib).toContain('function NewAlbumPanel(');
+    expect(lib.match(/<NewAlbumPanel/g)?.length).toBe(2); // beside Resume, and full-width
+  });
+
+  it('hard-codes no width that could overflow a narrow viewport', () => {
+    const panel = panelOf(render([]).html);
+    expect(panel).not.toMatch(/w-\[\d+px\]|min-w-\[\d+px\]/);
+  });
+});
+
 // ── AN EXISTING CUSTOMER ─────────────────────────────────────────────────────────────────────
 
 describe('a customer with a draft in progress', () => {

@@ -120,16 +120,24 @@ export default function Library({
           way to begin was a dashed bookend at the end of an empty shelf. The area is now
           unconditional and takes the shape the state deserves:
 
-            · a draft in progress → the two cards below: Resume (accented, wide) beside
-              New album (quieter, narrower). Unchanged in content, destination and behaviour.
-            · nothing yet         → ONE full-width invitation, which is the whole point of the
+            · a draft in progress → TWO PANELS OF EQUAL WEIGHT. Resume keeps its forest ground
+              and its content; New album sits beside it as a second forest panel, not as the
+              dashed white placeholder it used to be.
+            · nothing yet         → the SAME panel, full width, which is the whole point of the
               screen at that moment. No empty "resume" card, no placeholder album, no invented
               story count — just the one thing there is to do.
+
+          WHY THE WHITE CARD WENT. "Start a new album" and "carry on with this one" are peers —
+          on most visits the new one is the more likely intention — but the row said otherwise:
+          a wide filled panel beside a 240px dashed outline reads as an action beside an empty
+          slot, and an empty slot is not an invitation. Both are now forest, both fill the row's
+          height (the grid stretches them, so their top and bottom edges align by construction),
+          and the pair reads as one composition with two doors rather than one action and a gap.
 
           Both shapes go to `/albums/new`: the same route, the same creation flow, one entry.
         */}
         {draft ? (
-          <div className="mt-8 grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] lg:grid-cols-[minmax(0,1fr)_260px]">
+          <div className="mt-8 grid gap-4 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             {/* Resume — the left card, unchanged in content and destination. */}
             <div className="flex flex-wrap items-center gap-6 bg-primary px-6 py-6 text-primary-foreground sm:gap-7 sm:px-8">
               <Book
@@ -154,40 +162,17 @@ export default function Library({
               </div>
             </div>
 
-            {/* New album — its own card, same New Album flow as the shelf bookend. */}
-            <Link
-              href="/albums/new"
-              className="group flex flex-col items-center justify-center gap-3 border-[1.5px] border-dashed border-input bg-card/40 px-6 py-8 text-center text-muted-foreground transition-colors duration-200 hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99]"
-            >
-              <span className="grid h-10 w-10 place-items-center rounded-full border border-current transition-transform duration-200 group-hover:scale-105">
-                <Plus className="h-5 w-5" />
-              </span>
-              <span className="font-display text-lg leading-tight">New album</span>
-              <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
-                Begin a new chapter
-              </span>
-            </Link>
+            {/* New album — the second panel, same weight, same route. */}
+            <NewAlbumPanel />
           </div>
         ) : (
           /*
-            THE FIRST-RUN INVITATION. The same destination and the same visual language as the
-            card above — a dashed frame, a plus, the same two lines — given the full width and the
-            room to be read as the page's one action rather than a slot beside something else.
-            Deliberately NOT a filled button: this screen is a shelf, and the invitation is an
-            empty place on it, not a form control.
+            THE FIRST-RUN INVITATION — the SAME panel, given the whole row. One component, two
+            widths, so the two states cannot drift into two different-looking front doors.
           */
-          <Link
-            href="/albums/new"
-            className="group mt-8 flex flex-col items-center justify-center gap-4 border-[1.5px] border-dashed border-input bg-card/40 px-6 py-14 text-center text-muted-foreground transition-colors duration-200 ease-glide hover:border-primary hover:bg-card/70 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.995] sm:py-20"
-          >
-            <span className="grid h-14 w-14 place-items-center rounded-full border border-current transition-transform duration-200 ease-glide group-hover:scale-105">
-              <Plus className="h-7 w-7" />
-            </span>
-            <span className="font-display text-[26px] leading-tight sm:text-[30px]">New album</span>
-            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
-              Begin a new chapter
-            </span>
-          </Link>
+          <div className="mt-8">
+            <NewAlbumPanel full />
+          </div>
         )}
 
         {/*
@@ -280,6 +265,48 @@ export default function Library({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * NEW ALBUM — the front door, as a panel rather than a placeholder.
+ *
+ * ONE COMPONENT, TWO WIDTHS. Beside a draft it takes its column; with no albums yet it takes the
+ * row. Nothing else differs but the vertical breathing room, so the customer who returns after
+ * making their first album meets the same door they came in through.
+ *
+ * FOREST, NOT DASHED WHITE. `bg-primary-deep` is the existing "leather" end of the palette —
+ * the command rail and book spines already use it — so this reads as a sibling of the Resume
+ * panel's `bg-primary` rather than as a second, unrelated green. The half-step of depth between
+ * the two is the hierarchy: they are peers, and the one carrying content leads. No gradient, no
+ * new token, no heavy shadow.
+ *
+ * THE HAIRLINE IS THE AFFORDANCE. A gold-pale rule at 25% marks the panel as a surface you may
+ * press without turning it into a button; it warms on hover, and the ring around the plus warms
+ * with it. Everything else about the hover is a 2px lift and a soft drop — the same
+ * `ease-premium` language the rest of the product moves in, explicitly stilled under
+ * `prefers-reduced-motion` so the panel stops travelling while keeping every state cue.
+ *
+ * IT IS ONE LINK, so the whole panel is the target — no nested control, one tab stop, one
+ * accessible name, and the EXISTING `/albums/new` route behind it.
+ */
+function NewAlbumPanel({ full = false }: { full?: boolean }) {
+  return (
+    <Link
+      href="/albums/new"
+      aria-label="Start a new album"
+      className={`group relative flex flex-col items-center justify-center gap-4 overflow-hidden bg-primary-deep px-6 text-center text-primary-foreground shadow-[0_1px_2px_rgb(16_24_20/0.06)] ring-1 ring-inset ring-gold-pale/25 transition-[transform,box-shadow,background-color] duration-300 ease-premium hover:-translate-y-0.5 hover:bg-primary-light hover:shadow-elevated hover:ring-gold-pale/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-pale motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${
+        full ? 'py-16 sm:py-24' : 'py-12 sm:py-10'
+      }`}
+    >
+      <span className="grid h-14 w-14 place-items-center rounded-full ring-1 ring-gold-pale/40 text-gold-pale transition-[transform,background-color] duration-300 ease-premium group-hover:scale-105 group-hover:bg-gold-pale/10 motion-reduce:transition-none motion-reduce:group-hover:scale-100">
+        <Plus className="h-6 w-6" strokeWidth={1.5} />
+      </span>
+      <span className={`font-display leading-tight text-primary-foreground ${full ? 'text-[30px] sm:text-[34px]' : 'text-[26px]'}`}>
+        New album
+      </span>
+      <span className="text-[11px] uppercase tracking-[0.2em] text-gold-pale/70">Begin a new chapter</span>
+    </Link>
   );
 }
 
