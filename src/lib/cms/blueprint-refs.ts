@@ -23,6 +23,22 @@ export const BLUEPRINT_REF_KEY = 'blueprintIds';
 export const HOME_BLUEPRINTS_SLUG = 'home-featured-designs';
 
 /**
+ * The slug of the section that curates the DASHBOARD design shelf.
+ *
+ * A second slug is the ENTIRE cost of giving the dashboard its own curated shelf: the placement
+ * loader, the metadata key, the parser, the resolver, the admin picker, the cache tags and the
+ * invalidation are all the generic ones Home already uses. Which is exactly what the mechanism
+ * was built for — 'Home consumes it one way, a future surface consumes it a third'.
+ *
+ * It is a `homepage_section` row like Home's, and that is deliberate rather than sloppy: the type
+ * is the CMS's generic "a curated band on a page" content type, not a claim about which page.
+ * Adding a `dashboard_section` type would mean a new enum value, a migration and a second editor
+ * configuration for a row that stores exactly the same three things — and the admin picker is
+ * driven by the FIELD KIND, so a new row under this slug gets it for free with no admin change.
+ */
+export const DASHBOARD_BLUEPRINTS_SLUG = 'dashboard-featured-designs';
+
+/**
  * A conservative UUID shape check. The value is admin-authored, but it is still stored JSON that
  * a hand-edited row could carry anything into — and it is used as a lookup key. Filtering to
  * well-formed ids here means a junk entry is dropped at the boundary rather than travelling

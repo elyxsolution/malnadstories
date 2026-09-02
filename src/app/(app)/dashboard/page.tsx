@@ -6,6 +6,8 @@ import { presignGet } from '@/lib/r2';
 import { PAID_STATES } from '@/lib/orders/album-lock';
 import { recordTiming } from '@/lib/observability/log';
 import { PERF_THRESHOLDS } from '@/lib/observability/model';
+import { loadBlueprintPlacement } from '@/lib/cms/blueprint-placement';
+import { DASHBOARD_BLUEPRINTS_SLUG } from '@/lib/cms/blueprint-refs';
 import CustomerShell from '@/components/customer-shell';
 import WorkerPrewarm from '@/components/worker/worker-prewarm';
 import Library, { type LibraryAlbum } from './_library';
@@ -126,11 +128,31 @@ export default async function DashboardPage() {
     })(),
   }));
 
+  /*
+   * THE CURATED DESIGN SHELF — chosen by an administrator, never by this file.
+   *
+   * `loadBlueprintPlacement` is the SAME generic loader the home page uses; only the slug
+   * differs. It reads a published CMS section, takes the design ids the editor arranged in its
+   * metadata, and resolves them through the public blueprint projection in that exact order.
+   * There is no id here, no fallback selection, and no "show the newest three" — an unconfigured
+   * placement yields an empty set and the shelf is simply not rendered.
+   *
+   * IT COSTS NOTHING EXTRA TO CACHE. Both halves are already cached and already invalidated:
+   * `listPublished` under `CACHE_TAGS.cmsPublic` (busted when an admin publishes) and
+   * `listActiveBlueprints` under `CACHE_TAGS.templatesActive` (busted when a design changes).
+   * The dashboard is a per-user dynamic page regardless — it reads this customer's albums — so
+   * adding a cached global read changes nothing about how it renders.
+   *
+   * NEVER THROWS: the loader returns an empty placement on any failure, so a CMS or catalogue
+   * hiccup costs the shelf and nothing else on the page.
+   */
+  const designs = await loadBlueprintPlacement(DASHBOARD_BLUEPRINTS_SLUG);
+
   return (
     <CustomerShell email={user?.email ?? ''}>
       {/* Opportunistic worker pre-warm (≤ once / 10 min). */}
       <WorkerPrewarm />
-      <Library albums={albums} stickerUrls={stickerUrls} />
+      <Library albums={albums} stickerUrls={stickerUrls} designs={designs} />
     </CustomerShell>
   );
 }

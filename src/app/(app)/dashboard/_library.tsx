@@ -12,6 +12,8 @@ import type { CoverConfig } from '@/lib/builder/cover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { deleteAlbum } from '@/lib/actions/albums';
+import DesignShelf from './_design-shelf';
+import type { BlueprintPlacement } from '@/lib/cms/blueprint-placement';
 
 export type LibraryAlbum = {
   id: string;
@@ -57,10 +59,16 @@ const CHIPS: { key: 'all' | Kind; label: string }[] = [
 export default function Library({
   albums,
   stickerUrls = {},
+  designs,
 }: {
   albums: LibraryAlbum[];
   /** Presigned URLs for stickers placed on any front cover, by sticker id (resolved server-side). */
   stickerUrls?: Record<string, string>;
+  /**
+   * The CMS-curated design shelf, already resolved by the page. Optional so this component still
+   * renders without one, and EMPTY means the shelf is not drawn — never that a default is chosen.
+   */
+  designs?: BlueprintPlacement;
 }) {
   const stickerUrlFor = (id: string) => stickerUrls[id];
   const [greeting, setGreeting] = useState('Welcome back');
@@ -106,16 +114,21 @@ export default function Library({
         </p>
 
         {/*
-          Continue where you left off — TWO DISTINCT CARDS, side by side.
+          ── THE CREATION AREA — ALWAYS PRESENT, IN TWO SHAPES ───────────────────────────────
+          It used to render ONLY when a draft existed, which meant the customer with the most to
+          gain from it — the one who has never made an album — arrived at a dashboard whose only
+          way to begin was a dashed bookend at the end of an empty shelf. The area is now
+          unconditional and takes the shape the state deserves:
 
-          The resume bar used to be one full-width band with the Resume button tucked inside it,
-          which read as a single object and gave "start something new" no standing at all. They
-          are two different intentions, so they are two cards: the draft keeps the accent and the
-          width, and New album sits beside it as its own smaller, quieter card. The pair is a
-          grid rather than a flex row so both cards share a height whatever the title length.
-          Below `md` they stack, which is the same reflow the rest of this page uses.
+            · a draft in progress → the two cards below: Resume (accented, wide) beside
+              New album (quieter, narrower). Unchanged in content, destination and behaviour.
+            · nothing yet         → ONE full-width invitation, which is the whole point of the
+              screen at that moment. No empty "resume" card, no placeholder album, no invented
+              story count — just the one thing there is to do.
+
+          Both shapes go to `/albums/new`: the same route, the same creation flow, one entry.
         */}
-        {draft && (
+        {draft ? (
           <div className="mt-8 grid gap-4 md:grid-cols-[minmax(0,1fr)_240px] lg:grid-cols-[minmax(0,1fr)_260px]">
             {/* Resume — the left card, unchanged in content and destination. */}
             <div className="flex flex-wrap items-center gap-6 bg-primary px-6 py-6 text-primary-foreground sm:gap-7 sm:px-8">
@@ -155,7 +168,34 @@ export default function Library({
               </span>
             </Link>
           </div>
+        ) : (
+          /*
+            THE FIRST-RUN INVITATION. The same destination and the same visual language as the
+            card above — a dashed frame, a plus, the same two lines — given the full width and the
+            room to be read as the page's one action rather than a slot beside something else.
+            Deliberately NOT a filled button: this screen is a shelf, and the invitation is an
+            empty place on it, not a form control.
+          */
+          <Link
+            href="/albums/new"
+            className="group mt-8 flex flex-col items-center justify-center gap-4 border-[1.5px] border-dashed border-input bg-card/40 px-6 py-14 text-center text-muted-foreground transition-colors duration-200 ease-glide hover:border-primary hover:bg-card/70 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.995] sm:py-20"
+          >
+            <span className="grid h-14 w-14 place-items-center rounded-full border border-current transition-transform duration-200 ease-glide group-hover:scale-105">
+              <Plus className="h-7 w-7" />
+            </span>
+            <span className="font-display text-[26px] leading-tight sm:text-[30px]">New album</span>
+            <span className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground/70">
+              Begin a new chapter
+            </span>
+          </Link>
         )}
+
+        {/*
+          THE CURATED DESIGNS, between "what will I make" and "what I have made" — the point in
+          the page where the question is still open. Renders nothing at all when an administrator
+          has configured nothing; see `_design-shelf.tsx`.
+        */}
+        {designs && <DesignShelf heading={designs.heading} subheading={designs.subheading} set={designs.set} />}
 
         {/* Library header + search + filters */}
         <div className="mt-12 flex flex-wrap items-end justify-between gap-4">
