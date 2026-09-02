@@ -923,3 +923,58 @@
     }
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+   THE HEADING TYPOGRAPHY SYSTEM — one rule, every heading, whole frontend.
+
+   The heading face is Scriptorama Markdown JF, declared ONCE in `src/lib/fonts.ts` as
+   `--font-heading` and switched on by `brandFontVars` on <body>, so it is in scope for every
+   route in the app: public site, customer app, album builder and admin console alike.
+
+   ── WHY THE RULE IS HERE AND NOT ON 90-ODD CALL SITES ─────────────────────────────────────
+   A heading is a SEMANTIC element, so the system that decides what a heading looks like is a
+   selector on that element, not a class somebody has to remember. Anything rendered as h1–h6
+   inherits the brand face automatically, including screens that do not exist yet.
+
+   ── WHY IT LIVES IN `utilities` AND CARRIES A `:not()` ────────────────────────────────────
+   Both are load-bearing, not decoration. Most headings in this codebase already declare
+   `font-display` (Cormorant Garamond) — the face this replaces for headings — and a class beats
+   a bare element selector on specificity, so a rule in `@layer base` written as `h2 { … }` would
+   simply lose to every one of them. `h2:not([data-heading-font='off'])` scores 0,1,1 and wins,
+   in the last layer, without touching a single call site.
+
+   `font-display` KEEPS its other job. It is also the face of prices, counters, wordmarks and
+   italic captions (~100 spans and paragraphs), and a script face on a `tabular-nums` total would
+   be unreadable. Only heading ELEMENTS are re-pointed; those spans are untouched.
+
+   ── THE ESCAPE HATCH ──────────────────────────────────────────────────────────────────────
+   `data-heading-font="off"` opts one element out and keeps whatever face its classes ask for.
+   Nothing uses it today; it is the documented way to make an exception without weakening this
+   rule for everything else.
+
+   ── WHAT IS DELIBERATELY NOT COVERED ──────────────────────────────────────────────────────
+   Customer content in the album builder. Every text element on a page or cover is rendered with
+   an INLINE `font-family` chosen from the builder's own font catalog, and an inline style beats
+   any stylesheet rule — so the printed book, both PDFs, the flipbook and the canvas are
+   unaffected by this and cannot be affected by it. None of those surfaces renders an h element.
+
+   Sizes, weights, tracking, line-height and every responsive step are untouched: this changes
+   the TYPEFACE, not the scale.
+   ───────────────────────────────────────────────────────────────────────────────────────── */
+@layer utilities {
+  h1:not([data-heading-font='off']),
+  h2:not([data-heading-font='off']),
+  h3:not([data-heading-font='off']),
+  h4:not([data-heading-font='off']),
+  h5:not([data-heading-font='off']),
+  h6:not([data-heading-font='off']),
+  /* The title elements that are not h1–h6: the shared card title slot and the one empty-state
+     title. Both are title typography by role, so they belong to the same system. */
+  [data-slot='card-title']:not([data-heading-font='off']),
+  [data-slot='empty-state-title']:not([data-heading-font='off']) {
+    /* THE ONLY declaration in this rule. Size, weight, tracking, line-height and every
+       responsive step keep coming from the element's own classes — this changes the typeface
+       and nothing else, which is what keeps the existing scale and hierarchy intact. */
+    font-family: var(--font-heading), 'Cormorant Garamond', Georgia, serif;
+  }
+}

@@ -20,10 +20,11 @@ import type { ReadinessLevel } from './_quality-model';
  * PASS 3 makes the strip PAGE MANAGEMENT, not just navigation. An empty album used to render
  * no strip at all — a dead end where the only way forward was a floating button elsewhere. Now
  * the strip always exists: an empty album shows a dedicated "Add first spread" tile right after
- * the cover, and a populated one keeps a persistent Add tile at the end whose menu carries the
- * page operations (add single/double, duplicate, remove, choose a layout). Every item
- * dispatches the SAME callbacks the old floating button and per-thumb controls used — the strip
- * is a new trigger surface, not a new implementation.
+ * the cover, and a populated one leads with a persistent "Add spread" tile — in the same place,
+ * directly after the cover and before page 1 — whose menu carries the page operations (add
+ * single/double, duplicate, remove, choose a layout). Every item dispatches the SAME callbacks
+ * the old floating button and per-thumb controls used — the strip is a new trigger surface, not
+ * a new implementation.
  */
 export default function Navigator({
   blocks,
@@ -182,6 +183,26 @@ export default function Navigator({
           <ChevronDown className="h-3.5 w-3.5" />
         </button>
       )}
+
+      {/*
+        ADD SPREAD, FIRST — immediately after the Cover (which the builder renders just left of
+        this scroller) and immediately before page 1.
+
+        It used to sit at the very end of the strip, which meant that on a 24-page album the
+        control for adding a page was the one thing you had to scroll the furthest to reach, and
+        it drifted as pages were added. At the head it is always in view, and it sits where the
+        page it creates begins. Nothing about the tile itself changed: same geometry, same menu,
+        same callbacks, same insert-after affordance on every thumb for adding in the middle.
+      */}
+      <AddSpreadTile
+        canAddMore={canAddMore}
+        currentKey={currentKey ?? null}
+        onAddSpread={onAddSpread}
+        onOpenLayouts={onOpenLayouts}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+      />
+
       {blocks.map((b, i) => (
         <div
           key={b.key}
@@ -287,25 +308,19 @@ export default function Navigator({
           </button>
         </div>
       ))}
-
-      {/* Persistent Add tile — page management lives IN the strip, where pages live. */}
-      <AddSpreadTile
-        canAddMore={canAddMore}
-        currentKey={currentKey ?? null}
-        onAddSpread={onAddSpread}
-        onOpenLayouts={onOpenLayouts}
-        onDuplicate={onDuplicate}
-        onDelete={onDelete}
-      />
     </div>
   );
 }
 
 /**
- * The strip's Add tile: click adds a spread; the chevron (or right-click) opens the page menu
- * with the full set of page operations. The menu is `position: fixed` and measured from the
- * trigger because the strip is an `overflow-x-auto` scroller — an absolute menu would be
- * clipped by the very container it needs to escape.
+ * The strip's Add tile: it opens the page menu, which carries the full set of page operations
+ * (add single, add double-page, choose a layout, duplicate, remove). It is the FIRST item in the
+ * scroller — directly after the Cover and before page 1, and it is sticky so it stays there at
+ * any scroll position rather than being the first thing to slide out of view.
+ *
+ * The menu is `position: fixed` and measured from the trigger because the strip is an
+ * `overflow-x-auto` scroller — an absolute menu would be clipped by the very container it needs
+ * to escape.
  */
 function AddSpreadTile({
   canAddMore,
@@ -354,7 +369,7 @@ function AddSpreadTile({
   }, [open]);
 
   return (
-    <div ref={wrapRef} className="flex-none">
+    <div ref={wrapRef} className="sticky left-[38px] z-[5] flex-none bg-card">
       <button
         ref={btnRef}
         type="button"
@@ -368,7 +383,7 @@ function AddSpreadTile({
         }`}
       >
         <Plus className="h-4 w-4" />
-        <span className="text-[10px] font-medium leading-none">Add</span>
+        <span className="text-[10px] font-medium leading-tight">Add spread</span>
       </button>
       <span className="mt-1 block text-center text-[10px] font-medium text-transparent" aria-hidden>
         ·

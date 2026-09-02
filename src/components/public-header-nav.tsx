@@ -110,21 +110,46 @@ export function PublicHeaderNav({
       data-scrolled={scrolled ? '' : undefined}
       className="sticky top-0 z-50 border-b border-transparent transition-[background-color,border-color,backdrop-filter] duration-300 ease-glide data-[scrolled]:border-border/60 data-[scrolled]:bg-background/85 data-[scrolled]:supports-[backdrop-filter]:backdrop-blur-md"
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
+      {/*
+        ── THE ROW, AND WHY IT SCALES IN TWO STEPS ────────────────────────────────────────
+        The bar grows 64px -> 72px at `lg`, where the actions reach their full 48px. Twelve
+        pixels of clearance around a 48px control reads as a bar with a button in it; eight reads
+        as a button jammed into a bar.
+
+        Between `md` and `lg` everything renders one step down — 44px controls, 14px type, tighter
+        button padding, a 16px nav gap instead of 32px, an 18px wordmark, and 24px of container
+        padding instead of 32px.
+
+        That band is MEASURED, not guessed. At exactly 768px the row has 720px of content width,
+        and the three groups plus their two 16px gaps need ~691px signed in and ~708px signed
+        out (the Login link is wider than the account circle) — 12-29px of slack either way. At
+        full size they would need ~755px and collide. For reference the ORIGINAL row — a 28px
+        `size="sm"` button — cleared 768px by under 2px, so the tablet band is not tighter than it
+        was, it is roomier. Every step here is still far larger than that button, so nothing about
+        the intent is lost in the narrow band.
+
+        Below `md` the actions live in the sheet, nothing in the bar changed size, and the height
+        is untouched — which is also what keeps the mobile panel's `top-16` correct.
+      */}
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-6 lg:h-[4.5rem] lg:px-8">
         <Link
           href="/"
           className="inline-flex items-center gap-2.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background"
           aria-label="Malnad Stories — home"
         >
           <Image src="/logo.png" alt="" width={447} height={558} priority unoptimized className="h-8 w-auto" />
-          <span className="font-display text-lg font-semibold leading-none text-primary">
-            Malnad <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
+          {/* The wordmark is brand heading typography, so it takes the heading face explicitly —
+              it is a <span> and therefore outside the element rule in globals.css. "Stories"
+              stays the small uppercase counterweight it has always been. */}
+          <span className="font-heading text-lg font-semibold leading-none text-primary lg:text-xl">
+            Malnad{' '}
+            <span className="font-ui text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
           </span>
         </Link>
 
         {/* Desktop nav. The active state is an underline that GROWS from the left rather than a
             colour swap, so moving between sections reads as travel along one row. */}
-        <nav className="hidden items-center gap-8 md:flex" aria-label="Primary">
+        <nav className="hidden items-center gap-4 md:flex lg:gap-8" aria-label="Primary">
           {LINKS.map((l) => {
             const active = isActive(l);
             return (
@@ -132,7 +157,7 @@ export function PublicHeaderNav({
                 key={l.href}
                 href={l.href}
                 aria-current={active ? 'page' : undefined}
-                className={`group relative rounded-sm py-1 text-sm font-medium transition-colors duration-150 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background ${
+                className={`group relative whitespace-nowrap rounded-sm py-1 text-sm font-medium transition-colors duration-150 ease-glide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background ${
                   active ? 'text-primary' : 'text-muted-foreground hover:text-primary'
                 }`}
               >
@@ -149,15 +174,31 @@ export function PublicHeaderNav({
         </nav>
 
         {/*
-          RIGHT-HAND ACTIONS. "Explore designs" is unchanged and remains the one filled button in
-          the bar; the account control sits beside it as the quieter of the two, because a
-          marketing masthead's primary action is not "sign in".
+          RIGHT-HAND ACTIONS. "Explore designs" is the one filled button in the bar; the account
+          control sits beside it as the quieter of the two, because a marketing masthead's primary
+          action is not "sign in". Both controls are the same height at both steps, so they share a
+          baseline whatever the viewport.
         */}
-        <div className="hidden items-center gap-3 md:flex">
-          <Button render={<Link href="/stories" />} size="sm">
+        <div className="hidden items-center gap-2 md:flex lg:gap-3">
+          {/*
+            "Explore designs" is the masthead's one filled button, and it now reads like it. It
+            was `size="sm"` — a 28px control with 12.8px type, which is an admin-toolbar button,
+            not the primary action of a marketing site. It is 48px tall with 15px type and real
+            horizontal padding at `lg`, 44px with 14px type below it, and at both steps it is the
+            same height as the account control beside it so the two sit on one row.
+          */}
+          <Button
+            render={<Link href="/stories" />}
+            size="lg"
+            className="h-11 rounded-lg px-4 text-sm font-semibold lg:h-12 lg:px-6 lg:text-[15px]"
+          >
             Explore designs
           </Button>
-          {identity ? <AccountMenu identity={identity} context="public" /> : <LoginLink href={loginHref} />}
+          {identity ? (
+            <AccountMenu identity={identity} context="public" size="lg" />
+          ) : (
+            <LoginLink href={loginHref} />
+          )}
         </div>
 
         <button
@@ -208,7 +249,11 @@ export function PublicHeaderNav({
               );
             })}
           </ul>
-          <Button render={<Link href="/stories" />} size="lg" className="mt-8 w-full">
+          <Button
+            render={<Link href="/stories" />}
+            size="lg"
+            className="mt-8 h-12 w-full rounded-lg text-[15px] font-semibold"
+          >
             Explore designs
           </Button>
 
@@ -293,13 +338,15 @@ export function PublicHeaderNav({
  * make the masthead read as a SaaS app bar; the type weight and the gold hover are the same
  * treatment the nav links already use, so it belongs to the row it sits in.
  *
- * `h-11` gives it a 44px target even though it only renders at `md` and above.
+ * It scales in the same two steps as "Explore designs" and shares the row's horizontal padding
+ * with it, so the two read as one pair at one scale — the quiet half and the loud half — rather
+ * than a button with a small link tacked beside it.
  */
 function LoginLink({ href }: { href: string }) {
   return (
     <Link
       href={href}
-      className="inline-flex h-11 items-center rounded-sm px-2 text-sm font-medium text-muted-foreground transition-colors duration-150 ease-glide hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+      className="inline-flex h-11 items-center rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors duration-150 ease-glide hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background lg:h-12 lg:px-5 lg:text-[15px]"
     >
       Login
     </Link>

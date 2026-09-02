@@ -32,7 +32,12 @@ export default function EmptyState({
           <Icon className="h-5 w-5" />
         </span>
       )}
-      <p className="font-display text-base font-medium tracking-tight text-foreground">{title}</p>
+      {/* Title typography, so it joins the central heading rule in globals.css by slot — it is a
+          <p> rather than an h-element because an empty state sits inside a section that already
+          has a heading, and a second one there would be a lie about the document outline. */}
+      <p data-slot="empty-state-title" className="font-display text-base font-medium tracking-tight text-foreground">
+        {title}
+      </p>
       {description && <p className="max-w-sm text-sm text-muted-foreground">{description}</p>}
       {action && (
         <Link

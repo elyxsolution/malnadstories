@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, ArrowRight, CheckCircle2, LayoutTemplate, Palette, RotateCw, Sparkles, Wand2 } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, LayoutTemplate, RotateCw, Sparkles, Wand2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { InlineLoader } from '@/components/loading';
@@ -92,18 +92,18 @@ export default function StepBuild({
   return (
     /*
       TWO COLUMNS. Photographs are the work of this screen and they need the width — a grid of
-      thumbnails in a half-width column wastes both. The automated starting points are a short
-      menu, so they move into a narrow rail on the right where they stay in view beside the
-      upload area instead of sitting below it. Design Yourself stays in the main column, as a
-      single wide row rather than a third card, because it is the option that needs no
-      configuration and no statistics: it is one button.
+      thumbnails in a half-width column wastes both. Everything about HOW the album gets built is
+      a short menu, so it all lives in a narrow rail on the right where it stays in view beside
+      the upload area instead of sitting below it: the automated starting points, then CONTINUE,
+      which is the way onward rather than a fourth starting point.
 
-      Below `lg` the rail drops beneath the main column and everything reads in the same order
-      it always did — photographs, then how to build.
+      The main column is therefore the photographs and nothing else, and the rail reads top to
+      bottom as one decision. Below `lg` the rail drops beneath the main column and everything
+      reads in the same order it always did — photographs, then how to build.
     */
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_340px]">
-      {/* ── MAIN COLUMN — photographs, then Design Yourself ────────────── */}
-      <div className="min-w-0 space-y-8">
+      {/* ── MAIN COLUMN — the photographs ──────────────────────────────── */}
+      <div className="min-w-0">
       {/* ── UPLOAD — compact utility strip ─────────────────────────────── */}
       <section ref={uploadAnchorRef} className="scroll-mt-28 space-y-3" aria-labelledby="upload-heading">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -239,26 +239,10 @@ export default function StepBuild({
           </ul>
         )}
       </section>
-
-        {/* ── DESIGN YOURSELF — stays in the main column, as one wide row ── */}
-        <section className="border-t pt-8" aria-labelledby="design-yourself-heading">
-          <MethodCard
-            Icon={Palette}
-            headingId="design-yourself-heading"
-            title="Design Yourself"
-            desc="Start with an empty album and place every photograph exactly where you want it."
-            meta={[]}
-            note="Full control, from a blank page."
-            cta="Open builder"
-            onClick={onDesignMyself}
-            disabled={busy}
-            row
-          />
-        </section>
       </div>
 
-      {/* ── RIGHT RAIL — the automated starting points ──────────────────── */}
-      <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start" aria-labelledby="build-heading">
+      {/* ── RIGHT RAIL — the starting points, then CONTINUE ─────────────── */}
+      <aside className="min-w-0 space-y-3 lg:sticky lg:top-24 lg:self-start" aria-labelledby="build-heading">
         <div>
           <h2 id="build-heading" className="font-display text-lg font-semibold tracking-tight">
             How should we build it?
@@ -340,6 +324,38 @@ export default function StepBuild({
           disabled={busy || blueprints.length === 0}
         />
 
+        {/*
+          ── CONTINUE — the manual route, and the rail's terminal action ───────────────────
+          This replaces the old "Design Yourself" card, which was a fourth option dressed as the
+          other three: same shell, same statistics slot, same outline button, sitting alone in the
+          main column. It is not a fourth option. Auto Create and Choose Layout hand the album to
+          something that lays it out FOR you; this one just opens the builder — so it reads as the
+          way onward from the menu rather than another item in it.
+
+          THE WHOLE CARD IS THE BUTTON. One target, and it fires the SAME `onDesignMyself` the old
+          "Open builder" button fired — handler, route and album state untouched. The green is
+          `LUX_PRIMARY`, the project's existing crafted forest CTA surface, so this wears the brand
+          green every other primary action already wears rather than a colour invented for one card.
+        */}
+        <button
+          type="button"
+          onClick={onDesignMyself}
+          disabled={busy}
+          className={`group/continue !mt-5 block w-full rounded-2xl px-6 py-7 text-center transition-all duration-200 ease-glide hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-60 ${LUX_PRIMARY}`}
+        >
+          <span className="flex items-center justify-center gap-2.5">
+            {/* An h3, so it belongs to the central heading typography system like every other card
+                title on this screen — not a one-off label with a size hand-picked for it. */}
+            <h3 className="text-[30px] font-semibold uppercase leading-none tracking-[0.08em]">CONTINUE</h3>
+            <ArrowRight className="h-6 w-6 flex-none transition-transform duration-200 ease-glide group-hover/continue:translate-x-1 motion-reduce:transition-none" />
+          </span>
+          {/* Supporting text: says what CONTINUE actually does. Deliberately quieter — a step down
+              in size and held off full opacity, so the word above it stays the loud thing. */}
+          <span className="mt-2 block text-[13px] font-light leading-relaxed text-primary-foreground/75">
+            to edit album builder manually
+          </span>
+        </button>
+
         {error && (
           <p role="alert" className="text-[13px] text-destructive">
             {error}
@@ -354,14 +370,17 @@ export default function StepBuild({
  * One build option, as an action card rather than a button with a label. The primary card is
  * the only one carrying the accent, so stacking them in the rail keeps the hierarchy.
  *
- * `row` lays the same card out horizontally — icon, text, then the CTA on the right — for the
- * one option that lives in the wide main column. Same component, same props, same semantics;
- * only the arrangement differs, so there is no second card to keep in sync.
+ * COMPACT: the shell, the icon well and every vertical step were tightened so the pair takes less
+ * room in the rail. Nothing typographic moved — title, description, statistics and button label
+ * are all at the sizes they were; only the space around them is smaller, which is what makes the
+ * cards read as condensed rather than shrunken.
+ *
+ * The `row` variant is gone with its only caller (the old Design Yourself card). Every card this
+ * component renders now lives in the rail, so there is one arrangement.
  */
 function MethodCard({
   Icon,
   title,
-  headingId,
   badge,
   desc,
   meta,
@@ -370,11 +389,9 @@ function MethodCard({
   onClick,
   disabled,
   primary = false,
-  row = false,
 }: {
   Icon: typeof ArrowRight;
   title: string;
-  headingId?: string;
   badge?: string;
   desc: string;
   meta: { k: string; v: string }[];
@@ -383,15 +400,14 @@ function MethodCard({
   onClick: () => void;
   disabled?: boolean;
   primary?: boolean;
-  row?: boolean;
 }) {
-  const shell = `rounded-2xl border p-5 transition-all duration-200 ease-glide sm:p-6 ${
+  const shell = `rounded-2xl border p-4 transition-all duration-200 ease-glide sm:p-5 ${
     disabled ? 'opacity-60' : 'hover:-translate-y-1 hover:shadow-elevated'
   } ${primary ? 'border-primary/30 bg-primary/[0.03] ring-1 ring-primary/10' : 'bg-card'}`;
 
   const iconBadge = (
     <span
-      className={`grid h-12 w-12 flex-none place-items-center rounded-xl ring-1 ${
+      className={`grid h-10 w-10 flex-none place-items-center rounded-xl ring-1 ${
         primary ? 'bg-primary text-primary-foreground ring-primary/20' : 'bg-primary/[0.07] text-primary ring-primary/15'
       }`}
     >
@@ -405,27 +421,11 @@ function MethodCard({
       disabled={disabled}
       size="lg"
       variant={primary ? 'default' : 'outline'}
-      className={`h-11 text-[14px] ${row ? 'w-full sm:w-auto' : 'mt-5 w-full'} ${primary ? LUX_PRIMARY : ''}`}
+      className={`mt-4 h-10 w-full text-[14px] ${primary ? LUX_PRIMARY : ''}`}
     >
       <Icon /> {cta}
     </Button>
   );
-
-  if (row) {
-    return (
-      <div className={`flex flex-col gap-4 sm:flex-row sm:items-center ${shell}`}>
-        {iconBadge}
-        <div className="min-w-0 flex-1">
-          <h3 id={headingId} className="font-display text-xl font-semibold tracking-tight">
-            {title}
-          </h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
-          {note && <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
-        </div>
-        <div className="flex-none">{action}</div>
-      </div>
-    );
-  }
 
   return (
     <div className={`flex flex-col ${shell}`}>
@@ -441,13 +441,11 @@ function MethodCard({
           )}
         </div>
 
-        <h3 id={headingId} className="mt-4 font-display text-xl font-semibold tracking-tight">
-          {title}
-        </h3>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
+        <h3 className="mt-3 font-display text-xl font-semibold tracking-tight">{title}</h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{desc}</p>
 
         {meta.length > 0 && (
-          <dl className="mt-4 space-y-1 border-t pt-3">
+          <dl className="mt-3 space-y-0.5 border-t pt-2.5">
             {meta.map((m) => (
               <div key={m.k} className="flex items-center justify-between gap-2 text-[12px]">
                 <dt className="text-muted-foreground">{m.k}</dt>
@@ -457,7 +455,7 @@ function MethodCard({
           </dl>
         )}
 
-        {note && <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
+        {note && <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">{note}</p>}
       </div>
 
       {action}

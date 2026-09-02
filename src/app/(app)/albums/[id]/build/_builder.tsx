@@ -3700,8 +3700,29 @@ export default function Builder({
         )}
       </div>
 
-      {/* BOTTOM — timeline (the Cover is page 0, then the content spreads) */}
+      {/*
+        BOTTOM — the page strip, read left to right as: how long is the book · the cover · add a
+        spread · the spreads themselves.
+
+        THE COUNT LEADS. It is the one fact that is true of the whole album rather than of any one
+        item in the strip, and it is the thing a customer checks against the length they bought —
+        so it sits ahead of the page items instead of between the cover and them, where it used to
+        interrupt a row of thumbnails. The rule after it separates the summary from the items.
+
+        The COVER then opens the run of pages, and "Add spread" follows it immediately (inside the
+        Navigator, which owns every scrolling page item) so the control that creates a page sits
+        where the first page is, not at the far end of a strip you have to scroll to reach.
+      */}
       <div className="flex flex-none items-center gap-3 border-t border-border/70 bg-card px-4 py-2 max-md:gap-2 max-md:px-2 max-md:py-1.5">
+        <div className="flex flex-none items-center gap-2.5">
+          <span className="flex items-baseline gap-1 text-sm font-semibold tabular-nums">
+            <span className={remaining < 0 ? 'text-destructive' : remaining === 0 ? 'text-studio' : 'text-foreground'}>{consumed}</span>
+            <span className="text-muted-foreground/60">/</span>
+            <span className="text-muted-foreground">{size}</span>
+          </span>
+          <span className="hidden text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 sm:inline">pages</span>
+        </div>
+        <span className="h-9 w-px flex-none bg-border/70" />
         {/* Cover thumbnail — page 0 (fixed first, not reorderable/deletable) */}
         <button
           type="button"
@@ -3725,15 +3746,6 @@ export default function Builder({
             Cover
           </span>
         </button>
-        <span className="h-9 w-px flex-none bg-border/70" />
-        <div className="flex flex-none items-center gap-2.5">
-          <span className="flex items-baseline gap-1 text-sm font-semibold tabular-nums">
-            <span className={remaining < 0 ? 'text-destructive' : remaining === 0 ? 'text-studio' : 'text-foreground'}>{consumed}</span>
-            <span className="text-muted-foreground/60">/</span>
-            <span className="text-muted-foreground">{size}</span>
-          </span>
-          <span className="hidden text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 sm:inline">pages</span>
-        </div>
         <div className="min-w-0 flex-1">
           <Navigator
             blocks={blocks}

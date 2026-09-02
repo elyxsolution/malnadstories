@@ -1,5 +1,5 @@
 import { Cinzel, Jost, Lato } from 'next/font/google';
-import localFont from 'next/font/local';
+import { scriptorama } from '@/lib/fonts';
 
 /**
  * BOOK JOURNEY TYPOGRAPHY — the artifact's faces, moved onto the project's font system.
@@ -23,14 +23,16 @@ const cinzel = Cinzel({ subsets: ['latin'], weight: ['400', '500', '600'], displ
 const jost = Jost({ subsets: ['latin'], weight: ['300', '400', '500'], display: 'swap', variable: '--bj-jost' });
 const lato = Lato({ subsets: ['latin'], weight: ['300', '400', '700'], display: 'swap', variable: '--bj-lato' });
 
-/** The artifact's display face for the wordmark and the book cover art. Shipped with the port. */
-const scriptorama = localFont({
-  src: './fonts/ScriptoramaMarkdownJF-Regular.ttf',
-  weight: '400',
-  style: 'normal',
-  display: 'swap',
-  variable: '--bj-scriptorama',
-});
+/*
+ * The artifact's display face for the wordmark and the book cover art. It is NO LONGER declared
+ * here: Scriptorama is now the project-wide HEADING face, so the single `next/font/local`
+ * definition lives in `@/lib/fonts` (as `--font-heading`) and is imported. One `@font-face`,
+ * one copy of the file. The engine still needs the resolved family name, which is read off the
+ * same object below, so its canvas textures are unchanged.
+ *
+ * `--bj-scriptorama` is gone with it. Nothing referenced that variable — the stage markup never
+ * used it, and the engine has always taken the family name, not the variable.
+ */
 
 /** Apply on the journey section so the ported inline styles can resolve their variables. */
 export const bookJourneyFontVars = [

@@ -32,7 +32,7 @@ export default function AppHeader({ email, name }: { email: string; name?: strin
           unoptimized
           className="h-7 w-auto"
         />
-        <span className="font-display text-[15px] font-semibold">Malnad Stories</span>
+        <span className="font-heading text-[17px] font-semibold">Malnad Stories</span>
       </Link>
       <AccountMenu identity={accountIdentity(email, name)} context="app" />
     </header>

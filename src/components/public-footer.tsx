@@ -51,9 +51,11 @@ export function PublicFooter() {
                 unoptimized
                 className="h-8 w-auto"
               />
-              <span className="font-display text-lg font-semibold leading-none text-primary">
+              {/* The wordmark, in the brand heading face — the same statement the masthead makes, so
+                  the page opens and closes on one typeface. */}
+              <span className="font-heading text-lg font-semibold leading-none text-primary">
                 Malnad{' '}
-                <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
+                <span className="font-ui text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
               </span>
             </Link>
             <p className="mt-4 text-sm font-light leading-relaxed text-muted-foreground">

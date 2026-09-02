@@ -23,6 +23,7 @@ import {
   DM_Sans,
   Manrope,
 } from 'next/font/google';
+import localFont from 'next/font/local';
 
 /**
  * Malnad Stories editorial typography — the Claude Design "Foundations" typefaces.
@@ -47,6 +48,30 @@ export const jakarta = Work_Sans({
   variable: '--font-ui',
 });
 
+/**
+ * THE HEADING FACE — Scriptorama Markdown JF, self-hosted through `next/font/local`.
+ *
+ * This is the ONE definition of the family in the project. It is exposed as `--font-heading`
+ * (tailwind `font-heading`), and `globals.css` applies it to every heading element from a
+ * single central rule, so a new screen inherits the brand heading typography without opting in.
+ *
+ * The file lives in `src/lib/font-files/` rather than beside a component because two very
+ * different surfaces need it: this global heading system, and the Book Journey engine, which
+ * needs the RESOLVED family name for its canvas textures (`ctx.font` is a string, and
+ * `next/font` generates a hashed family). `book-journey/fonts.ts` imports this same object,
+ * so there is exactly one `@font-face` for it and exactly one copy of the file in the repo.
+ */
+export const scriptorama = localFont({
+  src: './font-files/ScriptoramaMarkdownJF-Regular.ttf',
+  weight: '400',
+  style: 'normal',
+  display: 'swap',
+  variable: '--font-heading',
+  // The face has a single cut. Naming a real fallback stack keeps a heading from being measured
+  // against Times for the swap frame, which is what makes a font change read as a layout jump.
+  fallback: ['Cormorant Garamond', 'Georgia', 'serif'],
+});
+
 export const handwritten = La_Belle_Aurore({
   subsets: ['latin'],
   weight: ['400'],
@@ -55,7 +80,7 @@ export const handwritten = La_Belle_Aurore({
 });
 
 /** Convenience: the class set that turns on the editorial typography on a wrapper. */
-export const brandFontVars = `${fraunces.variable} ${jakarta.variable} ${handwritten.variable}`;
+export const brandFontVars = `${fraunces.variable} ${jakarta.variable} ${handwritten.variable} ${scriptorama.variable}`;
 
 /**
  * Expanded album-builder font library (≈20 high-quality free Google fonts) — selectable for

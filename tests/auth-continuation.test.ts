@@ -457,9 +457,27 @@ describe('the public header offers Login when signed out and an account control 
   });
 
   it('draws exactly one of the two controls — never both', () => {
-    // A single ternary per surface (desktop bar, mobile sheet) is what makes that structural.
-    expect(nav).toContain('{identity ? <AccountMenu identity={identity} context="public" /> : <LoginLink href={loginHref} />}');
-    expect(nav).toContain('{identity ? (');
+    /*
+     * A single ternary per surface (desktop bar, mobile sheet) is what makes that structural.
+     *
+     * Asserted on the SHAPE rather than on one formatting of it: the desktop bar's ternary is
+     * now wrapped across lines (it gained the masthead's larger `size="lg"` trigger), and a
+     * test that breaks when Prettier moves a bracket is testing the formatter, not the rule.
+     */
+    const body = code(nav);
+    const branches = body.match(/\{identity \?/g) ?? [];
+    expect(branches).toHaveLength(2);
+
+    // The desktop bar: one ternary, AccountMenu on one side and LoginLink on the other, so
+    // neither can be rendered unconditionally and both can never appear together.
+    const bar = body.slice(body.indexOf('{identity ?'));
+    const desktop = bar.slice(0, bar.indexOf('</div>'));
+    expect(desktop).toContain('<AccountMenu identity={identity} context="public"');
+    expect(desktop).toContain('<LoginLink href={loginHref} />');
+    expect(desktop.indexOf('<AccountMenu')).toBeLessThan(desktop.indexOf('<LoginLink'));
+
+    // The masthead's account trigger is the larger of the two sizes the shared control offers.
+    expect(desktop).toContain('size="lg"');
   });
 
   it('Login points at the EXISTING /login route and preserves a pending continuation', () => {

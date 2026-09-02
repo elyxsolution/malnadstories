@@ -52,11 +52,20 @@ export default function AccountMenu({
   identity,
   context,
   tone = 'brand',
+  size = 'default',
   onNavigate,
   onSignOut,
 }: {
   identity: AccountIdentity;
   context: AccountContext;
+  /**
+   * The trigger's footprint. `default` is 44x44 — the size every surface has always used, and
+   * the one the app header and the builder keep. `lg` is 48x48 with a 20px glyph from `lg` up,
+   * falling back to 44x44 below it: it is for the public masthead, where the account control
+   * sits beside "Explore designs" and must match whichever of that button's two steps is on
+   * screen. Presentation only: same button, same menu, same behaviour, 44px minimum either way.
+   */
+  size?: 'default' | 'lg';
   /**
    * Which accent the trigger's focus ring and open state wear. `studio` is the album builder's
    * own interaction green (`--studio-bright`), which every other control in that header already
@@ -76,7 +85,8 @@ export default function AccountMenu({
       {/*
         THE TRIGGER. A real <button> with an accessible name — Base UI adds `aria-haspopup`,
         `aria-expanded` and `aria-controls`, so the state is announced rather than implied by a
-        colour. 44x44 exactly, on every viewport.
+        colour. 44x44, or 48x48 from `lg` up on the public masthead (`size="lg"`) — both clear
+        the touch minimum on every viewport.
 
         Three states, each doing one job: hover warms the surface, `aria-expanded` (open) holds a
         deeper ring so the menu is visibly anchored to the thing that opened it, and the press
@@ -84,13 +94,20 @@ export default function AccountMenu({
       */}
       <Menu.Trigger
         aria-label={`Account — ${identity.name}`}
-        className={`ms-account-trigger grid h-11 w-11 place-items-center rounded-full border border-border bg-card text-primary outline-none transition-[background-color,border-color,transform] duration-150 ease-glide hover:border-primary/40 hover:bg-secondary active:scale-[0.97] aria-expanded:border-primary/45 aria-expanded:bg-secondary ${
+        className={`ms-account-trigger grid ${
+          size === 'lg' ? 'h-11 w-11 lg:h-12 lg:w-12' : 'h-11 w-11'
+        } place-items-center rounded-full border border-border bg-card text-primary outline-none transition-[background-color,border-color,transform] duration-150 ease-glide hover:border-primary/40 hover:bg-secondary active:scale-[0.97] aria-expanded:border-primary/45 aria-expanded:bg-secondary ${
           tone === 'studio'
             ? 'focus-visible:ring-2 focus-visible:ring-studio-bright'
             : 'focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-4 focus-visible:ring-offset-background'
         }`}
       >
-        <User className="ms-account-trigger-icon h-[18px] w-[18px]" aria-hidden />
+        <User
+          className={`ms-account-trigger-icon ${
+            size === 'lg' ? 'h-[18px] w-[18px] lg:h-5 lg:w-5' : 'h-[18px] w-[18px]'
+          }`}
+          aria-hidden
+        />
       </Menu.Trigger>
 
       <Menu.Portal>

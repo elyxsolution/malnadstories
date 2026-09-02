@@ -132,6 +132,36 @@
   pointer-events: auto;
 }
 
+/**
+ * SCENE 0's "CREATE YOUR ALBUM" — the one white box on a dark, moving plate.
+ *
+ * Two things used to hide it, and both are fixed at their cause rather than papered over: it was
+ * forest green (#22372C) on a forest-green 3D scene, and it sat inside the scroll cue's
+ * `malnadCue` animation, whose opacity keyframes fade the WHOLE subtree — so it spent most of
+ * every 2.4s cycle at 55%. The animation now runs on the two cue elements themselves (see
+ * stage-markup.ts), which pulse exactly as before, and the box is white.
+ *
+ * This rule exists for the hover state. `.bj-frame a:hover` above sets `color: #ffffff` for
+ * every link on the stage, which on a white box erases the label — so the CTA restates its own
+ * ink and warms its surface a step instead of inverting it. Nothing else about the anchor is
+ * declared here: size, padding, typography, width and position stay in the stage markup beside
+ * every other scene-0 style, and scene 5's CTA is untouched.
+ */
+.bj-frame [data-bj-cta='hero'] {
+  color: #06281f;
+}
+
+.bj-frame [data-bj-cta='hero']:hover,
+.bj-frame [data-bj-cta='hero']:focus-visible {
+  background-color: #f5efe3;
+  border-color: #f5efe3;
+  color: #06281f;
+}
+
+.bj-frame [data-bj-cta='hero']:active {
+  transform: scale(0.97);
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .bj-frame [data-panel] > div {
     backdrop-filter: none !important;

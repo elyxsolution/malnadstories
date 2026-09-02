@@ -14,6 +14,10 @@ const config: Config = {
         // vars set on <body> (src/app/layout.tsx). Cormorant Garamond = display serif;
         // Work Sans = UI sans. Fallbacks match if the vars are ever absent.
         display: ['var(--font-display)', 'Cormorant Garamond', 'Georgia', 'serif'],
+        // THE HEADING FACE — Scriptorama Markdown JF (`--font-heading`, src/lib/fonts.ts).
+        // globals.css applies this to every heading element from one central rule; the utility
+        // exists for the few title elements that are not h1–h6 (card/dialog/empty-state titles).
+        heading: ['var(--font-heading)', 'Cormorant Garamond', 'Georgia', 'serif'],
         ui: ['var(--font-ui)', 'Work Sans', 'system-ui', 'sans-serif'],
         handwritten: ['var(--font-accent-handwritten)', 'cursive'],
       },
