@@ -192,12 +192,24 @@ describe('the spine carries background + title, and nothing else', () => {
   });
 
   it('places no photo in the spine', () => {
-    // The front and back carry images; the spine panel never does. With both faces given an
-    // image, exactly two <img> elements exist — one per face.
+    // The front and back carry images; the spine panel never does.
+    //
+    // FOUR <img>, not two, since the full-bleed pass: each face's backdrop is drawn twice — once
+    // in its finished panel, and once in the bleed band beneath it that carries the face's ground
+    // out into the 15 mm turn-in. Two faces × two copies = four, and the spine still contributes
+    // none. Counting the SPINE's own markup is what actually states the invariant, so that is
+    // asserted directly rather than inferred from a total.
     const html = render(config(), 'https://r2.test/front.jpg', 'https://r2.test/back.jpg');
-    expect((html.match(/<img /g) ?? []).length).toBe(2);
+    expect((html.match(/<img /g) ?? []).length).toBe(4);
     expect(html).toContain('https://r2.test/front.jpg');
     expect(html).toContain('https://r2.test/back.jpg');
+
+    // The spine panel is the third of the five .cover-panel elements; its markup ends where the
+    // fourth begins. Nothing image-shaped may appear inside it.
+    const panels = html.split('class="cover-panel"');
+    expect(panels).toHaveLength(6); // the head, then the five panels
+    expect(panels[3]).not.toContain('<img ');
+    expect(panels[3]).not.toContain('r2.test');
   });
 
   it('is 17 mm wide whatever the album’s page count', () => {

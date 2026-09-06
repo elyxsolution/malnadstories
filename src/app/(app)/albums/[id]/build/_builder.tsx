@@ -3701,17 +3701,23 @@ export default function Builder({
       </div>
 
       {/*
-        BOTTOM — the page strip, read left to right as: how long is the book · the cover · add a
-        spread · the spreads themselves.
+        BOTTOM — the page strip, read left to right as: how long is the book · cover 0 · spread 1
+        … spread N · add a spread.
 
         THE COUNT LEADS. It is the one fact that is true of the whole album rather than of any one
         item in the strip, and it is the thing a customer checks against the length they bought —
         so it sits ahead of the page items instead of between the cover and them, where it used to
         interrupt a row of thumbnails. The rule after it separates the summary from the items.
 
-        The COVER then opens the run of pages, and "Add spread" follows it immediately (inside the
-        Navigator, which owns every scrolling page item) so the control that creates a page sits
-        where the first page is, not at the far end of a strip you have to scroll to reach.
+        EVERY PAGE ITEM NOW LIVES IN THE NAVIGATOR, cover included. The cover used to be a smaller
+        button rendered HERE, outside the scroller, captioned "Cover" rather than numbered — so it
+        was a different size and a different kind of thing from the spreads it opens. It is now
+        page 0 of the one horizontal run, at the spread thumbnail's exact geometry, and "Add
+        spread" has moved to the END of that run so it always follows the last spread and moves
+        right as spreads are added. The Navigator owns the ordering; nothing here positions it.
+
+        The cover VISUAL is still built here, because this is where the cover config, the resolved
+        front/back images and the sticker resolver live — the Navigator only hosts the node.
       */}
       <div className="flex flex-none items-center gap-3 border-t border-border/70 bg-card px-4 py-2 max-md:gap-2 max-md:px-2 max-md:py-1.5">
         <div className="flex flex-none items-center gap-2.5">
@@ -3723,29 +3729,6 @@ export default function Builder({
           <span className="hidden text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70 sm:inline">pages</span>
         </div>
         <span className="h-9 w-px flex-none bg-border/70" />
-        {/* Cover thumbnail — page 0 (fixed first, not reorderable/deletable) */}
-        <button
-          type="button"
-          onClick={focusCover}
-          aria-current={coverFocused ? 'true' : undefined}
-          title="Cover — back · spine · front"
-          className={`group relative h-[58px] w-[92px] flex-none overflow-hidden rounded-lg bg-white ring-2 max-md:h-[42px] max-md:w-[66px] transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-studio-bright ${coverFocused ? 'ring-studio shadow-card' : 'ring-border'}`}
-        >
-          <div className="absolute inset-0">
-            <CoverSpread
-              config={coverConfig}
-              title={albumTitle}
-              frontImageUrl={coverImageUrl}
-              backImageUrl={backCoverImageUrl}
-              size={size}
-              pageAspect={pageA}
-              stickerUrlFor={stickerUrlFor}
-            />
-          </div>
-          <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/45 to-transparent px-1 pb-0.5 pt-2 text-center text-[8px] font-semibold uppercase tracking-wide text-white">
-            Cover
-          </span>
-        </button>
         <div className="min-w-0 flex-1">
           <Navigator
             blocks={blocks}
@@ -3794,6 +3777,24 @@ export default function Builder({
             onOpenLayouts={coverFocused ? undefined : () => setRailTab('layouts')}
             currentKey={coverFocused ? null : (blocks[cur]?.key ?? null)}
             spreadLevels={quality.spreadLevels}
+            /**
+             * PAGE 0 — the cover, as the first item of the strip's one horizontal run. The same
+             * `focusCover` the standalone button called; the visual is the same `CoverSpread` it
+             * always rendered, at the spread thumbnail's geometry instead of its own smaller one.
+             */
+            coverActive={coverFocused}
+            onFocusCover={focusCover}
+            coverThumb={
+              <CoverSpread
+                config={coverConfig}
+                title={albumTitle}
+                frontImageUrl={coverImageUrl}
+                backImageUrl={backCoverImageUrl}
+                size={size}
+                pageAspect={pageA}
+                stickerUrlFor={stickerUrlFor}
+              />
+            }
           />
         </div>
 

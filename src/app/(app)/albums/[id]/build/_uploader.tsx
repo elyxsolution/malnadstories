@@ -19,14 +19,31 @@ export default function Uploader({
   albumId,
   remaining,
   uploads,
+  size = 'compact',
 }: {
   albumId: string;
   remaining: number;
   /** Shared upload infrastructure — see `useUploadManager`. */
   uploads: UploadManagerApi;
+  /**
+   * HOW MUCH ROOM THIS SURFACE HAS — a presentational scale, and nothing else.
+   *
+   * `compact` (the default) is the ~76px row the builder's photo tray has always rendered: a
+   * narrow rail beside the canvas, where the dropzone's job is to stay available rather than to
+   * invite. `comfortable` is the SAME row at the sizes the Upload & Build step needs — that
+   * screen exists to get photographs in, so there the dropzone is the primary target and a 76px
+   * strip under-sells it.
+   *
+   * It scales the box padding, the icon well and the three type sizes. It changes NO behaviour:
+   * same drag handlers on the same element, same hidden input, same `slotsLeft` reservation
+   * against the cap, same wording, same border/background treatment.
+   */
+  size?: 'compact' | 'comfortable';
 }) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const big = size === 'comfortable';
 
   // Files already queued/uploading aren't photo rows yet, so they must be reserved against
   // the cap here or a batch could overshoot it and fail late at presign.
@@ -52,6 +69,10 @@ export default function Uploader({
      * compact line beneath. Every interaction is byte-for-byte the same — the same drag handlers
      * on the same element, the same hidden input, the same `slotsLeft` reservation against the
      * cap. Only the box got shorter.
+     *
+     * `size="comfortable"` re-inflates exactly that row for the Upload & Build step, where the
+     * whole screen is about getting photographs in. The arrangement is identical; only the
+     * padding, the icon well and the type sizes step up, so the click target is ~2x the height.
      */
     <div
       onDragOver={(e) => {
@@ -65,7 +86,9 @@ export default function Uploader({
         handleFiles(e.dataTransfer.files);
       }}
       onClick={() => inputRef.current?.click()}
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border border-dashed px-3 py-2.5 transition-all duration-300 ease-glide ${
+      className={`group relative cursor-pointer overflow-hidden rounded-xl border border-dashed transition-all duration-300 ease-glide ${
+        big ? 'px-5 py-6 sm:px-6 sm:py-7' : 'px-3 py-2.5'
+      } ${
         dragOver
           ? 'border-studio-bright/70 bg-studio-soft shadow-glow'
           : 'border-border/80 bg-gradient-to-b from-secondary/40 to-background hover:border-studio-bright/40 hover:shadow-xs'
@@ -78,28 +101,40 @@ export default function Uploader({
         style={{ background: 'radial-gradient(70% 100% at 50% 0%, hsl(var(--studio-bright) / 0.12), transparent 70%)' }}
       />
 
-      <div className="relative flex items-center gap-2.5">
+      <div className={`relative flex items-center ${big ? 'gap-4' : 'gap-2.5'}`}>
         <span
-          className={`flex h-8 w-8 flex-none items-center justify-center rounded-lg shadow-xs ring-1 transition-all duration-300 ease-glide ${
+          className={`flex flex-none items-center justify-center rounded-lg shadow-xs ring-1 transition-all duration-300 ease-glide ${
+            big ? 'h-14 w-14 rounded-2xl' : 'h-8 w-8'
+          } ${
             dragOver
               ? 'scale-105 bg-studio text-studio-foreground ring-studio-bright/30'
               : 'bg-background text-studio ring-border group-hover:ring-studio-bright/30'
           }`}
         >
-          <UploadCloud className="h-4 w-4" />
+          <UploadCloud className={big ? 'h-7 w-7' : 'h-4 w-4'} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12.5px] font-semibold leading-tight tracking-tight">
+          <span
+            className={`block truncate font-semibold leading-tight tracking-tight ${
+              big ? 'text-[19px] sm:text-[21px]' : 'text-[12.5px]'
+            }`}
+          >
             {slotsLeft > 0 ? (dragOver ? 'Drop to upload' : 'Add your photos') : 'Photo limit reached'}
           </span>
-          <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+          <span
+            className={`block truncate leading-tight text-muted-foreground ${big ? 'mt-1 text-[14px]' : 'text-[11px]'}`}
+          >
             Drag &amp; drop or <span className="font-medium text-foreground">browse</span>
           </span>
         </span>
       </div>
 
       {/* The file rules, one line, no pill — it is reference material, not a control. */}
-      <p className="relative mt-1.5 truncate text-[10px] leading-tight text-muted-foreground/80">
+      <p
+        className={`relative truncate leading-tight text-muted-foreground/80 ${
+          big ? 'mt-4 text-[12px]' : 'mt-1.5 text-[10px]'
+        }`}
+      >
         JPEG · PNG · HEIC · WebP · 20 MB · {Math.max(0, slotsLeft)} left
       </p>
       <input

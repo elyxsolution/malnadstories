@@ -1,10 +1,15 @@
 /**
- * PRINT REFERENCE GUIDES — the geometry of every dotted line, in the exported PDFs and in the
- * builder, plus the white-hairline regression.
+ * PRINT REFERENCE GUIDES — the geometry of every dotted line the BUILDER draws, the fact that the
+ * exported PDFs draw none, the cover's full-bleed wrap, and the white-hairline regression.
  *
  * A guide that is a few millimetres out is worse than no guide: it is a wrong answer someone
  * designs against. So every position here is asserted against `lib/print/spec`, which is asserted
  * against the supplied drawing in `print-spec.test.ts` — one chain, no second copy of the numbers.
+ *
+ * The cover EXPORT used to carry dotted fold / spine / finished-edge lines and a white turn-in.
+ * Both are gone: the file the press prints now carries artwork and nothing else, and the wrap is a
+ * bleed of the adjacent panel's own background. Section B pins BOTH halves — that no line of any
+ * kind is emitted, and that removing them and adding the bleed moved no dimension whatsoever.
  */
 import { describe, it, expect } from 'vitest';
 import * as React from 'react';
@@ -14,12 +19,13 @@ import PrintContent, { type PrintPhoto } from '@/app/albums/[id]/print/content/_
 import PrintCover from '@/app/albums/[id]/print/cover/_print-cover';
 import {
   COVER_ARTWORK,
+  COVER_BLEED_BANDS,
   COVER_FOLD_FRACTIONS,
-  COVER_FOLD_LINES_MM,
   COVER_GUIDE_LINES_ENABLED,
   COVER_PANEL_FRACTIONS,
+  COVER_PANELS,
   COVER_SPREAD_BOX,
-  GUIDE_STYLE,
+  COVER_WRAP_MM,
   INTERIOR_ARTWORK,
   INTERIOR_SAFE_INSET_FRACTION,
   INTERIOR_TRIM,
@@ -128,108 +134,173 @@ describe('the white hairline around content artwork', () => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════
-// B. Cover PDF guides
+// B. Cover PDF — no guides, and a full-bleed wrap
 // ═════════════════════════════════════════════════════════════════════════════════════════════
 
 const config = (overrides: Partial<CoverConfig> = {}): CoverConfig =>
   normalizeCoverConfig({ ...DEFAULT_COVER_CONFIG, ...overrides });
 
-const renderCover = (cfg: CoverConfig = config()) =>
+const renderCover = (cfg: CoverConfig = config(), images: { front?: string | null; back?: string | null } = {}) =>
   renderToStaticMarkup(
     React.createElement(PrintCover, {
       config: cfg,
       title: 'COORG MONSOON',
-      frontImageUrl: null,
-      backImageUrl: null,
+      frontImageUrl: images.front ?? null,
+      backImageUrl: images.back ?? null,
       stickerUrls: {},
     }),
   );
 
-describe('cover PDF — dotted partition lines', () => {
+/** Every `class="<cls>"` element's inline style, in document order. */
+const stylesOf = (html: string, cls: string): string[] =>
+  Array.from(html.matchAll(new RegExp(`class="${cls}" style="([^"]*)"`, 'g'))).map((m) => m[1]);
+
+/** A millimetre value off one inline style property. */
+const mm = (style: string, prop: string): number => {
+  const m = style.match(new RegExp(`(?:^|[;\\s])${prop}:\\s*([\\d.]+)mm`));
+  return m ? Number(m[1]) : NaN;
+};
+
+describe('cover PDF — every dotted guide line is gone', () => {
   const html = renderCover();
 
-  it('is enabled, and is NOT the printer-marks switch', () => {
-    // Reference lines a person reads are a different thing from marks a cutter reads.
-    expect(COVER_GUIDE_LINES_ENABLED).toBe(true);
+  it('is switched off in the spec, and is still NOT the printer-marks switch', () => {
+    // Two separate decisions, kept separate: reference lines a person reads, and marks a cutter
+    // reads. Both are now off, and neither implies the other.
+    expect(COVER_GUIDE_LINES_ENABLED).toBe(false);
     expect(PRINTER_MARKS_ENABLED).toBe(false);
   });
 
-  it('draws the guides in a millimetre viewBox, so coordinates ARE the specification', () => {
-    expect(html).toContain(`viewBox="0 0 ${COVER_ARTWORK.w} ${COVER_ARTWORK.h}"`);
-    expect(html).toContain('viewBox="0 0 487 327"');
+  it('emits no SVG, no line, no stroke and no dash pattern at all', () => {
+    expect(html).not.toContain('<svg');
+    expect(html).not.toContain('<line');
+    expect(html).not.toContain('stroke-dasharray');
+    expect(html).not.toContain('stroke-width');
+    expect(html).not.toContain('cover-guides');
   });
 
-  it('draws exactly four fold lines, at 225 / 235 / 252 / 262 mm', () => {
-    expect(COVER_FOLD_LINES_MM).toEqual([225, 235, 252, 262]);
-    const xs = Array.from(html.matchAll(/<line x1="([\d.]+)"/g)).map((m) => Number(m[1]));
-    expect(xs).toEqual([225, 235, 252, 262]);
-  });
-
-  it('derives the spine boundaries rather than hardcoding them', () => {
-    // spine left  = wrap + back + hinge = 15 + 210 + 10 = 235
-    // spine right = spine left + 17     = 252
-    const [, spineLeft, spineRight] = COVER_FOLD_LINES_MM;
-    expect(spineLeft).toBe(COVER_SPREAD_BOX.x + 210 + 10);
-    expect(spineRight).toBe(spineLeft + spinePrintWidthMm());
-    expect(spineRight - spineLeft).toBe(17);
-  });
-
-  it('uses the drawing’s dash-dot pattern for the folds, in millimetres', () => {
-    // Measured off Plate 02: 7 dash · 2 gap · 1.6 dash · 2 gap, 0.55 mm wide.
-    expect(GUIDE_STYLE.fold.dashMm).toEqual([7, 2, 1.6, 2]);
-    expect(GUIDE_STYLE.fold.widthMm).toBe(0.55);
-    expect(html).toContain('stroke-dasharray="7 2 1.6 2"');
-    expect(html).toContain('stroke-width="0.55"');
-  });
-
-  it('marks the finished edge with the drawing’s finer pattern', () => {
-    expect(GUIDE_STYLE.trim.dashMm).toEqual([3, 2.2]);
-    expect(html).toContain('stroke-dasharray="3 2.2"');
-    expect(html).toContain(`<rect x="${COVER_SPREAD_BOX.x}" y="${COVER_SPREAD_BOX.y}" width="457" height="297"`);
-  });
-
-  it('is BLACK, thin, and dashed — never a solid border', () => {
-    expect(GUIDE_STYLE.color).toBe('#000000');
-    expect(html).toContain('stroke="#000000"');
-    // Every stroked element carries a dash array: nothing is drawn solid.
-    const strokes = Array.from(html.matchAll(/<(line|rect)\b[^>]*>/g)).map((m) => m[0]);
-    expect(strokes.length).toBeGreaterThan(0);
-    for (const el of strokes) expect(el).toContain('stroke-dasharray');
-  });
-
-  it('confines every line to the finished spread, so the 15 mm wrap stays blank', () => {
-    const top = COVER_SPREAD_BOX.y;
-    const bottom = COVER_SPREAD_BOX.y + COVER_SPREAD_BOX.h;
-    expect([top, bottom]).toEqual([15, 312]);
-    for (const m of Array.from(html.matchAll(/<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/g))) {
-      const [, x1, y1, , y2] = m.map(Number);
-      expect(Number(y1)).toBeGreaterThanOrEqual(top);
-      expect(Number(y2)).toBeLessThanOrEqual(bottom);
-      expect(Number(x1)).toBeGreaterThanOrEqual(COVER_SPREAD_BOX.x);
-      expect(Number(x1)).toBeLessThanOrEqual(COVER_SPREAD_BOX.x + COVER_SPREAD_BOX.w);
-    }
-  });
-
-  it('does not change the artwork underneath', () => {
-    // The panel construction and page size are exactly what they were before the guides existed.
-    expect(html).toContain('@page { size: 487mm 327mm; margin: 0; }');
-    const widths = Array.from(html.matchAll(/class="cover-panel" style="[^"]*width:([\d.]+)mm/g)).map(
-      (m) => Number(m[1]),
-    );
-    expect(widths).toEqual([210, 10, 17, 10, 210]);
-  });
-
-  it('still keeps the spine to background + title, with no shading or shadow', () => {
-    expect(html).not.toContain('rgba(0,0,0,0.22)');
-    expect(html).not.toContain('inset 0 0 3cqw');
-    // Guides are strokes, never fills — they cannot become spine artwork.
-    expect(html).toContain('fill="none"');
+  it('substitutes nothing for them — no replacement rule, border or divider', () => {
+    // A dashed CSS border would be the obvious "keep something there" regression.
+    expect(html).not.toContain('border-dashed');
+    expect(html).not.toMatch(/border[^;"]*dashed/);
+    expect(html).not.toMatch(/outline[^;"]*dashed/);
   });
 
   it('adds no crop, registration, colour-bar or slug marks', () => {
     for (const mark of [/crop-?mark/i, /registration/i, /colou?r-?bar/i, /\bslug\b/i]) {
       expect(html).not.toMatch(mark);
     }
+  });
+});
+
+describe('cover PDF — the 15 mm wrap bleeds instead of printing white', () => {
+  const html = renderCover();
+
+  it('paints one bleed band per panel, in printed order', () => {
+    expect(COVER_BLEED_BANDS.map((b) => b.name)).toEqual([
+      'back',
+      'hinge-left',
+      'spine',
+      'hinge-right',
+      'front',
+    ]);
+    expect(stylesOf(html, 'bleed-band')).toHaveLength(5);
+  });
+
+  it('covers the artwork edge to edge, so no white turn-in can remain', () => {
+    const lefts = COVER_BLEED_BANDS.map((b) => b.rect.x);
+    const widths = COVER_BLEED_BANDS.map((b) => b.rect.w);
+    expect(lefts[0]).toBe(0);
+    expect(lefts[lefts.length - 1] + widths[widths.length - 1]).toBe(COVER_ARTWORK.w);
+    expect(widths.reduce((a, b) => a + b, 0)).toBe(COVER_ARTWORK.w);
+    // Contiguous: each band starts exactly where the previous one ends.
+    for (let i = 1; i < COVER_BLEED_BANDS.length; i += 1) {
+      expect(lefts[i]).toBe(lefts[i - 1] + widths[i - 1]);
+    }
+    // Full height, so the top and bottom turn-in is covered too.
+    for (const b of COVER_BLEED_BANDS) {
+      expect(b.rect.y).toBe(0);
+      expect(b.rect.h).toBe(COVER_ARTWORK.h);
+    }
+  });
+
+  it('widens ONLY the two outer bands, by exactly the wrap', () => {
+    const [back, hingeL, spine, hingeR, front] = COVER_BLEED_BANDS;
+    expect(back.rect.w).toBe(210 + COVER_WRAP_MM);
+    expect(front.rect.w).toBe(210 + COVER_WRAP_MM);
+    // The bound edge keeps its exact construction: 10 / 17 / 10, at the same x as the panels.
+    expect([hingeL.rect.w, spine.rect.w, hingeR.rect.w]).toEqual([10, spinePrintWidthMm(), 10]);
+    for (const name of ['hinge-left', 'spine', 'hinge-right'] as const) {
+      const band = COVER_BLEED_BANDS.find((b) => b.name === name)!;
+      const panel = COVER_PANELS.find((pp) => pp.name === name)!;
+      expect(band.rect.x).toBe(panel.rect.x);
+      expect(band.rect.w).toBe(panel.rect.w);
+    }
+  });
+
+  it('renders the bands at their specified millimetres', () => {
+    const styles = stylesOf(html, 'bleed-band');
+    expect(styles.map((st) => mm(st, 'left'))).toEqual(COVER_BLEED_BANDS.map((b) => b.rect.x));
+    expect(styles.map((st) => mm(st, 'width'))).toEqual(COVER_BLEED_BANDS.map((b) => b.rect.w));
+  });
+
+  it('carries the FACE’s own colour outward, never an invented one', () => {
+    // 'sand' resolves to #efe7d6 through the SAME backgroundStyle catalog the face itself uses.
+    const base = config();
+    const sand = { kind: 'color', value: 'sand' } as const;
+    const cfg = config({ background: sand, back: { ...base.back, background: sand } });
+    const bands = stylesOf(renderCover(cfg), 'bleed-band');
+    // The outer two bands — the ones that reach into the wrap — wear the face colour.
+    expect(bands[0]).toContain('#efe7d6');
+    expect(bands[4]).toContain('#efe7d6');
+  });
+
+  it('carries the face’s backdrop PHOTOGRAPH outward too, with its own edit', () => {
+    const withPhoto = renderCover(config(), { front: 'https://r2/front.jpg', back: 'https://r2/back.jpg' });
+    // Twice each: once in the finished panel, once in the bleed band beneath it.
+    expect(withPhoto.match(/https:\/\/r2\/front\.jpg/g)).toHaveLength(2);
+    expect(withPhoto.match(/https:\/\/r2\/back\.jpg/g)).toHaveLength(2);
+  });
+
+  it('keeps every element OUT of the wrap — background only', () => {
+    // The bleed layer must never carry text, a sticker, a QR or the studio mark: the turn-in is
+    // glued down out of sight. The title appears exactly once, inside the finished spread.
+    const bleed = html.slice(html.indexOf('cover-bleed'), html.indexOf('cover-spread'));
+    expect(bleed).not.toContain('COORG MONSOON');
+    expect(bleed).not.toContain('Malnad Stories');
+  });
+});
+
+describe('cover PDF — the bleed and the removed guides moved NO dimension', () => {
+  const html = renderCover();
+
+  it('keeps the page size exactly 487 × 327 mm', () => {
+    expect(html).toContain('@page { size: 487mm 327mm; margin: 0; }');
+    expect(COVER_ARTWORK).toEqual({ w: 487, h: 327 });
+  });
+
+  it('keeps the five panel widths at 210 / 10 / 17 / 10 / 210', () => {
+    const widths = Array.from(html.matchAll(/class="cover-panel" style="[^"]*width:([\d.]+)mm/g)).map(
+      (m) => Number(m[1]),
+    );
+    expect(widths).toEqual([210, 10, 17, 10, 210]);
+    expect(COVER_PANELS.map((pp) => pp.rect.w)).toEqual([210, 10, 17, 10, 210]);
+  });
+
+  it('keeps the finished spread inset by exactly the wrap, and clipped', () => {
+    expect([COVER_SPREAD_BOX.x, COVER_SPREAD_BOX.y]).toEqual([COVER_WRAP_MM, COVER_WRAP_MM]);
+    expect([COVER_SPREAD_BOX.w, COVER_SPREAD_BOX.h]).toEqual([457, 297]);
+    expect(html).toContain('left: 15mm; top: 15mm;');
+    expect(html).toContain('width: 457mm; height: 297mm;');
+  });
+
+  it('draws the bleed BEFORE the spread, so the artwork is never covered by it', () => {
+    expect(html.indexOf('cover-bleed')).toBeLessThan(html.indexOf('cover-spread'));
+  });
+
+  it('still keeps the spine to background + title, with no shading or shadow', () => {
+    expect(html).not.toContain('rgba(0,0,0,0.22)');
+    expect(html).not.toContain('inset 0 0 3cqw');
   });
 });
 
@@ -295,8 +366,8 @@ describe('builder chrome never reaches an exported PDF', () => {
   });
 
   it('does not export the builder’s trim or safe-area rectangles', () => {
-    // The builder guides are `border-dashed` divs tagged `data-guide`; the cover's exported lines
-    // are SVG strokes. Neither export may carry the builder's overlay.
+    // The builder guides are `border-dashed` divs tagged `data-guide`. Neither export carries
+    // them — and since the full-bleed pass the cover exports no lines of its own either.
     for (const html of [content, cover]) {
       expect(html).not.toContain('data-guide');
       expect(html).not.toContain('border-dashed');
@@ -313,6 +384,11 @@ describe('builder chrome never reaches an exported PDF', () => {
   it('exports NOTHING extra on the interior — no lines, no labels, no marks', () => {
     expect(content).not.toContain('<svg');
     expect(content).not.toContain('stroke');
+  });
+
+  it('exports NOTHING extra on the cover either — the same bar, now that guides are gone', () => {
+    expect(cover).not.toContain('<svg');
+    expect(cover).not.toContain('stroke');
   });
 });
 

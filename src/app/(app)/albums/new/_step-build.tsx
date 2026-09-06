@@ -123,7 +123,11 @@ export default function StepBuild({
           </p>
         </div>
 
-        <Uploader albumId={albumId} remaining={remaining} uploads={uploads} />
+        {/* This screen exists to get photographs in, so the dropzone renders at its
+            `comfortable` scale here — same component, same handlers, same wording, roughly twice
+            the height with a much larger primary label and icon. The builder tray keeps the
+            compact row, where the rail is narrow and the grid owns the space. */}
+        <Uploader albumId={albumId} remaining={remaining} uploads={uploads} size="comfortable" />
 
         {/* Batch progress — one bar per pick, so a 60-file drop reads as one thing. Bytes are
             half the bar and worker time the other half, so it keeps moving after upload lands. */}
@@ -179,7 +183,10 @@ export default function StepBuild({
         )}
 
         {photos.length === 0 ? (
-          <p className="rounded-xl border border-dashed px-4 py-5 text-center text-[13px] leading-relaxed text-muted-foreground">
+          /* THE PHOTOGRAPH SHELF, empty. Same dashed panel, given the height the filled grid
+             occupies and a readable type size, so the section no longer collapses to one thin
+             line before the first upload. Wording unchanged. */
+          <p className="flex min-h-[184px] items-center justify-center rounded-xl border border-dashed px-6 py-10 text-center text-[15px] leading-relaxed text-muted-foreground">
             No photographs yet — add up to {cap}. You can also design the pages first and upload from
             inside the builder.
           </p>

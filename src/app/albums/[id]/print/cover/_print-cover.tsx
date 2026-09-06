@@ -6,17 +6,16 @@ import {
   CoverDesignFromConfig,
   SpineDesign,
 } from '@/app/(app)/albums/[id]/build/_cover-render';
-import { spinePrintBackgroundStyle, type CoverConfig } from '@/lib/builder/cover';
-import type { EditConfig } from '@/lib/builder/model';
+import PhotoFrame from '@/app/(app)/albums/[id]/build/_photo-frame';
+import { coverBackgroundStyle, spinePrintBackgroundStyle, type CoverConfig } from '@/lib/builder/cover';
+import type { Background, EditConfig } from '@/lib/builder/model';
 import {
   COVER_ARTWORK,
-  COVER_FOLD_LINES_MM,
+  COVER_BLEED_BANDS,
   COVER_HINGE_FILL,
   COVER_PANEL,
   COVER_PANELS,
   COVER_SPREAD_BOX,
-  GUIDE_STYLE,
-  dashArray,
   mmCss,
   mmToPxCeil,
   type CoverPanelName,
@@ -33,14 +32,26 @@ import {
  * PDFs, and not the preview's arrangement (which prints the front, the back and the spine as three
  * separate portrait pages so a customer can page through them). That renderer is untouched.
  *
- * ── THE WRAP IS BLANK, AND THAT IS ENFORCED STRUCTURALLY ──────────────────────────────────────
+ * ── THE WRAP IS A FULL BLEED, NOT WHITE ───────────────────────────────────────────────────────
  *
- * The 15 mm turn-in is the paper that folds over the board edge and is glued down inside. Nothing
- * is drawn there: no artwork extension, no photo, no decorative element, no spine text, no
- * gradient. It is enforced by GEOMETRY rather than by a rule someone has to remember — the page is
- * white, and every panel is a child of a `.cover-spread` box inset by exactly the wrap and clipped
- * with `overflow: hidden`. A design that overflowed its panel is cut at the finished edge; it
- * cannot reach the wrap.
+ * The 15 mm turn-in is the paper that folds over the board edge and is glued down inside. It used
+ * to print WHITE, which is the one thing a wrapped case cannot afford: the fold and the trim both
+ * carry registration drift, so a white turn-in shows as a pale sliver along the finished edge of a
+ * dark cover. Each panel's own background now BLEEDS outward into the turn-in beside it — the back
+ * cover's into the left and its share of the top/bottom, the front cover's into the right, and the
+ * spine and hinges straight up and down — so the cut always lands inside colour.
+ *
+ * NOTHING MOVED TO ACHIEVE THAT, and that is structural rather than a promise. The bleed is a
+ * separate layer painted UNDERNEATH the finished spread, from `COVER_BLEED_BANDS`, which is
+ * derived from the very same `COVER_PANELS` the spread is built from. The spread itself still sits
+ * at exactly `COVER_SPREAD_BOX` with its five panels at exactly their specified widths, still
+ * clipped with `overflow: hidden`, so every panel's artwork is the same size, in the same place,
+ * with the same crop as before. The page size is untouched.
+ *
+ * THE BLEED CARRIES BACKGROUND ONLY — the face's colour/gradient, plus its backdrop photograph
+ * where it has one. No text, no sticker, no QR, no placed overlay and no studio mark is drawn out
+ * there: the turn-in is glued down out of sight, so an element that reached it would simply be
+ * lost, and a partially-visible one at the fold would be worse than nothing.
  *
  * ── THE SPINE CARRIES ONLY BACKGROUND + TITLE ─────────────────────────────────────────────────
  *
@@ -50,12 +61,15 @@ import {
  * the spine's element list is `config.spine.texts` and nothing else — the same single source of
  * truth the builder edits.
  *
- * ── REFERENCE LINES, BUT NO PRINTER MARKS ─────────────────────────────────────────────────────
+ * ── NO MARKS AND NO GUIDES ────────────────────────────────────────────────────────────────────
  *
- * The cover DOES carry black dotted fold / spine / finished-edge reference lines — an explicit
- * project requirement, with the pattern and positions taken from the supplied drawing. See
- * `CoverGuides` for why those are not printer marks. No crop marks, registration marks, colour
- * bars or slug are drawn, here or anywhere else.
+ * The exported cover carries NOTHING but the artwork: no crop marks, registration marks, colour
+ * bars or slug (`PRINTER_MARKS_ENABLED`), and — since the full-bleed pass — no dotted fold, spine
+ * or finished-edge reference lines either (`COVER_GUIDE_LINES_ENABLED`, now false, which records
+ * the decision and lets a test assert it). Those lines were reference geometry for a person
+ * checking the case construction; on the file the press actually prints they are ink. Nothing was
+ * substituted for them. The builder's on-screen fold/trim guides are unaffected — they are editor
+ * chrome and have never been exported.
  */
 
 /** Physical geometry, computed once. Pure — every value traces back to `lib/print/spec`. */
@@ -69,8 +83,6 @@ function buildCoverCss(): string {
     margin: 0; padding: 0; background: #fff;
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  /* THE WRAP. The page is white and the spread is inset by exactly 15 mm on every side, so the
-     turn-in region is blank because nothing is positioned in it — not because anything erases it. */
   .print-page {
     position: relative;
     /* The fragmentainer's own dimensions (ceil of the physical size), so no strip of sheet is
@@ -86,6 +98,12 @@ function buildCoverCss(): string {
      */
     contain: strict;
   }
+  /* THE BLEED. One band per panel, spanning the full artwork height, painted UNDER the finished
+     spread — so it fills the 15 mm turn-in and is completely hidden everywhere else. */
+  .cover-bleed { position: absolute; inset: 0; }
+  .bleed-band { position: absolute; top: 0; height: 100%; overflow: hidden; }
+  /* THE FINISHED SPREAD. Inset by exactly the wrap, and clipped — unchanged. Everything the
+     customer designed is inside this box, at the millimetre it was always at. */
   .cover-spread {
     position: absolute;
     left: ${mmCss(COVER_SPREAD_BOX.x)}; top: ${mmCss(COVER_SPREAD_BOX.y)};
@@ -95,9 +113,6 @@ function buildCoverCss(): string {
   /* Each panel is positioned in absolute millimetres from the spread's own origin, so the
      210 / 10 / 17 / 10 / 210 construction is exact and independent of any page proportion. */
   .cover-panel { position: absolute; top: 0; height: 100%; overflow: hidden; }
-  /* The reference lines sit ABOVE the artwork so they stay readable over a dark photo, and cover
-     the whole page so their millimetre viewBox maps 1:1 onto the artwork coordinates. */
-  .cover-guides { position: absolute; inset: 0; width: 100%; height: 100%; }
 `;
 }
 
@@ -113,80 +128,45 @@ function panelStyle(name: CoverPanelName): { left: string; width: string } {
   return { left: mmCss(rect.x - COVER_SPREAD_BOX.x), width: mmCss(rect.w) };
 }
 
-/**
- * THE REFERENCE / PARTITION LINES — an explicit requirement, drawn from `dimensions.pdf`.
- *
- * These are NOT printer marks. A crop mark tells a machine where to cut; these tell a PERSON where
- * the case creases, so the back / hinge / spine / hinge / front construction can be checked
- * against the specification on the printed artwork itself. No crop marks, registration marks,
- * colour bars or slug are drawn anywhere.
- *
- * ── WHY SVG, IN MILLIMETRES ───────────────────────────────────────────────────────────────────
- *
- * The viewBox is the artwork in millimetres, so every coordinate below IS the spec value — 225,
- * 235, 252, 262 — with no conversion to get wrong. `preserveAspectRatio="none"` maps the box onto
- * the fragmentainer-ceilinged page exactly, so the lines land on the folds to within the same
- * sub-pixel the whole page already carries.
- *
- * VERIFIED IN THE EXPORTED FILE, not assumed: Chromium converts a dashed SVG stroke into explicit
- * filled VECTOR subpaths — one thin quad per dash — which is the same encoding `dimensions.pdf`
- * itself uses for its guides. Nothing is rasterised. In a generated cover the dash subpaths sit at
- * x = 225.275 / 235.275 / 252.275 / 262.275 (each fold ± half of the 0.55 mm width) and the
- * finished-edge rule at x = 14.75 / 472.25, in black.
- *
- * ── THE PATTERN ───────────────────────────────────────────────────────────────────────────────
- *
- * Measured out of Plate 02 rather than invented (`GUIDE_STYLE`): the folds use the drawing's
- * dash-dot centre line (7 · 2 · 1.6 · 2 mm at 0.55 mm), the finished edge its finer 3 · 2.2 mm at
- * 0.5 mm. Black at 40 % opacity, per the product decision recorded in the spec — light enough to
- * annotate the artwork rather than compete with it, dark enough to survive a greyscale proof.
- *
- * ── THE WRAP STAYS BLANK ──────────────────────────────────────────────────────────────────────
- *
- * Every line is confined to the finished spread (y 15 → 312, x 15 → 472). The drawing runs its
- * fold guides through the full artwork height, but the 15 mm turn-in is required to be blank and a
- * reference line is not an exception to that — it would be glued down inside the case anyway.
- */
-function CoverGuides() {
-  const { fold, trim, color, opacity } = GUIDE_STYLE;
-  const top = COVER_SPREAD_BOX.y;
-  const bottom = COVER_SPREAD_BOX.y + COVER_SPREAD_BOX.h;
+/** A bleed band's absolute position on the PAGE (artwork coordinates, full height). */
+function bandStyle(name: CoverPanelName): { left: string; width: string } {
+  const rect: MmRect = COVER_BLEED_BANDS.find((b) => b.name === name)!.rect;
+  return { left: mmCss(rect.x), width: mmCss(rect.w) };
+}
 
+/**
+ * ONE BLEED BAND — a face's background carried out into the turn-in beside it.
+ *
+ * It paints exactly what the panel above it paints as its GROUND, from the same functions: the
+ * face's chosen colour or gradient via `coverBackgroundStyle`, and — when that face has a backdrop
+ * photograph — the same photograph, with the same stored `edit`, through the same `PhotoFrame`.
+ * The face renderer switches its own ground to the dark house green behind a photo, so this does
+ * the same, and a photo that fails to load leaves the face's colour showing rather than white.
+ *
+ * `onReady` is deliberately NOT passed: the readiness gate counts the real panels, and a duplicate
+ * of an image the browser is already fetching must not be able to move that count. Nor may it hold
+ * generation up — it is the same URL, served from the same cache.
+ */
+function BleedBand({
+  name,
+  background,
+  imageUrl = null,
+  imageEdit = null,
+  style,
+}: {
+  name: CoverPanelName;
+  /** The face's stored background. `null` resolves to the same default the face itself uses. */
+  background?: Background | null;
+  imageUrl?: string | null;
+  imageEdit?: EditConfig | null;
+  /** An explicit ground, for the hinges — whose fill is a policy value, not a face's property. */
+  style?: React.CSSProperties;
+}) {
+  const ground = style ?? (imageUrl ? { background: '#1e3a2f' } : coverBackgroundStyle(background ?? null));
   return (
-    <svg
-      className="cover-guides"
-      viewBox={`0 0 ${COVER_ARTWORK.w} ${COVER_ARTWORK.h}`}
-      preserveAspectRatio="none"
-      aria-hidden
-    >
-      {/* The finished edge — where the 487 × 327 artwork is trimmed back to 457 × 297. */}
-      <rect
-        x={COVER_SPREAD_BOX.x}
-        y={COVER_SPREAD_BOX.y}
-        width={COVER_SPREAD_BOX.w}
-        height={COVER_SPREAD_BOX.h}
-        fill="none"
-        stroke={color}
-        strokeWidth={trim.widthMm}
-        strokeOpacity={opacity}
-        strokeDasharray={dashArray(trim.dashMm)}
-      />
-      {/* The four folds: back|hinge · hinge|spine · spine|hinge · hinge|front. The middle pair IS
-          the 17 mm spine, so its width is readable straight off the printed sheet. */}
-      {COVER_FOLD_LINES_MM.map((x) => (
-        <line
-          key={x}
-          x1={x}
-          y1={top}
-          x2={x}
-          y2={bottom}
-          stroke={color}
-          strokeWidth={fold.widthMm}
-          strokeOpacity={opacity}
-          strokeDasharray={dashArray(fold.dashMm)}
-        />
-      ))}
-    </svg>
+    <div className="bleed-band" style={{ ...bandStyle(name), ...ground }} aria-hidden>
+      {imageUrl && <PhotoFrame url={imageUrl} edit={imageEdit} />}
+    </div>
   );
 }
 
@@ -271,11 +251,39 @@ export default function PrintCover({
   const hingeStyle =
     COVER_HINGE_FILL === 'spine' ? spinePrintBackgroundStyle(config.spine.background) : undefined;
 
+  /** The spine's own ground, reused for its bleed band so the bound edge runs edge to edge. */
+  const spineStyle = spinePrintBackgroundStyle(config.spine.background);
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: buildCoverCss() }} />
 
       <div className="print-page">
+        {/*
+          THE BLEED, UNDERNEATH EVERYTHING. Five bands, one per panel, each carrying that panel's
+          ground out to the artwork's own edges. Only the outer two widen (into the left and right
+          turn-in); the three interior bands keep the exact fold widths, so the spine reads 17 mm
+          from top to bottom of the sheet and the hinges stay 10 mm. Every visible pixel of the
+          finished spread is drawn by the layer below, which covers this completely.
+        */}
+        <div className="cover-bleed">
+          <BleedBand
+            name="back"
+            background={config.back.background}
+            imageUrl={backImageUrl}
+            imageEdit={config.back.imageEdit}
+          />
+          <BleedBand name="hinge-left" style={hingeStyle} />
+          <BleedBand name="spine" style={spineStyle} />
+          <BleedBand name="hinge-right" style={hingeStyle} />
+          <BleedBand
+            name="front"
+            background={config.background}
+            imageUrl={frontImageUrl}
+            imageEdit={config.imageEdit}
+          />
+        </div>
+
         <div className="cover-spread">
           {/* BACK COVER — 210 mm. The left-hand panel of the printed spread. */}
           <div className="cover-panel" style={panelStyle('back')}>
@@ -291,7 +299,7 @@ export default function PrintCover({
           {/* LEFT HINGE — 10 mm. */}
           <div className="cover-panel" style={{ ...panelStyle('hinge-left'), ...hingeStyle }} />
 
-          {/* SPINE — 13 mm, fixed for every page count. Background colour + title text only. */}
+          {/* SPINE — 17 mm, fixed for every page count. Background colour + title text only. */}
           <div className="cover-panel" style={panelStyle('spine')}>
             <SpineDesign config={config} title={title} pageAspect={facePageAspect} print />
           </div>
@@ -311,10 +319,6 @@ export default function PrintCover({
             />
           </div>
         </div>
-
-        {/* Dotted fold / spine / finished-edge reference lines — an explicit requirement, drawn
-            from dimensions.pdf. Above the artwork, never inside the wrap. */}
-        <CoverGuides />
       </div>
     </>
   );

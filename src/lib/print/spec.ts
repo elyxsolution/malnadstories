@@ -196,7 +196,13 @@ export const COVER_HINGE_MM = 10;
  */
 export const COVER_SPINE_MM = 17;
 
-/** The wrap / turn-in on all four sides of the cover artwork. Rendered BLANK — see the cover route. */
+/**
+ * The wrap / turn-in on all four sides of the cover artwork.
+ *
+ * DIMENSIONALLY UNCHANGED, and it must stay that way: the artwork is the finished spread plus
+ * this on every side, so touching it moves the PDF page size. What changed is only what is
+ * PAINTED there — see `COVER_BLEED_BANDS` and the cover route. It used to be left white.
+ */
 export const COVER_WRAP_MM = 15;
 
 /**
@@ -279,6 +285,40 @@ export function coverPanel(name: CoverPanelName): CoverPanel {
   const found = COVER_PANELS.find((p) => p.name === name);
   if (!found) throw new Error(`unknown cover panel "${name}"`);
   return found;
+}
+
+/**
+ * THE BLEED BANDS — which panel's colour fills which part of the 15 mm wrap.
+ *
+ * The turn-in used to print WHITE. That is wrong for a wrapped case: the paper folds over the
+ * board edge, so any registration drift shows a white sliver along the finished edge, and the
+ * outermost millimetre of the design is exactly where it is least forgiving. A bleed is the
+ * standard remedy — carry the artwork past the trim so the cut lands inside colour.
+ *
+ * NOTHING DIMENSIONAL MOVES. These bands are derived from `COVER_PANELS` and `COVER_ARTWORK`
+ * and introduce no new measurement: each panel keeps its exact x/width, and the run still sums
+ * to the artwork width. Only the two OUTERMOST bands widen, and only outward into the wrap —
+ * the back's to the left artwork edge, the front's to the right — while every band spans the
+ * full artwork height so the top and bottom turn-in is covered by whichever panel is above it.
+ *
+ *     0 ─────── 15 ────────────── 225 ─ 235 ─ 252 ─ 262 ────────────── 472 ─────── 487
+ *     │  back's bleed  │  back cover  │ hi │ spine │ hi │  front cover  │ front's bleed │
+ *
+ * The bands are painted BEHIND the finished spread, which still renders at exactly
+ * `COVER_SPREAD_BOX` with its panels at exactly `COVER_PANELS`. So no artwork is resized,
+ * repositioned or re-cropped: the wrap simply stops being white.
+ */
+export const COVER_BLEED_BANDS: readonly CoverPanel[] = buildCoverBleedBands();
+
+function buildCoverBleedBands(): readonly CoverPanel[] {
+  const last = COVER_PANELS.length - 1;
+  return COVER_PANELS.map((panel, i) => {
+    // Only the first and last band reach outward; the interior folds keep their exact widths, so
+    // the spine and both hinges stay 17 / 10 / 10 mm and the bound edge reads as one surface.
+    const left = i === 0 ? 0 : panel.rect.x;
+    const right = i === last ? COVER_ARTWORK.w : panel.rect.x + panel.rect.w;
+    return { name: panel.name, rect: { x: left, y: 0, w: right - left, h: COVER_ARTWORK.h } };
+  });
 }
 
 /**
@@ -468,7 +508,18 @@ export function effectivePpi(sourcePx: number, printedMm: number): number {
 export const PRINTER_MARKS_ENABLED = false;
 
 /**
- * The cover export draws the dotted fold / spine / finished-edge reference lines described above.
- * Deliberately separate from `PRINTER_MARKS_ENABLED`, which stays false.
+ * Whether the cover export draws the dotted fold / spine / finished-edge reference lines described
+ * above. Deliberately separate from `PRINTER_MARKS_ENABLED`, which also stays false.
+ *
+ * ── FALSE (product decision) ────────────────────────────────────────────────────────────────
+ *
+ * The generated cover PDF is the file the press prints, and a dashed rule drawn across the
+ * artwork prints as ink. These were reference geometry for a person checking the case
+ * construction, which is a proofing job, not something the finished artwork should carry — so
+ * the cover export now emits NO lines of any kind, and none were substituted for them.
+ *
+ * `GUIDE_STYLE`, `COVER_FOLD_LINES_MM` and `dashArray` are deliberately KEPT: the builder's
+ * on-screen fold and trim guides (`_cover-canvas`, `_print-guides`) are drawn from exactly the
+ * same measured values, and those are editor chrome that is never exported.
  */
-export const COVER_GUIDE_LINES_ENABLED = true;
+export const COVER_GUIDE_LINES_ENABLED = false;

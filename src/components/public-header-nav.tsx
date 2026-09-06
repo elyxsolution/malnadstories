@@ -145,13 +145,11 @@ export function PublicHeaderNav({
           aria-label="Malnad Stories — home"
         >
           <Image src="/logo.png" alt="" width={447} height={558} priority unoptimized className="h-8 w-auto" />
-          {/* THE WHOLE WORDMARK is the brand face — "Stories" too. It used to be pinned to the UI
-              sans as a small-caps counterweight, which made the lockup two typefaces; it keeps
-              its size, letterspacing and colour and simply joins the word above it. */}
-          <span className="text-lg font-semibold leading-none text-primary lg:text-xl">
-            Malnad{' '}
-            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Stories</span>
-          </span>
+          {/* ONE UNIFIED WORDMARK. "Stories" used to render at 10px in `muted-foreground` beside a
+              20px `primary` "Malnad", so the lockup read as a word plus a caption rather than one
+              brand name. Both words now share one size, one weight and one colour; the typeface,
+              leading, spacing and the mark beside them are untouched. */}
+          <span className="text-lg font-semibold leading-none text-primary lg:text-xl">Malnad Stories</span>
         </Link>
 
         {/* Desktop nav. The active state is an underline that GROWS from the left rather than a

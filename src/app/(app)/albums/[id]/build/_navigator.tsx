@@ -20,11 +20,24 @@ import type { ReadinessLevel } from './_quality-model';
  * PASS 3 makes the strip PAGE MANAGEMENT, not just navigation. An empty album used to render
  * no strip at all — a dead end where the only way forward was a floating button elsewhere. Now
  * the strip always exists: an empty album shows a dedicated "Add first spread" tile right after
- * the cover, and a populated one leads with a persistent "Add spread" tile — in the same place,
- * directly after the cover and before page 1 — whose menu carries the page operations (add
- * single/double, duplicate, remove, choose a layout). Every item dispatches the SAME callbacks
- * the old floating button and per-thumb controls used — the strip is a new trigger surface, not
- * a new implementation.
+ * the cover, and a populated one ENDS with a persistent "Add spread" tile whose menu carries the
+ * page operations (add single/double, duplicate, remove, choose a layout). Every item dispatches
+ * the SAME callbacks the old floating button and per-thumb controls used — the strip is a new
+ * trigger surface, not a new implementation.
+ *
+ * ONE HORIZONTAL COLLECTION: cover 0 → spread 1 → … → spread N → Add spread.
+ *
+ * The cover used to be rendered by the builder OUTSIDE this scroller, at its own smaller size and
+ * captioned rather than numbered, and "Add spread" was pinned at the HEAD of the run — so the
+ * sequence read cover · add · 1 · 2 · 3 and the add control never moved however many spreads
+ * existed. Both are now ordinary items of this one flex row at the one thumbnail geometry, in
+ * book order, which is what makes "the control that creates the next spread" sit where the next
+ * spread will actually appear.
+ *
+ * The cover is still NOT a `Block`: it arrives as an already-rendered node plus its focus
+ * callback, so it is never draggable, reorderable, duplicable or deletable, and `blocks` still
+ * indexes the spreads exactly as it did — spread `i` is still numbered `i + 1`. The cover's
+ * number is 0 because that is the page it is.
  */
 export default function Navigator({
   blocks,
@@ -46,6 +59,9 @@ export default function Navigator({
   onOpenLayouts,
   currentKey,
   spreadLevels,
+  coverThumb,
+  coverActive = false,
+  onFocusCover,
 }: {
   blocks: Block[];
   photoMap: Map<string, Photo>;
@@ -78,6 +94,16 @@ export default function Navigator({
   onOpenLayouts?: () => void;
   /** The focused spread's key, so the Add menu can duplicate/remove the current page. */
   currentKey?: string | null;
+  /**
+   * PAGE 0. The cover's visual, already rendered by the builder (which owns the cover config, the
+   * resolved images and the sticker resolver) and simply HOSTED here so it flows with the
+   * spreads. Omitted → the strip renders exactly as it did before, spreads only.
+   */
+  coverThumb?: React.ReactNode;
+  /** The cover is the focused surface. Mirrors a spread's `aria-current` + ring treatment. */
+  coverActive?: boolean;
+  /** Focus the cover — the builder's existing `focusCover`, unchanged. */
+  onFocusCover?: () => void;
 }) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
@@ -141,6 +167,11 @@ export default function Navigator({
   if (blocks.length === 0) {
     return (
       <div className="flex items-end gap-2.5 px-1 py-1">
+        {coverThumb && (
+          <CoverTile active={coverActive} onFocus={onFocusCover}>
+            {coverThumb}
+          </CoverTile>
+        )}
         <div className="flex-none">
           <button
             type="button"
@@ -184,24 +215,12 @@ export default function Navigator({
         </button>
       )}
 
-      {/*
-        ADD SPREAD, FIRST — immediately after the Cover (which the builder renders just left of
-        this scroller) and immediately before page 1.
-
-        It used to sit at the very end of the strip, which meant that on a 24-page album the
-        control for adding a page was the one thing you had to scroll the furthest to reach, and
-        it drifted as pages were added. At the head it is always in view, and it sits where the
-        page it creates begins. Nothing about the tile itself changed: same geometry, same menu,
-        same callbacks, same insert-after affordance on every thumb for adding in the middle.
-      */}
-      <AddSpreadTile
-        canAddMore={canAddMore}
-        currentKey={currentKey ?? null}
-        onAddSpread={onAddSpread}
-        onOpenLayouts={onOpenLayouts}
-        onDuplicate={onDuplicate}
-        onDelete={onDelete}
-      />
+      {/* PAGE 0 — the cover, at the spread geometry, opening the run it belongs to. */}
+      {coverThumb && (
+        <CoverTile active={coverActive} onFocus={onFocusCover}>
+          {coverThumb}
+        </CoverTile>
+      )}
 
       {blocks.map((b, i) => (
         <div
@@ -324,15 +343,72 @@ export default function Navigator({
           </button>
         </div>
       ))}
+
+      {/*
+        ADD SPREAD, LAST — and it MOVES. It is the final item of the same flex run, so adding a
+        spread pushes it right by exactly one thumbnail and it is always immediately after the
+        last spread rather than at a fixed offset. Nothing about the tile itself changed: same
+        geometry, same menu, same callbacks, and the insert-after affordance on every thumb still
+        covers adding in the middle.
+      */}
+      <AddSpreadTile
+        canAddMore={canAddMore}
+        currentKey={currentKey ?? null}
+        onAddSpread={onAddSpread}
+        onOpenLayouts={onOpenLayouts}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+/**
+ * THE COVER, AS PAGE 0 — the same 144x72 card, the same ring treatment and the same number
+ * caption a spread thumb carries, so the run reads as one sequence rather than a special item
+ * followed by a list.
+ *
+ * It takes the spread chrome and nothing else: no drag handle, no duplicate/delete, no
+ * insert-after seam, because none of those operations exist for a cover. The visual itself is
+ * supplied by the builder; this component only places and decorates it.
+ */
+function CoverTile({
+  active,
+  onFocus,
+  children,
+}: {
+  active: boolean;
+  onFocus?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex-none">
+      <button
+        type="button"
+        onClick={onFocus}
+        aria-current={active ? 'true' : undefined}
+        title="Cover — back · spine · front"
+        className={`group relative block h-[72px] w-[144px] overflow-hidden bg-white ring-2 transition-all duration-200 ease-glide hover:-translate-y-0.5 hover:shadow-card focus-visible:outline-none focus-visible:ring-studio-bright ${
+          active ? 'ring-studio shadow-card' : 'ring-border'
+        }`}
+      >
+        <div className="absolute inset-0">{children}</div>
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/45 to-transparent px-1 pb-0.5 pt-2 text-center text-[8px] font-semibold uppercase tracking-wide text-white">
+          Cover
+        </span>
+      </button>
+      {/* The SAME numbering style the spreads use — this is page 0. */}
+      <span className="mt-1 block text-center text-[10px] font-medium tabular-nums text-muted-foreground">0</span>
     </div>
   );
 }
 
 /**
  * The strip's Add tile: it opens the page menu, which carries the full set of page operations
- * (add single, add double-page, choose a layout, duplicate, remove). It is the FIRST item in the
- * scroller — directly after the Cover and before page 1, and it is sticky so it stays there at
- * any scroll position rather than being the first thing to slide out of view.
+ * (add single, add double-page, choose a layout, duplicate, remove). It is the LAST item in the
+ * scroller, immediately after the final spread, and it FLOWS with the run — adding a spread moves
+ * it one thumbnail to the right. It used to be `sticky left-[38px]`, pinned between the cover and
+ * page 1; a pinned control cannot follow the last spread, so the stickiness is gone.
  *
  * The menu is `position: fixed` and measured from the trigger because the strip is an
  * `overflow-x-auto` scroller — an absolute menu would be clipped by the very container it needs
@@ -385,7 +461,7 @@ function AddSpreadTile({
   }, [open]);
 
   return (
-    <div ref={wrapRef} className="sticky left-[38px] z-[5] flex-none bg-card">
+    <div ref={wrapRef} className="z-[5] flex-none bg-card">
       <button
         ref={btnRef}
         type="button"
