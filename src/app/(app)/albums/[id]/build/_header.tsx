@@ -64,7 +64,7 @@ export default function BuilderHeader({
   const identity = accountIdentity(identityEmail, identityName);
 
   return (
-    <header className="sticky top-0 z-40 flex h-[72px] flex-none items-center gap-4 border-b border-border/70 bg-background/90 px-4 shadow-[0_1px_0_rgb(16_24_20/0.04),0_8px_24px_-20px_rgb(16_24_20/0.25)] backdrop-blur-md sm:px-6">
+    <header className="sticky top-0 z-40 flex h-14 flex-none items-center gap-4 border-b border-border/70 bg-background/90 px-3 shadow-[0_1px_0_rgb(16_24_20/0.04),0_8px_24px_-20px_rgb(16_24_20/0.25)] backdrop-blur-md sm:h-[72px] sm:gap-4 sm:px-6">
       {/*
         Brand. It is a LINK to the dashboard, so it leaves the builder — and it is therefore
         guarded like everything else here rather than being the one door left open.
@@ -75,7 +75,7 @@ export default function BuilderHeader({
           e.preventDefault();
           onLeave('/dashboard');
         }}
-        className="group flex flex-none items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+        className="group flex min-h-11 flex-none items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
       >
         <Image
           src="/logo.png"

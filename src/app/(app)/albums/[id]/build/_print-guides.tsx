@@ -100,3 +100,6 @@ export function SafeAreaGuides() {
 /** What the dotted line means. Precise about WHICH boundary — see the note in `_block.tsx`. */
 export const TRIM_GUIDE_CAPTION =
   'Only the area inside the dotted line is printed — the rest is trimmed off';
+
+/** The same fact, for a phone's pasteboard, where the full sentence wraps onto the page. */
+export const TRIM_GUIDE_CAPTION_SHORT = 'Dotted line = where the page is trimmed';

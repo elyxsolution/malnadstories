@@ -106,6 +106,12 @@ export type CoverCanvasProps = {
    * spread is, and the two must not behave differently.
    */
   onCanvasEl?: (el: HTMLDivElement | null) => void;
+  /**
+   * Phone only: the tool sheet is open, so the workspace gives up its bottom half and the cover
+   * re-fits into what is left. The page canvas does exactly this with the same variable; without
+   * it the cover would be the one surface still edited from behind a sheet.
+   */
+  sheetOpen?: boolean;
 };
 
 /** The caption under the book, plus the flex gap above it. Vertical furniture the fit must clear. */
@@ -176,6 +182,7 @@ export default function CoverCanvas({
   cropHandlers,
   onFaceEl,
   onCanvasEl,
+  sheetOpen = false,
 }: CoverCanvasProps) {
   /**
    * THE CANVAS IS COMPOSED FROM THE PRINT SPECIFICATION.
@@ -216,7 +223,9 @@ export default function CoverCanvas({
         canvas.ref(el);
         onCanvasEl?.(el);
       }}
-      className="ms-scroll relative min-h-0 flex-1 overflow-auto p-6 lg:p-10"
+      className={`ms-scroll relative min-h-0 flex-1 overflow-auto p-6 transition-[padding] duration-200 ease-glide motion-reduce:transition-none lg:p-10 ${
+        sheetOpen ? 'max-md:pb-[calc(var(--ms-sheet-h)-3rem)]' : ''
+      }`}
       /* The pasteboard around the book: a click out here means "nothing selected", which is the
          cover-level toolbar — the same rule the page canvas follows. */
       onPointerDown={() => cover.setSelection({ kind: 'none' })}

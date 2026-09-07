@@ -694,6 +694,20 @@
     }
   }
 
+  /* A HORIZONTAL STRIP THAT SCROLLS WITHOUT SHOWING A TRACK.
+     Used only by mobile-only strips (dashboard filters, order/support status rails, the
+     builder tool strip), where the affordance is the cut-off last item, not a 9px bar sitting
+     under a row of 44px controls. Momentum + snap-free, so it stays a plain flick.
+     `ms-scroll` (the visible thin bar) is unchanged and still used everywhere it was. */
+  .ms-hscroll {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .ms-hscroll::-webkit-scrollbar {
+    display: none;
+  }
+
   .ms-scroll {
     scrollbar-width: thin;
     scrollbar-color: hsl(150 8% 78%) transparent;

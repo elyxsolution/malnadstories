@@ -73,7 +73,7 @@ export default async function CartPage() {
                 Per-row "Buy now" is untouched for anyone who wants one album alone.
               */}
               <div className="mt-6 border bg-card p-5">
-                <div className="flex flex-wrap items-end justify-between gap-4">
+                <div className="flex flex-wrap items-end justify-between gap-4 max-sm:gap-3">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/70">
                       {eligibleCount === 0
@@ -87,7 +87,7 @@ export default async function CartPage() {
                     </p>
                   </div>
                   {eligibleCount > 0 && (
-                    <Button render={<Link href="/checkout/cart" />} className={LUX_PRIMARY}>
+                    <Button render={<Link href="/checkout/cart" />} className={`${LUX_PRIMARY} max-sm:min-h-11 max-sm:w-full`}>
                       <ShoppingBag /> Checkout all
                     </Button>
                   )}

@@ -9,6 +9,32 @@ import { STUDIO_PRIMARY } from './_ui';
 import { reviewStatusLabel, reviewStatusChip } from '@/lib/reviews/model';
 
 /**
+ * PHONE ONLY — the terminal action stays on screen while the tool strip scrolls under it.
+ *
+ * Below `md` this bar is one horizontally scrollable row (see the comment on the container),
+ * which is the honest answer for ten tools on a 375px screen — except for ONE of them. Submit /
+ * Resubmit / Checkout is the thing the whole editor is for, and it sat at the far right of that
+ * scroll, i.e. off screen on every phone until the customer thought to swipe a toolbar.
+ *
+ * `position: sticky; right: 0` inside the scroller pins it to the trailing edge while every
+ * other control keeps its designed size and scrolls beneath. The button already carries a solid
+ * fill, and the shadow feathers the card ground into it so a tool passing underneath reads as
+ * passing under something rather than colliding with it. At `md` and up this contributes
+ * nothing: the bar does not scroll and the classes are all `max-md:`.
+ */
+const MOBILE_PINNED_CTA =
+  'max-md:sticky max-md:right-0 max-md:z-10 max-md:h-11 max-md:rounded-r-none max-md:shadow-[-14px_0_10px_-8px_hsl(var(--card))]';
+
+/**
+ * PHONE TOUCH SIZING. Every control in this bar is designed for a pointer — 28px icon buttons
+ * inside 32px segmented groups — which is correct from md up and roughly half a fingertip
+ * below it. The bar is already 56px tall, so 44px controls fit inside it without changing its
+ * height, its order, or anything from md up.
+ */
+const MOBILE_TAP = 'max-md:h-11 max-md:w-11';
+const MOBILE_TAP_WIDE = 'max-md:h-11';
+
+/**
  * The canvas toolbar (Part 2 "CONTROLS"): history, zoom, guides, preview, save, submit.
  * Identity + progress live in the header above; this row is strictly the editor's controls.
  */
@@ -108,12 +134,12 @@ export default function CanvasToolbar({
   // scroll is the honest answer, because the alternative is removing tools. `ms-scroll` matches
   // the thin scrollbar used elsewhere in the builder. At md and up the bar is unchanged.
   return (
-    <div className="ms-scroll flex h-14 flex-none items-center gap-2 overflow-x-auto border-b border-border/70 bg-card/60 px-3 max-md:gap-1.5 max-md:px-2 sm:px-4 xl:overflow-x-visible">
+    <div className="ms-hscroll flex h-14 flex-none items-center gap-2 overflow-x-auto border-b border-border/70 bg-card/60 px-3 max-md:gap-1.5 max-md:pl-2 max-md:pr-0 sm:px-4 xl:overflow-x-visible">
       {/* Identity + status — customer mode only. In Blueprint Mode the dedicated header carries
           identity + save state, so the toolbar is tools-only. */}
       {!blueprintMode && (
-      <div className="flex min-w-0 items-center gap-2 max-md:min-w-[7rem] max-md:shrink">
-        <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-foreground max-md:min-w-[4.5rem]">{title}</h1>
+      <div className="flex min-w-0 items-center gap-2 max-md:min-w-[5.5rem] max-md:max-w-[11rem] max-md:shrink max-md:overflow-hidden">
+        <h1 className="truncate font-display text-[15px] font-semibold tracking-tight text-foreground max-md:min-w-0 max-md:flex-1">{title}</h1>
         {reviewMode ? (
           /* ONE consolidated workflow status chip (replaces competing Submitted + review pills). */
           <span className="hidden items-center gap-1.5 rounded-full bg-warning/10 px-2.5 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/20 sm:inline-flex">
@@ -138,7 +164,7 @@ export default function CanvasToolbar({
         <span
           // flex-none + nowrap: in the phone scroll strip this chip was being compressed
           // until 'All changes saved' wrapped onto three lines and grew the bar.
-          className={`inline-flex items-center gap-1 rounded-full max-md:flex-none max-md:whitespace-nowrap px-2 py-0.5 text-[11px] font-medium ${
+          className={`inline-flex items-center gap-1 rounded-full max-md:flex-none max-md:whitespace-nowrap max-md:bg-transparent max-md:px-0 max-md:ring-0 px-2 py-0.5 text-[11px] font-medium ${
             saving
               ? 'bg-studio/10 text-studio ring-1 ring-studio/20'
               : dirty
@@ -147,7 +173,8 @@ export default function CanvasToolbar({
           }`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${saving ? 'animate-pulse bg-studio' : dirty ? 'animate-pulse bg-warning' : 'bg-studio'}`} />
-          {saving ? 'Saving…' : dirty ? 'Unsaved' : 'All changes saved'}
+          <span className="max-md:hidden">{saving ? 'Saving…' : dirty ? 'Unsaved' : 'All changes saved'}</span>
+          <span className="sr-only md:hidden">{saving ? 'Saving' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
         </span>
       </div>
       )}
@@ -155,17 +182,17 @@ export default function CanvasToolbar({
       {/* Right cluster — editing tools (shared across the cover + content pages). */}
       <div className="ml-auto flex items-center gap-2 max-md:flex-none max-md:gap-1.5">
         <div className="inline-flex rounded-xl border bg-card p-0.5 shadow-xs">
-          <Button variant="ghost" size="icon-sm" onClick={onUndo} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)">
+          <Button variant="ghost" size="icon-sm" onClick={onUndo} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)" className={MOBILE_TAP}>
             <Undo2 />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onRedo} disabled={!canRedo} aria-label="Redo" title="Redo (⌘⇧Z)">
+          <Button variant="ghost" size="icon-sm" onClick={onRedo} disabled={!canRedo} aria-label="Redo" title="Redo (⌘⇧Z)" className={MOBILE_TAP}>
             <Redo2 />
           </Button>
           <span className="mx-0.5 my-1 w-px bg-border" />
-          <Button variant={showGuides ? 'secondary' : 'ghost'} size="icon-sm" onClick={onToggleGuides} aria-label="Toggle guides" title="Guides (G)">
+          <Button variant={showGuides ? 'secondary' : 'ghost'} size="icon-sm" onClick={onToggleGuides} aria-label="Toggle guides" title="Guides (G)" className={MOBILE_TAP}>
             <Frame />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onShortcuts} aria-label="Shortcuts" title="Shortcuts (?)">
+          <Button variant="ghost" size="icon-sm" onClick={onShortcuts} aria-label="Shortcuts" title="Shortcuts (?)" className="max-md:hidden">
             <Keyboard />
           </Button>
         </div>
@@ -208,7 +235,7 @@ export default function CanvasToolbar({
             type="button"
             onClick={onExitPreview}
             aria-pressed={!previewMode}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-all duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-all duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright max-md:h-11 max-md:min-w-11 max-md:justify-center ${
               previewMode ? 'text-muted-foreground hover:text-foreground' : 'bg-secondary text-foreground shadow-xs'
             }`}
           >
@@ -218,7 +245,7 @@ export default function CanvasToolbar({
             type="button"
             onClick={onPreview}
             aria-pressed={previewMode}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-all duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium transition-all duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright max-md:h-11 max-md:min-w-11 max-md:justify-center ${
               previewMode ? 'bg-secondary text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -230,13 +257,13 @@ export default function CanvasToolbar({
           /* BLUEPRINT MODE — no customer actions (no Auto Align, Build-for-me, Submit or Checkout).
              Just Preview the template, Save the blueprint, or Exit back to the admin catalog. */
           <>
-            <Button variant="outline" size="sm" onClick={onPreview}>
+            <Button variant="outline" size="sm" onClick={onPreview} className={MOBILE_TAP_WIDE}>
               <Eye /> <span className="hidden sm:inline">Preview</span>
             </Button>
-            <Button size="sm" onClick={onSaveBlueprint} disabled={blueprintSaving || !dirty} className={STUDIO_PRIMARY}>
+            <Button size="sm" onClick={onSaveBlueprint} disabled={blueprintSaving || !dirty} className={`${STUDIO_PRIMARY} ${MOBILE_PINNED_CTA}`}>
               {blueprintSaving ? <InlineLoader /> : <Save />} <span className="hidden sm:inline">Save Blueprint</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={onExitBlueprint} disabled={blueprintSaving}>
+            <Button variant="outline" size="sm" onClick={onExitBlueprint} disabled={blueprintSaving} className={MOBILE_TAP_WIDE}>
               <LogOut /> <span className="hidden sm:inline">Exit Blueprint</span>
             </Button>
           </>
@@ -248,7 +275,7 @@ export default function CanvasToolbar({
                 size="sm"
                 onClick={onOpenSettings}
                 title="Album Settings — name, format, photos & build options"
-                className="text-muted-foreground hover:text-foreground"
+                className={`text-muted-foreground hover:text-foreground ${MOBILE_TAP}`}
               >
                 <Settings2 /> <span className="hidden lg:inline">Album Settings</span>
               </Button>
@@ -259,7 +286,7 @@ export default function CanvasToolbar({
               onClick={onAutoAlign}
               disabled={!canAutoAlign}
               title="Auto Align — tidy this page's text & stickers"
-              className="border-studio/30 text-studio hover:border-studio/50 hover:bg-studio-soft hover:text-studio focus-visible:ring-studio-bright [&_svg]:text-studio"
+              className={`border-studio/30 text-studio hover:border-studio/50 hover:bg-studio-soft hover:text-studio focus-visible:ring-studio-bright [&_svg]:text-studio ${MOBILE_TAP}`}
             >
               <AlignCenterHorizontal /> <span className="hidden sm:inline">Auto Align</span>
             </Button>
@@ -271,13 +298,13 @@ export default function CanvasToolbar({
               size="sm"
               onClick={onBuildForMe}
               title="Build it for me — auto-arrange your photos from a blueprint"
-              className="gap-1.5 border border-studio/25 bg-studio-soft font-semibold text-studio shadow-xs ring-1 ring-inset ring-studio/10 transition-all hover:bg-studio/15 hover:text-studio active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-studio-bright [&_svg]:text-studio"
+              className={`gap-1.5 border border-studio/25 bg-studio-soft font-semibold text-studio shadow-xs ring-1 ring-inset ring-studio/10 transition-all hover:bg-studio/15 hover:text-studio active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-studio-bright [&_svg]:text-studio ${MOBILE_TAP}`}
             >
               <Sparkles /> <span className="hidden sm:inline">Build it for me</span>
             </Button>
 
             {/* Preview moved to the bottom Pages bar (see _builder.tsx) — kept out of this row. */}
-            <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty}>
+            <Button variant="outline" size="sm" onClick={onSave} disabled={saving || !dirty} className={MOBILE_TAP}>
               {saving ? <InlineLoader /> : <Save />} <span className="hidden sm:inline">Save</span>
             </Button>
             {adminEditing ? (
@@ -287,7 +314,7 @@ export default function CanvasToolbar({
             ) : reviewMode ? (
               /* Review Revision Mode (CHANGE 2/3/7): the album is already paid — NO Checkout.
                  Resubmit is the primary action; it runs the SAME central validation + dialog as Submit. */
-              <Button size="sm" onClick={onSubmit} disabled={submitting} className={STUDIO_PRIMARY}>
+              <Button size="sm" onClick={onSubmit} disabled={submitting} className={`${STUDIO_PRIMARY} ${MOBILE_PINNED_CTA}`}>
                 {submitting ? <InlineLoader /> : <Send />} <span className="hidden sm:inline">Resubmit album</span><span className="sm:hidden">Resubmit</span>
               </Button>
             ) : status === 'submitted' ? (
@@ -305,13 +332,13 @@ export default function CanvasToolbar({
                     }}
                   />
                 }
-                className={STUDIO_PRIMARY}
+                className={`${STUDIO_PRIMARY} ${MOBILE_PINNED_CTA}`}
               >
                 <ShoppingCart /> Checkout
               </Button>
             ) : (
               // Always clickable — validation now INFORMS via a dialog instead of blocking.
-              <Button size="sm" onClick={onSubmit} disabled={submitting} className={STUDIO_PRIMARY}>
+              <Button size="sm" onClick={onSubmit} disabled={submitting} className={`${STUDIO_PRIMARY} ${MOBILE_PINNED_CTA}`}>
                 {submitting ? <InlineLoader /> : <Send />}
                 Submit
               </Button>

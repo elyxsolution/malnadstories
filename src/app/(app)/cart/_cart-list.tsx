@@ -175,16 +175,18 @@ function CartItem({ row }: { row: CartRow }) {
                   onClick={() => changeQuantity(-1)}
                   disabled={quantity <= 1 || locked}
                   aria-label={`Decrease copies of ${row.title}`}
+                  className="max-sm:h-11 max-sm:w-11"
                 >
                   <Minus />
                 </Button>
-                <span className="w-6 text-center font-medium tabular-nums">{quantity}</span>
+                <span className="w-6 text-center font-medium tabular-nums max-sm:w-8 max-sm:text-base">{quantity}</span>
                 <Button
                   variant="outline"
                   size="icon-sm"
                   onClick={() => changeQuantity(1)}
                   disabled={quantity >= MAX_QUANTITY || locked}
                   aria-label={`Increase copies of ${row.title}`}
+                  className="max-sm:h-11 max-sm:w-11"
                 >
                   <Plus />
                 </Button>
@@ -217,7 +219,7 @@ function CartItem({ row }: { row: CartRow }) {
             size="sm"
             onClick={() => setConfirming(true)}
             disabled={locked}
-            className="text-destructive hover:text-destructive"
+            className="text-destructive hover:text-destructive max-sm:min-h-11"
             aria-label={`Remove ${row.title} from cart`}
           >
             <Trash2 /> Remove

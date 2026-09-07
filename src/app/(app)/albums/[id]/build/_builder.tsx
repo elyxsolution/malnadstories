@@ -2866,7 +2866,11 @@ export default function Builder({
   const photoForOverview = usePhotoFor(photoMap, photoStateFor);
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)] max-md:pb-[calc(3.25rem+env(safe-area-inset-bottom))]">
+    /* `--ms-sheet-h` is the phone tool sheet's height, declared ONCE here and read by both
+       halves of the arrangement it describes: the sheet's own cap, and the canvas padding that
+       keeps the spread out from under it. Two numbers that must agree is how a sheet ends up
+       covering the thing it is being used to edit. */
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)] [--ms-sheet-h:46dvh] max-md:pb-[calc(3.25rem+env(safe-area-inset-bottom))]">
       {blueprintMode ? (
         <BlueprintHeader
           meta={blueprintMeta}
@@ -2990,9 +2994,7 @@ export default function Builder({
           builder is for was off screen. Canvas-first is the only workable phone layout.
         */}
         <div
-          className={`flex flex-none border-border/70 bg-card max-md:pointer-events-none max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-30 max-md:flex-col-reverse max-md:border-r-0 md:border-r ${
-            sheetOpen ? 'max-md:top-0' : ''
-          }`}
+          className="flex flex-none border-border/70 bg-card max-md:pointer-events-none max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-30 max-md:flex-col-reverse max-md:border-r-0 md:border-r"
         >
           <nav
             className="pointer-events-auto order-2 flex w-[68px] flex-col items-center gap-1 border-border/70 py-3 max-md:order-none max-md:w-full max-md:flex-row max-md:justify-between max-md:gap-0 max-md:border-t max-md:bg-card max-md:px-1 max-md:py-1 max-md:pb-[max(0.25rem,env(safe-area-inset-bottom))] md:order-none md:border-r"
@@ -3046,7 +3048,7 @@ export default function Builder({
           */}
           <aside
             className={`pointer-events-auto flex w-[284px] flex-col overflow-hidden max-md:w-full max-md:rounded-t-2xl max-md:border-t max-md:border-border/70 max-md:shadow-[0_-8px_28px_-12px_hsl(var(--foreground)/0.18)] md:w-[240px] lg:w-[284px] ${
-              sheetOpen ? 'max-md:max-h-[calc(100dvh-8.5rem)] max-md:flex-1' : 'max-md:hidden'
+              sheetOpen ? 'max-md:max-h-[var(--ms-sheet-h)]' : 'max-md:hidden'
             }`}
           >
             {/* Sheet handle — phone only; the panel has no dismiss affordance on desktop. */}
@@ -3289,25 +3291,25 @@ export default function Builder({
             filmstrip and page controls clear of the fixed tool tab bar. */}
         <main className="relative flex min-w-0 flex-1 flex-col">
           {/* canvas strip — one linear sequence: Cover → Spread 1 → … */}
-          <div className="flex h-11 flex-none items-center justify-between gap-2 border-b border-border/60 px-4">
+          <div className="flex h-11 flex-none items-center justify-between gap-2 border-b border-border/60 px-4 max-md:h-12 max-md:px-2">
             <div className="flex items-center gap-1.5">
-              <button type="button" onClick={goPrev} disabled={coverFocused} aria-label="Previous page" className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30">
+              <button type="button" onClick={goPrev} disabled={coverFocused} aria-label="Previous page" className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-secondary hover:text-foreground active:scale-[0.94] disabled:opacity-30 max-md:h-11 max-md:w-11">
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="min-w-[6rem] text-center text-[12px] font-medium tabular-nums text-muted-foreground">
                 {coverFocused ? 'Cover' : `Spread ${cur + 1} / ${Math.max(1, blocks.length)}`}
               </span>
-              <button type="button" onClick={goNext} disabled={coverFocused ? blocks.length === 0 : cur >= blocks.length - 1} aria-label="Next page" className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30">
+              <button type="button" onClick={goNext} disabled={coverFocused ? blocks.length === 0 : cur >= blocks.length - 1} aria-label="Next page" className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-secondary hover:text-foreground active:scale-[0.94] disabled:opacity-30 max-md:h-11 max-md:w-11">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
             {!coverFocused && blocks.length > 0 && (
               <div className="inline-flex rounded-lg border bg-card p-0.5 shadow-xs">
-                <button type="button" onClick={() => setEditLayout('focus')} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${editLayout === 'focus' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <Square className="h-3.5 w-3.5" /> Edit
+                <button type="button" onClick={() => setEditLayout('focus')} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors max-md:min-h-10 max-md:px-3 ${editLayout === 'focus' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <Square className="h-3.5 w-3.5" /> <span className="whitespace-nowrap">Edit</span>
                 </button>
-                <button type="button" onClick={() => setEditLayout('grid')} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${editLayout === 'grid' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <Rows3 className="h-3.5 w-3.5" /> All pages
+                <button type="button" onClick={() => setEditLayout('grid')} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors max-md:min-h-10 max-md:px-3 ${editLayout === 'grid' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <Rows3 className="h-3.5 w-3.5" /> <span className="whitespace-nowrap">All pages</span>
                 </button>
               </div>
             )}
@@ -3318,6 +3320,7 @@ export default function Builder({
             /* Eight props instead of twenty-four. Everything the canvas needs to MUTATE now
                lives on `cover`; what is left is what it needs to DRAW. */
             <CoverCanvas
+              sheetOpen={sheetOpen}
               cover={cover}
               frontImageUrl={coverImageUrl}
               backImageUrl={backCoverImageUrl}
@@ -3371,7 +3374,9 @@ export default function Builder({
               canvas.ref(el);
               zoomAreaRef(el);
             }}
-            className="ms-scroll relative min-h-0 flex-1 overflow-auto p-4 lg:p-7"
+            className={`ms-scroll relative min-h-0 flex-1 overflow-auto p-4 transition-[padding] duration-200 ease-glide motion-reduce:transition-none lg:p-7 ${
+              sheetOpen ? 'max-md:pb-[calc(var(--ms-sheet-h)-3rem)]' : ''
+            }`}
             /**
              * CLICKING OFF THE BOOK DESELECTS.
              *
@@ -3809,7 +3814,7 @@ export default function Builder({
               onClick={() => setFlipbookOpen(true)}
               aria-label="Preview album"
               title="Preview album"
-              className="flex-none gap-2 rounded-lg border-transparent bg-[hsl(150_48%_29%)] px-4 font-semibold max-md:px-3 text-studio-foreground shadow-[0_1px_2px_rgb(16_24_20/0.14),0_8px_20px_-8px_hsl(150_46%_22%/0.55)] transition-all duration-200 ease-glide hover:-translate-y-px hover:bg-[hsl(150_50%_25%)] hover:shadow-[0_3px_10px_rgb(16_24_20/0.18),0_16px_30px_-10px_hsl(150_46%_20%/0.6)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-2"
+              className="flex-none gap-2 rounded-lg border-transparent bg-[hsl(150_48%_29%)] px-4 font-semibold max-md:h-11 max-md:w-11 max-md:px-0 text-studio-foreground shadow-[0_1px_2px_rgb(16_24_20/0.14),0_8px_20px_-8px_hsl(150_46%_22%/0.55)] transition-all duration-200 ease-glide hover:-translate-y-px hover:bg-[hsl(150_50%_25%)] hover:shadow-[0_3px_10px_rgb(16_24_20/0.18),0_16px_30px_-10px_hsl(150_46%_20%/0.6)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright focus-visible:ring-offset-2"
             >
               <Eye /> <span className="max-md:hidden">Preview</span>
             </Button>
@@ -4113,7 +4118,7 @@ function EmptyCanvas({
             Add pages, then arrange layouts, overlay slots, text and stickers. Photos aren&rsquo;t added here — each customer fills the slots with their own.
           </p>
           <div className="mt-6 flex items-center justify-center">
-            <Button size="sm" onClick={onAdd} className={STUDIO_PRIMARY}>
+            <Button size="sm" onClick={onAdd} className={`${STUDIO_PRIMARY} max-md:min-h-11 max-md:w-full`}>
               <Plus /> Add a page
             </Button>
           </div>
@@ -4146,10 +4151,10 @@ function EmptyCanvas({
                 : 'Add a single page (a photo on each side) or a double page (one image across the fold) — or let us arrange your photos.'}
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
-            <Button size="sm" onClick={onBuild} disabled={!canBuild} className={STUDIO_PRIMARY}>
+            <Button size="sm" onClick={onBuild} disabled={!canBuild} className={`${STUDIO_PRIMARY} max-md:min-h-11 max-md:w-full`}>
               <Wand2 /> Build it for me
             </Button>
-            <Button variant="outline" size="sm" onClick={onAdd}>
+            <Button variant="outline" size="sm" onClick={onAdd} className="max-md:min-h-11 max-md:w-full">
               <Plus /> Start manually
             </Button>
           </div>

@@ -22,7 +22,7 @@ import { LAYER_CHROME_Z, layerZIndexes } from '@/lib/builder/layers';
 import { useStickerBoxFit } from './_sticker-autofit';
 import { stickerAspectRatio } from '@/lib/builder/sticker-fit';
 import { PASTEBOARD_PCT, PASTEBOARD_ESCAPE } from '@/lib/builder/edit-bounds';
-import { TrimGuides, SafeAreaGuides, TRIM_GUIDE_CAPTION } from './_print-guides';
+import { TrimGuides, SafeAreaGuides, TRIM_GUIDE_CAPTION, TRIM_GUIDE_CAPTION_SHORT } from './_print-guides';
 import { hitStack, isSamePoint, resolveHit, type HitPoint, type HitTarget } from '@/lib/builder/hit-test';
 import { acceptPhotoDrag, leftDropTarget, readPhotoDrag, startPhotoDrag } from '@/lib/builder/photo-dnd';
 import { useBuilderDimensions } from './_dimensions';
@@ -422,7 +422,7 @@ export default function BlockCard({
     <div className="group/block">
       {/* Per-spread action bar — the explicit home for adding photos to this spread. */}
       <div className="mb-2.5 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-muted-foreground">{spreadSummary}</span>
+        <span className="min-w-0 truncate text-[11px] font-medium text-muted-foreground">{spreadSummary}</span>
         {/*
           ADD THE FRAME, THEN THE PHOTO — not the other way round.
           This used to open the photo picker and create nothing until something was chosen, which
@@ -436,7 +436,7 @@ export default function BlockCard({
             const newId = api.addOverlay(block.key, null, 'center');
             if (newId) onSelect({ kind: 'overlay', id: newId });
           }}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-studio/30 bg-card px-2.5 py-1.5 text-[12px] font-medium text-studio shadow-xs transition-all duration-150 ease-glide hover:border-studio/50 hover:bg-studio-soft active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright"
+          className="inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-lg border border-studio/30 bg-card px-2.5 py-1.5 text-[12px] font-medium text-studio shadow-xs transition-all duration-150 ease-glide hover:border-studio/50 hover:bg-studio-soft active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright max-sm:min-h-11 max-sm:px-3"
         >
           <ImagePlus className="h-3.5 w-3.5" /> Add photo overlay
         </button>
@@ -928,7 +928,8 @@ export default function BlockCard({
           aria-hidden
           className="pointer-events-none absolute inset-x-0 bottom-1 select-none text-center text-[10px] font-medium leading-tight text-muted-foreground/70 sm:text-[11px]"
         >
-          {TRIM_GUIDE_CAPTION}
+          <span className="max-sm:hidden">{TRIM_GUIDE_CAPTION}</span>
+          <span className="sm:hidden">{TRIM_GUIDE_CAPTION_SHORT}</span>
         </p>
       </div>
 

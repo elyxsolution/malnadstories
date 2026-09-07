@@ -122,7 +122,7 @@ export default function BlueprintTile({
         {variant !== 'compact' && (
           <Link
             href={href}
-            className="mt-3 inline-flex items-center gap-1.5 rounded-sm text-sm font-semibold text-primary transition-all duration-150 ease-glide hover:gap-2.5 hover:text-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-sm text-sm font-semibold text-primary transition-all duration-150 ease-glide hover:gap-2.5 hover:text-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 max-sm:min-h-11"
           >
             Use this design
             <ArrowRight className="h-4 w-4" aria-hidden />

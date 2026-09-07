@@ -155,7 +155,7 @@ export default function Library({
                 <Button
                   render={<Link href={`/albums/${draft.id}/build`} />}
                   variant="secondary"
-                  className="mt-4"
+                  className="mt-4 max-sm:min-h-11 max-sm:w-full"
                 >
                   Resume building <ArrowRight />
                 </Button>
@@ -185,20 +185,20 @@ export default function Library({
         {/* Library header + search + filters */}
         <div className="mt-12 flex flex-wrap items-end justify-between gap-4">
           <h2 className="font-display text-3xl font-medium tracking-tight text-primary">Your stories</h2>
-          <div className="flex items-center gap-2.5">
-            <div className="relative">
+          <div className="flex items-center gap-2.5 max-sm:w-full">
+            <div className="relative max-sm:min-w-0 max-sm:flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search destinations…"
-                className="h-8 w-[200px] pl-8 pr-3 text-xs bg-card rounded-sm"
+                className="h-8 w-[200px] pl-8 pr-3 text-xs bg-card rounded-sm max-sm:h-11 max-sm:w-full max-sm:pl-9 max-sm:text-sm"
               />
             </div>
             <select
               value={year}
               onChange={(e) => setYear(e.target.value)}
-              className="h-8 rounded-sm border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-ring"
+              className="h-8 flex-none rounded-sm border border-input bg-card px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-ring max-sm:h-11 max-sm:text-sm"
             >
               <option value="all">All years</option>
               {years.map((y) => (
@@ -210,7 +210,11 @@ export default function Library({
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
+        {/* PHONE: ONE SCROLLABLE ROW, not two wrapped ones. Five short filters read as a strip;
+            wrapped, they turned the library header into a block of chips. The negative margin
+            lets the strip bleed to the screen edge so the last chip is visibly cut, which is
+            what tells a thumb there is more. Unchanged (wrapping) from `sm` up. */}
+        <div className="ms-hscroll mt-5 flex gap-2 max-sm:-mx-5 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-5 sm:flex-wrap">
           {CHIPS.map((c) => {
             const active = chip === c.key;
             return (
@@ -218,7 +222,7 @@ export default function Library({
                 key={c.key}
                 type="button"
                 onClick={() => setChip(c.key)}
-                className={`rounded-full border px-3.5 py-1.5 text-xs transition-colors ${
+                className={`flex-none rounded-full border px-3.5 py-1.5 text-xs transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.97] max-sm:min-h-11 max-sm:px-4 max-sm:text-[13px] ${
                   active ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-card text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -247,14 +251,14 @@ export default function Library({
             </Button>
           </div>
         ) : (
-          <div className="mt-9 flex flex-wrap items-end gap-x-10 gap-y-10">
+          <div className="mt-9 grid grid-cols-2 gap-x-5 gap-y-9 sm:flex sm:flex-wrap sm:items-end sm:gap-x-10 sm:gap-y-10">
             {filtered.map((a) => (
               <ShelfBook key={a.id} album={a} stickerUrlFor={stickerUrlFor} />
             ))}
             {/* New Story bookend */}
-            <Link href="/albums/new" className="group w-[150px] text-center">
+            <Link href="/albums/new" className="group w-full text-center sm:w-[150px]">
               <div className="flex h-[248px] items-end justify-center">
-                <div className="flex h-[200px] w-[150px] flex-col items-center justify-center gap-3 border-[1.5px] border-dashed border-input text-muted-foreground transition-all duration-200 group-hover:-translate-y-1.5 group-hover:border-primary group-hover:text-primary">
+                <div className="flex h-[200px] w-full max-w-[150px] flex-col items-center justify-center gap-3 border-[1.5px] border-dashed border-input text-muted-foreground transition-all duration-200 group-hover:-translate-y-1.5 group-hover:border-primary group-hover:text-primary">
                   <Plus className="h-6 w-6" />
                   <span className="font-display text-lg">New story</span>
                 </div>
@@ -348,7 +352,7 @@ function ShelfBook({
   };
 
   return (
-    <div className="group relative w-[150px]">
+    <div className="group relative w-full sm:w-[150px]">
       <Link href={`/albums/${album.id}`} className="block">
         <div className="flex h-[248px] items-end justify-center">
           <Book
@@ -378,7 +382,7 @@ function ShelfBook({
           type="button"
           onClick={() => setConfirming(true)}
           aria-label={`Delete ${album.title}`}
-          className="absolute right-0 top-2 rounded-[2px] bg-background/80 p-1.5 text-destructive opacity-40 shadow-sm transition-opacity hover:bg-background focus-visible:opacity-100 md:opacity-0 group-hover:opacity-100"
+          className="absolute right-0 top-2 rounded-[2px] bg-background/80 p-1.5 text-destructive opacity-40 shadow-sm transition-opacity hover:bg-background focus-visible:opacity-100 md:opacity-0 group-hover:opacity-100 max-sm:grid max-sm:h-11 max-sm:w-11 max-sm:place-items-center max-sm:p-0 max-sm:opacity-70 max-sm:transition-[opacity,transform] max-sm:duration-150 max-sm:active:scale-[0.94]"
         >
           <Trash2 className="h-4 w-4" />
         </button>

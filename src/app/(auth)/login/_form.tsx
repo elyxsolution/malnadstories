@@ -72,7 +72,7 @@ export default function LoginForm({ next, notice }: { next: string | null; notic
             <Label htmlFor="password">Password</Label>
             <Link
               href="/forgot-password"
-              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline max-sm:-my-3.5 max-sm:py-3.5"
             >
               Forgot?
             </Link>
@@ -80,7 +80,7 @@ export default function LoginForm({ next, notice }: { next: string | null; notic
           <PasswordInput id="password" name="password" autoComplete="current-password" required />
         </div>
 
-        <label htmlFor="remember" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <label htmlFor="remember" className="flex items-center gap-2 text-sm text-muted-foreground max-sm:min-h-11">
           <input id="remember" name="remember" type="checkbox" defaultChecked className="h-4 w-4" />
           Stay logged in
         </label>

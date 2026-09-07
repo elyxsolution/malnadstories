@@ -20,11 +20,17 @@ import { useCart } from '@/lib/cart/provider';
 const NAV: {
   href: string | null;
   label: string;
+  /**
+   * The label for the phone tab bar, where a tab is ~54px wide at 320px. Only "Your stories"
+   * needs one — every other label already fits — so this is optional and falls back to `label`.
+   * It is a shorter NAME for the same destination, never a different one.
+   */
+  shortLabel?: string;
   icon: typeof Library;
   match: (p: string) => boolean;
   cartBadge?: boolean;
 }[] = [
-  { href: '/dashboard', label: 'Your stories', icon: Library, match: (p: string) => p === '/dashboard' || p.startsWith('/albums') },
+  { href: '/dashboard', label: 'Your stories', shortLabel: 'Stories', icon: Library, match: (p: string) => p === '/dashboard' || p.startsWith('/albums') },
   { href: '/cart', label: 'Cart', icon: ShoppingCart, match: (p: string) => p.startsWith('/cart'), cartBadge: true },
   { href: '/orders', label: 'Orders', icon: Package, match: (p: string) => p.startsWith('/orders') },
   { href: '/reviews', label: 'Reviews', icon: ClipboardCheck, match: (p: string) => p.startsWith('/reviews') },
@@ -38,14 +44,23 @@ export default function CustomerShell({ email, children }: { email: string; chil
   const initial = (email || 'U').trim().charAt(0).toUpperCase();
 
   return (
-    <div className="brand-surface flex min-h-[calc(100vh-3.5rem)]">
+    <div className="brand-surface flex min-h-[calc(100vh-3.5rem)] [--ms-tabbar-h:calc(52px_+_env(safe-area-inset-bottom))]">
       {/* R8 — the rail is a fixed-height sticky column, so anything taller than the viewport was
           simply unreachable: in phone landscape (667x375) its content is 480px inside a 319px
           box, hiding 161px — Support, Account, New album and the user chip could be focused by
           keyboard but never scrolled into view. `overflow-y-auto` makes them reachable and is a
           no-op wherever the content already fits (portrait 611/611, desktop 844/844), which is
-          why no other viewport changes. Matches the admin rail, which already scrolls. */}
-      <aside className="sticky top-14 z-20 flex h-[calc(100vh-3.5rem)] w-[68px] flex-none flex-col overflow-y-auto bg-primary-deep py-6 text-primary-foreground/80 sm:w-[236px]">
+          why no other viewport changes. Matches the admin rail, which already scrolls.
+
+          ── PHONE (<sm): THE RAIL IS NOT RENDERED AS A COLUMN AT ALL ─────────────────────────
+          It used to stay in the flow at 68px with its labels hidden, so every customer page on a
+          390px phone lost 17% of its width to six unlabelled glyphs — and the cart badge, the
+          "New album" CTA and the account chip were all `sm:`-hidden inside it, i.e. the column
+          was paying for itself in width while showing almost nothing. Below `sm` it is removed
+          from the flow (`hidden`) and the SAME six destinations are drawn as a bottom tab bar
+          (below), which is where a thumb already is. At `sm` and up nothing here changes: the
+          rail is the identical 236px column it has always been. */}
+      <aside className="sticky top-14 z-20 hidden h-[calc(100vh-3.5rem)] w-[68px] flex-none flex-col overflow-y-auto bg-primary-deep py-6 text-primary-foreground/80 sm:flex sm:w-[236px]">
         {/*
           NO BRAND BLOCK HERE. The mark and the wordmark sit in the app header directly above
           this rail, so a second copy three rems below it was the same statement made twice —
@@ -125,7 +140,84 @@ export default function CustomerShell({ email, children }: { email: string; chil
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 font-ui">{children}</main>
+      {/*
+        THE CONTENT. `pb-[--ms-tabbar-h]` on phone reserves exactly the height of the fixed tab
+        bar below, so the last thing on a page is reachable rather than sitting under the
+        navigation. The variable is declared here and read by the bar itself and by the two
+        sticky phone action bars (cart, checkout), so there is ONE height, not four guesses.
+      */}
+      <main className="min-w-0 flex-1 font-ui max-sm:pb-[var(--ms-tabbar-h)]">{children}</main>
+
+      {/*
+        ── PHONE NAVIGATION ───────────────────────────────────────────────────────────────────
+        The same six destinations, the same `NAV` array, the same active predicate — presented
+        where a thumb already is instead of as a column stealing width. Nothing is added and
+        nothing is dropped, so the two presentations cannot drift.
+
+        It keeps the rail's forest ground, so the app still reads as one place; the labels the
+        rail hid below `sm` are printed here, because six unlabelled glyphs is not navigation.
+        Six equal columns clear 44px of touch width down to 320px (53px each).
+      */}
+      <nav
+        aria-label="Primary"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-primary-foreground/10 bg-primary-deep pb-[env(safe-area-inset-bottom)] sm:hidden"
+      >
+        <ul className="flex items-stretch">
+          {NAV.map((n) => {
+            const active = n.match(pathname);
+            const Icon = n.icon;
+            const inner = (
+              <>
+                <span className="relative grid h-7 w-12 place-items-center rounded-full transition-colors duration-150">
+                  {/* The active pill sits BEHIND the glyph rather than around the whole tab, so
+                      the row keeps one rhythm and the cue reads as a state, not a button. */}
+                  <span
+                    aria-hidden
+                    className={`absolute inset-0 rounded-full transition-opacity duration-150 ${
+                      active ? 'bg-primary-foreground/[0.14] opacity-100' : 'opacity-0'
+                    }`}
+                  />
+                  <Icon className="relative h-[18px] w-[18px]" />
+                  {n.cartBadge && cartCount > 0 && (
+                    <span
+                      aria-hidden
+                      className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-gold px-1 text-[10px] font-semibold leading-none tabular-nums text-primary"
+                    >
+                      {cartCount}
+                    </span>
+                  )}
+                </span>
+                <span className="max-w-full truncate text-[10px] font-medium leading-none">{n.shortLabel ?? n.label}</span>
+              </>
+            );
+            const shell = `flex min-h-[52px] w-full flex-col items-center justify-center gap-1 px-0.5 pb-1.5 pt-1.5 transition-[color,transform] duration-150 ease-glide active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gold-pale ${
+              active ? 'text-primary-foreground' : 'text-primary-foreground/60'
+            }`;
+            return (
+              <li key={n.label} className="min-w-0 flex-1">
+                {n.href === null ? (
+                  <div aria-disabled className={`${shell} cursor-default`}>
+                    {inner}
+                  </div>
+                ) : (
+                  <Link
+                    href={n.href}
+                    aria-current={active ? 'page' : undefined}
+                    aria-label={
+                      n.cartBadge && cartCount > 0
+                        ? `${n.label} — ${cartCount} ${cartCount === 1 ? 'album' : 'albums'}`
+                        : undefined
+                    }
+                    className={shell}
+                  >
+                    {inner}
+                  </Link>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
     </div>
   );
 }

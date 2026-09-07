@@ -166,7 +166,7 @@ export default function Navigator({
   // page thumb, so adding the first spread happens exactly where that spread will then live.
   if (blocks.length === 0) {
     return (
-      <div className="flex items-end gap-2.5 px-1 py-1">
+      <div className="ms-hscroll flex items-end gap-2.5 overflow-x-auto px-1 py-1">
         {coverThumb && (
           <CoverTile active={coverActive} onFocus={onFocusCover}>
             {coverThumb}

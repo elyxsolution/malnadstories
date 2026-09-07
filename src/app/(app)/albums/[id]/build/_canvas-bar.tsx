@@ -230,7 +230,19 @@ export function CanvasBar({
        * keeps the rows right-aligned to each other when they differ in width, which is what stops
        * the page row appearing to shuffle sideways as the object row changes.
        */
-      className={`motion-safe:animate-scale-in fixed z-[70] flex flex-col items-center gap-1.5 ${
+      /*
+       * ── PHONE: THE BAR IS DOCKED, NOT ANCHORED ────────────────────────────────────────────
+       * Anchoring a toolbar to the object it describes is right on a large screen and wrong on a
+       * 390px one, where the bar is wider than the object, wider than the gap above it, and ends
+       * up sitting ON the thing being edited. Below md it docks to the bottom edge instead,
+       * just clear of the tool tab bar — one predictable place, never over the selection.
+       *
+       * The ! overrides are deliberate: placeBar writes left/top as INLINE styles, which
+       * no ordinary class can beat. Nothing about the measurement, the avoidance band, the roving
+       * tabindex or the Escape handling changes — only where the placed shell is painted, and
+       * only below md. Every override is a max-md: class, so md and up is byte-identical.
+       */
+      className={`motion-safe:animate-scale-in fixed z-[70] flex flex-col items-center gap-1.5 max-md:!inset-x-0 max-md:!left-0 max-md:!top-auto max-md:!bottom-[calc(3.25rem+env(safe-area-inset-bottom))] max-md:w-full max-md:items-stretch max-md:gap-1 max-md:px-2 ${
         settled ? 'motion-safe:transition-[top] motion-safe:duration-200 motion-safe:ease-glide' : ''
       }`}
     >
@@ -255,7 +267,7 @@ export function BarRow({
 }) {
   return (
     <div
-      className={`motion-safe:animate-scale-in flex max-w-[min(94vw,1100px)] flex-wrap items-center justify-center gap-0.5 rounded-xl border p-1 shadow-elevated backdrop-blur-sm ${
+      className={`ms-hscroll motion-safe:animate-scale-in flex max-w-[min(94vw,1100px)] flex-wrap items-center justify-center gap-0.5 rounded-xl border p-1 shadow-elevated backdrop-blur-sm max-md:max-w-none max-md:flex-nowrap max-md:justify-start max-md:overflow-x-auto ${
         tone === 'page' ? 'border-border/70 bg-card/90' : 'border-border/80 bg-card/95'
       }`}
     >
@@ -292,8 +304,8 @@ export function BarBtn({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-7 items-center justify-center gap-1 rounded-lg text-[12px] font-medium transition-colors duration-100 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-35 [&_svg]:h-3.5 [&_svg]:w-3.5 ${
-        text ? 'px-2' : 'w-7'
+      className={`inline-flex h-7 flex-none items-center justify-center gap-1 rounded-lg text-[12px] font-medium transition-colors duration-100 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright disabled:pointer-events-none disabled:opacity-35 max-md:h-11 max-md:whitespace-nowrap [&_svg]:h-3.5 [&_svg]:w-3.5 max-md:[&_svg]:h-[18px] max-md:[&_svg]:w-[18px] ${
+        text ? 'px-2 max-md:px-3' : 'w-7 max-md:w-11'
       } ${
         active
           ? 'bg-studio text-studio-foreground'
@@ -309,12 +321,12 @@ export function BarBtn({
 }
 
 export function BarSep() {
-  return <span className="mx-0.5 h-4 w-px flex-none bg-border" aria-hidden />;
+  return <span className="mx-0.5 h-4 w-px flex-none bg-border max-md:h-6" aria-hidden />;
 }
 
 /** A non-interactive caption, so a bar can say what it is acting on. */
 export function BarLabel({ children }: { children: React.ReactNode }) {
-  return <span className="px-1.5 text-[11px] font-medium text-muted-foreground">{children}</span>;
+  return <span className="flex-none whitespace-nowrap px-1.5 text-[11px] font-medium text-muted-foreground">{children}</span>;
 }
 
 /**
