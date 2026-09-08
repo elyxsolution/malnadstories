@@ -2870,7 +2870,19 @@ export default function Builder({
        halves of the arrangement it describes: the sheet's own cap, and the canvas padding that
        keeps the spread out from under it. Two numbers that must agree is how a sheet ends up
        covering the thing it is being used to edit. */
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)] [--ms-sheet-h:46dvh] max-md:pb-[calc(3.25rem+env(safe-area-inset-bottom))]">
+    /*
+     * --ms-sheet-h IS THE PHONE SHEET'S HEIGHT, and the Photos tab earns more of it. 46dvh is the
+     * right size for a tool panel you dip into — colours, text settings, a QR code. Browsing and
+     * dragging a hundred photos is not that: it is the one panel whose whole job is a grid, and
+     * with the spec sheet above gone the reclaimed height goes to thumbnails rather than back to
+     * the chrome. The variable is read ONLY by max-md: rules (the sheet's max-height and the
+     * canvas's bottom padding), so md and up never sees either value.
+     */
+    <div
+      className={`flex h-[100dvh] flex-col overflow-hidden bg-[hsl(150_12%_97%)] max-md:pb-[calc(3.25rem+env(safe-area-inset-bottom))] ${
+        railTab === 'images' ? '[--ms-sheet-h:62dvh]' : '[--ms-sheet-h:46dvh]'
+      }`}
+    >
       {blueprintMode ? (
         <BlueprintHeader
           meta={blueprintMeta}
@@ -3100,7 +3112,22 @@ export default function Builder({
                     numbers are unchanged and all four labels stay — they just read as a spec
                     sheet (label left, value right) instead of four tiles.
                   */}
-                  <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+                  {/*
+                    PHONES DO NOT GET THE SPEC SHEET.
+
+                    Capacity · Placed · Empty · Unused and the quality summary attached beneath
+                    them are a REVIEW instrument: four counts you read once, before submitting, on
+                    a screen wide enough to hold them beside the pages they describe. On a phone
+                    the Photos sheet is a few hundred pixels tall in total, and this block was
+                    ~120px of it — spent on numbers, above the thumbnails that are the entire
+                    reason the sheet is open. The mobile order is upload → see photos → use them.
+
+                    HIDDEN, NOT REMOVED, and only below md: every number here is still computed,
+                    still correct, still on screen at md and up, and the Quality tab in the tool
+                    rail is the same tap away it always was — this row was a shortcut to it, not
+                    the only route. Nothing at md and above changes.
+                  */}
+                  <div className="overflow-hidden rounded-lg border border-border/70 bg-card max-md:hidden">
                     <div className="grid grid-cols-2 gap-x-px gap-y-px bg-border/50">
                       <PhotoStat label="Capacity" value={totalSlots} />
                       <PhotoStat label="Placed" value={placedCount} />
@@ -3291,7 +3318,7 @@ export default function Builder({
             filmstrip and page controls clear of the fixed tool tab bar. */}
         <main className="relative flex min-w-0 flex-1 flex-col">
           {/* canvas strip — one linear sequence: Cover → Spread 1 → … */}
-          <div className="flex h-11 flex-none items-center justify-between gap-2 border-b border-border/60 px-4 max-md:h-12 max-md:px-2">
+          <div className="flex h-11 flex-none items-center justify-between gap-2 border-b border-border/60 px-4 max-md:order-[-2] max-md:h-12 max-md:px-2">
             <div className="flex items-center gap-1.5">
               <button type="button" onClick={goPrev} disabled={coverFocused} aria-label="Previous page" className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-secondary hover:text-foreground active:scale-[0.94] disabled:opacity-30 max-md:h-11 max-md:w-11">
                 <ChevronLeft className="h-4 w-4" />

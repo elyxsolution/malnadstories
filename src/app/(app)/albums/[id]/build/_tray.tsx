@@ -366,7 +366,15 @@ export default function Tray({
               </button>
             )}
 
-            <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-all duration-200 focus-within:opacity-100 group-hover:opacity-100">
+            <div
+              className={`absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-all duration-200 focus-within:opacity-100 group-hover:opacity-100 ${
+                /* NO HOVER ON A PHONE. These actions are revealed by pointing at the tile, which
+                   a touch screen cannot do — so below md the SELECTED tile reveals them instead,
+                   and only that one. Long-press still opens the full context menu, unchanged, and
+                   md and up is untouched: the desktop reveal is still hover and focus. */
+                isSelected?.(photo.id) ? 'max-md:opacity-100' : ''
+              }`}
+            >
               {canEdit && (
                 <button
                   type="button"

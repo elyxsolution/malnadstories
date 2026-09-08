@@ -1930,18 +1930,40 @@ export class BookJourneyEngine {
         // actually is once the cards go full width.
         const wide = Math.max(L, R) >= vw * 0.34;
         if (wide) {
-          strips[n] = { left: R > L ? vw - R : 0, width: Math.max(L, R), top: 0, height: vh, hf: 0.62 };
+          strips[n] = { wide, left: R > L ? vw - R : 0, width: Math.max(L, R), top: 0, height: vh, hf: 0.62 };
         } else {
           const T = r && r.height ? r.top - (box ? box.top : 0) : vh * 0.5;
           const B = r && r.height ? (box ? box.bottom : vh) - r.bottom : vh * 0.5;
-          strips[n] = { left: 0, width: vw, top: B > T ? vh - B : 0, height: Math.max(T, B), hf: 0.9 };
+          strips[n] = { wide, left: 0, width: vw, top: B > T ? vh - B : 0, height: Math.max(T, B), hf: 0.9 };
         }
       }
-      c = this._read = { vw, vh, t: now, strips };
+      /*
+       * THE PHONE LAYOUT, recognised rather than assumed: every one of the six stops fell back to
+       * a horizontal band, i.e. no card left a gutter wide enough to sit beside. That is the
+       * mobile composition (album above, card beneath) and nothing else produces it. The viewport
+       * test is belt and braces — it guarantees a desktop or tablet reader can never enter this
+       * branch even in a deliberately narrow window, so >= 768px is byte-identical to before.
+       */
+      const vertical = (window.innerWidth || 0) < 768 && strips.every((t) => !t.wide);
+      c = this._read = { vw, vh, t: now, strips, vertical };
     }
     const k = (2 * Math.tan(this.camera.fov * Math.PI / 360) * Math.max(1, d)) / vh;  // world units per px
-    // 1.45 pads for the rotated, pitched footprint swinging outside the flat spread
-    const halfW0 = (this.bookW * 1.45) / k, halfH0 = (2.15 * 1.45) / k;   // px, at scale 1
+    /*
+     * 1.45 pads for the rotated, pitched footprint swinging outside the flat spread.
+     *
+     * ON A PHONE THAT PAD IS WHAT WAS KEEPING THE ALBUM SMALL. In the horizontal band the mobile
+     * layout gives it, the WIDTH term binds at every phone width measured (320/375/390/430) and
+     * the height term has 40-60% slack — so the album's size was set entirely by a 45% rotation
+     * allowance on the one axis that had none to spare, and the spread rendered at roughly 57% of
+     * the canvas width with the rest of the lane empty.
+     *
+     * 1.2 on phones is still a real allowance (a spread rolled 15 degrees projects ~14% wider),
+     * and it is provably safe: while the width term binds, halfW reduces to (vw - 26) x 0.45
+     * whatever the pad is, so the RESERVED lane and therefore the horizontal clamp below are
+     * unchanged — only how much of that lane the album actually fills. Desktop keeps 1.45 exactly.
+     */
+    const pad = c.vertical ? 1.2 : 1.45;
+    const halfW0 = (this.bookW * pad) / k, halfH0 = (2.15 * pad) / k;   // px, at scale 1
     // ONE SCALE FOR THE WHOLE JOURNEY. This used to be solved per scene, so the album grew and
     // shrank between stops as each card left a different gutter — visible size change driven by
     // nothing but scrolling. Taking the tightest of the six means it fits every stop and never

@@ -59,7 +59,7 @@ function Chip({
       onClick={onClick}
       aria-pressed={active}
       title={title}
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright ${
+      className={`inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-studio-bright max-md:min-h-9 max-md:px-3 ${
         active
           ? 'border-studio bg-studio text-studio-foreground'
           : 'border-input bg-background text-muted-foreground hover:text-foreground'
@@ -174,7 +174,11 @@ export default function TrayToolbar({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* PHONES GET ONE SCROLLABLE ROW, not a wrapped block three lines deep. The chips are a
+          secondary control above the grid they filter; letting them wrap turns "browse my photos"
+          into "read a control panel first". Identical set, identical behaviour — `ms-hscroll` is
+          the same thin-scrollbar treatment the toolbars use, and md and up still wraps. */}
+      <div className="ms-hscroll flex flex-wrap items-center gap-1.5 max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-1">
         {USAGE.map((c) => (
           <Chip key={c.key} label={c.label} active={filters.usage.has(c.key)} onClick={() => onToggleAxis('usage', c.key)} />
         ))}
@@ -202,7 +206,7 @@ export default function TrayToolbar({
       {/* Label chips get their own row — they are a different KIND of question ("where is this
           in my process") and mixing them into the shape/state row makes both harder to scan. */}
       {anyLabels && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="ms-hscroll flex flex-wrap items-center gap-1.5 max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-1">
           {LABEL_LIST.filter((l) => labelCounts[l.key] > 0).map((l) => {
             const on = filters.labels.has(l.key);
             return (

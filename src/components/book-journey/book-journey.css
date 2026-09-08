@@ -293,3 +293,161 @@
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
+
+/**
+ * ── PHONES (< 768px) — THE MOBILE COMPOSITION ──────────────────────────────────────────────
+ *
+ * A MEDIA query, not a container query, and deliberately so: everything below is a mobile
+ * composition decision, and a media query is the only thing that can promise a desktop or tablet
+ * reader (>= 768px) sees byte-identical output. The container tiers above stay exactly as they
+ * were and continue to do what they do on a short desktop window.
+ *
+ * WHAT WAS WRONG, and it was one thing with three symptoms. The stage's copy carries PIXEL font
+ * sizes on the nested <b>/<span> runs inside each element — 46px on the headline, 20px on the
+ * lede, 25px on the scroll cue, 22px on the card titles, 17px on the feature tiles. The container
+ * tiers above size the h1/h2/p/div, which the bold run inside then overrides, so on a 390px box
+ * the headline still rendered at 46px whatever the tier said. That is why the text dominated the
+ * frame, why it sat over the album, and why shrinking the box never helped.
+ *
+ * So the nested runs inherit, and one rule per element governs its size again. Everything else
+ * here follows from the space that frees up:
+ *
+ *   · panels 1–4 anchor their card to the BOTTOM of the box rather than its middle, so the free
+ *     band the album is placed in (`readSlot`, which measures the card's real rect and takes the
+ *     taller of the bands above and below it) is one tall region at the top instead of two thin
+ *     ones. The album grows to fill it — the engine needs no change, because it was already
+ *     measuring the thing this moves.
+ *   · the reading order on every scene therefore becomes album → messaging → CTA, top to bottom.
+ *   · the scene-0 CTA leaves the scroll-cue row (where it was a third flex item competing with a
+ *     51px cue bar and a 25px label) and takes a full-width line of its own beneath it, at a
+ *     48px minimum touch height.
+ *
+ * Nothing is repositioned in 3D, no scene is added or removed, no asset changes, and the
+ * choreography — six scenes, the same cross-fades, the same camera flight — is untouched.
+ */
+@media (max-width: 767px) {
+  /* THE ROOT CAUSE: nested runs stop carrying their own pixel size. */
+  .bj-frame [data-panel] h1 b,
+  .bj-frame [data-panel] h1 span,
+  .bj-frame [data-panel] h2 b,
+  .bj-frame [data-panel] h2 span,
+  .bj-frame [data-panel] p b,
+  .bj-frame [data-panel] p span,
+  .bj-frame [data-panel] div b,
+  .bj-frame [data-panel] div span {
+    font-size: inherit !important;
+  }
+
+  /* One size per element, on the 4px-adjacent type scale the rest of the site uses. The clamps
+     still key off the container, so a 320px phone and a 430px one both stay in proportion. */
+  .bj-frame [data-panel] h1 {
+    font-size: clamp(1.3rem, 6.6cqw, 1.95rem) !important;
+    line-height: 1.14 !important;
+  }
+
+  .bj-frame [data-panel] h2 {
+    font-size: clamp(1.15rem, 5.4cqw, 1.6rem) !important;
+    line-height: 1.16 !important;
+  }
+
+  .bj-frame [data-panel] p {
+    font-size: clamp(0.82rem, 3.4cqw, 0.95rem) !important;
+    margin-top: 0.85rem !important;
+  }
+
+  /* ALBUM ON TOP, CARD BENEATH — scenes 1–4. Scene 0 is already bottom-anchored and scene 5 is a
+     column, so neither is touched here. */
+  .bj-frame [data-panel='1'],
+  .bj-frame [data-panel='2'],
+  .bj-frame [data-panel='3'],
+  .bj-frame [data-panel='4'] {
+    align-items: flex-end !important;
+    justify-content: center !important;
+  }
+
+  /* The cards were authored with a 2.4–2.6rem inset for a full-screen stage. Tightening the inset
+     — not the content — is what leaves the album a real band above them. */
+  .bj-frame [data-panel='1'] > div,
+  .bj-frame [data-panel='2'] > div,
+  .bj-frame [data-panel='3'] > div,
+  .bj-frame [data-panel='4'] > div {
+    width: 100% !important;
+    padding: 1rem 1.05rem !important;
+  }
+
+  /* The 2rem gap between a card's label row and its content, and the gaps inside that content. */
+  .bj-frame [data-panel='1'] > div > div:last-child,
+  .bj-frame [data-panel='2'] > div > div:last-child,
+  .bj-frame [data-panel='3'] > div > div:last-child,
+  .bj-frame [data-panel='4'] > div > div:last-child {
+    margin-top: 1rem !important;
+    gap: 0.8rem !important;
+  }
+
+  /* ── SCENE 0 — the hero ─────────────────────────────────────────────────────────────────── */
+  .bj-frame [data-panel='0'] > div {
+    width: 100% !important;
+  }
+
+  /* The scroll cue and the CTA share one flex row. Allowing it to wrap, and giving the CTA a full
+     line, puts the button on its own row without restructuring the markup: cue bar · cue label,
+     then the button beneath, aligned to the same left edge as the headline above it. */
+  .bj-frame [data-panel='0'] > div > div {
+    flex-wrap: wrap !important;
+    gap: 0.55rem 0.65rem !important;
+    margin-top: 1.15rem !important;
+  }
+
+  /* The cue's gradient rule is 8 x 51px — a desktop flourish that reads as a bar chart at this
+     size. It stays, at the weight of a hairline beside its label. */
+  .bj-frame [data-panel='0'] > div > div > span:first-child {
+    width: 2px !important;
+    height: 16px !important;
+  }
+
+  .bj-frame [data-panel='0'] > div > div > span {
+    font-size: 0.66rem !important;
+    letter-spacing: 0.22em !important;
+  }
+
+  /* ── SCENE 5 — the close ────────────────────────────────────────────────────────────────── */
+  .bj-frame [data-panel='5'] > div:first-child {
+    width: 100% !important;
+    align-self: stretch !important;
+    text-align: left !important;
+    padding: 0.9rem 1rem !important;
+    font-size: clamp(0.85rem, 3.6cqw, 1rem) !important;
+    line-height: 1.55 !important;
+  }
+
+  .bj-frame [data-panel='5'] [data-cta] {
+    width: 100% !important;
+    margin-top: 0.85rem !important;
+    gap: 0.85rem !important;
+  }
+
+  .bj-frame [data-panel='5'] h2 {
+    align-self: stretch !important;
+  }
+
+  /* ── BOTH "CREATE YOUR ALBUM" BUTTONS ───────────────────────────────────────────────────── */
+  .bj-frame [data-panel] a {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: none !important;
+    width: 100% !important;
+    min-height: 48px !important;
+    padding: 0.75rem 1.25rem !important;
+    font-size: 0.76rem !important;
+    letter-spacing: 0.2em !important;
+    text-align: center !important;
+  }
+
+  /* Scene 0 ONLY: a full basis in the cue's wrapping ROW is what puts the button on its own line.
+     It must not be set globally — scene 5's CTA block is a COLUMN, where a 100% basis means 100%
+     of the HEIGHT, which collapses the heading above it to nothing. */
+  .bj-frame [data-panel='0'] > div > div > a {
+    flex: 0 0 100% !important;
+  }
+}
